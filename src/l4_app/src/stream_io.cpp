@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/stream_io.h"
 
+#include "infra/path_parts.h"
+
 namespace mister::app {
 
 [[nodiscard]] Ex<StreamFile> stream_open(
@@ -10,9 +12,8 @@ namespace mister::app {
 ) {
     if (!svc::opens_read_only(mode) && mode != svc::OpenMode::ReadWrite) {
 
-        if (const std::size_t slash = rel.rfind('/');
-            slash != std::string_view::npos && slash > 0) {
-            if (auto r = vfs.ensure_dir(rel.substr(0, slash)); !r)
+        if (const std::optional<std::string_view> dir = infra::nested_dir(rel)) {
+            if (auto r = vfs.ensure_dir(*dir); !r)
                 return std::unexpected(r.error());
         }
     }

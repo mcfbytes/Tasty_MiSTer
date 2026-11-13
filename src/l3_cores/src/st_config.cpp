@@ -11,6 +11,7 @@
 #include "infra/byte_view.h"
 #include "infra/endian.h"
 #include "infra/indexed_array.h"
+#include "infra/path_parts.h"
 
 namespace mister::cores {
 
@@ -42,11 +43,6 @@ constexpr std::array<std::string_view, st_ctrl::CtrlWord::kChoiceCount> kScanNam
     {"", "S1 ", "S2 ", "S3 "};
 constexpr std::string_view kEmptySlot = "< empty slot >";
 
-}
-
-std::string_view StConfig::leaf_of(std::string_view path) noexcept {
-    const auto slash = path.rfind('/');
-    return slash == std::string_view::npos ? path : path.substr(slash + 1);
 }
 
 StConfig StConfig::defaults() noexcept {
@@ -124,7 +120,7 @@ FixedStr<kConfigPreviewChars, StrFit::Clip> StConfig::preview(ConfigBlob blob) n
     (void)out.append(sc.has(st_ctrl::CtrlWord::kStereo) ? "AS " : "AM ");
 
     if (const auto tos = get_str(tmp, st_cfg::kTosImg); !tos.empty()) {
-        const std::string_view leaf = leaf_of(tos);
+        const std::string_view leaf = infra::basename(tos);
         if (leaf.size() >= st_cfg::kTosExtChars) {
             (void)out.append(leaf.substr(0, leaf.size() - st_cfg::kTosExtChars));
         } else {

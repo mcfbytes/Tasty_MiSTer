@@ -47,6 +47,7 @@ inline constexpr auto kUiAdmission = [] {
         {.kind = K::SetOsdStyle},
         {.kind = K::SdramDetected},
         {.kind = K::SetHdLook},
+        {.kind = K::SwitchIni},
     });
 }();
 static_assert(

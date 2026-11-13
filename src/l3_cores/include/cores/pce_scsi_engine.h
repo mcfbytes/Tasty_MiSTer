@@ -14,6 +14,7 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/pce_command.h"
+#include "cores/poll_ticks.h"
 #include "cores/scsi_sense.h"
 #include "cores/types.h"
 #include "svc/track.h"
@@ -25,6 +26,8 @@ class PceScsiEngine final : public CdEngine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
+    enum class State : std::uint8_t { Idle = 0, NoDisc = 1, Read = 2, Play = 3, Pause = 4 };
+
     PceScsiEngine(
         const CdDialectFacts& facts,
         const CdProfile::PceScsiFacts& row,
@@ -39,8 +42,8 @@ public:
     void grant_read_ack() noexcept { st_.can_read_next = true; }
 
     struct View {
-        std::uint8_t state = 0;
-        std::uint32_t latency = 0;
+        State state = State::Idle;
+        PollTicks latency{};
         HeadLba lba{};
         SectorCount cnt{};
         svc::TrackIndex track{};
@@ -65,11 +68,16 @@ public:
     [[nodiscard]] Ex<bool> drain_pending(ICdLink& link);
 
 private:
+    enum class Status : std::uint16_t { Good = 0, CheckCondition = 1 };
+
+    [[nodiscard]] static constexpr std::uint16_t word_of(Status s) noexcept {
+        return static_cast<std::uint16_t>(s);
+    }
+
     bool do_cart_load_ejects() const noexcept override { return true; }
 
     struct Cdd {
-        std::uint8_t state = 1;
-        std::uint16_t stat = 0;
+        State state = State::NoDisc;
         bool loaded = false;
         bool has_status = false;
         bool data_req = false;
@@ -79,9 +87,9 @@ private:
         bool region = false;
         bool is_data = true;
         std::optional<PceCommand::CddaMode> cdda_mode = PceCommand::CddaMode::Silent;
-        std::uint8_t cdda_first = 0;
-        std::uint32_t latency = 0;
-        std::uint32_t audio_delay = 0;
+        bool cdda_first = false;
+        PollTicks latency{};
+        PollTicks audio_delay{};
         SectorCount cnt{};
         HeadLba lba{};
         CddaPlayRange cdda{};
@@ -127,12 +135,13 @@ private:
 
     [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> read_send_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> deliver_cdda_pass_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> command_exec_(const PceCommand& command, CdDialectPorts& p);
-    [[nodiscard]] Ex<void> send_status_(std::uint16_t status, ICdLink& link);
+    [[nodiscard]] Ex<void> send_status_(Status status, ICdLink& link);
     [[nodiscard]] Ex<void> send_data_request_(ICdLink& link);
     void build_subcode_frame_(HeadLba lba, const svc::DiscGeometry& geom);
     svc::TrackIndex track_by_lba_(HeadLba lba, const svc::DiscGeometry& geom) const;
-    std::uint32_t seek_ticks_(HeadMove move, const svc::DiscGeometry& geom) const;
+    PollTicks seek_ticks_(HeadMove move, const svc::DiscGeometry& geom) const;
 
     void hint_at_(HeadLba lba, bool doubled, const svc::DiscGeometry& geom) noexcept;
     void pump_pipeline_(const svc::DiscGeometry& geom) noexcept;

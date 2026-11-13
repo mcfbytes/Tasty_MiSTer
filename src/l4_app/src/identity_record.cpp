@@ -33,20 +33,19 @@ IdentityRecord build_identity_record(
     IdentityRecord out{};
     SessionIdentity& id = out.identity;
     if (in.identity_bound) {
-        const svc::ButtonLists lists = svc::choose_button_lists(
-            in.button_override.names,
-            in.button_override.defaults,
-            in.fields[1],
-            in.fields[2],
-            in.fields[3]
-        );
-        id.joy = svc::build_joy_plan(lists.j, lists.jn, lists.jp, in.gamepad_defaults);
+        const svc::ButtonLists lists = svc::ButtonLists{in.fields[1], in.fields[2], in.fields[3]}
+                                           .with_override(
+                                               in.button_override.names,
+                                               in.button_override.defaults
+                                           );
+        id.joy = svc::build_joy_plan(lists, in.gamepad_defaults);
         (void)id.j_names.assign(lists.j);
     }
     id.joy.stick_dpad = !p.suppress_stick_dpad;
     (void)id.core.assign(eff);
     (void)id.rbf.assign(name);
     id.stem = RememberedStem::of(name, facts);
+    id.rotation = facts.rotation;
     id.setname_same_dir = facts.setname_same_dir;
     id.front_end = p.is_front_end;
     id.suppress_analog_followup = p.suppress_analog_followup;
@@ -59,7 +58,6 @@ IdentityRecord build_identity_record(
     id.pause = p.host.pause;
 
     out.mgl_playable = !p.is_front_end && !p.suppresses_mgl;
-    out.uart_default_baud = cores::profile_for(eff).default_uart_baud;
     out.stamp = in.stamp;
     return out;
 }

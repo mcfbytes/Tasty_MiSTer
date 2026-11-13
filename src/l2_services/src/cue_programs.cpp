@@ -5,6 +5,7 @@
 
 #include "disc_lex.h"
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "svc/index_pair_cue_program.h"
 #include "svc/index_triple_cue_program.h"
 #include "svc/sentinel_cue_program.h"
@@ -41,7 +42,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         return std::unexpected(text_r.error());
     const std::string text = std::move(*text_r);
 
-    const std::string_view base_dir = dir_of(cue_path);
+    const std::string_view base_dir = infra::dir_prefix_any_sep(cue_path);
 
     TrackCount last{};
     BlockCount pregap{};
@@ -247,7 +248,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 }
 
                 const FileSize payload = pending.size.after_header(hdr);
-                t.end = t.start + payload.units_covering(ss.extent(BlockCount{1}));
+                t.end = t.start + payload.units_covering(ss);
                 t.start += *frames;
                 m.toc.end = t.end;
             }
@@ -342,7 +343,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         return std::unexpected(text_r.error());
     const std::string text = std::move(*text_r);
 
-    const std::string_view base_dir = dir_of(cue_path);
+    const std::string_view base_dir = infra::dir_prefix_any_sep(cue_path);
 
     TrackCount last{};
 
@@ -476,7 +477,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 }
                 t.start = m.toc.end;
                 const proto::BlockSize track_ss{t.sector_size};
-                m.toc.end += pending.size.whole_units(track_ss.extent(BlockCount{1}));
+                m.toc.end += pending.size.whole_units(track_ss);
                 t.offset = position_bytes(t.start, track_ss);
             }
 
@@ -525,7 +526,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
     if (!text_r)
         return std::unexpected(text_r.error());
     const std::string text = std::move(*text_r);
-    const std::string_view base_dir = dir_of(cue_path);
+    const std::string_view base_dir = infra::dir_prefix_any_sep(cue_path);
 
     TrackCount last{};
     BlockCount index0{};
@@ -629,7 +630,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
                     return std::unexpected(pushed.error());
                 t.backing = *pushed;
                 start = disc_end + index0 + index1;
-                disc_end += pending.size.whole_units(kRawSector.extent(BlockCount{1}));
+                disc_end += pending.size.whole_units(kRawSector);
             }
             t.start = start;
             t.pregap = pregap;

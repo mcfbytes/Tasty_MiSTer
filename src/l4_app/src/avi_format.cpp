@@ -3,6 +3,7 @@
 
 #include <limits>
 
+#include "app/frame_ticks.h"
 #include "app/log_clock.h"
 #include "app/picture_size.h"
 #include "app/row_bytes.h"
@@ -93,8 +94,9 @@ Header header(const Fields& f) noexcept {
     const RecCodecFacts& facts = rec_codec_facts(f.codec);
     Header out{};
     Put p{out};
-    const std::uint32_t scale = f.scale != 0 ? f.scale : kDefaultVtime;
-    const std::uint32_t rate = f.rate != 0 ? f.rate : kTickHz;
+    const std::uint32_t scale = f.scale != 0 ? f.scale
+                                             : FrameTicks::k60Hz().dw_scale(RecEvery::one());
+    const std::uint32_t rate = f.rate != 0 ? f.rate : FrameTicks::kTickHz;
     const std::uint64_t riff = kHeaderBytes - kChunkHeadBytes + f.movi_bytes + f.index_bytes;
     p.cc("RIFF");
     p.u32(clamp32(riff));
@@ -166,10 +168,10 @@ void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noe
     p.u32(payload);
 }
 
-void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept {
+void index_head(AviFrameCount entries, std::span<std::byte, kChunkHead> out) noexcept {
     Put p{out};
     p.cc("idx1");
-    p.u32(entries * static_cast<std::uint32_t>(kIndexEntry));
+    p.u32(static_cast<std::uint32_t>(entries.scaled_by(kIndexEntry)));
 }
 
 void index_entry(

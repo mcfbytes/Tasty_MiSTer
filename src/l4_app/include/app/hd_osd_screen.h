@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 #include "app/hd_flip_slot.h"
 #include "app/hd_look.h"
@@ -12,6 +13,7 @@
 #include "app/hd_surface.h"
 #include "app/output_geometry.h"
 #include "app/video_pump_stats.h"
+#include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
@@ -47,7 +49,10 @@ public:
         infra::OptRef<const PageDescription> page,
         HdOsdStatus::Badge badge,
         HdStatusSlots slots = {},
-        HdLook look = {}
+        HdLook look = {},
+        FrontEndBg bg = FrontEndBg::None,
+        FrontEndIdle idle = FrontEndIdle::Awake,
+        std::string_view ini_label = {}
     ) noexcept;
     [[nodiscard]] bool intends_hdmi() const noexcept;
     [[nodiscard]] bool covers_hdmi() const noexcept;
@@ -84,6 +89,16 @@ private:
     HdStatusSlots slots_sent_{};
     HdLook look_{};
     HdLook look_sent_{};
+
+    HdOsdShows shows_ = HdOsdShows::Menu;
+    HdOsdShows shows_sent_ = HdOsdShows::Menu;
+
+    FrontEndBg bg_{};
+    FrontEndBg bg_sent_{};
+    FrontEndIdle idle_{};
+    FrontEndIdle idle_sent_{};
+    FixedStr<8, StrFit::Clip> ini_label_{};
+    FixedStr<8, StrFit::Clip> ini_label_sent_{};
     HdSurface surface_{};
     HdEpoch epoch_{};
     std::uint32_t applies_seen_ = 0;

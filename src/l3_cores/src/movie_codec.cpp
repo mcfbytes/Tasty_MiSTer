@@ -14,6 +14,7 @@
 #include "cores/snes_lsmv_codec.h"
 #include "infra/ascii.h"
 #include "infra/parse_int.h"
+#include "infra/path_parts.h"
 #include "movie_codec_detail.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
@@ -195,16 +196,6 @@ std::optional<MovieRerecordCount> rerecord_count(
     return std::nullopt;
 }
 
-std::string_view movie_path_extension(std::string_view movie_path) noexcept {
-    const std::size_t dot = movie_path.rfind('.');
-    if (dot == std::string_view::npos)
-        return {};
-    const std::size_t slash = movie_path.rfind('/');
-    if (slash != std::string_view::npos && slash > dot)
-        return {};
-    return movie_path.substr(dot + 1);
-}
-
 std::span<const MovieCodecRow> movie_codec_rows() noexcept {
     return kMovieCodecs;
 }
@@ -213,7 +204,7 @@ infra::OptRef<const MovieCodec> movie_codec_for(
     std::string_view conf_str_name,
     std::string_view movie_path
 ) noexcept {
-    const std::string_view ext = movie_path_extension(movie_path);
+    const std::string_view ext = infra::extension_bare(movie_path);
     for (const MovieCodecRow& r : movie_codec_rows()) {
         if (r.name == conf_str_name && infra::ieq(r.ext, ext))
             return infra::OptRef<const MovieCodec>{r.codec};
@@ -222,7 +213,7 @@ infra::OptRef<const MovieCodec> movie_codec_for(
 }
 
 const MovieCodecRow* unique_row_for_ext(std::string_view movie_path) noexcept {
-    const std::string_view ext = movie_path_extension(movie_path);
+    const std::string_view ext = infra::extension_bare(movie_path);
     const MovieCodecRow* found = nullptr;
     unsigned n = 0;
     for (const MovieCodecRow& r : movie_codec_rows()) {

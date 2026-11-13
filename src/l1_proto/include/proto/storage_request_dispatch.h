@@ -15,7 +15,8 @@ concept StorageRequestSink = requires(
     const StorageRequest::Head& h,
     Ctx&... c
 ) {
-    s.on(std::declval<const StorageRequest::Read&>(), h, c...);
+    s.on(std::declval<const StorageRequest::Fetch&>(), h, c...);
+    s.on(std::declval<const StorageRequest::ReadAhead&>(), h, c...);
     s.on(std::declval<const StorageRequest::Write&>(), h, c...);
     s.on(std::declval<const StorageRequest::Create&>(), h, c...);
     s.on(std::declval<const StorageRequest::Flush&>(), h, c...);

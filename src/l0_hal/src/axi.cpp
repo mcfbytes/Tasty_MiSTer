@@ -69,19 +69,18 @@ std::size_t page_size() noexcept {
     return MappedRegs{std::move(*pages), lead};
 }
 
-[[nodiscard]] Ex<MappedRegs> map_lw_registers(PhysRegion lw, LwOffset off, std::size_t len) {
+[[nodiscard]] Ex<MappedRegs> map_lw_registers(PhysRegion lw, LwOffset off, LwExtent len) {
 
-    if (lw.len == 0) {
-        return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), off.v});
-    }
+    if (lw.len == 0)
+        return std::unexpected(off.refused(Errc::dt_missing, ERR_SITE()));
 
-    if (!off.fits(lw.len, len)) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), off.v});
+    const std::optional<LwExtent> window = LwExtent::of_length(os::MapLength{lw.len});
+    if (!window || !off.fits(*window, len)) {
+        return std::unexpected(off.refused(Errc::bad_format, ERR_SITE()));
     }
-    if (!off.dword_aligned()) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), off.v});
-    }
-    return map_registers(os::PhysAddr{lw.phys.v + off.v}, len);
+    if (!off.dword_aligned())
+        return std::unexpected(off.refused(Errc::bad_format, ERR_SITE()));
+    return map_registers(os::PhysAddr{lw.phys.v + off.v}, len.map_length().bytes());
 }
 
 [[nodiscard]] Ex<MappedRegs> map_named(

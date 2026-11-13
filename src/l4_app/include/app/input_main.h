@@ -5,6 +5,7 @@
 
 #include "app/input_decode.h"
 #include "app/input_park.h"
+#include "app/link_rx_channel.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
@@ -24,10 +25,12 @@ public:
 
     InputMain(
         InputDecode& decode,
+        LinkRxChannel<SeatTag::Input>& link_rx,
         xthread::ParkFds fds,
         infra::OptRef<xthread::WakeFlag> asker = {}
     ) noexcept
         : decode_(decode),
+          link_rx_(link_rx),
           pause_wake_(fds.wake()),
           stop_(std::move(fds).take_stop()),
           pause_(pause_wake_, asker),
@@ -72,7 +75,12 @@ public:
     [[nodiscard]] std::uint32_t paused_link_drops() const noexcept { return paused_link_drops_; }
 
 private:
+    void drop_link_events() noexcept;
+
+    void pop_link_events() noexcept;
+
     InputDecode& decode_;
+    LinkRxChannel<SeatTag::Input>& link_rx_;
     xthread::WakeFlag& pause_wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;

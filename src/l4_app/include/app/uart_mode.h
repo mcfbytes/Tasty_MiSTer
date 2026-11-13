@@ -4,19 +4,21 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
 
+#include "app/baud_table.h"
 #include "app/baud_words.h"
+#include "app/uart_binding.h"
 #include "app/uart_handoff.h"
+#include "app/uart_mode_facts.h"
 #include "app/uart_modes.h"
+#include "app/uart_persist.h"
 #include "cores/types.h"
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/inbox.h"
-#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
@@ -26,16 +28,7 @@ class ILinkFrame;
 
 namespace mister::app {
 
-enum class BaudSpace : std::uint8_t {
-    Uart,
-    Midi,
-    Mlink,
-};
-
-inline constexpr std::size_t kBaudTableSize = 13;
-inline constexpr std::size_t kBaudTokenMax = 10;
-
-inline constexpr std::array<cores::BaudRate, kBaudTableSize> kMlinkSpeeds{
+inline constexpr std::array kMlinkSpeeds{
     cores::BaudRate{110},
     cores::BaudRate{300},
     cores::BaudRate{600},
@@ -50,41 +43,6 @@ inline constexpr std::array<cores::BaudRate, kBaudTableSize> kMlinkSpeeds{
     cores::BaudRate{57600},
     cores::BaudRate{115200},
 };
-
-inline constexpr std::array<const char*, 6> kUartSentinels{
-    "/tmp/uartmode1",
-    "/tmp/uartmode2",
-    "/tmp/uartmode3",
-    "/tmp/uartmode4",
-    "/tmp/uartmode5",
-    "/tmp/uartmode6",
-};
-
-struct MidiLinkSlot {
-    std::uint8_t v = 0;
-
-    enum : std::uint8_t { kCount = 7 };
-
-    [[nodiscard]] static constexpr MidiLinkSlot of(MidiLinkMode ml) noexcept {
-        return MidiLinkSlot{static_cast<std::uint8_t>(ml)};
-    }
-
-    friend constexpr bool operator==(MidiLinkSlot, MidiLinkSlot) = default;
-};
-
-[[nodiscard]] constexpr auto midi_link_sentinels() noexcept {
-    infra::IndexedArray<const char*, MidiLinkSlot::kCount, MidiLinkSlot> names{};
-    names[MidiLinkSlot::of(MidiLinkMode::FSynth)] = "/tmp/ML_FSYNTH";
-    names[MidiLinkSlot::of(MidiLinkMode::Munt)] = "/tmp/ML_MUNT";
-    names[MidiLinkSlot::of(MidiLinkMode::UsbMidi)] = "/tmp/ML_USBMIDI";
-    names[MidiLinkSlot::of(MidiLinkMode::Udp)] = "/tmp/ML_UDP";
-    names[MidiLinkSlot::of(MidiLinkMode::Tcp)] = "/tmp/ML_TCP";
-    names[MidiLinkSlot::of(MidiLinkMode::UdpAlt)] = "/tmp/ML_UDP_ALT";
-    names[MidiLinkSlot::of(MidiLinkMode::UsbSer)] = "/tmp/ML_USBSER";
-    return names;
-}
-
-inline constexpr auto kMidiLinkSentinels = midi_link_sentinels();
 
 inline constexpr std::array<const char*, 2> kMidiLinkRetiredSentinels{
     "/tmp/ML_TCP_ALT",
@@ -103,63 +61,10 @@ inline constexpr std::array<const char*, 9> kMidiLinkRemovalOrder{
     "/tmp/ML_TCP",
 };
 
-constexpr std::uint32_t pack_uart_persist(UartMode m, MidiLinkMode ml) noexcept {
-    return static_cast<std::uint32_t>(m) | (static_cast<std::uint32_t>(ml) << 8);
-}
-
-struct UartPersist {
-    UartMode mode;
-    MidiLinkMode midilink;
-};
-
-constexpr UartPersist unpack_uart_persist(std::uint32_t w) noexcept {
-    return UartPersist{
-        static_cast<UartMode>(w & 0xFFu),
-        static_cast<MidiLinkMode>((w >> 8) & 0xFFu)
-    };
-}
-
-struct UartPersistFiles {
-    std::optional<std::uint32_t> mode{};
-    std::optional<std::array<cores::BaudRate, 3>> speeds{};
-};
-
 struct CoreNames {
     std::string_view effective;
     std::string_view conf_str;
 };
-
-struct UartTokens {
-    std::string_view uart;
-    std::string_view midi;
-};
-
-enum class MidiLinkGroup : std::uint8_t { Local, Network, Neither };
-
-[[nodiscard]] constexpr MidiLinkGroup midi_link_group(MidiLinkMode ml) noexcept {
-    switch (ml) {
-        case MidiLinkMode::FSynth:
-        case MidiLinkMode::Munt:
-        case MidiLinkMode::UsbMidi:
-        case MidiLinkMode::Udp:
-            return MidiLinkGroup::Local;
-        case MidiLinkMode::Tcp:
-        case MidiLinkMode::UdpAlt:
-        case MidiLinkMode::UsbSer:
-            return MidiLinkGroup::Network;
-    }
-    return MidiLinkGroup::Neither;
-}
-
-[[nodiscard]] constexpr bool is_local(MidiLinkMode ml) noexcept {
-    return midi_link_group(ml) == MidiLinkGroup::Local;
-}
-
-[[nodiscard]] constexpr bool is_network(MidiLinkMode ml) noexcept {
-    return midi_link_group(ml) == MidiLinkGroup::Network;
-}
-
-[[nodiscard]] UartPersist clamp_uart_modes(UartPersist p) noexcept;
 
 [[nodiscard]] constexpr UartMode masked_mode(UartMode m) noexcept {
     constexpr std::uint8_t kModeMask = 0x0F;
@@ -167,32 +72,8 @@ enum class MidiLinkGroup : std::uint8_t { Local, Network, Neither };
 }
 
 [[nodiscard]] constexpr std::uint16_t wire_mode(UartMode masked) noexcept {
-    if (masked == UartMode::Modem || masked == UartMode::Udp)
-        return std::uint16_t{1};
-    return static_cast<std::uint16_t>(masked);
+    return static_cast<std::uint16_t>(uart_mode_facts(masked).wire_as.value_or(masked));
 }
-
-[[nodiscard]] constexpr BaudSpace baud_space_for(UartMode m) noexcept {
-    switch (m) {
-        case UartMode::None:
-        case UartMode::Ppp:
-        case UartMode::Console:
-            return BaudSpace::Uart;
-        case UartMode::Midi:
-            return BaudSpace::Midi;
-        case UartMode::Modem:
-        case UartMode::Udp:
-        case UartMode::Sni:
-            return BaudSpace::Mlink;
-    }
-
-    return BaudSpace::Mlink;
-}
-
-void parse_baud_token(
-    std::string_view token,
-    std::span<cores::BaudRate, kBaudTableSize> out
-) noexcept;
 
 class UartModeController {
     TASTY_SEAT_RESIDENT(RT);
@@ -211,15 +92,7 @@ public:
 
     void bind_identity(CoreNames names) noexcept;
 
-    [[nodiscard]] Ex<void> load_for_core(
-        proto::ILinkFrame& frame,
-        bool uart_capable,
-        UartTokens tokens,
-        const UartPersistFiles& files,
-        cores::BaudRate default_baud
-    );
-
-    void latch_usb_ser(bool present) noexcept;
+    [[nodiscard]] Ex<void> load_for_core(proto::ILinkFrame& frame, const UartBinding& binding);
     [[nodiscard]] Ex<void> save_for_core(std::string_view core_name) const;
 
     std::span<const cores::BaudRate> baud_table(BaudSpace s) const;
@@ -263,9 +136,9 @@ private:
             friend constexpr bool operator==(Slot, Slot) = default;
         };
 
-        [[nodiscard]] bool empty() const noexcept { return table[0] == cores::BaudRate{}; }
+        [[nodiscard]] bool empty() const noexcept { return table.empty(); }
 
-        std::array<cores::BaudRate, kBaudTableSize> table{};
+        BaudTable table{};
         Slot latched{};
     };
 
@@ -274,12 +147,11 @@ private:
         MidiLinkMode midilink = MidiLinkMode::FSynth;
         bool uart_capable = false;
 
-        bool usb_ser_latched = false;
-        bool usb_ser_present = false;
+        bool usb_ser = false;
 
         BaudSpaceState uart{};
         BaudSpaceState midi{};
-        BaudSpaceState mlink{kMlinkSpeeds};
+        BaudSpaceState mlink{BaudTable{kMlinkSpeeds}};
         FixedStr<kUartNameMax, StrFit::Clip> core_name{};
         FixedStr<kUartNameMax, StrFit::Clip> rbf_name{};
         Stats stats{};

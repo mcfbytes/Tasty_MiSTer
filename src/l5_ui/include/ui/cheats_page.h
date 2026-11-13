@@ -12,6 +12,7 @@
 #include "infra/seat.h"
 #include "ui/list_view.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::app {
 class CheatStore;
@@ -50,7 +51,7 @@ public:
         return view_.viewport().selected;
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CheatsPage);
         return refusals_;
     }
@@ -66,7 +67,7 @@ private:
     std::vector<app::CheatRow> rows_;
     ListView<app::CheatRow> view_;
     std::uint32_t opens_seen_ = 0;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

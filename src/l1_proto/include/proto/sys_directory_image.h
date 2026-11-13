@@ -8,11 +8,14 @@
 
 #include "hal/register_window.h"
 #include "hal/sys_directory.h"
+#include "hal/types.h"
+#include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/dir_entry_facts.h"
+#include "proto/dir_version.h"
+#include "proto/sys_dir_entry.h"
 
 namespace mister::proto {
-
-struct AxiBlockDecl;
 
 class SysDirectoryImage {
 public:
@@ -30,14 +33,19 @@ public:
 
     [[nodiscard]] std::uint32_t magic() const noexcept { return words_[0]; }
 
-    [[nodiscard]] std::uint32_t version() const noexcept { return words_[1]; }
+    [[nodiscard]] DirVersion version() const noexcept { return DirVersion::of_wire(words_[1]); }
 
     [[nodiscard]] std::uint32_t count() const noexcept {
         return words_[2] < hal::SysDirectory::kMaxEntries ? words_[2]
                                                           : hal::SysDirectory::kMaxEntries;
     }
 
-    [[nodiscard]] AxiBlockDecl entry(std::uint32_t i) const noexcept;
+    [[nodiscard]] SysDirEntry entry(std::uint32_t i) const noexcept;
+
+    [[nodiscard]] Ex<SysDirEntry> find(
+        const DirEntryFacts& facts,
+        hal::LwExtent window
+    ) const noexcept;
 
 private:
     enum class EntryWord : std::uint32_t { Kind, Version, Offset, Size, Ops, Line = 15 };

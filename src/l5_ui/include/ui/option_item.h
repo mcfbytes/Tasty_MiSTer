@@ -5,17 +5,25 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app/page_description.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "proto/types.h"
+#include "ui/browser_session.h"
 #include "ui/build_env.h"
 #include "ui/transition.h"
 #include "ui/types.h"
+
+namespace mister::app {
+class RomsetAliasReader;
+}
 
 namespace mister::ui {
 
@@ -68,6 +76,12 @@ public:
         proto::FieldValue value{};
     };
 
+    struct BrowseFacts {
+        std::span<const cores::FileSlot> slots{};
+        bool image_no_zip = false;
+        infra::OptRef<app::RomsetAliasReader> romsets{};
+    };
+
     virtual ~OptionItem() = default;
     OptionItem(const OptionItem&) = delete;
     OptionItem& operator=(const OptionItem&) = delete;
@@ -84,15 +98,22 @@ public:
     [[nodiscard]] Transition select(IOptionHost& host) const;
     [[nodiscard]] Transition step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const;
 
+    [[nodiscard]] virtual std::optional<proto::FileRowId> file_row() const noexcept {
+        return std::nullopt;
+    }
+
     [[nodiscard]] virtual bool hidden_in_flat_root() const noexcept { return false; }
 
     [[nodiscard]] virtual bool leads_with_manual_row() const noexcept { return false; }
 
     [[nodiscard]] virtual bool rings_at_root() const noexcept { return false; }
 
-    [[nodiscard]] virtual bool opens_browser() const noexcept { return false; }
-
-    [[nodiscard]] virtual bool mounts_image() const noexcept { return false; }
+    [[nodiscard]] BrowserSession::Request shape_browse(
+        BrowserSession::Request req,
+        const BrowseFacts& f
+    ) const {
+        return on_shape_browse(std::move(req), f);
+    }
 
     const Kind kind;
     bool disabled = false;
@@ -112,7 +133,7 @@ public:
 
     std::optional<RowIndex> selectable_index;
 
-    std::optional<proto::OsdRow> screen_row;
+    std::optional<RowIndex> drawn_row;
 
 protected:
     explicit OptionItem(Kind k) noexcept : kind(k) {}
@@ -124,6 +145,13 @@ private:
     virtual std::optional<app::PageDescription::Row> on_describe(const Look& look) const = 0;
     virtual Transition on_select(IOptionHost& host) const = 0;
     virtual Transition on_step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const = 0;
+
+    virtual BrowserSession::Request on_shape_browse(
+        BrowserSession::Request req,
+        const BrowseFacts&
+    ) const {
+        return req;
+    }
 };
 
 struct KindRow {

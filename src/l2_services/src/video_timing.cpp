@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/video_timing.h"
 
+#include <array>
 #include <cmath>
 
 namespace mister::svc {
@@ -11,58 +12,56 @@ constexpr double kFpixMinMhz = static_cast<double>(2.f);
 constexpr double kFpixMaxMhz = static_cast<double>(300.f);
 static_assert(kFpixMinMhz == 2.0 && kFpixMaxMhz == 300.0);
 
-constexpr PresetMode kVmodes[kNumVmodes] = {
-    {{1280, 110, 40, 220, 720, 5, 5, 20}, 74.25, 4, 0},
-    {{1024, 24, 136, 160, 768, 3, 6, 29}, 65.0, 0, 0},
-    {{720, 16, 62, 60, 480, 9, 6, 30}, 27.0, 3, 0},
-    {{720, 12, 64, 68, 576, 5, 5, 39}, 27.0, 18, 0},
-    {{1280, 48, 112, 248, 1024, 1, 3, 38}, 108.0, 0, 0},
-    {{800, 40, 128, 88, 600, 1, 4, 23}, 40.0, 0, 0},
-    {{640, 16, 96, 48, 480, 10, 2, 33}, 25.175, 1, 0},
-    {{1280, 440, 40, 220, 720, 5, 5, 20}, 74.25, 19, 0},
-    {{1920, 88, 44, 148, 1080, 4, 5, 36}, 148.5, 16, 0},
-    {{1920, 528, 44, 148, 1080, 4, 5, 36}, 148.5, 31, 0},
-    {{1366, 70, 143, 213, 768, 3, 3, 24}, 85.5, 0, 0},
-    {{1024, 40, 104, 144, 600, 1, 3, 18}, 48.96, 0, 0},
-    {{1920, 48, 32, 80, 1440, 2, 4, 38}, 185.203, 0, 0},
-    {{2048, 48, 32, 80, 1536, 2, 4, 38}, 209.318, 0, 0},
+constexpr auto kVmodes = std::to_array<PresetMode>({
+    {.h = {1280, 110, 40, 220}, .v = {720, 5, 5, 20}, .fpix_mhz = 74.25, .vic = 4, .pr = 0},
+    {.h = {1024, 24, 136, 160}, .v = {768, 3, 6, 29}, .fpix_mhz = 65.0, .vic = 0, .pr = 0},
+    {.h = {720, 16, 62, 60}, .v = {480, 9, 6, 30}, .fpix_mhz = 27.0, .vic = 3, .pr = 0},
+    {.h = {720, 12, 64, 68}, .v = {576, 5, 5, 39}, .fpix_mhz = 27.0, .vic = 18, .pr = 0},
+    {.h = {1280, 48, 112, 248}, .v = {1024, 1, 3, 38}, .fpix_mhz = 108.0, .vic = 0, .pr = 0},
+    {.h = {800, 40, 128, 88}, .v = {600, 1, 4, 23}, .fpix_mhz = 40.0, .vic = 0, .pr = 0},
+    {.h = {640, 16, 96, 48}, .v = {480, 10, 2, 33}, .fpix_mhz = 25.175, .vic = 1, .pr = 0},
+    {.h = {1280, 440, 40, 220}, .v = {720, 5, 5, 20}, .fpix_mhz = 74.25, .vic = 19, .pr = 0},
+    {.h = {1920, 88, 44, 148}, .v = {1080, 4, 5, 36}, .fpix_mhz = 148.5, .vic = 16, .pr = 0},
+    {.h = {1920, 528, 44, 148}, .v = {1080, 4, 5, 36}, .fpix_mhz = 148.5, .vic = 31, .pr = 0},
+    {.h = {1366, 70, 143, 213}, .v = {768, 3, 3, 24}, .fpix_mhz = 85.5, .vic = 0, .pr = 0},
+    {.h = {1024, 40, 104, 144}, .v = {600, 1, 3, 18}, .fpix_mhz = 48.96, .vic = 0, .pr = 0},
+    {.h = {1920, 48, 32, 80}, .v = {1440, 2, 4, 38}, .fpix_mhz = 185.203, .vic = 0, .pr = 0},
+    {.h = {2048, 48, 32, 80}, .v = {1536, 2, 4, 38}, .fpix_mhz = 209.318, .vic = 0, .pr = 0},
 
-    {{1280, 24, 16, 40, 1440, 3, 5, 33}, 120.75, 0, 1},
-};
+    {.h = {1280, 24, 16, 40}, .v = {1440, 3, 5, 33}, .fpix_mhz = 120.75, .vic = 0, .pr = 1},
+});
+static_assert(kVmodes.size() == kNumVmodes, "vmodes: one row per preset index");
 
-constexpr PresetMode kTvmodes[kNumTvmodes] = {
-    {{640, 30, 60, 70, 240, 4, 4, 14}, 12.587, 0, 0},
-    {{640, 16, 96, 48, 480, 8, 4, 33}, 25.175, 0, 0},
-    {{640, 30, 60, 70, 288, 6, 4, 14}, 12.587, 0, 0},
-    {{640, 16, 96, 48, 576, 2, 4, 42}, 25.175, 0, 0},
-};
+constexpr auto kTvmodes = std::to_array<PresetMode>({
+    {.h = {640, 30, 60, 70}, .v = {240, 4, 4, 14}, .fpix_mhz = 12.587, .vic = 0, .pr = 0},
+    {.h = {640, 16, 96, 48}, .v = {480, 8, 4, 33}, .fpix_mhz = 25.175, .vic = 0, .pr = 0},
+    {.h = {640, 30, 60, 70}, .v = {288, 6, 4, 14}, .fpix_mhz = 12.587, .vic = 0, .pr = 0},
+    {.h = {640, 16, 96, 48}, .v = {576, 2, 4, 42}, .fpix_mhz = 25.175, .vic = 0, .pr = 0},
+});
+static_assert(kTvmodes.size() == kNumTvmodes, "tvmodes: one row per TV mode");
 
 }
 
 std::span<const PresetMode> vmodes() noexcept {
-    return std::span<const PresetMode>(kVmodes, kNumVmodes);
+    return std::span<const PresetMode>(kVmodes);
 }
 
 std::span<const PresetMode> tvmodes() noexcept {
-    return std::span<const PresetMode>(kTvmodes, kNumTvmodes);
+    return std::span<const PresetMode>(kTvmodes);
 }
 
 namespace video_timing {
 
 Modeline with_timings(Modeline m, std::span<const std::uint32_t, kModelineTimings> t) noexcept {
-    m.hact = t[0];
-    m.hfp = t[1];
-    m.hs = t[2];
-    m.hbp = t[3];
-    m.vact = t[4];
-    m.vfp = t[5];
-    m.vs = t[6];
-    m.vbp = t[7];
+    m.h = AxisTiming{t[0], t[1], t[2], t[3]};
+    m.v = AxisTiming{t[4], t[5], t[6], t[7]};
     return m;
 }
 
 Modeline preset_modeline(const PresetMode& p) noexcept {
-    Modeline m = with_timings(Modeline{}, p.vpar);
+    Modeline m{};
+    m.h = p.h;
+    m.v = p.v;
     m.vic = p.vic;
     m.pixel_repeat = (p.pr != 0);
     m.fpix_mhz = p.fpix_mhz;
@@ -95,19 +94,19 @@ StoredMode apply_preset(PresetIndex preset, bool pixel_repeat) {
 }
 
 StoredMode store_mode(const ParsedMode& parsed, CoreVideoCaps caps) {
-    if (parsed.how != ModeRequest::PresetIndex) {
+    StoredMode out{};
+    if (const PresetPick* pick = std::get_if<PresetPick>(&parsed)) {
+        out = apply_preset(pick->index, caps.pixel_repeat);
 
-        StoredMode out{};
-        out.mode = parsed.mode;
-        out.fully_custom = true;
-        out.explicitly_requested = false;
+        out.mode.hpol = pick->hpol;
+        out.mode.vpol = pick->vpol;
+        out.explicitly_requested = true;
         return out;
     }
-    StoredMode out = apply_preset(parsed.preset_index, caps.pixel_repeat);
 
-    out.mode.hpol = parsed.mode.hpol;
-    out.mode.vpol = parsed.mode.vpol;
-    out.explicitly_requested = true;
+    out.mode = std::get<CustomMode>(parsed).mode;
+    out.fully_custom = true;
+    out.explicitly_requested = false;
     return out;
 }
 
@@ -147,8 +146,8 @@ std::optional<double> estimate_fpix(const Modeline& m, std::uint32_t vtime, Refr
 
     if (vtime == 0)
         return std::nullopt;
-    const double htotal = static_cast<double>(m.hact + m.hfp + m.hs + m.hbp);
-    const double vtotal = static_cast<double>(m.vact + m.vfp + m.vs + m.vbp);
+    const double htotal = static_cast<double>(m.h.total());
+    const double vtotal = static_cast<double>(m.v.total());
     double fpix = kFabricClockMhz * htotal * vtotal;
     fpix /= static_cast<double>(vtime);
 
@@ -164,13 +163,13 @@ std::optional<double> estimate_fpix(const Modeline& m, std::uint32_t vtime, Refr
 std::optional<ScanrateLock> lock_scanrate(const Modeline& m, std::uint32_t vtime) noexcept {
     if (vtime == 0)
         return std::nullopt;
-    const std::int64_t htotal = static_cast<std::int64_t>(m.hact) + m.hfp + m.hs + m.hbp;
+    const std::int64_t htotal = static_cast<std::int64_t>(m.h.total());
     if (htotal <= 0 || !(m.fpix_mhz > 0.0))
         return std::nullopt;
 
-    const std::int64_t vbp = static_cast<std::int64_t>(m.vbp);
+    const std::int64_t vbp = static_cast<std::int64_t>(m.v.back_porch);
     const std::int64_t min_vbp = (vbp < kScanlockMinVbp) ? vbp : kScanlockMinVbp;
-    const std::int64_t vt_min = static_cast<std::int64_t>(m.vact) + m.vs + min_vbp + 1;
+    const std::int64_t vt_min = static_cast<std::int64_t>(m.v.active) + m.v.sync + min_vbp + 1;
 
     const double vtotal_real = m.fpix_mhz
         * static_cast<double>(vtime)
@@ -182,7 +181,7 @@ std::optional<ScanrateLock> lock_scanrate(const Modeline& m, std::uint32_t vtime
     if (vt_min > kScanlockVtotalMax || vtotal < vt_min)
         return std::nullopt;
 
-    const std::int64_t vblank = vtotal - static_cast<std::int64_t>(m.vact) - m.vs;
+    const std::int64_t vblank = vtotal - static_cast<std::int64_t>(m.v.active) - m.v.sync;
     const std::int64_t vfp = (vblank - vbp < 1) ? 1 : vblank - vbp;
 
     ScanrateLock out{};
@@ -202,12 +201,12 @@ bool rotation_needs_buffered_scaler(
 ) noexcept {
     if (!s.rotated() || s.htime == 0 || s.vtime == 0)
         return false;
-    const std::uint32_t vfp = lock ? lock->vfp : m.vfp;
-    const std::uint32_t vbp = lock ? lock->vbp : m.vbp;
-    const std::int64_t vtotal = static_cast<std::int64_t>(m.vact) + vfp + m.vs + vbp;
+    const std::uint32_t vfp = lock ? lock->vfp : m.v.front_porch;
+    const std::uint32_t vbp = lock ? lock->vbp : m.v.back_porch;
+    const std::int64_t vtotal = static_cast<std::int64_t>(m.v.active) + vfp + m.v.sync + vbp;
     if (vtotal <= 0)
         return false;
-    const std::int64_t vblank = vtotal - static_cast<std::int64_t>(m.vact);
+    const std::int64_t vblank = vtotal - static_cast<std::int64_t>(m.v.active);
     return (vblank * static_cast<std::int64_t>(s.vtime) / vtotal)
         > (static_cast<std::int64_t>(s.de_v) + kScanlockRotMargin)
         * static_cast<std::int64_t>(s.htime);

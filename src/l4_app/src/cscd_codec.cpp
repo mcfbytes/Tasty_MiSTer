@@ -28,10 +28,9 @@ constexpr std::size_t kWorkBytes = LZO1X_1_MEM_COMPRESS;
 
 }
 
-Ex<void> CscdCodec::begin(PictureSize size) noexcept {
+Ex<void> CscdCodec::begin_(PictureSize size) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    end();
-    if (size.empty() || lzo_init() != LZO_E_OK)
+    if (lzo_init() != LZO_E_OK)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     constexpr std::size_t kStripePlanes = 2;
     const std::size_t pic = picture_bytes(size);
@@ -79,14 +78,17 @@ std::span<const std::byte> CscdCodec::dup() noexcept {
     return dup_.first(dup_len_);
 }
 
-std::span<const std::byte> CscdCodec::encode(
+IFrameCodec::Encoded CscdCodec::encode(
     RgbRows rgb,
     bool key,
-    std::span<std::byte> out
+    std::span<std::byte> out,
+    const FrameBudget&
 ) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
     const PicturePixels width = size_.width;
-    if (!open() || !rgb.covers(rgb_row_of(width), size_.rows) || out.size() < payload_bound(size_))
+    if (size_.empty()
+        || !rgb.covers(rgb_row_of(width), size_.rows)
+        || out.size() < payload_bound(size_))
         return {};
     const RowBytes row{row_bytes(width)};
     const RowBytes line = rgb_row_of(width);
@@ -111,12 +113,12 @@ std::span<const std::byte> CscdCodec::encode(
         }
     });
     const std::size_t picture = picture_bytes(size_);
-    return pack_(key ? prev_.first(picture) : delta_.first(picture), key, out);
+    return Encoded{pack_(key ? prev_.first(picture) : delta_.first(picture), key, out), Search{}};
 }
 
 std::span<const std::byte> CscdCodec::rekey(std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    if (!open() || out.size() < payload_bound(size_))
+    if (size_.empty() || out.size() < payload_bound(size_))
         return {};
     return pack_(prev_.first(picture_bytes(size_)), true, out);
 }

@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "app/flat_save_servant.h"
@@ -12,7 +13,6 @@
 #include "cores/servant_id.h"
 #include "hal/boards_table.h"
 #include "infra/opt_ref.h"
-#include "os/bt_probe.h"
 #include "reactor/notifier.h"
 
 namespace mister::fw {
@@ -57,11 +57,25 @@ std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
     };
 }
 
+std::optional<app::HostLedWatch> DeviceBlock::open_led_watch_(const BootParts& plat) noexcept {
+    const std::string_view node = plat.kernel.activity_led;
+    if (node.empty())
+        return std::nullopt;
+    auto watch = app::HostLedWatch::open(node, disk_activity_);
+    if (!watch) {
+        opened_.refuse("T-INPUT: HostLedWatch::open", watch.error());
+        return std::nullopt;
+    }
+    return std::optional<app::HostLedWatch>{std::in_place, std::move(*watch)};
+}
+
 std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
-    const BootParts& plat,
     const Parts::Frontend& front
 ) noexcept {
-    auto fds = app::InputDecode::Fds::create(input_wire_);
+    const std::optional<app::HostLedWatch>& watch = led_watch_;
+    const auto led = watch ? infra::OptRef<const app::HostLedWatch>{*watch}
+                           : infra::OptRef<const app::HostLedWatch>{};
+    auto fds = app::InputDecode::Fds::create(input_ctrl_, led);
     if (!fds) {
         opened_.refuse("T-INPUT: InputDecode::Fds::create", fds.error());
         return std::nullopt;
@@ -74,7 +88,6 @@ std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
     return std::optional<app::InputPipeline>{
         std::in_place,
         std::move(*fds),
-        input_wire_,
         input_build_,
         input_emit_,
         std::move(*service),
@@ -82,11 +95,19 @@ std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
         app::InputDecode::Wiring{
             .diag = diag_log_,
             .inbox = input_inbox_,
-            .link_rx = input_rx_,
-            .rt_wake = plat.exec.kicker(),
+            .rt_kick = rt_input_kick_,
             .cell = front.launcher_state,
             .keys = front.launcher_keys,
-            .ui_wake = infra::OptRef<xthread::WakeFlag>{ui_wake_},
+            .menu_keys = menu_keys_,
+            .ctrl = input_ctrl_,
+            .gates = gates_cell_,
+            .key_focus = key_focus_,
+            .hotplug = hotplug_,
+            .joy_edge_reset = edge_reset_,
+            .activity = activity_,
+            .capture_arm = capture_arm_,
+            .capture_hit = capture_hit_,
+            .rumble_players = rumble_players_,
         }
     };
 }
@@ -106,6 +127,7 @@ std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
     return std::optional<app::InputMain>{
         std::in_place,
         input_pipeline_->decode(),
+        input_rx_,
         std::move(*park),
         infra::OptRef{main_wake_}
     };
@@ -113,7 +135,7 @@ std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
 
 std::unique_ptr<reactor::FrameClock> DeviceBlock::open_frame_clock(
     const char* vsync_device,
-    reactor::Executive& exec,
+    const os::IClock& clock,
     OpenVerdict& verdict
 ) {
     std::unique_ptr<reactor::FrameClock> frame;
@@ -121,18 +143,13 @@ std::unique_ptr<reactor::FrameClock> DeviceBlock::open_frame_clock(
         std::fprintf(stderr, "mister: this board row names no vsync device: no T-FRAME\n");
         return frame;
     }
-    auto fc = reactor::FrameClock::open(vsync_device);
+    auto fc = reactor::FrameClock::open(vsync_device, reactor::FrameClock::Wiring{.clock = clock});
     if (!fc) {
         std::fprintf(stderr, "mister: vsync device %s\n", vsync_device);
         verdict.refuse("T-FRAME: FrameClock::open", fc.error());
         return frame;
     }
     frame = std::move(*fc);
-    if (auto nf = reactor::Notifier::frame(frame->eventfd()); !nf) {
-        verdict.refuse("T-FRAME: Notifier::frame", nf.error());
-    } else if (auto a = exec.add_notifier(std::move(*nf)); !a) {
-        verdict.refuse("T-FRAME: Executive::add_notifier", a.error());
-    }
     return frame;
 }
 
@@ -157,6 +174,9 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .sector_route = infra::OptRef<const app::SectorRouteCell>{sector_route_},
         .osd_route = infra::OptRef<const app::OsdRouteCell>{osd_route_},
         .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
+        .sector_lease = infra::OptRef<const app::SectorLeaseCell>{sector_lease_},
+        .osd_lease = infra::OptRef<const app::OsdLeaseCell>{osd_lease_},
+        .sys_lease = infra::OptRef<const app::SysLeaseCell>{sys_lease_},
         .main_log = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
     };
 }
@@ -186,7 +206,7 @@ template <class Row>
 void DeviceBlock::grant_if_latched_(const ThreadAssembly::SeatMains& mains) noexcept {
     using M = typename Row::Main;
     if constexpr (HasPauseLatch<M>) {
-        if (M* m = mains.mains.get<M>(); m != nullptr)
+        if (M* m = mains.get<M>(); m != nullptr)
             grant_pause(Row::seat, m->pause_latch());
     }
 }
@@ -221,13 +241,15 @@ DeviceBlock::DeviceBlock(
     const Parts::Frontend& front
 )
     : threads_(plat.threads),
+      io_doorbells_(open_io_doorbells_()),
 
-      disk_relay_{io_wake_, cores::make_disk_servant(plat.vfs)},
+      disk_relay_{io_wake_, cores::make_disk_servant(plat.vfs, infra::OptRef{disk_activity_})},
       save_relay_{plat.link, io_wake_, std::make_unique<app::FlatSaveServant>(plat.vfs)},
       events_(),
       owner_events_(),
       clock_(),
-      input_wire_{},
+      main_rx_{main_wake_},
+      link_router_{main_rx_, ui_rx_, input_rx_},
       video_pump_{
           plat.vfs,
           clock_,
@@ -235,18 +257,24 @@ DeviceBlock::DeviceBlock(
           {},
           hdmi_level_,
           app::VideoPump::Wiring{
-              .activity = input_wire_,
+              .activity = activity_,
+              .gates = gates_cell_,
               .link_tx = ui_inbox_,
+              .replies = link_router_,
+              .ini = ini_cell_,
           }
       },
-      bt_pump_{clock_, &os::bluetooth_adapter_up, infra::OptRef<xthread::DiagLog>{diag_log_}},
-      main_rx_{main_wake_},
-      link_router_{main_rx_, ui_rx_, input_rx_},
-      input_emit_{input_wire_, plat.link, link_router_},
-      input_build_{plat.vfs, input_wire_, plat.input_dir},
-      input_pipeline_(open_input_pipeline_(plat, front)),
+      input_emit_{edge_reset_, plat.link, link_router_},
+      input_build_{
+          plat.vfs,
+          app::InputBuild::Ends{core_facts_, hotplug_, input_ctrl_.kicker()},
+          plat.input_dir
+      },
+      rt_input_kick_(plat.exec.kicker()),
+      led_watch_(open_led_watch_(plat)),
+      input_pipeline_(open_input_pipeline_(front)),
       input_main_(open_input_main_()),
-      frame_(open_frame_clock(plat.video.vsync_device, plat.exec, opened_)),
+      frame_(open_frame_clock(plat.video.vsync_device, clock_, opened_)),
       prefetch_(),
       prefetch_main_(open_prefetch_main_()),
       pcm_feeder_{clock_, pcm_commands_, infra::OptRef<const svc::Vfs>{plat.vfs}},
@@ -267,9 +295,10 @@ DeviceBlock::DeviceBlock(
           app::LwSectorEndpoint::Wiring{
               .grant = sector_grant_,
               .route = sector_route_,
+              .lease = sector_lease_,
               .geometry = disc_geometry_,
               .discs = discs_,
-              .doorbells = io_doorbells_.get(),
+              .doorbells = io_doorbell_set_(),
               .saves = infra::OptRef<const svc::ISaveFilesOnIo>{storage_}
           }
       ),
@@ -277,8 +306,9 @@ DeviceBlock::DeviceBlock(
           app::LwSysEndpoint::Wiring{
               .grant = sys_grant_,
               .route = sys_route_,
+              .lease = sys_lease_,
               .snapshots = status_snapshots_,
-              .doorbells = io_doorbells_.get()
+              .doorbells = io_doorbell_set_()
           }
       ),
       window_jobs_(plat.vfs, io_window_map_, plat.fpga_mem.region, io_wake_),
@@ -287,13 +317,18 @@ DeviceBlock::DeviceBlock(
       surface_(),
       osd_wire_{surface_, plat.link},
       lw_osd_(
-          app::LwOsdEndpoint::Wiring{.grant = osd_grant_, .route = osd_route_, .surface = surface_}
+          app::LwOsdEndpoint::Wiring{
+              .grant = osd_grant_,
+              .route = osd_route_,
+              .lease = osd_lease_,
+              .surface = surface_
+          }
       ),
       ladder_{transitioning_, infra::OptRef<reactor::RoundTimer>{plat.round_timer}},
       board_reset_{plat.bridges},
       parts_{
           .video = video_pump_.wire(),
-          .input = input_wire_,
+          .rumble_players = rumble_players_,
           .osd = osd_wire_,
           .link_inbox = main_inbox_,
           .link_rx = main_rx_,
@@ -327,6 +362,8 @@ DeviceBlock::DeviceBlock(
           .status_snapshots = infra::OptRef<const proto::StatusSnapshotCell>{status_snapshots_},
 
           .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
+          .lamp = plat.disk_lamp,
+          .disk_activity = infra::OptRef<xthread::WakeFlag>{disk_activity_},
 
           .board_ops =
               {.rt = infra::OptRef<app::IRtPriorityScope>{ladder_},
@@ -342,6 +379,7 @@ DeviceBlock::DeviceBlock(
               .inbox = main_inbox_,
               .rx = main_rx_,
               .config_cell = config_cell_,
+              .ini_cell = ini_cell_,
               .identity_record_cell = identity_record_cell_,
               .owner_events = owner_events_,
               .conf_str_cell = conf_str_cell_,
@@ -373,13 +411,15 @@ DeviceBlock::DeviceBlock(
                   app::CoreBuilder::SectorCells{
                       .grant = sector_grant_,
                       .route = sector_route_,
+                      .lease = sector_lease_,
                       .wake = infra::OptRef<xthread::WakeFlag>{io_wake_}
                   },
-              .osds = app::CoreBuilder::OsdCells{.grant = osd_grant_, .route = osd_route_},
+              .osds = app::CoreBuilder::OsdCells{.grant = osd_grant_, .lease = osd_lease_},
               .sys =
                   app::CoreBuilder::SysCells{
                       .grant = sys_grant_,
                       .route = sys_route_,
+                      .lease = sys_lease_,
                       .wake = infra::OptRef<xthread::WakeFlag>{io_wake_}
                   },
               .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
@@ -396,9 +436,6 @@ DeviceBlock::DeviceBlock(
       vfs_(plat.vfs) {
 
     static_assert(svc::IoMain::kMaxCoworkers >= 9);
-    if (!io_doorbells_.valid()) {
-        opened_.refuse("T-IO: epoll_create1(doorbells)", Error{Errc::os, ERR_SITE(), 0});
-    }
     companion_host_.install(cores::make_servants(vfs_));
 }
 
@@ -413,11 +450,13 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .io_wake = io_wake_,
              .ui_inbox = ui_inbox_,
              .video = video_pump_,
-             .input = input_wire_,
+             .key_focus = key_focus_,
+             .core_input = core_input_,
+             .joymap = joymap_,
+             .menu_keys = menu_keys_,
              .osd = osd_wire_,
              .events = events_,
              .owner_events = owner_events_,
-             .bt = bt_pump_,
              .frames = frame_counter_,
              .input_emit = input_emit_,
 
@@ -434,7 +473,9 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .io_windows = io_window_map_,
              .ui_windows = ui_window_map_,
              .frame_demand = frame_demand_,
-             .core_frames = core_frames_},
+             .core_frames = core_frames_,
+             .ini = ini_cell_,
+             .disk_activity = disk_activity_},
         .session = {.link = session_, .owner = owner_},
     };
 }
@@ -471,16 +512,32 @@ std::optional<app::PcmMain> DeviceBlock::open_pcm_main_() {
     }
 }
 
+std::optional<os::EpollSet> DeviceBlock::open_io_doorbells_() {
+    auto s = os::EpollSet::create();
+    if (!s) {
+        opened_.refuse("T-IO: epoll_create1(doorbells)", s.error());
+        return std::nullopt;
+    }
+    return std::optional<os::EpollSet>{std::move(*s)};
+}
+
+infra::OptRef<const os::EpollSet> DeviceBlock::io_doorbell_set_() noexcept {
+    return io_doorbells_ ? infra::OptRef<const os::EpollSet>{*io_doorbells_}
+                         : infra::OptRef<const os::EpollSet>{};
+}
+
 std::optional<svc::IoMain> DeviceBlock::open_io_main_() {
     if (auto fds = xthread::ParkFds::create(io_wake_); !fds) {
         opened_.refuse("T-IO: ParkFds::create", fds.error());
         return std::nullopt;
     } else {
+        if (!io_doorbells_)
+            return std::nullopt;
         return std::optional<svc::IoMain>{
             std::in_place,
             std::move(*fds),
             infra::OptRef{main_wake_},
-            io_doorbells_.get()
+            *io_doorbells_
         };
     }
 }
@@ -495,6 +552,7 @@ app::SupervisorParts::Services DeviceBlock::services_() noexcept {
         .discs = discs_,
         .window_jobs = window_jobs_,
         .storage_life = infra::OptRef<svc::IStorageLifecycle>{storage_},
+        .disc_backend = infra::OptRef<svc::IStorageBackend>{disc_store_},
     };
 }
 
@@ -513,11 +571,8 @@ DiagSampler::Services DeviceBlock::diag_services() noexcept {
 }
 
 void DeviceBlock::open_wires(const BootParts& plat) noexcept {
-    if (!diag_log_.open(plat.diag_path)) {
-        opened_.refuse(
-            "diag sink: DiagLog::open",
-            Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-        );
+    if (auto o = diag_log_.open(plat.diag_path); !o) {
+        opened_.refuse("diag sink: DiagLog::open", o.error());
     }
     diag_log_.set_echo_stderr(true);
 }
@@ -528,12 +583,12 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
 
     if (frame_ != nullptr) {
         frame_main_.emplace(*frame_);
-        seats.mains.mains.bind(&*frame_main_);
+        seats.mains.bind(&*frame_main_);
     }
 
-    seats.mains.mains.bind(&seated(input_main_, "T-INPUT bound past a refused open"));
-    seats.mains.mains.bind(&seated(prefetch_main_, "T-PREFETCH bound past a refused open"));
-    seats.mains.mains.bind(&seated(pcm_main_, "T-PCM bound past a refused open"));
+    seats.mains.bind(&seated(input_main_, "T-INPUT bound past a refused open"));
+    seats.mains.bind(&seated(prefetch_main_, "T-PREFETCH bound past a refused open"));
+    seats.mains.bind(&seated(pcm_main_, "T-PCM bound past a refused open"));
 
     (void)rides_io_(discs_, "T-IO: add_coworker(discs)");
 
@@ -557,7 +612,7 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
 
     (void)rides_io_(storage_, "T-IO: add_coworker(storage)");
 
-    seats.mains.mains.bind(&seated(io_main_, "T-IO bound past a refused open"));
+    seats.mains.bind(&seated(io_main_, "T-IO bound past a refused open"));
 
     if (const auto page = plat.programmer.boot_handoff()) {
         owner_.set_boot_cookie(proto::MemSizeCookie::of(page->boot_cookie()));

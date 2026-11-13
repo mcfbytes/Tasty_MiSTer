@@ -114,7 +114,7 @@ Ex<void> StCore::eject_all_() {
     return {};
 }
 
-Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts) {
+Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts, std::string_view) {
     const auto f = StMediaFact::of(facts);
     if (!f) {
         return std::unexpected(

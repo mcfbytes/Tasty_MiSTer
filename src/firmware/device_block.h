@@ -12,7 +12,6 @@
 #include "app/bitstream_programmer.h"
 #include "app/built_core.h"
 #include "app/board_ops.h"
-#include "app/bt_pump.h"
 #include "app/cheat_blob_cell.h"
 #include "app/cheat_catalog_cell.h"
 #include "app/cheat_link.h"
@@ -20,12 +19,18 @@
 #include "app/companion_host.h"
 #include "app/conf_str_cell.h"
 #include "app/core_frame_counter.h"
+#include "app/core_input_binding.h"
+#include "app/core_input_facts.h"
 #include "app/core_frame_record.h"
 #include "app/dev_mem_window_map.h"
 #include "app/event.h"
 #include "app/frame_demand.h"
+#include "app/capture_arm.h"
+#include "app/capture_hit.h"
+#include "app/input_gates_cell.h"
 #include "app/input_main.h"
 #include "app/input_pipeline.h"
+#include "app/host_led_watch.h"
 #include "app/identity_record.h"
 #include "app/ini_parse.h"
 #include "app/launcher_demand.h"
@@ -33,10 +38,14 @@
 #include "app/link_router.h"
 #include "app/link_rx_channel.h"
 #include "app/link_session.h"
+#include "app/joymap_ends.h"
+#include "app/key_focus.h"
 #include "app/link_tx_channel.h"
 #include "app/lw_osd_endpoint.h"
 #include "app/lw_sector_endpoint.h"
 #include "app/lw_sys_endpoint.h"
+#include "app/raw_key_edge.h"
+#include "app/rumble_players_cell.h"
 #include "app/disk_relay.h"
 #include "app/save_upload_relay.h"
 #include "app/mailbox_relay.h"
@@ -61,6 +70,7 @@
 #include "hal/fpga_memory.h"
 #include "hal/hdmi_int_level.h"
 #include "hal/thread_map.h"
+#include "infra/coalesced_kick.h"
 #include "infra/diag_log.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -74,6 +84,7 @@
 #include "ladder_scope.h"
 #include "open_verdict.h"
 #include "os/clock.h"
+#include "os/epoll_set.h"
 #include "os/monotonic_clock.h"
 #include "proto/osd_surface.h"
 #include "reactor/core_state.h"
@@ -105,11 +116,14 @@ public:
             xthread::WakeFlag& io_wake;
             app::LinkTxChannel<SeatTag::Ui>& ui_inbox;
             app::VideoPump& video;
-            app::InputWire& input;
+
+            app::KeyFocusCell& key_focus;
+            app::CoreInputBinding& core_input;
+            const app::JoyMapEnds& joymap;
+            app::MenuKeyInbox& menu_keys;
             app::OsdWire& osd;
             app::EventQueue<SeatTag::RT>& events;
             app::EventQueue<SeatTag::Main>& owner_events;
-            app::BtPump& bt;
             app::CoreFrameCounter& frames;
             app::InputEmit& input_emit;
 
@@ -129,6 +143,10 @@ public:
             app::DevMemWindowMap<seat_owner::Ui>& ui_windows;
             app::FrameDemandCell& frame_demand;
             app::CoreFrameCell& core_frames;
+
+            app::IniCell& ini;
+
+            xthread::WakeFlag& disk_activity;
         };
 
         struct SessionFacts {
@@ -192,13 +210,15 @@ public:
 private:
     static std::unique_ptr<reactor::FrameClock> open_frame_clock(
         const char* vsync_device,
-        reactor::Executive& exec,
+        const os::IClock& clock,
         OpenVerdict& verdict
     );
 
     [[nodiscard]] std::optional<svc::PrefetchMain> open_prefetch_main_();
     [[nodiscard]] std::optional<app::PcmMain> open_pcm_main_();
     [[nodiscard]] std::optional<svc::IoMain> open_io_main_();
+    [[nodiscard]] std::optional<os::EpollSet> open_io_doorbells_();
+    [[nodiscard]] infra::OptRef<const os::EpollSet> io_doorbell_set_() noexcept;
 
     [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
 
@@ -206,9 +226,10 @@ private:
         const BootParts& plat
     ) noexcept;
     [[nodiscard]] std::optional<app::InputPipeline> open_input_pipeline_(
-        const BootParts& plat,
         const Parts::Frontend& front
     ) noexcept;
+
+    [[nodiscard]] std::optional<app::HostLedWatch> open_led_watch_(const BootParts& plat) noexcept;
     [[nodiscard]] std::optional<app::InputMain> open_input_main_() noexcept;
 
     [[nodiscard]] bool rides_io_(svc::IIoCoworker& lane, const char* what) noexcept;
@@ -228,16 +249,21 @@ public:
 
     xthread::WakeFlag io_wake_;
 
-    UniqueFd io_doorbells_{::epoll_create1(EPOLL_CLOEXEC)};
+    xthread::WakeFlag disk_activity_;
+
+    std::optional<os::EpollSet> io_doorbells_;
 
     app::SectorGrantCell sector_grant_{};
     app::SectorRouteCell sector_route_{};
+    app::SectorLeaseCell sector_lease_{};
 
     app::OsdGrantCell osd_grant_{};
     app::OsdRouteCell osd_route_{};
+    app::OsdLeaseCell osd_lease_{};
 
     app::SysGrantCell sys_grant_{};
     app::SysRouteCell sys_route_{};
+    app::SysLeaseCell sys_lease_{};
     proto::StatusSnapshotCell status_snapshots_{};
 
     svc::DiscReadService::GeomCell disc_geometry_{};
@@ -262,9 +288,28 @@ public:
     os::MonotonicClock clock_;
 
     app::LinkTxChannel<SeatTag::Ui> ui_inbox_;
-    app::InputWire input_wire_;
-    app::VideoPump video_pump_;
-    app::BtPump bt_pump_;
+
+    xthread::WakeFlag edge_reset_;
+    xthread::WakeFlag hotplug_;
+    xthread::WakeFlag input_ctrl_;
+    app::KeyFocusCell key_focus_;
+    app::InputGatesCell gates_cell_;
+    xthread::Counter activity_;
+    app::CoreInputCell core_facts_;
+    app::CaptureArmCell capture_arm_;
+    app::CaptureHitCell capture_hit_;
+    app::RumblePlayersCell rumble_players_;
+
+    app::CoreInputBinding core_input_{
+        app::CoreInputBinding::Ends{core_facts_, edge_reset_, hotplug_, input_ctrl_.kicker()}
+    };
+    app::JoyMapEnds joymap_{
+        .arm = capture_arm_,
+        .hit = capture_hit_,
+        .hotplug = hotplug_,
+        .input_ctrl = input_ctrl_.kicker()
+    };
+    app::IniCell ini_cell_{};
     app::LinkTxChannel<SeatTag::Input> input_inbox_;
     app::LinkRxChannel<SeatTag::Input> input_rx_;
 
@@ -277,13 +322,21 @@ public:
     app::LinkRxChannel<SeatTag::Ui> ui_rx_;
 
     xthread::WakeFlag ui_wake_;
+
+    app::MenuKeyInbox menu_keys_{ui_wake_};
     app::UartModeController::Handoffs uart_handoffs_{ui_wake_};
 
     app::LinkRouter link_router_;
 
+    app::VideoPump video_pump_;
+
     app::InputEmit input_emit_;
     app::InputBuild input_build_;
     xthread::WakeFlag input_wake_{};
+
+    xthread::CoalescedKick<SeatTag::Input, SeatTag::RT> rt_input_kick_;
+
+    std::optional<app::HostLedWatch> led_watch_;
     std::optional<app::InputPipeline> input_pipeline_;
     std::optional<app::InputMain> input_main_;
     std::unique_ptr<reactor::FrameClock> frame_;

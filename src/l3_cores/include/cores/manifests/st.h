@@ -14,6 +14,7 @@
 #include "cores/st_config.h"
 #include "cores/st_options.h"
 #include "proto/bit_field.h"
+#include "proto/status_bit.h"
 #include "proto/types.h"
 #include "svc/disk_codec.h"
 #include "svc/disk_format_row.h"

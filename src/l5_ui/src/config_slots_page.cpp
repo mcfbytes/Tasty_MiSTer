@@ -80,7 +80,7 @@ void ConfigSlotsPage::ask_slot(cores::ConfigSlot slot) {
         ? push_ask(asks_, app::UiRequest::LoadCoreConfig{.slot = slot, .scope = {drawn_}})
         : push_ask(asks_, app::UiRequest::SaveCoreConfig{.slot = slot, .scope = {drawn_}});
     if (!landed) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -223,20 +223,20 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
 Transition ConfigSlotsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ConfigSlotsPage);
     if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Left | UiEvent::Back})) {
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     }
     if (!ev.buttons.has_any({UiEvent::Select}))
         return Transition{};
 
     const SlotChoice sel = choice_of(sel_);
     if (sel.back())
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     if (!selectable(*sel.slot)) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     ask_slot(*sel.slot);
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 }

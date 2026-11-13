@@ -75,7 +75,7 @@ public:
     [[nodiscard]] Ex<std::span<std::byte>> read_raw_frame(
         Lba lba,
         std::span<std::byte> dst,
-        SectorHeader header = {}
+        std::optional<SectorHeader> header = {}
     );
 
     [[nodiscard]] Ex<std::span<std::byte>> read_full_frame(Lba lba, std::span<std::byte> dst);
@@ -147,7 +147,7 @@ private:
         Lba lba,
         std::span<std::byte> dst,
         Form form,
-        SectorHeader header = {}
+        std::optional<SectorHeader> header = {}
     );
 
     void normalize_cdda_(const Track& t, Form form, std::span<std::byte> frame) const noexcept;

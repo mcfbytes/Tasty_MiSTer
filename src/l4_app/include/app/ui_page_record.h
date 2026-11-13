@@ -5,6 +5,7 @@
 
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -15,7 +16,7 @@ struct UiPageRecord {
 
     std::uint32_t cell_refusals = 0;
 
-    std::uint32_t page_refusals = 0;
+    svc::Tally page_refusals{};
 
     std::uint32_t button_levels = 0;
     std::uint32_t button_edges = 0;
@@ -23,6 +24,8 @@ struct UiPageRecord {
     std::uint32_t button_classic = 0;
     std::uint32_t button_injects = 0;
     std::uint32_t button_core_resets = 0;
+
+    svc::Tally button_actions{};
     std::uint32_t last_hold_ms = 0;
 
     std::uint32_t recent_build_us = 0;

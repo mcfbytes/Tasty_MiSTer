@@ -3,10 +3,13 @@
 
 #include <cstring>
 
+#include "cores/cdi_disc_rules.h"
 #include "cores/core_adopt.h"
+#include "cores/mount_answer.h"
 #include "cores/mounted_path.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
+#include "svc/track.h"
 #include "proto/block_geometry.h"
 
 namespace mister::cores {
@@ -14,7 +17,6 @@ namespace {
 
 constexpr HeadLba kBootLba{166};
 constexpr proto::StatusBit kServoAudioCd{12};
-constexpr std::uint32_t kBlock = cdi::kBlockBytes;
 
 }
 
@@ -31,7 +33,7 @@ MountState CdiCore::mount_disc(std::string_view path) {
     TASTY_SEAT_BODY(CdiCore);
     const auto m = mount(profile().staging.disc_slot, MountedPath{path, proto::FileSize{}});
     if (!m)
-        return MountState::Failed;
+        return mount_answer_of(m.error());
     if (path.empty())
         return MountState::Done;
     switch (refresh_disc_()) {
@@ -54,34 +56,45 @@ Ex<void> CdiCore::on_mount(IoIndex slot, const MountedPath& p) {
 
     if (mount_seen_ == svc::DiscMountState::Mounted && image_path_.view() == p.path)
         return {};
-    probed_ = false;
-    plan_ = StagePlan{};
-    image_path_.clear();
     if (p.path.empty()) {
-        toc_ = {};
-        (void)discs_->arm_mount(
-            svc::DiscOp::Unmount,
-            infra::OptRef<const svc::CuePolicy>{cue_},
-            std::string_view{}
-        );
+        if (discs_->arm_mount(
+                svc::DiscOp::Unmount,
+                infra::OptRef<const svc::CuePolicy>{cue_},
+                std::string_view{}
+            )
+            == svc::DiscArm::Declined) {
+            return std::unexpected(mount_declined(ERR_SITE()));
+        }
+        clear_mount_();
         (void)refresh_disc_();
         return {};
     }
 
     if (!infra::iends_with(p.path, ".cue") && !infra::iends_with(p.path, ".chd")) {
+        clear_mount_();
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    const svc::DiscMountState st = discs_->arm_mount(
+    const svc::DiscArm arm = discs_->arm_mount(
         svc::DiscOp::Mount,
         infra::OptRef<const svc::CuePolicy>{cue_},
-        p.path
+        p.path,
+        infra::OptRef<const svc::IDiscRules>{cdi::rules_after(disc_type_)}
     );
+    if (arm == svc::DiscArm::Declined)
+        return std::unexpected(mount_declined(ERR_SITE()));
+    clear_mount_();
     (void)refresh_disc_();
-    if (st == svc::DiscMountState::Failed) {
+    if (arm == svc::DiscArm::Failed) {
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     }
     (void)image_path_.assign(p.path);
     return {};
+}
+
+void CdiCore::clear_mount_() noexcept {
+    probed_ = false;
+    plan_ = StagePlan{};
+    image_path_.clear();
 }
 
 svc::DiscMountState CdiCore::refresh_disc_() noexcept {
@@ -101,16 +114,13 @@ MountState CdiCore::finish_mount_() {
 
     if (!geom_.mounted || geom_.toc.last == svc::TrackCount{})
         return MountState::Failed;
-    std::array<std::uint8_t, kBlock> block{};
-    if (!serve_block_(kBootLba, block))
+    if (probe_boot_() == MountState::Pending)
         return MountState::Pending;
-    audio_cd_ = std::memcmp(block.data(), cdi::kBootHeader.data(), cdi::kBootHeader.size()) != 0;
     if (session_) {
 
         session_->post(proto::StatusEdit::bit(kServoAudioCd, audio_cd_));
     }
     disc_type_ = cdi::disc_type(geom_.toc, disc_type_);
-    toc_ = cdi::build_toc(geom_.toc, disc_type_, toc_rows_);
     plan_.disc_size_bytes = proto::FileSize{
         static_cast<std::uint64_t>(geom_.toc.end.v) * cdi::kSectorBytes
     };
@@ -119,115 +129,34 @@ MountState CdiCore::finish_mount_() {
     return MountState::Done;
 }
 
-CdiCore::Answer CdiCore::classify_(HeadLba lba) const noexcept {
-    const svc::Toc& toc = geom_.toc;
-    if (!lba.readable() || !geom_.mounted || toc.last == svc::TrackCount{})
-        return Answer::TocArea;
-    for (svc::TrackIndex i{}; toc.last.contains(i); i = i + svc::TrackCount{1}) {
-        const svc::Track& t = toc.at(i);
-        const HeadLba lo = HeadLba::of(t.start) - SectorCount::of(t.pregap);
-        const HeadLba hi = HeadLba::of(t.end) - SectorCount{1};
-        if (lba >= lo && lba <= hi)
-            return Answer::Track;
+MountState CdiCore::probe_boot_() {
+    if (cdi::classify(kBootLba, geom_) != cdi::BlockAnswer::Track) {
+        audio_cd_ = true;
+        return MountState::Done;
     }
-    return Answer::LeadOut;
-}
-
-void CdiCore::warm_(HeadLba first, SectorCount blocks) noexcept {
-    for (SectorCount i{}; i < blocks; i = i + SectorCount{1}) {
-        const HeadLba lba = first + i;
-
-        const std::optional<proto::Lba> at = lba.readable();
-        if (!at || classify_(lba) != Answer::Track)
-            continue;
-        discs_->hint(svc::DiscAsk{.form = svc::DiscForm::FullFrame, .lba = *at});
-    }
-}
-
-bool CdiCore::serve_block_(HeadLba lba, std::span<std::uint8_t, cdi::kBlockBytes> out) noexcept {
-    std::memset(out.data(), 0, out.size());
-    const auto sector = out.first<cdi::kSectorBytes>();
-    const auto q = out.subspan<cdi::kSectorBytes, cdi::kQBytes>();
-    const auto rw = out.subspan<cdi::kSectorBytes + cdi::kQBytes, cdi::kRwBytes>();
-    const std::optional<proto::Lba> at = lba.readable();
+    const std::optional<proto::Lba> at = kBootLba.readable();
     if (!at) {
-
-        const cdi::QFrame frame = cdi::compose_toc_q(lba, toc_);
-        std::memcpy(q.data(), frame.bytes.data(), cdi::kQBytes);
-        return true;
+        audio_cd_ = true;
+        return MountState::Done;
     }
-    switch (classify_(lba)) {
-        case Answer::TocArea:
-        case Answer::LeadOut: {
-
-            const cdi::QFrame frame = cdi::compose_q(lba, geom_.toc);
-            std::memcpy(q.data(), frame.bytes.data(), cdi::kQBytes);
-            return true;
-        }
-        case Answer::Track:
-            break;
-    }
-    std::array<std::byte, svc::kFullFrameBytes> frame{};
+    std::array<std::byte, svc::kFullFrameBytes> frame;
     const svc::DiscTake got = discs_->take(
         svc::DiscAsk{.form = svc::DiscForm::FullFrame, .lba = *at},
         frame
     );
-    discs_->hint(svc::DiscAsk{.form = svc::DiscForm::FullFrame, .lba = *at + proto::BlockCount{1}});
-    if (got.is_bytes()) {
-
-        std::memcpy(sector.data(), frame.data(), cdi::kSectorBytes);
-        cdi::widen_rw(
-            infra::byte_cast<const std::uint8_t>(std::span(frame))
-                .subspan<cdi::kSectorBytes, cdi::kRawSubcodeBytes>(),
-            rw
-        );
-    } else if (got.is_failed()) {
-        ++failed_reads_;
-    } else {
-        ++declines_;
-        return false;
+    if (got.is_failed()) {
+        audio_cd_ = true;
+        return MountState::Done;
     }
-    const cdi::QFrame q_frame = cdi::compose_q(lba, geom_.toc);
-    std::memcpy(q.data(), q_frame.bytes.data(), cdi::kQBytes);
-    return true;
+    if (!got.is_bytes())
+        return MountState::Pending;
+    audio_cd_ = std::memcmp(frame.data(), cdi::kBootHeader.data(), cdi::kBootHeader.size()) != 0;
+    return MountState::Done;
 }
 
 proto::SlotAttributes CdiCore::attributes(proto::SlotIndex) const {
     TASTY_SEAT_BODY(CdiCore);
     return proto::SlotAttributes{};
-}
-
-Ex<std::size_t> CdiCore::read_at(
-    proto::SlotIndex,
-    std::uint64_t offset,
-    std::span<std::uint8_t> dst
-) {
-    TASTY_SEAT_BODY(CdiCore);
-
-    const proto::Lba start{static_cast<std::uint32_t>(offset / kBlock)};
-    const std::size_t blocks = dst.size() / kBlock;
-    const proto::BlockCount window{static_cast<std::uint32_t>(blocks)};
-    warm_(HeadLba::of(start), SectorCount::of(window * 2u));
-    std::span<std::uint8_t> rest = dst;
-    for (proto::BlockCount i{}; i < window; i += proto::BlockCount{1}) {
-        const proto::Lba at = start + i;
-        if (!serve_block_(HeadLba::of(at), rest.first<kBlock>())) {
-            return std::unexpected(
-                Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(at.v)}
-            );
-        }
-        rest = rest.subspan(kBlock);
-    }
-    return blocks * kBlock;
-}
-
-Ex<std::size_t> CdiCore::write_at(
-    proto::SlotIndex slot,
-    std::uint64_t,
-    std::span<const std::uint8_t>
-) {
-    TASTY_SEAT_BODY(CdiCore);
-    return std::unexpected(Error{Errc::io, ERR_SITE(), slot.v});
 }
 
 proto::BlockGeometry CdiCore::geometry_for(
@@ -241,7 +170,7 @@ proto::BlockGeometry CdiCore::geometry_for(
         return wire;
 
     return proto::BlockGeometry{
-        proto::BlockSize{kBlock},
+        cdi::rules_after(disc_type_).block_size(),
         proto::BlockCount{cdi::hunk_window(geom_.chd_hunk_bytes())}
     };
 }

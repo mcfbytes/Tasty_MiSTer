@@ -10,7 +10,7 @@
 
 #include "app/block_poll_route.h"
 #include "app/core_block_row.h"
-#include "app/input_wire.h"
+#include "app/rumble_players_cell.h"
 #include "app/sys_grant.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -48,7 +48,6 @@ class ISessionLive;
 
 namespace mister::app {
 
-class InputWire;
 class LinkBinder;
 class OsdWire;
 class SessionBindings;
@@ -72,7 +71,7 @@ public:
         LinkBinder& binder;
         proto::BlockSlots& slots;
         OsdWire& osd;
-        InputWire& input;
+        const RumblePlayersCell& rumble_players;
 
         infra::OptRef<const proto::StatusSnapshotCell> status_lw{};
     };
@@ -91,7 +90,7 @@ public:
         infra::OptRef<cores::Core> owner
     );
 
-    void bind_status_route(StatusRoute route, std::uint16_t gen) noexcept;
+    void bind_status_route(StatusRoute route, proto::BuildGeneration gen) noexcept;
 
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows(
         std::array<reactor::LinkDecoderDecl, kMaxServices>& out,
@@ -155,7 +154,7 @@ private:
     SessionBindings& bindings_;
     LinkBinder& binder_;
     OsdWire& osd_;
-    InputWire& input_;
+    const RumblePlayersCell& rumble_players_;
 
     proto::StatusWord status_scratch_{};
     proto::StatusCell status_cell_{};

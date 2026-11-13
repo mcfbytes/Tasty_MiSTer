@@ -34,8 +34,23 @@ struct FilterSendPlan {
         FilterWireBank bank = FilterWireBank::Horiz;
     };
 
+    struct SegIndex {
+        std::uint8_t v = 0;
+
+        [[nodiscard]] constexpr SegIndex next() const noexcept {
+            const std::uint8_t place = static_cast<std::uint8_t>(v + 1);
+            return SegIndex{place};
+        }
+
+        friend constexpr bool operator==(SegIndex, SegIndex) = default;
+    };
+
     std::array<Seg, 3> segs{};
     std::uint8_t count = 0;
+
+    [[nodiscard]] const Seg& seg(SegIndex i) const noexcept { return segs[i.v]; }
+
+    [[nodiscard]] bool covers(SegIndex i) const noexcept { return i.v < count; }
 };
 
 }

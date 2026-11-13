@@ -22,7 +22,7 @@ using cores::OnError;
 using cores::kEightBitDialect;
 
 [[nodiscard]] Ex<void> init_reset_video_geometry(CoreInitContext& ctx);
-[[nodiscard]] Ex<void> init_arm_video_prelude(CoreInitContext& ctx);
+[[nodiscard]] Ex<void> init_bind_video_prelude(CoreInitContext& ctx);
 [[nodiscard]] Ex<void> init_flush_status(CoreInitContext& ctx);
 [[nodiscard]] Ex<void> init_publish_identity(CoreInitContext& ctx);
 
@@ -64,10 +64,10 @@ inline constexpr auto kCoreInitBase = std::to_array<CoreInitStep>({
      .fn = &init_reset_video_geometry,
      .site = "item/item - host state only; VideoWire::geo_gate_ "
              "re-armed per core"},
-    {.name = "video.arm_prelude",
+    {.name = "video.bind_prelude",
      .status = InitStatus::Satisfied,
      .phase = InitPhase::CompletionArm,
-     .fn = &init_arm_video_prelude,
+     .fn = &init_bind_video_prelude,
      .site = "item - arms the 8-opcode prelude; wire-silent at the arm"},
     {.name = "status.flush",
      .reg = FabricReg::Status,
@@ -105,18 +105,18 @@ inline constexpr auto kCoreInitBase = std::to_array<CoreInitStep>({
      .reg = FabricReg::UartMode,
      .status = InitStatus::SatisfiedElsewhere,
      .phase = InitPhase::Apply,
-     .site = "uart_mode.cpp:196 via the unconditional set_mode(None) at :372"},
+     .site = "UartModeController::load_for_core's unconditional set_mode(None)"},
     {.name = "apply.uart_speed",
      .reg = FabricReg::UartSpeed,
      .status = InitStatus::SatisfiedElsewhere,
      .phase = InitPhase::Apply,
-     .site = "uart_mode.cpp:196 - same 0x3B commit window"},
+     .site = "UartModeController::load_for_core - same 0x3B commit window"},
     {.name = "late.cfg",
      .reg = FabricReg::Cfg,
      .status = InitStatus::WrittenLate,
      .phase = InitPhase::PostLoad,
-     .site = "M2 F3 - VideoWire::step_prelude S6 (0x01), ~68 ms AFTER "
-             "CoreLoaded; stock sends it at user_io.cpp:1518, before the "
+     .site = "M2 F3 - PreludeComposer's block tail (StagedFrame::AudioTail, 0x01), "
+             "~68 ms AFTER CoreLoaded; stock sends it at user_io.cpp:1518, before the "
              "reset release at :1696"},
     {.name = "late.systop_cfg",
      .reg = FabricReg::SysTopCfg,
@@ -127,7 +127,7 @@ inline constexpr auto kCoreInitBase = std::to_array<CoreInitStep>({
      .reg = FabricReg::ScalerFlt,
      .status = InitStatus::WrittenLate,
      .phase = InitPhase::PostLoad,
-     .site = "M2 F4 - VideoWire::step_prelude S2 (0x2B), after CoreLoaded"},
+     .site = "M2 F4 - StagedFrame::FilterMode (0x2B), after CoreLoaded"},
     {.name = "late.img_size",
      .reg = FabricReg::ImgSize,
      .status = InitStatus::WrittenLate,

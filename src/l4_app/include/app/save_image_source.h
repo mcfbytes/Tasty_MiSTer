@@ -7,7 +7,7 @@
 #include <span>
 #include <string_view>
 
-#include "cores/core_profile.h"
+#include "svc/blank_save.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
@@ -38,7 +38,7 @@ public:
         proto::SlotIndex slot,
         std::string_view path,
         bool manual = false,
-        const cores::BlankSaveSpec& blank = {}
+        const svc::BlankSaveSpec& blank = {}
     ) noexcept;
     std::string_view path_of(proto::SlotIndex slot) const;
 
@@ -76,7 +76,7 @@ private:
         Attach attach = Attach::Detached;
         bool manual = false;
         bool close_owed = false;
-        cores::BlankSaveSpec blank{};
+        svc::BlankSaveSpec blank{};
     };
 
     infra::OptRef<Binding> find(proto::SlotIndex slot);

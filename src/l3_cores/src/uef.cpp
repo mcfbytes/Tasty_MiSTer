@@ -1,46 +1,49 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/uef.h"
+#include "cores/uef_tape_file.h"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include "infra/endian.h"
+#include "infra/seat.h"
 
 namespace mister::cores::uef {
 namespace {
 
-[[nodiscard]] std::uint16_t read_u16(
-    std::span<const std::uint8_t> image,
-    std::size_t pos
-) noexcept {
-    return infra::load_le<std::uint16_t>(image.subspan(pos).first<2>());
-}
+struct TapeImage {
+    std::span<const std::uint8_t> v;
 
-[[nodiscard]] std::uint32_t read_u32(
-    std::span<const std::uint8_t> image,
-    std::size_t pos
-) noexcept {
-    return infra::load_le<std::uint32_t>(image.subspan(pos).first<4>());
-}
+    [[nodiscard]] std::size_t size() const noexcept { return v.size(); }
 
-[[nodiscard]] constexpr std::uint32_t tape_byte_at(std::uint32_t bit_pos) noexcept {
-    return bit_pos / kBitsPerTapeByte;
-}
+    [[nodiscard]] ChunkId id_at(std::size_t at) const noexcept { return chunk_id(u16_at(at)); }
 
-[[nodiscard]] constexpr std::uint32_t tape_slot_at(std::uint32_t bit_pos) noexcept {
-    return bit_pos % kBitsPerTapeByte;
-}
+    [[nodiscard]] std::uint16_t ms_at(std::size_t at) const noexcept { return u16_at(at); }
+
+    [[nodiscard]] std::uint32_t length_at(std::size_t at) const noexcept { return u32_at(at); }
+
+private:
+    [[nodiscard]] std::uint16_t u16_at(std::size_t at) const noexcept {
+        return infra::load_le<std::uint16_t>(v.subspan(at).first<2>());
+    }
+
+    [[nodiscard]] std::uint32_t u32_at(std::size_t at) const noexcept {
+        return infra::load_le<std::uint32_t>(v.subspan(at).first<4>());
+    }
+};
 
 struct Walk {
     std::optional<Located> located;
     TapeBit remaining_bits{};
 };
 
-[[nodiscard]] Walk walk_chunks(
-    std::span<const std::uint8_t> image,
-    ChunkInfo& cache,
-    TapeBit from
-) noexcept {
+[[nodiscard]] Walk walk_chunks(TapeImage image, ChunkInfo& cache, TapeBit from) noexcept {
     TapeBit bit_pos = from;
     if (bit_pos.within(
             TapeBit{cache.bit_offset_start},
@@ -63,11 +66,11 @@ struct Walk {
     for (;;) {
         if (pos + kChunkHeaderBytes > image.size())
             break;
-        const ChunkId id = chunk_id(read_u16(image, pos));
+        const ChunkId id = image.id_at(pos);
 
         if (id == ChunkId::ShortRead)
             break;
-        const std::uint32_t length = read_u32(image, pos + 2);
+        const std::uint32_t length = image.length_at(pos + 2);
         pos += kChunkHeaderBytes;
         cache.id = id;
         cache.length = length;
@@ -83,12 +86,12 @@ struct Walk {
             } else if (id == ChunkId::Gap || id == ChunkId::HighTone) {
                 if (pos + 2 > image.size())
                     break;
-                chunk_bitlen = TapeBitCount{ms_to_bits(read_u16(image, pos))};
+                chunk_bitlen = TapeBitCount{ms_to_bits(image.ms_at(pos))};
             } else {
                 if (pos + 4 > image.size())
                     break;
-                cache.pre_carrier = ms_to_bits(read_u16(image, pos));
-                const std::uint32_t post_carrier = ms_to_bits(read_u16(image, pos + 2));
+                cache.pre_carrier = ms_to_bits(image.ms_at(pos));
+                const std::uint32_t post_carrier = ms_to_bits(image.ms_at(pos + 2));
                 chunk_bitlen = TapeBitCount{
                     cache.pre_carrier + kHighDummyCarrierBits + post_carrier
                 };
@@ -108,15 +111,122 @@ struct Walk {
     return Walk{std::nullopt, bit_pos};
 }
 
+struct TapeByte {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] static TapeByte at(proto::FileSize off) noexcept {
+        return TapeByte{off.file_word<std::uint32_t>()};
+    }
+
+    [[nodiscard]] std::array<TapeBit, std::numeric_limits<std::uint8_t>::digits>
+    bits() const noexcept {
+        constexpr std::uint32_t kBits = std::numeric_limits<std::uint8_t>::digits;
+        std::array<TapeBit, kBits> out{};
+        for (std::uint32_t i = 0; i < kBits; ++i)
+            out[i] = TapeBit{(v * kBits) + i};
+        return out;
+    }
+};
+
+struct OutputByte {
+    std::uint8_t v = 0;
+
+    constexpr void append(std::uint8_t level) noexcept {
+        v = static_cast<std::uint8_t>((v << 1) | level);
+    }
+
+    void copy_to(std::byte* dst) const noexcept { std::memcpy(dst, &v, 1); }
+};
+
+}
+
+namespace detail {
+
+struct TapeState {
+    std::vector<std::uint8_t> image;
+    ChunkInfo cache;
+    TapeBits bits;
+};
+
+namespace {
+
+[[nodiscard]] std::optional<Located> locate(TapeState& t, TapeBit at) {
+    const TapeImage image{t.image};
+    return walk_chunks(image, t.cache, at).located;
+}
+
+[[nodiscard]] bool level_high(TapeState& t, TapeBit at) {
+    const std::optional<Located> located = locate(t, at);
+    if (!located)
+        return false;
+    const ChunkInfo& info = located->chunk;
+    const ChunkBit pos_in_chunk = located->offset_in_chunk;
+
+    if (info.id == ChunkId::Gap)
+        return false;
+    if (info.id == ChunkId::HighTone)
+        return true;
+
+    if (info.id == ChunkId::Tape) {
+        return pos_in_chunk.tape_level_high(
+            std::span<const std::uint8_t>(t.image).subspan(info.file_offset)
+        );
+    }
+
+    return pos_in_chunk.carrier_level_high(ChunkBit{info.pre_carrier});
+}
+
+}
+
+UefTapeFile::UefTapeFile(std::vector<std::uint8_t>&& image) : v{std::make_unique<TapeState>()} {
+    v->image = std::move(image);
+    v->bits = sized(v->image);
+}
+
+UefTapeFile::~UefTapeFile() = default;
+
+Ex<std::size_t> UefTapeFile::read_at(std::uint64_t off, std::span<std::byte> dst) {
+    TASTY_SEAT_BODY(UefTapeFile);
+    const proto::FileSize at{off};
+    const std::size_t total = v->bits.bytes().file_word<std::size_t>();
+    const std::size_t from = at.file_word<std::size_t>();
+    if (from >= total)
+        return std::size_t{0};
+    const std::size_t n = std::min(dst.size(), total - from);
+    for (std::size_t i = 0; i < n; ++i) {
+        const TapeByte byte = TapeByte::at(at.advance(proto::FileSize{i}));
+        OutputByte out{};
+        for (const TapeBit bit : byte.bits())
+            out.append(level_high(*v, bit) ? kStopBit : kStartBit);
+        out.copy_to(&dst[i]);
+    }
+    return n;
+}
+
+Ex<std::size_t> UefTapeFile::write_at(std::uint64_t, std::span<const std::byte>) {
+    TASTY_SEAT_BODY(UefTapeFile);
+    return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+}
+
+Ex<proto::FileSize> UefTapeFile::size() const {
+    TASTY_SEAT_BODY(UefTapeFile);
+    return v->bits.bytes();
+}
+
+Ex<void> UefTapeFile::flush() {
+    TASTY_SEAT_BODY(UefTapeFile);
+    return {};
+}
+
 }
 
 bool ChunkBit::tape_level_high(std::span<const std::uint8_t> tape) const noexcept {
-    const std::uint32_t slot = tape_slot_at(v);
+    const std::uint32_t slot = frame_slot();
     if (slot == kStartSlot)
         return false;
     if (slot == kStopSlot)
         return true;
-    const std::size_t byte_at = tape_byte_at(v);
+    const std::size_t byte_at = data_byte();
 
     const std::uint8_t byte = byte_at < tape.size() ? tape[byte_at] : std::uint8_t{0};
     const std::uint32_t shift = slot - 1u;
@@ -126,13 +236,21 @@ bool ChunkBit::tape_level_high(std::span<const std::uint8_t> tape) const noexcep
 bool ChunkBit::carrier_level_high(ChunkBit carrier) const noexcept {
     if (v < carrier.v || v >= carrier.v + kHighDummyCarrierBits)
         return true;
-    const std::uint32_t slot = tape_slot_at(v - carrier.v);
+    const std::uint32_t slot = ChunkBit{v - carrier.v}.frame_slot();
     if (slot == kStartSlot)
         return false;
     if (slot == kStopSlot)
         return true;
     const std::uint32_t shift = slot - 1u;
     return (kHighDummyByte & (1u << shift)) != 0;
+}
+
+std::uint32_t ChunkBit::frame_slot() const noexcept {
+    return v % kBitsPerTapeByte;
+}
+
+std::size_t ChunkBit::data_byte() const noexcept {
+    return v / kBitsPerTapeByte;
 }
 
 bool valid_header(std::span<const std::uint8_t> image) noexcept {
@@ -143,41 +261,21 @@ bool valid_header(std::span<const std::uint8_t> image) noexcept {
     return std::equal(kTag.begin(), kTag.end(), image.begin());
 }
 
-std::optional<Located> locate_chunk(
-    std::span<const std::uint8_t> image,
-    ChunkInfo& cache,
-    TapeBit bit_pos
-) noexcept {
-    return walk_chunks(image, cache, bit_pos).located;
-}
-
-std::uint8_t bit_at(
-    std::span<const std::uint8_t> image,
-    ChunkInfo& cache,
-    TapeBit bit_pos
-) noexcept {
-    const std::optional<Located> located = locate_chunk(image, cache, bit_pos);
-    if (!located)
-        return 0;
-    const ChunkInfo& info = located->chunk;
-    const ChunkBit pos_in_chunk = located->offset_in_chunk;
-
-    if (info.id == ChunkId::Gap)
-        return 0;
-    if (info.id == ChunkId::HighTone)
-        return 1;
-
-    if (info.id == ChunkId::Tape) {
-        const std::size_t data_at = static_cast<std::size_t>(info.file_offset);
-        return pos_in_chunk.tape_level_high(image.subspan(data_at)) ? kStopBit : kStartBit;
-    }
-
-    return pos_in_chunk.carrier_level_high(ChunkBit{info.pre_carrier}) ? kStopBit : kStartBit;
-}
-
-std::uint32_t total_bits(std::span<const std::uint8_t> image) noexcept {
+TapeBits sized(std::span<const std::uint8_t> image) noexcept {
+    const TapeImage bytes{image};
     ChunkInfo cache{};
-    return walk_chunks(image, cache, TapeBit{TapeBit::kNone}).remaining_bits.sizing_result();
+    return TapeBits{
+        walk_chunks(bytes, cache, TapeBit{TapeBit::kNone}).remaining_bits.sizing_result()
+    };
+}
+
+std::unique_ptr<svc::IFile> make_tape_file(std::vector<std::uint8_t>&& image) {
+
+    const proto::FileSize bytes{image.size()};
+    if (bytes < kMinImageBytes || bytes > kMaxImageBytes || !valid_header(image)) {
+        return std::make_unique<detail::UefTapeFile>(std::vector<std::uint8_t>{});
+    }
+    return std::make_unique<detail::UefTapeFile>(std::move(image));
 }
 
 }

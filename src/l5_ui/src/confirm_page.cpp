@@ -74,7 +74,7 @@ bool ConfirmPage::walk(PageWalk& out) const {
 Transition ConfirmPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ConfirmPage);
     if (!spec_.host)
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     if (ev.buttons.has_any({UiEvent::Menu}))
         return spec_.host->on_cancel();
     if (ev.buttons.has_any({UiEvent::Select})) {

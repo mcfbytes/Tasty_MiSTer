@@ -14,7 +14,7 @@
 
 #include "svc/chd_prefetch.h"
 
-#include "app/input_wire.h"
+#include "app/rumble_players_cell.h"
 
 #include "app/osd_wire.h"
 #include "app/rt_relax_scope.h"
@@ -113,7 +113,7 @@ LinkSession::LinkSession(
       boot_(machine_, fenced_signals_),
       config_(config_cell_, boot_),
       video_(parts.video),
-      input_(parts.input),
+      rumble_players_(parts.rumble_players),
       osd_(parts.osd),
       osd_mask_decoder_(link, router_, static_cast<const proto::IOsdFocus&>(*this)),
       ops_(parts.board_ops),
@@ -145,6 +145,8 @@ LinkSession::LinkSession(
           .prefetch = infra::OptRef{parts.services.prefetch},
           .mailbox = infra::OptRef<cores::IMailboxPort>{parts.services.mailbox},
           .disk = infra::OptRef<cores::IDiskPort>{parts.services.disks},
+          .lamp = parts.lamp,
+          .disk_activity = parts.disk_activity,
           .save_copy = parts.save_copy,
           .feeder = infra::OptRef{parts.services.feeder},
           .aperture = parts.fpga_mem,
@@ -170,8 +172,10 @@ LinkSession::LinkSession(
               .log_lane = parts.log_lane,
               .vfs = parts.vfs,
               .storage_life = parts.services.storage_life,
+              .disc_backend = parts.services.disc_backend,
               .prefetch = infra::OptRef{parts.services.prefetch},
-              .storage_channel = parts.storage_channel
+              .storage_channel = parts.storage_channel,
+              .lamp = parts.lamp
           }
       ),
       rows_(
@@ -185,7 +189,7 @@ LinkSession::LinkSession(
               .binder = binder_,
               .slots = slot_bindings_.slots(),
               .osd = osd_,
-              .input = input_,
+              .rumble_players = rumble_players_,
               .status_lw = parts.status_snapshots
           }
       ),
@@ -221,7 +225,6 @@ LinkSession::LinkSession(
           session_,
           osd_,
           slot_bindings_.slots(),
-          video_,
           parts.input_emitter,
           tally_
       ),
@@ -263,8 +266,12 @@ void LinkSession::reset_video_geometry() {
     video_.reset_geometry(core_edge_seq_.v);
 }
 
-void LinkSession::arm_video_prelude() {
-    video_.arm_prelude();
+void LinkSession::bind_video_prelude() {
+    video_.bind_core(core_edge_seq_, bindings_.generation(), clock().now());
+}
+
+bool LinkSession::prelude_settled() noexcept {
+    return video_.prelude_settled(clock().now());
 }
 
 void LinkSession::publish_core_identity() {
@@ -301,6 +308,9 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
 
     const bool live_at_entry = session_live();
 
+    video_.take_ui_cells();
+    const bool prelude_settled_now = video_.prelude_settled(clock().now());
+
     if (held_.wire_held()) {
         if (tick)
             publish_fabric_();
@@ -323,7 +333,7 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
         if (core_ready_) {
             const hal::ButtonMask but = g.buttons;
 
-            if (!video_.prelude_running()) {
+            if (prelude_settled_now) {
 
                 proto::Link link{link_};
                 (void)video_.update_but_sw(
@@ -418,6 +428,7 @@ Delivered LinkSession::deliver(
         .windows_closed = windows_closed,
         .live = session_live_(),
         .starting = start_.on(),
+        .core_ready = core_ready_,
         .fence = binder_.fio_queue(),
         .roles = infra::OptRef<const EncoderRoles>{roles},
         .core = live_core
@@ -450,6 +461,15 @@ Delivered LinkSession::deliver(
                     static_cast<CoreOptionCells::Host&>(*this)
                 );
                 break;
+            case OpTarget::Frame: {
+
+                proto::Link link{link_};
+                const auto
+                    d = infra::dispatch<LinkOpRoutes<OpTarget::Frame>>(op, video_, ctx, link);
+                r = d.outcome;
+                spent = d.round_spent;
+                break;
+            }
             case OpTarget::kCount:
                 r = misrouted(op, ctx);
                 break;
@@ -537,7 +557,12 @@ ILinkEncoder::Outcome LinkSession::on(
     }
 
     RtRelaxScope scope(ops_);
-    if (!current->apply_load_facts(ctx.tx.bytes(a.facts))) {
+
+    const infra::OptRef<const InternedFile> image = ctx.tx.file(a.image);
+    if (!current->apply_load_facts(
+            ctx.tx.bytes(a.facts),
+            image ? image->path.view() : std::string_view{}
+        )) {
         ++tally_.load_facts_refusals;
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -588,7 +613,7 @@ ILinkEncoder::Outcome LinkSession::on(
 
     rows_.bind_status_route(
         slot ? slot->status_route : StatusRoute::Link,
-        slot ? slot->gen : std::uint16_t{0}
+        slot ? proto::BuildGeneration::of_wire(slot->gen) : proto::BuildGeneration{}
     );
 
     if (made && slot)
@@ -665,16 +690,14 @@ ILinkEncoder::Outcome LinkSession::on(
     if (bound.dropped)
         ++tally_.link_op_drops;
     video_.set_key_map(a.conf);
+    osd_.bind_rotation(a.osd_rotation);
     if (a.waitmount_exhausted) {
         push(Event::SessionAdvisory{.why = Errc::timeout});
     }
-    constexpr std::size_t kCfgBytes = 16;
     if (a.cfg != proto::TxSlabId{} && session_.type() == proto::CoreType::EightBit) {
-        const auto bytes = ctx.tx.bytes(a.cfg);
-        if (bytes.size() == kCfgBytes) {
-            session_.stage(
-                proto::StatusEdit::whole(proto::StatusWord::from_bytes(bytes.first<kCfgBytes>()))
-            );
+
+        if (const auto word = proto::StatusWord::of(ctx.tx.bytes(a.cfg))) {
+            session_.stage(proto::StatusEdit::whole(*word));
         }
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -685,9 +708,6 @@ ILinkEncoder::Outcome LinkSession::on(
     const LinkOpCtx& ctx
 ) noexcept {
     bindings_.bind_uart(a, ctx.tx);
-
-    if (a.probe_usb_ser)
-        uart_.latch_usb_ser(a.usb_ser);
     return ILinkEncoder::Outcome::Encoded;
 }
 
@@ -768,33 +788,6 @@ ILinkEncoder::Outcome LinkSession::on(
     if (out == ILinkEncoder::Outcome::EncodedStatusChange)
         ++tally_.resets_pulsed;
     return out;
-}
-
-ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::SetMute& a, const LinkOpCtx&) noexcept {
-
-    video_.audio().set_mute(a.on);
-    return ILinkEncoder::Outcome::Encoded;
-}
-
-ILinkEncoder::Outcome LinkSession::on(
-    const proto::LinkOp::SetAttenuation& a,
-    const LinkOpCtx&
-) noexcept {
-    video_.audio().set_attenuation(a.attenuation);
-    return ILinkEncoder::Outcome::Encoded;
-}
-
-ILinkEncoder::Outcome LinkSession::on(
-    const proto::LinkOp::NudgeVolume& a,
-    const LinkOpCtx&
-) noexcept {
-    video_.audio().nudge(a.step);
-    return ILinkEncoder::Outcome::Encoded;
-}
-
-ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::ToggleMute&, const LinkOpCtx&) noexcept {
-    video_.audio().toggle_mute();
-    return ILinkEncoder::Outcome::Encoded;
 }
 
 ILinkEncoder::Outcome LinkSession::misrouted(const proto::LinkOp&, const LinkOpCtx&) noexcept {
@@ -939,6 +932,8 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
         current.has_value() ? current->profile().init_additions
                             : std::span<const cores::CoreInitStep>{}
     );
+
+    (void)osd_.send_rotation();
     rows_.publish_status_word();
     options_.publish_dip_labels(tenancy_.core(), bindings_.generation());
     options_.publish_dip_choices(tenancy_.core());
@@ -1019,7 +1014,7 @@ Ex<void> LinkSession::detach() {
     encoder_.drop_pads();
 
     osd_.bind_rows(OsdPageRoute::Link);
-    rows_.bind_status_route(StatusRoute::Link, 0);
+    rows_.bind_status_route(StatusRoute::Link, proto::BuildGeneration{});
     rows_.bind_block_poll(BlockPollRoute::Link);
 
     if (auto r = binder_.unbind_session(); !r)
@@ -1260,19 +1255,11 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
     }
 
     {
-        const SessionBindings::Uart& bound = bindings_.uart();
 
         uart_.bind_identity(CoreNames{eff, name});
-        const UartPersistFiles files{bound.mode, bound.speeds};
 
         proto::SpiFrame frame{link_};
-        (void)uart_.load_for_core(
-            frame,
-            bound.capable,
-            UartTokens{bound.uart_token.view(), bound.midi_token.view()},
-            files,
-            bindings_.record().uart_default_baud
-        );
+        (void)uart_.load_for_core(frame, bindings_.uart());
     }
 
     f12_mod_poll_.arm(true, bindings_.generation());

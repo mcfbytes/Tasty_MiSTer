@@ -33,7 +33,6 @@ struct IdentityRecord {
     SessionIdentity identity{};
 
     bool mgl_playable = true;
-    cores::BaudRate uart_default_baud{cores::kDefaultUartBaud};
     Stamp stamp{};
 };
 

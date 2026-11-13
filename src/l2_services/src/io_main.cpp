@@ -5,11 +5,21 @@
 
 namespace mister::svc {
 
-IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker, int doorbells) noexcept
+IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker) noexcept
     : wake_(fds.wake()),
       pause_(wake_, asker),
       stop_(std::move(fds).take_stop()),
-      park_(wake_, stop_, doorbells) {}
+      park_(wake_, stop_) {}
+
+IoMain::IoMain(
+    xthread::ParkFds fds,
+    infra::OptRef<xthread::WakeFlag> asker,
+    const os::EpollSet& doorbells
+) noexcept
+    : wake_(fds.wake()),
+      pause_(wake_, asker),
+      stop_(std::move(fds).take_stop()),
+      park_(wake_, stop_, doorbells.fd()) {}
 
 Ex<void> IoMain::add_coworker(IIoCoworker& c) noexcept {
     for (std::uint8_t i = 0; i < n_coworkers_; ++i)

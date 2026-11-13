@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "app/ui_pass_work.h"
 #include "app/ui_round_edge.h"
 
 namespace mister::proto {
@@ -9,12 +10,16 @@ struct LinkEvent;
 
 namespace mister::app {
 
+struct RawKeyEdge;
+
 class IUiRoundPort {
 public:
     virtual ~IUiRoundPort() = default;
 
     virtual void boot_witness() = 0;
-    [[nodiscard]] virtual UiRoundEdge round(bool link_work) = 0;
+
+    virtual void on(const RawKeyEdge& e) noexcept = 0;
+    [[nodiscard]] virtual UiRoundEdge round(UiPassWork work) = 0;
 
     virtual void publish_edges(const UiRoundEdge& edge) = 0;
     virtual void forget_cells() noexcept = 0;

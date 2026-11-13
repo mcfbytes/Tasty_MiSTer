@@ -10,6 +10,8 @@
 #include "proto/info_window.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "svc/types.h"
+#include "ui/connect_demand.h"
 #include "ui/page_facts.h"
 #include "ui/page_id.h"
 #include "ui/page_row.h"
@@ -143,9 +145,11 @@ public:
 
     virtual bool runs_a_process() const { return false; }
 
+    virtual ConnectDemand connect_demand() const { return ConnectDemand{}; }
+
     virtual bool back_is_idle() const { return false; }
 
-    virtual std::uint32_t refusals() const noexcept { return 0; }
+    virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
 
 protected:
     Page() = default;

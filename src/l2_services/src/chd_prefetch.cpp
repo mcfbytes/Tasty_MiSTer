@@ -48,9 +48,9 @@ bool ChdPrefetch::idle() const noexcept {
     if (!rests_)
         return false;
     if (rest_parked_)
-        return parked() && attaches_.empty();
+        return parked() && media_.outbound() == 0;
     return !(
-        !attaches_.empty()
+        media_.outbound() != 0
         || park_req_.load(std::memory_order_acquire)
         || want_hunk_.load(std::memory_order_acquire) != want_seen_
         || (watch_free_ && chan_.outbound() != 0)
@@ -152,44 +152,29 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
     return {};
 }
 
-bool ChdPrefetch::reap_leases_() noexcept {
-    const HandoverSeq taken = attaches_taken_.load(std::memory_order_acquire);
-    for (HeldLease& held : cmd_.leases) {
-        if (held.lease && taken.reached(held.seq))
-            held.lease.reset();
-    }
-    return media_.available() != 0;
-}
-
 Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
-    (void)reap_leases_();
-    auto lease = media_.acquire();
-    if (!lease)
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
-    *lease = std::move(media);
-    const xthread::PoolSlot idx = *media_.index_of(lease.get());
-    if (!attaches_.push(ChdAttach{idx})) {
-        *lease = ChdMedia{};
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+
+    while (Media::Loan back = media_.reap()) {
     }
-    cmd_.sent = cmd_.sent.next();
-    cmd_.leases[idx].seq = cmd_.sent;
-    cmd_.leases[idx].lease = std::move(lease);
+    Media::Loan loan = media_.acquire();
+    if (!loan)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    *loan = std::move(media);
+    media_.send(std::move(loan));
     return {};
 }
 
 void ChdPrefetch::take_attaches_() noexcept {
-    while (const auto a = attaches_.pop()) {
+    for (Media::Job job = media_.take(); job; job = media_.take()) {
         held_ = Chan::Job{};
-        ChdMedia& m = media_.at(a->lease);
+        ChdMedia& m = *job;
         src_ = std::move(m.src);
         geo_ = m.geo;
         forward_span_ = m.forward_span;
         next_ = HunkIndex{};
         tracking_ = HunkIndex::none();
         disabled_ = false;
-        taken_ = taken_.next();
-        attaches_taken_.store(taken_, std::memory_order_release);
+        job.complete();
     }
 }
 
@@ -377,7 +362,7 @@ PrefetchCounters ChdPrefetch::counters() const noexcept {
     c.decodes = decodes_.get();
     c.seeks = seeks_.get();
 
-    c.drops = chan_.breaches();
+    c.drops = chan_.breaches() + media_.breaches();
     c.errors = errors_.get();
     c.state = state();
     c.decode_us = decode_us_.get();

@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <type_traits>
 
 #include "infra/seat.h"
+#include "svc/joy_bit.h"
 #include "svc/sys_button.h"
 
 namespace mister::svc {
@@ -22,33 +24,28 @@ struct JoyPlan {
     );
 
     std::array<std::optional<SysButton>, kWords> src{};
-    std::int8_t paddle_idx = kNone;
+
+    std::optional<JoyBit> paddle_idx{};
     bool present = false;
 
     bool stick_dpad = true;
 };
 
-JoyPlan build_joy_plan(
-    std::string_view j_list,
-    std::string_view jn_list,
-    std::string_view jp_list,
-    bool gamepad_defaults
-) noexcept;
+static_assert(std::is_trivially_copyable_v<JoyPlan>, "JoyPlan is copied between threads by value");
 
 struct ButtonLists {
     std::string_view j;
     std::string_view jn;
     std::string_view jp;
+
+    [[nodiscard]] constexpr ButtonLists with_override(
+        std::string_view names,
+        std::string_view defaults
+    ) const noexcept {
+        return {names.empty() ? j : names, defaults.empty() ? jn : defaults, jp};
+    }
 };
 
-[[nodiscard]] constexpr ButtonLists choose_button_lists(
-    std::string_view ovr_names,
-    std::string_view ovr_defaults,
-    std::string_view j,
-    std::string_view jn,
-    std::string_view jp
-) noexcept {
-    return {ovr_names.empty() ? j : ovr_names, ovr_defaults.empty() ? jn : ovr_defaults, jp};
-}
+JoyPlan build_joy_plan(const ButtonLists& lists, bool gamepad_defaults) noexcept;
 
 }

@@ -83,6 +83,7 @@ private:
 
     const CdProfile& cd_;
     infra::OptRef<svc::DiscReadService> granted_discs_{};
+    infra::OptRef<hal::DiskLamp> lamp_{};
     CdWirePort wire_;
     CdDiscSlot slot_;
     std::unique_ptr<CdEngine> engine_;

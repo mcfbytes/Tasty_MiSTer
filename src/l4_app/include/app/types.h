@@ -235,6 +235,11 @@ struct ColorChannel {
         return ColorChannel{static_cast<std::uint8_t>(n)};
     }
 
+    template <std::unsigned_integral W>
+    [[nodiscard]] constexpr W scaled_by(W weight) const noexcept {
+        return static_cast<W>(v) * weight;
+    }
+
     [[nodiscard]] constexpr Rgb888 rgb_with(ColorChannel g, ColorChannel b) const noexcept {
         return rgb_from_channels({v, g.v, b.v});
     }
@@ -393,6 +398,22 @@ struct CoreFrameCount {
         return infra::DecimalText{v};
     }
 
+    [[nodiscard]] constexpr bool odd() const noexcept { return (v & 1u) != 0u; }
+
+    [[nodiscard]] constexpr std::chrono::nanoseconds lasting(
+        std::chrono::nanoseconds period
+    ) const noexcept {
+        return period * v;
+    }
+
+    [[nodiscard]] constexpr CoreFrameCount masked(CoreFrameCount mask) const noexcept {
+        return CoreFrameCount{v & mask.v};
+    }
+
+    [[nodiscard]] static constexpr CoreFrameCount every_bit() noexcept {
+        return CoreFrameCount{~std::uint32_t{}};
+    }
+
     friend constexpr bool operator==(CoreFrameCount, CoreFrameCount) = default;
     friend constexpr auto operator<=>(CoreFrameCount, CoreFrameCount) = default;
 };
@@ -480,6 +501,8 @@ struct CoreFrameGap {
 
     [[nodiscard]] constexpr CoreFrameGap halved() const noexcept { return CoreFrameGap{v / 2}; }
 
+    [[nodiscard]] constexpr bool odd() const noexcept { return (v & 1) != 0; }
+
     [[nodiscard]] constexpr bool beyond(CoreFrameGap tol) const noexcept {
         return v > tol.v || v < -tol.v;
     }
@@ -502,6 +525,37 @@ struct CoreFrameGap {
 
     friend constexpr bool operator==(CoreFrameGap, CoreFrameGap) = default;
     friend constexpr auto operator<=>(CoreFrameGap, CoreFrameGap) = default;
+};
+
+struct CountParity {
+    bool v = false;
+
+    [[nodiscard]] static constexpr CountParity of(CoreFrameCount n) noexcept {
+        return CountParity{n.odd()};
+    }
+
+    [[nodiscard]] constexpr CountParity after(CoreFrameGap frames) const noexcept {
+        return CountParity{v != frames.odd()};
+    }
+
+    friend constexpr bool operator==(CountParity, CountParity) = default;
+};
+
+struct Wrapping {
+    CoreFrameCount raw{};
+    CoreFrameCount mask{};
+
+    [[nodiscard]] constexpr CoreFrameCount since(Wrapping earlier) const noexcept {
+        return (raw - earlier.raw).masked(mask);
+    }
+
+    [[nodiscard]] static constexpr Wrapping of(hal::FrameSeq s) noexcept {
+        return {CoreFrameCount{s.word()}, CoreFrameCount::every_bit()};
+    }
+
+    [[nodiscard]] constexpr CountParity parity() const noexcept { return CountParity::of(raw); }
+
+    friend constexpr bool operator==(Wrapping, Wrapping) = default;
 };
 
 struct WideCoreFrame {
@@ -534,46 +588,20 @@ struct FabricGeneration {
     friend constexpr bool operator==(FabricGeneration, FabricGeneration) = default;
 };
 
-struct InputRequestBits {
-    std::uint32_t v = 0;
-
-    [[nodiscard]] constexpr bool has(InputRequestBits bit) const noexcept {
-        return (v & bit.v) != 0u;
-    }
-
-    [[nodiscard]] constexpr InputRequestBits with(InputRequestBits bit) const noexcept {
-        return InputRequestBits{v | bit.v};
-    }
-
-    [[nodiscard]] constexpr InputRequestBits without(InputRequestBits bit) const noexcept {
-        return InputRequestBits{v & ~bit.v};
-    }
-
-    friend constexpr bool operator==(InputRequestBits, InputRequestBits) = default;
-};
-
-struct InputGateBits {
-    std::uint32_t v = 0;
-
-    [[nodiscard]] constexpr bool has(InputGateBits bit) const noexcept { return (v & bit.v) != 0u; }
-
-    [[nodiscard]] constexpr InputGateBits with(InputGateBits bit) const noexcept {
-        return InputGateBits{v | bit.v};
-    }
-
-    [[nodiscard]] constexpr InputGateBits without(InputGateBits bit) const noexcept {
-        return InputGateBits{v & ~bit.v};
-    }
-
-    friend constexpr bool operator==(InputGateBits, InputGateBits) = default;
-};
-
 struct CoreEdgeSeq {
     std::uint32_t v = 0;
 
     [[nodiscard]] constexpr CoreEdgeSeq next() const noexcept { return CoreEdgeSeq{v + 1u}; }
 
     friend constexpr bool operator==(CoreEdgeSeq, CoreEdgeSeq) = default;
+};
+
+struct ResendSeq {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr ResendSeq next() const noexcept { return ResendSeq{v + 1u}; }
+
+    friend constexpr bool operator==(ResendSeq, ResendSeq) = default;
 };
 
 struct CaptureToken {
@@ -710,6 +738,29 @@ struct RowAlign {
     }
 
     friend constexpr bool operator==(RowAlign, RowAlign) = default;
+};
+
+struct PreludeCompletions {
+    std::uint32_t v = 0;
+    friend constexpr bool operator==(PreludeCompletions, PreludeCompletions) = default;
+};
+
+struct FrameWordCount {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr std::span<const std::uint16_t> prefix_of(
+        std::span<const std::uint16_t> all
+    ) const noexcept {
+        return all.first(v);
+    }
+
+    [[nodiscard]] constexpr bool is_empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr bool exceeds(FrameWordCount bound) const noexcept {
+        return v > bound.v;
+    }
+
+    friend constexpr bool operator==(FrameWordCount, FrameWordCount) = default;
 };
 
 enum class VsyncAdjust : std::uint8_t { Off, Match, LowLag };

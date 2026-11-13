@@ -18,9 +18,4 @@ concept RawFrameSink = requires(S& s, const RawFrameSlot& m) {
 
 using RawFrameRoutes = infra::AllRouted;
 
-template <RawFrameSink S>
-[[nodiscard]] infra::SinkResult<S> dispatch(const RawFrameSlot& m, S& s) noexcept {
-    return infra::dispatch<RawFrameRoutes>(m, s);
-}
-
 }

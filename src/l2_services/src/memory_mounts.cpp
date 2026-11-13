@@ -89,9 +89,9 @@ std::unique_ptr<IFile> MemoryMounts::open_by_crc_under(std::string_view prefix, 
     return nullptr;
 }
 
-std::uint32_t MemoryMounts::sequential_hints(std::string_view key) const noexcept {
+Tally MemoryMounts::sequential_hints(std::string_view key) const noexcept {
     const Blob* m = find_(key);
-    return m == nullptr ? 0u : m->hints->load(std::memory_order_relaxed);
+    return m == nullptr ? Tally{} : Tally{m->hints->load(std::memory_order_relaxed)};
 }
 
 }

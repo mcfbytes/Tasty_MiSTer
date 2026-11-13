@@ -45,20 +45,19 @@ Ex<bool> MegaCdLadder::on_step() {
             if (!order_reset())
                 return false;
             rung_ = Rung::Bios;
-            row_i_ = 0;
+            row_.rewind();
             return false;
 
         case Rung::Bios: {
 
-            const auto rows = profile_.boot_assets;
-            while (row_i_ < rows.size() && rows[row_i_].group == 0) {
-                const BootAsset& row = rows[row_i_];
+            while (const auto at = row_.current_in(BootGroup::First)) {
+                const BootAsset& row = *at;
                 auto hit = load_row(row);
                 if (!hit)
                     return std::unexpected(hit.error());
                 if (*hit == AssetWait::Pending)
                     return false;
-                ++row_i_;
+                row_.advance();
                 if (*hit == AssetWait::Ready) {
                     report_.bios_found = true;
                     rung_ = Rung::MountDisc;
@@ -68,7 +67,7 @@ Ex<bool> MegaCdLadder::on_step() {
             }
 
             ++report_.bios_missing;
-            if (group_gates(0)) {
+            if (group_gates(BootGroup::First)) {
                 rung_ = Rung::Done;
                 return true;
             }
@@ -101,16 +100,14 @@ Ex<bool> MegaCdLadder::on_step() {
 
         case Rung::LayeredBios: {
 
-            const auto rows = profile_.boot_assets;
-            while (row_i_ < rows.size() && rows[row_i_].group == 0)
-                ++row_i_;
-            if (row_i_ < rows.size()) {
-                auto hit = load_row(rows[row_i_]);
+            row_.skip_group(BootGroup::First);
+            if (const auto at = row_.current()) {
+                auto hit = load_row(*at);
                 if (!hit)
                     return std::unexpected(hit.error());
                 if (*hit == AssetWait::Pending)
                     return false;
-                ++row_i_;
+                row_.advance();
                 return false;
             }
             rung_ = Rung::MountSave;

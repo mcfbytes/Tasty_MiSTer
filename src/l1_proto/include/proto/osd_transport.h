@@ -9,6 +9,7 @@
 #include "proto/info_window.h"
 #include "proto/osd_surface.h"
 #include "proto/link.h"
+#include "proto/osd_rotation.h"
 #include "proto/osd_target.h"
 #include "proto/types.h"
 #include "infra/seat.h"
@@ -20,8 +21,6 @@ enum class OsdMode : std::uint8_t {
     DisableKeyboard = 0x02,
     Message = 0x08,
 };
-
-enum class OsdRotation : std::uint8_t { None = 0, Left = 1, Right = 3 };
 
 class OsdTransport {
     TASTY_SEAT_RESIDENT(RT);

@@ -26,7 +26,7 @@ void InputEmitter::bind_pads(proto::ILinkFrame& frame) noexcept {
 void InputEmitter::bind_pads(
     proto::ILinkFrame& frame,
     hal::reg::Block pad,
-    proto::AxiBlockDecl block
+    proto::PadBlockDecl block
 ) noexcept {
     if (!held_)
         hold_pads();
@@ -70,8 +70,8 @@ Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, Joy
     return joy_.release(route(), player, composed);
 }
 
-JoyMask InputEmitter::PlayerMasks::composed(bool grabbed) const noexcept {
-    return grabbed ? joy_.with(autofire_) : joy_;
+JoyMask InputEmitter::PlayerMasks::composed() const noexcept {
+    return joy_.with(autofire_);
 }
 
 void InputEmitter::set_joy_mask(PlayerIndex player, JoyMask mask) noexcept {
@@ -97,7 +97,7 @@ JoyMask InputEmitter::autofire_mask(PlayerIndex player) const noexcept {
 Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool local_walk) {
     unsigned pushed = 0;
 
-    if (local_walk && gates_.grabbed) {
+    if (local_walk) {
         for (const PlayerIndex p : kPlayers) {
             auto sent = submit(frame, p, masks_[p].joy(), masks_[p].autofire());
             if (!sent)
@@ -107,13 +107,13 @@ Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool loca
         }
     }
 
-    if (local_walk && (!gates_.grabbed || gates_.osd_visible)) {
+    if (local_walk) {
         for (const PlayerIndex p : kPlayers) {
             PlayerMasks& masks = masks_[p];
             if (!masks.zero_armed())
                 continue;
 
-            auto sent = release(frame, p, masks.composed(gates_.grabbed));
+            auto sent = release(frame, p, masks.composed());
             if (!sent)
                 return std::unexpected(sent.error());
 
@@ -134,9 +134,6 @@ Ex<bool> InputEmitter::push_paddle(
     if (player.v >= kMaxPlayers) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
-
-    if (gates_.osd_visible)
-        return false;
 
     auto byte = proto::JoystickPort::paddle_scale(raw, cal.min, cal.max);
     if (!byte) {
@@ -159,8 +156,6 @@ Ex<bool> InputEmitter::push_spinner(
     if (player.v >= kMaxPlayers) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
-    if (gates_.osd_visible)
-        return false;
     const std::int8_t clamped = proto::JoystickPort::spinner_clamp(delta);
     framed_.over(frame);
     if (const Ex<void> r = joy_.push_spinner(route(), player, clamped); !r) {

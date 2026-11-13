@@ -9,9 +9,12 @@
 #include <string_view>
 
 #include "app/adv7513_seat.h"
+#include "app/audio_pump.h"
+#include "app/prelude_composer.h"
 #include "infra/opt_ref.h"
 #include "app/event.h"
 #include "app/idle_blank.h"
+#include "app/ini_cell.h"
 #include "app/output_geometry.h"
 #include "app/session_identity.h"
 #include "app/video_geometry_record.h"
@@ -25,6 +28,8 @@
 #include "hal/hdmi_int.h"
 #include "hal/video_out_decl.h"
 #include "svc/adv7513_probe_report.h"
+#include "app/input_gates_cell.h"
+#include "infra/counter.h"
 #include "svc/i2c_adapter.h"
 #include "svc/pll_params.h"
 #include "svc/stored_mode.h"
@@ -36,8 +41,6 @@ class Vfs;
 
 namespace mister::app {
 
-class InputWire;
-
 class VideoPump : public IOutputGeometry {
     TASTY_SEAT_RESIDENT(Ui);
 
@@ -45,8 +48,11 @@ public:
     static constexpr std::size_t kSpecMax = 1024;
 
     struct Wiring {
-        const InputWire& activity;
+        const xthread::Counter& activity;
+        const InputGatesCell& gates;
         LinkTxChannel<SeatTag::Ui>& link_tx;
+        proto::ILinkRouter& replies;
+        const IniCell& ini;
     };
 
     VideoPump(
@@ -67,7 +73,10 @@ public:
 
     void tick();
 
-    void on_pause() noexcept { i2c_held_ = true; }
+    void on_pause() noexcept {
+        i2c_held_ = true;
+        composer_.abandon();
+    }
 
     [[nodiscard]] bool i2c_held() const noexcept { return i2c_held_; }
 
@@ -75,6 +84,16 @@ public:
     void on_session_over();
 
     VideoWire& wire() noexcept { return wire_; }
+
+    PreludeComposer& prelude() noexcept { return composer_; }
+
+    const PreludeComposer& prelude() const noexcept { return composer_; }
+
+    AudioPump& audio() noexcept { return audio_; }
+
+    svc::VideoService::IVideoWireSink& mode_sink() noexcept { return composer_; }
+
+    void on_frame_reply(const proto::LinkEvent::FrameReply& r) noexcept;
 
     using GeometryRecord = VideoGeometryRecord;
 
@@ -118,6 +137,10 @@ public:
     }
 
     void set_core_name(std::string_view name) noexcept;
+
+    void set_spd_identity(std::string_view name, proto::RotationDir dir) noexcept;
+
+    void note_menu_present(bool present) noexcept;
 
     void set_mode_override(std::string_view spec) noexcept;
 
@@ -182,15 +205,21 @@ private:
     void load_filters();
     void latch_spec(std::string_view spec) noexcept;
 
+    [[nodiscard]] Adv7513Seat::Spd spd_inputs() const noexcept;
+
     const svc::Vfs& vfs_;
     const os::IClock& clock_;
 
     Adv7513Seat seat_;
     VideoWire wire_;
+    AudioPump audio_;
+    PreludeComposer composer_;
     std::optional<svc::VideoService> video_;
 
     VideoIni ini_{};
     VideoIni::Force ini_force_{};
+
+    std::string afilter_default_{};
 
     Stats stats_{};
 
@@ -212,7 +241,12 @@ private:
     bool override_latched_ = false;
     bool support_fhd_ = false;
     bool mode_pending_ = false;
-    const InputWire& activity_;
+    const xthread::Counter& activity_;
+    const InputGatesCell& gates_cell_;
+    const IniCell& ini_cell_;
+
+    InputGatesCell::Reader gates_reader_{};
+    svc::InputGates gates_{};
     IdleBlank idle_{};
     std::uint32_t emit_watermark_ = 0;
     std::int64_t stage_ns_ = 0;
@@ -237,6 +271,11 @@ private:
     FixedStr<kSpecMax, StrFit::Clip> spec_{};
 
     FixedStr<SessionIdentity::kMax, StrFit::Clip> core_name_{};
+
+    FixedStr<SessionIdentity::kMax, StrFit::Clip> spd_name_{};
+    proto::RotationDir spd_dir_{};
+    svc::SpdForm spd_form_ = svc::SpdForm::None;
+    bool menu_present_ = false;
 };
 
 }

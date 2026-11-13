@@ -79,6 +79,9 @@ private:
 
     enum class Sent : std::uint8_t { Yes, Declined };
     using StatField = SaturnCddFrame::Field;
+    using StatusCode = SaturnCddFrame::StatusCode;
+    using RingPhase = SaturnCddFrame::RingPhase;
+    using Opcode = SaturnCddFrame::Opcode;
 
     [[nodiscard]] Ex<void> do_accept(
         std::span<const std::uint16_t> words,
@@ -118,7 +121,7 @@ private:
     void command_exec_(const svc::DiscGeometry& geom) noexcept;
     void process_(const svc::DiscGeometry& geom) noexcept;
     void fill_position_(
-        std::uint8_t code,
+        StatusCode code,
         std::uint8_t q,
         bool pause_msf,
         const svc::DiscGeometry& geom
@@ -153,7 +156,9 @@ private:
         const svc::DiscGeometry& geom
     ) const noexcept;
 
-    [[nodiscard]] static svc::SectorHeader header_for_(HeadLba head) noexcept;
+    [[nodiscard]] std::optional<svc::SectorHeader> data_header_(
+        const svc::DiscGeometry& geom
+    ) const noexcept;
 
     CdDialectFacts facts_;
     const CdProfile::SaturnFacts& row_;
@@ -171,7 +176,7 @@ private:
     std::uint32_t index_ = 0;
     HeadLba seek_lba_{};
     std::uint32_t toc_pos_ = 0;
-    saturn::SeekTicks seek_delay_{};
+    PollTicks seek_delay_{};
     std::int32_t speed_ = 0;
     bool lid_open_ = true;
     SaturnPending pend_{};

@@ -5,6 +5,7 @@ add_library(mister_hal STATIC
   src/compatible_blob.cpp
   src/irq_pin.cpp
   src/link_timing.cpp
+  src/lw_extent.cpp
   src/scaler_buffers.cpp
   src/scaler_probe.cpp
   src/spi_bus.cpp
@@ -48,9 +49,12 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/pin_levels.h
   hal/program_geometry.h
   hal/reboot_flag.h
+  hal/read_window_port.h
   hal/reg.h
   hal/reg_block.h
   hal/reg_field.h
+  hal/reg_port.h
+  hal/reg_word.h
   hal/region_id.h
   hal/register_window.h
   hal/scaler_buffers.h
@@ -68,6 +72,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/sys_block.h
   hal/sys_directory.h
   hal/taken_window.h
+  hal/stack_bytes.h
   hal/thread_map.h
   hal/types.h
   hal/unmeasured.h
@@ -76,5 +81,6 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/uio_reg_file.h
   hal/video_out_decl.h
   hal/window_decl.h
+  hal/window_port.h
 )
 

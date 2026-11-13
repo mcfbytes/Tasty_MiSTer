@@ -15,6 +15,7 @@
 #include "infra/seat.h"
 #include "ui/browser_entry.h"
 #include "ui/list_view.h"
+#include "svc/types.h"
 
 namespace mister::app {
 class IRomsetAliases;
@@ -112,7 +113,7 @@ public:
 
     std::uint32_t scans() const noexcept { return scans_; }
 
-    std::uint32_t refusals() const noexcept { return refusals_; }
+    svc::Tally refusals() const noexcept { return refusals_; }
 
 private:
     [[nodiscard]] Ex<void> scan_list(std::string_view type_filter);
@@ -143,7 +144,7 @@ private:
 
     std::optional<std::chrono::nanoseconds> filter_deadline_{};
     std::uint32_t scans_ = 0;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     ListView<BrowserEntry> view_{{}};
 };
 

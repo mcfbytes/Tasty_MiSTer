@@ -16,7 +16,7 @@ void CorePickHost::bind(Borrows b) noexcept {
 
 Transition CorePickHost::on_cancel() {
     TASTY_SEAT_BODY(CorePickHost);
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 bool CorePickHost::deliver_pick_(std::string_view path) {
@@ -36,27 +36,25 @@ bool CorePickHost::deliver_pick_(std::string_view path) {
 Transition CorePickHost::on_picked(const BrowserEntry& e, std::string_view path) {
     TASTY_SEAT_BODY(CorePickHost);
     if (path.empty()) {
-        ++refusals_;
-        return Transition{Transition::Kind::CloseAll};
+        refusals_.add();
+        return Transition::close_all();
     }
-    const app::RecentsStore::ListId cores_list{
-        app::RecentsStore::ListId::Kind::Cores,
-        proto::IoIndex{}
-    };
-    if (b_.recents && !b_.recents->update("", cores_list, path, e.altname)) {
-        ++refusals_;
+    const app::RecentsStore::ListId cores_list = app::RecentsStore::ListId::cores();
+    if (b_.recents
+        && !b_.recents->update(app::RecentsStore::kNoCore, cores_list, path, e.altname)) {
+        refusals_.add();
     }
 
     if (path.size() > app::PathText::kCapacity) {
-        ++refusals_;
-        return Transition{Transition::Kind::CloseAll};
+        refusals_.add();
+        return Transition::close_all();
     }
     if (deliver_pick_(path)) {
         ++published_;
     } else {
-        ++refusals_;
+        refusals_.add();
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 }

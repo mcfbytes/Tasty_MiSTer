@@ -156,10 +156,10 @@ FileTxPieces::Pass FileTxPieces::step(
                                      : (last ? Phase::Close : Phase::Piece);
 
     if (last && !facts_sent_ && loader_ != nullptr && !loader_->facts().empty()) {
-        auto f = inbox.intern(loader_->facts());
-        if (!f)
-            return f.error().code == Errc::would_block ? Pass::Waiting : fail_(inbox);
-        (void)inbox.push(proto::LinkOp::LoadFacts{.facts = *f});
+
+        const auto sent = inbox.push_load_facts(loader_->facts(), path_.view());
+        if (!sent)
+            return sent.error().code == Errc::would_block ? Pass::Waiting : fail_(inbox);
         facts_sent_ = true;
     }
 

@@ -178,11 +178,11 @@ static_assert(
     "a `sub << 6` sub-index"
 );
 static_assert(
-    kThreeDoBootAssets[0].group == 0
-        && kThreeDoBootAssets[1].group == 0
-        && kThreeDoBootAssets[2].group == 0
-        && kThreeDoBootAssets[3].group == 1
-        && kThreeDoBootAssets[4].group == 1,
+    kThreeDoBootAssets[0].group == BootGroup::First
+        && kThreeDoBootAssets[1].group == BootGroup::First
+        && kThreeDoBootAssets[2].group == BootGroup::First
+        && kThreeDoBootAssets[3].group == BootGroup::Second
+        && kThreeDoBootAssets[4].group == BootGroup::Second,
     "3do.cpp:151: the kanji stage is a SECOND alternatives group, "
     "run only when the first one hit"
 );

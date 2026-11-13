@@ -26,18 +26,18 @@ HdSlotSheetPlan::HdSlotSheetPlan(const HdPlanInputs& in)
       now_playing_(in.now_playing),
       verbs_(in.verbs),
       front_end_(in.front_end),
-      focus_(slot_focus_of(in.focus)),
+      focus_(in.arg.slot()),
       env_(in.env) {
     TASTY_SEAT_BODY(HdSlotSheetPlan);
     walk_(in.items, in.env);
 
     if (slot_) {
         if (!ctx_.launches.browser)
-            ++refusals_;
+            refusals_.add();
         if (!ctx_.recents)
-            ++refusals_;
-        if (slot_->mounts_image() && !ctx_.ui_requests)
-            ++refusals_;
+            refusals_.add();
+        if (focus_->kind == proto::FileRowKind::Mount && !ctx_.ui_requests)
+            refusals_.add();
     }
 }
 
@@ -67,9 +67,10 @@ void HdSlotSheetPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) 
 }
 
 bool HdSlotSheetPlan::ejectable_() const {
-    if (!slot_ || !slot_->mounts_image())
-        return false;
-    return !now_playing_.mounted_image(slot_->ioctl_index).empty();
+    return slot_
+        && focus_
+        && focus_->kind == proto::FileRowKind::Mount
+        && !now_playing_.path_of(*focus_).empty();
 }
 
 PageId HdSlotSheetPlan::id() const {
@@ -97,9 +98,9 @@ void HdSlotSheetPlan::rewalk(const proto::ItemTable& table, const BuildEnv& env)
     walk_(table, env);
 }
 
-std::uint32_t HdSlotSheetPlan::refusals() const noexcept {
+svc::Tally HdSlotSheetPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdSlotSheetPlan);
-    return refusals_ + (picks_ ? picks_->refusals() : 0u);
+    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
 }
 
 std::uint32_t HdSlotSheetPlan::commands_published() const noexcept {

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "input_rules.h"
 
-#include "infra/ascii.h"
 #include "infra/indexed_array.h"
+#include "infra/path_parts.h"
 #include "infra/persist.h"
 #include "svc/joy_bit.h"
 #include "svc/map_store.h"
@@ -21,53 +21,9 @@ namespace mister::svc {
 namespace {
 
 constexpr unsigned kHexNibbleBits = 4;
-constexpr std::uint32_t kHexRadix = 16;
 constexpr unsigned kHexDigitMask = 0xFu;
 constexpr std::size_t kHexDigits16 = 4;
 constexpr std::size_t kHexDigits32 = 8;
-
-std::optional<std::uint32_t> hex_token(std::string_view t, std::size_t max_digits) {
-    if (t.size() >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X'))
-        t.remove_prefix(2);
-    if (t.empty() || t.size() > max_digits)
-        return std::nullopt;
-    std::uint32_t v = 0;
-    for (const char c : t) {
-        const char l = infra::ascii_lower(c);
-        const int d = (c >= '0' && c <= '9') ? c - '0' : (l >= 'a' && l <= 'f') ? l - 'a' + 10 : -1;
-        if (d < 0)
-            return std::nullopt;
-        v = v * kHexRadix + static_cast<std::uint32_t>(d);
-    }
-    return v;
-}
-
-std::optional<std::pair<bool, std::uint32_t>> vid_pid_token(std::string_view t) {
-    if (t.empty())
-        return std::nullopt;
-    const char head = infra::ascii_lower(t[0]);
-    if (head != 'v' && head != 'p')
-        return std::nullopt;
-    std::size_t i = 1;
-    std::size_t n = 0;
-    while (i < t.size() && infra::ascii_lower(t[i]) == 'i') {
-        ++i;
-        ++n;
-    }
-    if (n == 0)
-        return std::nullopt;
-    n = 0;
-    while (i < t.size() && infra::ascii_lower(t[i]) == 'd') {
-        ++i;
-        ++n;
-    }
-    if (n == 0 || i >= t.size() || t[i] != ':')
-        return std::nullopt;
-    const auto v = hex_token(t.substr(i + 1), kHexDigits16);
-    if (!v)
-        return std::nullopt;
-    return std::pair<bool, std::uint32_t>{head == 'v', *v};
-}
 
 }
 
@@ -120,11 +76,6 @@ std::optional<unsigned> event_number(std::string_view devname) {
     if (r.ec != std::errc{} || r.ptr == first)
         return std::nullopt;
     return n;
-}
-
-std::string_view basename_of(std::string_view path) {
-    const auto pos = path.rfind('/');
-    return pos == std::string_view::npos ? path : path.substr(pos + 1);
 }
 
 std::string_view line_value(std::string_view line) {
@@ -313,7 +264,7 @@ unsigned apply_proc_devices(std::string_view proc_text, FactsSpan slots) {
                 for (DeviceFacts* const sp : slots) {
                     DeviceFacts& s = *sp;
 
-                    std::string needle(basename_of(s.devname));
+                    std::string needle(infra::basename(s.devname));
                     needle.push_back(' ');
                     if (handlers.find(needle) == std::string_view::npos)
                         continue;
@@ -373,7 +324,7 @@ void apply_no_merge(FactsSpan slots, std::span<const NoMergeRule> extra) {
 }
 
 bool is_mouse_node(std::string_view devname) {
-    return basename_of(devname).starts_with("mouse");
+    return infra::basename(devname).starts_with("mouse");
 }
 
 MergeStats merge_by_id(FactsSpan slots) {
@@ -700,24 +651,9 @@ Deadzone deadzone_class(QuirkId quirk) {
     return kDeadzoneDefault;
 }
 
-bool deadzone_uid_matches(std::string_view uid, const DeviceFacts& dev) {
-    if (const auto v = hex_token(uid, kHexDigits32)) {
-
-        return VidPidKey::of(dev.id.vid, dev.id.pid) == VidPidKey{*v};
-    }
-    if (const auto vp = vid_pid_token(uid)) {
-        return vp->first ? dev.id.vid.v == static_cast<std::uint16_t>(vp->second)
-                         : dev.id.pid.v == static_cast<std::uint16_t>(vp->second);
-    }
-
-    return infra::icontains(dev.id.merge_id, uid)
-        || infra::icontains(dev.sysfs, uid)
-        || infra::icontains(dev.id.id, uid);
-}
-
 Deadzone deadzone_for(const DeviceFacts& dev, std::span<const DeadzoneRule> cfg) {
     for (const DeadzoneRule& r : cfg) {
-        if (deadzone_uid_matches(r.uid.view(), dev))
+        if (r.match.matches(dev))
             return r.deadzone;
     }
     return deadzone_class(dev.quirk);

@@ -10,6 +10,7 @@
 #include "cores/stock_scan.h"
 #include "hal/types.h"
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
 
@@ -729,8 +730,7 @@ std::string_view arcade_root_of(std::string_view mra_path) noexcept {
 }
 
 std::string sibling_name(std::string_view mra_path, std::string_view ext) {
-    const std::size_t slash = mra_path.rfind('/');
-    std::string name(slash == std::string_view::npos ? mra_path : mra_path.substr(slash + 1));
+    std::string name(infra::basename(mra_path));
 
     for (std::size_t i = 0; i + 4 <= name.size(); ++i) {
         if (ieq(std::string_view(name).substr(i, 4), ".mra")) {

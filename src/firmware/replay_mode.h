@@ -18,15 +18,20 @@
 #include "infra/seat.h"
 #include "recorder_block.h"
 #include "replay_block.h"
+#include "replay_port.h"
 #include "run_exit.h"
 #include "session_mode.h"
 #include "tasty_cli.h"
-#include "tasty_ctl.h"
 #include "tasty_entry.h"
+#include "tasty_home_lane.h"
 #include "tasty_osd.h"
 #include "tasty_refusal.h"
+#include "tasty_return_home.h"
+#include "tasty_runtime.h"
 #include "tasty_session.h"
 #include "tasty_sink.h"
+#include "tasty_status_file.h"
+#include "tasty_stock_control.h"
 
 namespace mister::fw {
 
@@ -34,8 +39,17 @@ class ReplayMode final : public SessionMode {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    explicit ReplayMode(const TastyArgs& args, std::optional<ArgvArea> area = std::nullopt) noexcept
-        : args_(args),
+    explicit ReplayMode(
+        const TastyArgs& args,
+        const TastySession::Run& run,
+        std::optional<ArgvArea> area = std::nullopt,
+        const TastyRuntime& rt = {}
+    ) noexcept
+        : rt_(rt),
+          stock_(rt_.stock),
+          status_(rt_.paths),
+          args_(args),
+          run_(run),
           area_(area) {}
 
     ReplayMode(const ReplayMode&) = delete;
@@ -105,7 +119,7 @@ private:
         const TastyArgs& args_;
     };
 
-    struct FeederReplay final : TastySession::Replay {
+    struct FeederReplay final : IReplayPort {
         TASTY_SEAT_RESIDENT(Ui);
 
         explicit FeederReplay(app::ReplayFeeder& feeder) noexcept : f(feeder) {}
@@ -113,13 +127,11 @@ private:
         app::ReplayFeeder& f;
         bool take_play(const app::ReplayFeeder::Play& play) noexcept override;
         void take_stop() noexcept override;
-        [[nodiscard]] app::FrameCount frames() const noexcept override;
         [[nodiscard]] app::FrameCount movie_frames() const noexcept override;
-        [[nodiscard]] bool refused() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
         [[nodiscard]] std::optional<ReplayRefusal> refusal() const noexcept override;
-        [[nodiscard]] std::size_t settings_set() const noexcept override;
-        [[nodiscard]] std::string setting_line(std::size_t i) const override;
+        [[nodiscard]] SettingNo settings_set() const noexcept override;
+        [[nodiscard]] std::string setting_line(SettingNo i) const override;
     };
 
     class NoFront final : public Front {
@@ -170,7 +182,9 @@ private:
             ReplayBlock& replay,
             RecorderBlock& rec,
             RunExitCell& run_exit,
-            const TastyArgs& args
+            const TastyArgs& args,
+            const TastySession::Run& run,
+            TastyStatusFile& status
         );
 
         [[nodiscard]] infra::OptRef<app::IOwnerTick> owner_tick() noexcept override {
@@ -182,7 +196,11 @@ private:
         TastySession session_;
     };
 
+    TastyRuntime rt_;
+    StockControl stock_;
+    TastyStatusFile status_;
     TastyArgs args_;
+    const TastySession::Run& run_;
     QuietVoice voice_{args_};
     std::optional<ArgvArea> area_;
 
@@ -193,11 +211,5 @@ private:
 
 [[nodiscard]] const std::atomic<int>& tasty_owner_stop_flag() noexcept;
 void tasty_arm_owner_signals() noexcept;
-
-void tasty_owe_home() noexcept;
-
-[[nodiscard]] int tasty_stop_and_owe() noexcept;
-
-[[nodiscard]] bool tasty_home_may_launch() noexcept;
 
 }

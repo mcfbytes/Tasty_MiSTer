@@ -8,6 +8,7 @@ namespace mister::hal {
 struct KernelContract {
     std::string_view doorbell_prefix;
     std::string_view sd_block;
+    std::string_view activity_led;
 };
 
 }

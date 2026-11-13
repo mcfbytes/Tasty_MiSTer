@@ -17,9 +17,9 @@
 #include "proto/block_geometry.h"
 #include "proto/storage_channel.h"
 #include "svc/block_ctl.h"
-#include "svc/block_half.h"
 #include "svc/io_coworker.h"
 #include "svc/save_files_on_io.h"
+#include "svc/slot_arena.h"
 #include "svc/storage_backend.h"
 #include "svc/storage_lifecycle.h"
 
@@ -42,10 +42,9 @@ class StorageService final : public proto::IStorageChannel,
 
 public:
     static constexpr unsigned kSlots = proto::kBlockSlots;
-    static constexpr std::uint32_t kHalfBytes = proto::kBlockStagingBytes;
+    static constexpr std::uint32_t kArenaBytes = proto::kBlockStagingBytes;
 
-    using Data = xthread::
-        LoanChannel<BlockHalf, kSlots * proto::ArenaHalf::kCount, SeatTag::RT, SeatTag::Io>;
+    using Data = xthread::LoanChannel<SlotArena, kSlots, SeatTag::RT, SeatTag::Io>;
     using Ctl = xthread::LoanChannel<BlockCtl, kSlots, SeatTag::RT, SeatTag::Io>;
 
     StorageService() noexcept : data_(xthread::Polled{}), ctl_(xthread::Polled{}) {}
@@ -55,16 +54,24 @@ public:
     ~StorageService() override;
 
     struct Work {
-        std::span<std::uint8_t> data;
+        infra::OptRef<SlotArena> arena{};
         proto::StorageCompletion answer{};
         infra::OptRef<IStorageBackend> backend{};
         Generation gen{};
-        std::span<const std::byte> order{};
+
+        infra::OptRef<const BlockCtl> hand{};
+
+        infra::OptRef<const BlankSaveSpec> blank{};
         bool performed = false;
     };
 
     void on(
-        const proto::StorageRequest::Read& a,
+        const proto::StorageRequest::Fetch& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::ReadAhead& a,
         const proto::StorageRequest::Head& h,
         Work& w
     ) noexcept;
@@ -110,50 +117,28 @@ public:
         const proto::StorageRequest&
     ) noexcept override;
     [[nodiscard]] std::optional<proto::StorageCompletion> reap() noexcept override;
-    [[nodiscard]] std::span<const std::uint8_t> half(
-        proto::SlotIndex,
-        proto::ArenaHalf
-    ) const noexcept override;
-    [[nodiscard]] std::span<std::uint8_t> half_mut(
-        proto::SlotIndex,
-        proto::ArenaHalf
-    ) noexcept override;
+    [[nodiscard]] HandsOut hands_out() const noexcept override;
+    [[nodiscard]] std::optional<HomeWindow> window(proto::SlotIndex) const noexcept override;
+    [[nodiscard]] std::span<std::uint8_t> claim(proto::SlotIndex) noexcept override;
+    void install(proto::SlotIndex, const proto::ResidentWindow&) noexcept override;
 
     [[nodiscard]] bool stage_backend(
         proto::SlotIndex,
         IStorageBackend&,
-        std::span<const std::byte> order
+        std::span<const std::byte> order,
+        infra::OptRef<const BlankSaveSpec> blank
     ) noexcept override;
     [[nodiscard]] bool release_slot(proto::SlotIndex) noexcept override;
     [[nodiscard]] bool quiesced() const noexcept override;
 
 private:
-    struct DataHand {
-        std::uint8_t v = 0;
-
-        [[nodiscard]] static constexpr DataHand of(xthread::PoolSlot slot) noexcept {
-            return DataHand{slot.v};
-        }
-
-        friend constexpr bool operator==(DataHand, DataHand) = default;
-    };
-
-    struct HandAt {
-        TASTY_SEAT_RESIDENT(RT);
-        proto::SlotIndex slot;
-        proto::ArenaHalf half;
-
-        [[nodiscard]] static constexpr HandAt of(DataHand hand) noexcept {
-            return HandAt{
-                proto::SlotIndex::of(static_cast<std::size_t>(hand.v) / proto::ArenaHalf::kCount),
-                proto::ArenaHalf::of(hand.v)
-            };
-        }
-    };
-
     void own_all_() noexcept;
 
-    static void set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept;
+    static void set_order_(
+        BlockCtl& hand,
+        std::span<const std::byte> order,
+        infra::OptRef<const BlankSaveSpec> blank
+    ) noexcept;
 
     [[nodiscard]] bool home_(proto::SlotIndex slot) const noexcept;
 
@@ -174,28 +159,18 @@ private:
             TASTY_SEAT_RESIDENT(RT);
 
         public:
-            [[nodiscard]] Data::Loan& hand(proto::ArenaHalf half) noexcept {
-                return data_hands_[half];
-            }
+            [[nodiscard]] Data::Loan& hand() noexcept { return data_hand_; }
 
-            [[nodiscard]] const Data::Loan& hand(proto::ArenaHalf half) const noexcept {
-                return data_hands_[half];
-            }
+            [[nodiscard]] const Data::Loan& hand() const noexcept { return data_hand_; }
 
             [[nodiscard]] Ctl::Loan& ctl() noexcept { return ctl_hand_; }
 
             [[nodiscard]] const Ctl::Loan& ctl() const noexcept { return ctl_hand_; }
 
-            [[nodiscard]] bool home() const noexcept {
-                for (const Data::Loan& l : data_hands_)
-                    if (!l)
-                        return false;
-                return static_cast<bool>(ctl_hand_);
-            }
+            [[nodiscard]] bool home() const noexcept { return data_hand_ && ctl_hand_; }
 
             void drop_hands() noexcept {
-                for (auto& l : data_hands_)
-                    l = Data::Loan{};
+                data_hand_ = Data::Loan{};
                 ctl_hand_ = Ctl::Loan{};
             }
 
@@ -216,8 +191,7 @@ private:
             void forget() noexcept { bound_.reset(); }
 
         private:
-            infra::IndexedArray<Data::Loan, proto::ArenaHalf::kCount, proto::ArenaHalf>
-                data_hands_{};
+            Data::Loan data_hand_{};
             Ctl::Loan ctl_hand_{};
             infra::OptRef<IStorageBackend> bound_{};
             Generation gen_{};
@@ -241,13 +215,15 @@ private:
             void attached(
                 infra::OptRef<IStorageBackend> file,
                 std::optional<proto::FileSize> extent,
-                bool growable
+                bool growable,
+                infra::OptRef<const BlankSaveSpec> blank
             ) noexcept {
                 save_ = ISaveFilesOnIo::Save{
                     .file = file,
                     .extent = extent,
                     .growable = growable,
-                    .gen = save_.gen.next()
+                    .gen = save_.gen.next(),
+                    .blank = blank
                 };
             }
 
@@ -269,10 +245,6 @@ private:
     xthread::Counter abandoned_{};
 };
 
-static_assert(
-    sizeof(StorageService) > 512u * 1024u,
-    "the arena dominates; a later pass that quadruples the halves argues for it at "
-    "the point of change"
-);
+static_assert(sizeof(StorageService) > 256u * 1024u, "one window per slot dominates");
 
 }

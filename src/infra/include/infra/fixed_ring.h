@@ -27,6 +27,10 @@ public:
         return true;
     }
 
+    [[nodiscard]] T& front() noexcept { return slots_[head_]; }
+
+    [[nodiscard]] const T& front() const noexcept { return slots_[head_]; }
+
     [[nodiscard]] std::optional<T> pop() noexcept {
         if (count_ == 0)
             return std::nullopt;
@@ -41,6 +45,8 @@ public:
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 
     [[nodiscard]] bool empty() const noexcept { return count_ == 0; }
+
+    [[nodiscard]] bool full() const noexcept { return count_ == N; }
 
     static constexpr std::size_t capacity() noexcept { return N; }
 

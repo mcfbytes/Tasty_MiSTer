@@ -20,9 +20,13 @@ enum class AssetAnchor : std::uint8_t {
     CoreHome,
 };
 
-enum class AssetLoader : std::uint8_t { GenericFileTx, PceBios };
-
 enum class AssetWait : std::uint8_t { Ready, Miss, Pending };
+
+enum class BootGroup : std::uint8_t {
+    First,
+    Second,
+    Third,
+};
 
 struct BootAsset {
     std::string_view name;
@@ -31,20 +35,13 @@ struct BootAsset {
     AssetAnchor anchor = AssetAnchor::Search;
     std::string_view subdir{};
     WideIoIndex dest{};
-    std::uint8_t group = 0;
+    BootGroup group = BootGroup::First;
     bool group_required = false;
-    std::string_view marker_sibling{};
-    std::optional<WideIoIndex> dest_if_marker{};
-    AssetLoader loader = AssetLoader::GenericFileTx;
 
     std::optional<FileSize> exact_size{};
 
     [[nodiscard]] constexpr bool accepts(FileSize size) const noexcept {
         return !exact_size || *exact_size == size;
-    }
-
-    [[nodiscard]] constexpr WideIoIndex dest_for(bool marker_seen) const noexcept {
-        return marker_seen && dest_if_marker ? *dest_if_marker : dest;
     }
 };
 

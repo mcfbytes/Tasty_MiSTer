@@ -42,7 +42,10 @@ private:
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
-        SlotRow(HdMediaPlan& plan, std::size_t at) noexcept : plan_(plan), at_(at) {}
+        SlotRow(HdMediaPlan& plan, std::size_t at, proto::FileRowId row) noexcept
+            : plan_(plan),
+              at_(at),
+              row_(row) {}
 
         std::optional<RowKey> key() const override;
         app::PageDescription::Row describe() const override;
@@ -51,6 +54,7 @@ private:
     private:
         HdMediaPlan& plan_;
         std::size_t at_;
+        proto::FileRowId row_;
     };
 
     void walk_(const proto::ItemTable& table, const BuildEnv& env);
@@ -58,8 +62,6 @@ private:
     [[nodiscard]] const OptionItem& slot_(std::size_t at) const {
         return *page0_.placer().slots()[at];
     }
-
-    [[nodiscard]] SlotFocus focus_at_(std::size_t at) const;
 
     const NowPlaying& now_playing_;
     const CoreVerbs& verbs_;

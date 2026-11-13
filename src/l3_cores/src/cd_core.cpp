@@ -2,6 +2,7 @@
 #include "cores/cd_core.h"
 
 #include "cores/core_adopt.h"
+#include "cores/mount_answer.h"
 #include "cores/mounted_path.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -24,8 +25,9 @@ Ex<void> CdCore::do_adopt(const CoreAdopt&) {
 
 MountState CdCore::mount_disc(std::string_view path) {
     TASTY_SEAT_BODY(CdCore);
-    if (!mount(profile().staging.disc_slot, MountedPath{path, proto::FileSize{}})) {
-        return MountState::Failed;
+    if (const auto m = mount(profile().staging.disc_slot, MountedPath{path, proto::FileSize{}});
+        !m) {
+        return mount_answer_of(m.error());
     }
     return drive_.disc_mount_state();
 }

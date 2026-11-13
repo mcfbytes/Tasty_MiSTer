@@ -10,16 +10,34 @@
 #include <string>
 
 #include "app/core_builder.h"
+#include "app/front_end_status.h"
 #include "app/intern_exact.h"
 #include "app/link_tx_reader.h"
 #include "app/session_bindings.h"
 #include "app/owner_push.h"
+#include "app/uart_binding.h"
+#include "app/uart_persist.h"
 #include "cores/registry.h"
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
+
+namespace {
+
+std::string card_path_(std::string_view stem, std::string_view core) {
+    std::string rel{stem};
+    rel += core;
+    return rel;
+}
+
+bool usb_serial_present_() noexcept {
+    struct ::stat st{};
+    return ::stat("/dev/ttyUSB0", &st) == 0;
+}
+
+}
 
 std::array<std::string_view, SessionBindings::kIdentityFields> bind_identity_fields(
     const proto::ConfStr& conf
@@ -130,37 +148,37 @@ void BindTail::facts(const MraFacts& facts) noexcept {
 
 void BindTail::uart(std::string_view core_name, const proto::ConfStr* conf) {
     TASTY_SEAT_BODY(BindTail);
-    proto::LinkOp::BindUart op{.probe_usb_ser = true};
-    struct ::stat st{};
-    op.usb_ser = ::stat("/dev/ttyUSB0", &st) == 0;
+    UartBinding::Inputs in{};
+    in.usb_ser = usb_serial_present_();
+    in.default_baud = cores::profile_for(core_name).default_uart_baud;
     if (conf != nullptr) {
-        std::string_view uart_raw, midi_raw;
         for (const auto& cap : conf->capabilities()) {
             if (cap.kind == proto::Capability::Kind::Uart) {
-                op.capable = true;
-                uart_raw = cap.raw;
+                in.capable = true;
+                in.tokens.uart = cap.raw;
             } else if (cap.kind == proto::Capability::Kind::Midi) {
-                midi_raw = cap.raw;
-            }
-        }
-        if (!uart_raw.empty() || !midi_raw.empty()) {
-            std::string blob(uart_raw);
-            blob.push_back('\0');
-            blob.append(midi_raw);
-            if (blob.size() <= kLinkTxSlabBytes) {
-                const auto id = inbox_.intern(infra::text_bytes<const std::uint8_t>(blob));
-                if (id)
-                    op.tokens = *id;
+                in.tokens.midi = cap.raw;
             }
         }
     }
-    if (!core_name.empty()) {
-        std::string rel = "config/uartmode.";
-        rel += core_name;
-        op.mode = intern_exact(vfs_, inbox_, rel, SessionBindings::Uart::kModeBytes);
-        rel = "config/uartspeed.";
-        rel += core_name;
-        op.speeds = intern_exact(vfs_, inbox_, rel, SessionBindings::Uart::kSpeedsBytes);
+
+    if (in.capable && !core_name.empty()) {
+        in.files = UartBinding::Files::from_card(
+            read_exact<UartPersist::kCardBytes>(vfs_, card_path_("config/uartmode.", core_name)),
+            read_exact<UartBinding::SpeedsFile::kBytes>(
+                vfs_,
+                card_path_("config/uartspeed.", core_name)
+            )
+        );
+    }
+    const UartBinding binding = UartBinding::decode(in);
+    proto::LinkOp::BindUart op{};
+    if (!binding.is_inert()) {
+        if (const auto id = inbox_.intern(binding.image())) {
+            op.binding = *id;
+        } else {
+            tally_.uart_intern_refusals.add();
+        }
     }
 
     (void)push_gating(inbox_, tally_, sleeper_, infra::make<proto::LinkOp>(op));
@@ -173,9 +191,21 @@ bool BindTail::reset_level(bool asserted) {
         tally_,
         sleeper_,
         infra::make<proto::LinkOp>(proto::LinkOp::WriteStatus{
-            .start = proto::StatusBit{0},
-            .width = 1,
-            .value = asserted ? 1u : 0u
+            .field = proto::kResetField,
+            .value = proto::FieldValue::flag(asserted)
+        })
+    );
+}
+
+bool BindTail::front_end_pal(bool pal) {
+    TASTY_SEAT_BODY(BindTail);
+    return push_gating(
+        inbox_,
+        tally_,
+        sleeper_,
+        infra::make<proto::LinkOp>(proto::LinkOp::WriteStatus{
+            .field = kFrontEndPalField,
+            .value = proto::FieldValue::flag(pal)
         })
     );
 }

@@ -6,6 +6,7 @@
 #include "app/mgl_pump.h"
 #include "app/save_state_attach.h"
 #include "boot_parts.h"
+#include "connect_block.h"
 #include "device_block.h"
 #include "hd_osd_block.h"
 #include "host_facts.h"
@@ -19,12 +20,12 @@
 #include "thread_assembly.h"
 #include "ui/event_trace.h"
 #include "ui/menu_model.h"
-#include "ui/shell_bt_ops.h"
 #include "ui/ui_round.h"
 #include "ui/vfs_browse_source.h"
 #include "ui_sink.h"
 
 namespace mister::os {
+class IClock;
 class ProcessTitle;
 }
 
@@ -50,8 +51,8 @@ public:
     void latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& mains) noexcept override;
 
 private:
+    const os::IClock& clock_;
     const char* diag_path_;
-    infra::OptRef<app::BtPump> bt_;
     ui::EventTrace trace_;
 
     app::UiWriteLane ui_writes_;
@@ -59,7 +60,8 @@ private:
     app::MglPump mgl_pump_;
     app::HpsFramebuffer hps_fb_;
     ui::VfsBrowseSource browse_source_;
-    ui::ShellBtOps bt_ops_;
+
+    ConnectBlock connect_;
 
     ui::MenuModel ui_model_;
     ui::PageContext ui_context_;

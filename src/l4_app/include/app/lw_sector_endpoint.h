@@ -14,12 +14,14 @@
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "hal/fpga_memory.h"
-#include "hal/reg_block.h"
-#include "hal/register_window.h"
+#include "hal/reg_port.h"
 #include "hal/sector_block.h"
+#include "hal/window_port.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "os/epoll_set.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_io.h"
 #include "os/monotonic_clock.h"
 #include "proto/save_slot_rule.h"
 #include "svc/disc_geometry.h"
@@ -32,21 +34,15 @@
 namespace mister::app {
 
 class LwSectorEndpoint final : public svc::IIoCoworker,
-                               public LwBlockEndpoint<SectorGrant, SectorRoute, SeatTag::Io> {
+                               public LwBlockEndpoint<SectorGrant, SectorRoute, seat_owner::Io> {
     TASTY_SEAT_RESIDENT(Io);
+    static_assert(
+        seat_owner::Io::kSeatDecl == kSeatDecl,
+        "the base's owner tag and this endpoint's declaration must agree"
+    );
 
 public:
-    class Port {
-    public:
-        [[nodiscard]] virtual std::uint32_t read(hal::SectorBlock::Reg r) noexcept = 0;
-        virtual void write(hal::SectorBlock::Reg r, std::uint32_t v) noexcept = 0;
-
-    protected:
-        Port() = default;
-        Port(const Port&) = default;
-        Port& operator=(const Port&) = default;
-        ~Port() = default;
-    };
+    using Port = hal::IRegPort<hal::SectorBlock>;
 
     static constexpr unsigned kMaxResends = 2;
 
@@ -55,9 +51,10 @@ public:
     struct Wiring {
         const SectorGrantCell& grant;
         SectorRouteCell& route;
+        SectorLeaseCell& lease;
         const svc::DiscReadService::GeomCell& geometry;
         svc::DiscReadService& discs;
-        int doorbells = -1;
+        infra::OptRef<const os::EpollSet> doorbells{};
         infra::OptRef<Port> port{};
 
         infra::OptRef<const svc::ISaveFilesOnIo> saves{};
@@ -75,27 +72,6 @@ public:
     [[nodiscard]] const SectorRoute& route() const noexcept { return tally_; }
 
 private:
-    class BlockPort final : public Port {
-        TASTY_SEAT_RESIDENT(Io);
-
-    public:
-        explicit BlockPort(hal::reg::Block lease) noexcept
-            : regs_(hal::RegisterWindow<hal::SectorBlock>::borrow(std::move(lease))) {}
-
-        [[nodiscard]] std::uint32_t read(hal::SectorBlock::Reg r) noexcept override {
-            TASTY_SEAT_BODY(BlockPort);
-            return regs_.read(r);
-        }
-
-        void write(hal::SectorBlock::Reg r, std::uint32_t v) noexcept override {
-            TASTY_SEAT_BODY(BlockPort);
-            regs_.write(r, v);
-        }
-
-    private:
-        hal::RegisterWindow<hal::SectorBlock> regs_;
-    };
-
     struct Ahead {
         svc::DiscReadSlot slot{};
         bool live = false;
@@ -129,13 +105,17 @@ private:
         proto::Lba lba{};
     };
 
-    using Base = LwBlockEndpoint<SectorGrant, SectorRoute, SeatTag::Io>;
+    using Base = LwBlockEndpoint<SectorGrant, SectorRoute, seat_owner::Io>;
+    static_assert(
+        std::is_same_v<SectorLeaseCell, Base::LeaseCell>,
+        "the route's lease cell is the base's lease cell"
+    );
     void publish_hook_(const SectorRoute& r) noexcept override;
     void prepare_hook_(const SectorGrant& g) noexcept override;
     [[nodiscard]] bool arm_hook_(const SectorGrant& g) noexcept override;
     void bind_hook_(const SectorGrant& g) noexcept override;
     void bound_hook_() noexcept override;
-    void answer_hook_(std::uint16_t gen) noexcept override;
+    void answer_hook_(proto::BuildGeneration gen) noexcept override;
     void unbind_hook_() noexcept override;
     void serve_bound_() noexcept override;
     [[nodiscard]] bool idle_bound_hook_() const noexcept override;
@@ -178,7 +158,7 @@ private:
     Wiring w_;
     svc::DiscReadService::GeomCell::Reader geom_rd_{};
     std::optional<svc::DiscGeometry> disc_{std::in_place};
-    std::optional<BlockPort> block_{};
+    std::optional<hal::WindowPort<hal::SectorBlock, seat_owner::Io>> block_{};
     LwLine line_{};
     bool recheck_ = false;
     proto::Lba ahead_from_{};
@@ -193,4 +173,15 @@ private:
     os::MonotonicClock clock_{};
 };
 
+extern template class LwBlockEndpoint<SectorGrant, SectorRoute, seat_owner::Io>;
+
+}
+
+namespace mister::hal {
+
+extern template class WindowPort<SectorBlock, seat_owner::Io>;
+}
+
+namespace mister::xthread {
+extern template class GrantLease<app::SectorGrant, seat_owner::Io>;
 }

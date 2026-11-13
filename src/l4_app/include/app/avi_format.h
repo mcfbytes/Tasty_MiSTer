@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 
+#include "app/avi_frame_count.h"
 #include "app/picture_pixels.h"
 #include "app/picture_row.h"
 #include "app/rec_options.h"
@@ -32,16 +33,6 @@ inline constexpr std::size_t kIndexEntry = 16;
 inline constexpr std::uint32_t kKeyFlag = 0x10;
 inline constexpr std::uint32_t kHasIndex = 0x10;
 
-inline constexpr std::uint32_t kTickHz = 100'000'000;
-inline constexpr std::uint32_t kDefaultVtime = 1'666'667;
-
-inline constexpr std::uint32_t kVtimeMin = kTickHz / 120;
-inline constexpr std::uint32_t kVtimeMax = kTickHz / 20;
-
-[[nodiscard]] constexpr bool plausible_vtime(std::uint32_t vtime) noexcept {
-    return vtime >= kVtimeMin && vtime <= kVtimeMax;
-}
-
 using Header = std::array<std::byte, kHeaderBytes>;
 [[nodiscard]] Header header(const Fields& f) noexcept;
 
@@ -51,7 +42,7 @@ void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noe
     return kChunkHead + payload + (payload & 1u);
 }
 
-void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept;
+void index_head(AviFrameCount entries, std::span<std::byte, kChunkHead> out) noexcept;
 void index_entry(
     bool key,
     std::uint32_t offset,

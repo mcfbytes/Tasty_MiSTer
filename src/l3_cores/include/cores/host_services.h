@@ -4,6 +4,7 @@
 #include "cores/core_window_grant.h"
 #include "cores/save_copy_level.h"
 #include "infra/opt_ref.h"
+#include "infra/wake_flag.h"
 
 namespace mister::svc {
 class Vfs;
@@ -22,6 +23,10 @@ class IClock;
 namespace mister::proto {
 class IImageSink;
 class SpiFioQueue;
+}
+
+namespace mister::hal {
+class DiskLamp;
 }
 
 namespace mister::cores {
@@ -49,6 +54,9 @@ struct HostServices {
     infra::OptRef<const SaveCopyCell> save_copy{};
 
     infra::OptRef<IDiskPort> disk{};
+
+    infra::OptRef<hal::DiskLamp> lamp{};
+    infra::OptRef<xthread::WakeFlag> disk_activity{};
 };
 
 }

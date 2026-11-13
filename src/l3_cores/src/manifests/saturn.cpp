@@ -170,7 +170,7 @@ static_assert(
     kSaturnBlankSave.fill == std::byte{0x00}
         && kSaturnBlankSave.regions.size() == 1
         && kSaturnBlankSave.regions[0].block == saturn_blank::kSecondCopyLba
-        && kSaturnBlankSave.regions[0].within == 0,
+        && kSaturnBlankSave.regions[0].within == proto::FileSize{},
     "sat.cpp:289: the record at LBA 0 AND LBA 128 of 512-byte blocks"
 );
 

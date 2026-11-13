@@ -7,6 +7,7 @@
 #include "cores/romset_file.h"
 #include "cores/romset_index.h"
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
 
@@ -111,10 +112,10 @@ bool has_name(std::string_view nameset, std::string_view name) {
 }
 
 std::string get_romset(std::string_view path) {
-    const auto slash = path.rfind('/');
-    if (slash == std::string_view::npos)
+    const auto leaf = infra::leaf_in_dir(path);
+    if (!leaf)
         return {};
-    std::string_view p = path.substr(slash + 1);
+    std::string_view p = *leaf;
     std::size_t len = p.size();
     if (len > 4 && ieq(p.substr(len - 4), ".zip"))
         len -= 4;

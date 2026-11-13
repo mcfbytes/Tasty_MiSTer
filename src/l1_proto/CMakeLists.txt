@@ -1,9 +1,15 @@
 add_library(mister_proto STATIC
-  src/axi_block_decl.cpp
+  src/pad_block_decl.cpp
+  src/sector_block_decl.cpp
+  src/osd_block_decl.cpp
+  src/sys_block_decl.cpp
+  src/lane_block_decl.cpp
+  src/dir_version.cpp
   src/sys_directory_image.cpp
   src/axi_pad_encoder.cpp
   src/block_slots.cpp
   src/conf_str.cpp
+  src/file_slots.cpp
   src/held_pad_encoder.cpp
   src/conf_str_caps.cpp
   src/core_session.cpp
@@ -54,12 +60,22 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_roles.h
   proto/block_server.h
   proto/block_slots.h
+  proto/build_generation.h
   proto/disc_announce.h
   proto/fixed_block_roles.h
   proto/late_answers.h
   proto/no_block_roles.h
   proto/conf_str.h
-  proto/axi_block_decl.h
+  proto/conf_str_entry.h
+  proto/conf_str_file_row.h
+  proto/file_slot_hit.h
+  proto/file_slots.h
+  proto/dir_entry_facts.h
+  proto/dir_entry_kind.h
+  proto/dir_version.h
+  proto/op_bitmap.h
+  proto/pad_block_decl.h
+  proto/sys_dir_entry.h
   proto/declared_line.h
   proto/lane_block_decl.h
   proto/link_frame.h
@@ -86,9 +102,11 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/image_sink.h
   proto/image_source.h
   proto/irq_binding.h
+  proto/item.h
   proto/item_probe.h
   proto/item_rule.h
   proto/item_table.h
+  proto/text_span.h
   proto/link_event.h
   proto/link_op.h
   proto/link_port.h
@@ -128,6 +146,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/sector_floor.h
   proto/session_params.h
   proto/slot_attributes.h
+  proto/resident_window.h
   proto/slot_record.h
   proto/spi_block_decoder.h
   proto/spi_block_poll.h
@@ -147,6 +166,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/standard_item.h
   proto/standard_item_row.h
   proto/state_slot.h
+  proto/status_bit.h
   proto/status_register.h
   proto/status_edit.h
   proto/status_word.h
@@ -158,6 +178,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/storage_request.h
   proto/storage_request_dispatch.h
   proto/types.h
+  proto/window_fails.h
   proto/uio_opcodes.h
   proto/fio_opcodes.h
   proto/osd_opcodes.h

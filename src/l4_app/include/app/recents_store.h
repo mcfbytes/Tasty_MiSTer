@@ -33,20 +33,36 @@ public:
     static constexpr std::size_t kRecordSize = kDirCap + kNameCap + kLabelCap;
     static constexpr std::size_t kFileSize = kMaxEntries * kRecordSize;
 
-    struct ListId {
-        enum class Kind : std::uint8_t { Cores, File, Mount };
-
+    class ListId {
+    public:
         static constexpr proto::ListIndex kMountIndexBase{500};
-        Kind kind = Kind::Cores;
-        proto::IoIndex slot{};
+
+        constexpr ListId() noexcept = default;
+
+        [[nodiscard]] static constexpr ListId cores() noexcept { return ListId{}; }
+
+        [[nodiscard]] static constexpr ListId of(proto::FileRowId row) noexcept {
+            return ListId{row};
+        }
+
+        [[nodiscard]] constexpr std::optional<proto::FileRowId> row() const noexcept {
+            return row_;
+        }
 
         [[nodiscard]] std::string file_name(std::string_view core) const;
 
-        [[nodiscard]] static std::optional<std::pair<std::string, ListId>> from_file_name(
+        [[nodiscard]] static std::optional<std::pair<std::string, proto::FileRowId>> from_file_name(
             std::string_view name
         );
         friend constexpr bool operator==(ListId, ListId) = default;
+
+    private:
+        constexpr explicit ListId(proto::FileRowId row) noexcept : row_(row) {}
+
+        std::optional<proto::FileRowId> row_{};
     };
+
+    static constexpr std::string_view kNoCore{};
 
     struct Entry {
         std::string dir;

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import os
 import re
 import shutil
 import struct
@@ -20,7 +19,7 @@ import sys
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from collections.abc import Iterable, Iterator
 
 try:
     import numpy as np  # type: ignore
@@ -33,7 +32,7 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 DEFAULT_NES_PAL = HERE / "palettes" / "nes-kitrinx34.pal"
 FFMPEG_MIN = "4.2"
-PYTHON_MIN = (3, 9)
+PYTHON_MIN = (3, 14)
 
 # TSV columns written by the recorder sidecar.
 TSV_COLS = (
@@ -68,7 +67,7 @@ class Picture(bytes):
     width: int
     height: int
 
-    def __new__(cls, data: bytes, width: int, height: int) -> "Picture":
+    def __new__(cls, data: bytes, width: int, height: int) -> Picture:
         obj = super().__new__(cls, data)
         obj.width = width
         obj.height = height
@@ -99,10 +98,10 @@ class Row:
 class Side:
     kind: str  # tsv, avi, pngs, log
     path: Path
-    tsv: Optional[Path] = None
-    avi: Optional[Path] = None
-    png_dir: Optional[Path] = None
-    log: Optional[Path] = None
+    tsv: Path | None = None
+    avi: Path | None = None
+    png_dir: Path | None = None
+    log: Path | None = None
     rows: list[Row] | None = None
     by_movie: dict[int, Row] | None = None
     skipped_missed: list[int] | None = None
@@ -110,15 +109,15 @@ class Side:
     height: int = 0
 
 
-def which(name: str) -> Optional[str]:
+def which(name: str) -> str | None:
     return shutil.which(name)
 
 
-def find_ffmpeg() -> Optional[str]:
+def find_ffmpeg() -> str | None:
     return which("ffmpeg")
 
 
-def find_ffprobe() -> Optional[str]:
+def find_ffprobe() -> str | None:
     return which("ffprobe")
 
 
@@ -126,7 +125,7 @@ def crc32_bytes(data: bytes) -> str:
     return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
 
 
-def crc32_rgb(pixels: bytes, width: int, height: int, stride: Optional[int] = None) -> str:
+def crc32_rgb(pixels: bytes, width: int, height: int, stride: int | None = None) -> str:
     row = width * 3
     if stride is None:
         stride = row
@@ -628,7 +627,7 @@ def frame_leftover(
     eh: int,
     crop_m: tuple[int, int, int, int],
     crop_e: tuple[int, int, int, int],
-) -> Optional[int]:
+) -> int | None:
     mp = mpix.get(mf)
     ep = epix.get(mf + off)
     if mp is None or ep is None:
@@ -686,7 +685,7 @@ def refine_slip(
     slop: int,
     lo: int = -3,
     hi: int = 3,
-) -> tuple[Optional[int], int, Optional[int]]:
+) -> tuple[int | None, int, int | None]:
     """After a leftover miss, see if a nearby offset restores a match streak."""
     keys = [k for k in sorted(mpix) if first - 40 <= k <= first + 120]
     best_off = start_off
@@ -704,7 +703,7 @@ def refine_slip(
         if n >= 8 and hits > best_hits:
             best_hits = hits
             best_off = off
-    slip_at: Optional[int] = None
+    slip_at: int | None = None
     if best_off != start_off:
         for mf in keys:
             old = frame_leftover(mpix, epix, mf, start_off, mw, mh, ew, eh, crop_m, crop_e)
@@ -714,7 +713,7 @@ def refine_slip(
                 break
         if slip_at is None:
             slip_at = first
-    unique: Optional[int] = None
+    unique: int | None = None
     start = slip_at if slip_at is not None else first
     for mf in sorted(mpix):
         if mf < start:
@@ -800,11 +799,11 @@ def detect_slip(
     a: dict[int, str],
     b: dict[int, str],
     start_off: int,
-    first: Optional[int],
+    first: int | None,
     lo: int = -3,
     hi: int = 3,
     confirm: int = 12,
-) -> tuple[Optional[int], int, Optional[int]]:
+) -> tuple[int | None, int, int | None]:
     """Find a sustained offset change, then the first uniquely different picture."""
     if first is None:
         return None, start_off, None
@@ -815,7 +814,7 @@ def detect_slip(
     if not head:
         head = keys[:80]
     base = vote_offset(a, b, head, lo, hi)
-    slip_at: Optional[int] = None
+    slip_at: int | None = None
     new_off = base
     win = confirm
     for i in range(len(keys) - win):
@@ -825,10 +824,10 @@ def detect_slip(
             slip_at = chunk[0]
             new_off = off
             break
-    unique: Optional[int] = None
+    unique: int | None = None
     start = slip_at if slip_at is not None else (first if first is not None else keys[0])
     streak = 0
-    mark: Optional[int] = None
+    mark: int | None = None
     for k in keys:
         if k < start:
             continue
@@ -947,10 +946,10 @@ def compare_hashes(
     emu: dict[int, str],
     offset: int,
     overlap_only: bool,
-    max_frames: Optional[int] = None,
-) -> tuple[Optional[int], list[tuple[int, bool, str]]]:
+    max_frames: int | None = None,
+) -> tuple[int | None, list[tuple[int, bool, str]]]:
     rows: list[tuple[int, bool, str]] = []
-    first: Optional[int] = None
+    first: int | None = None
     keys = sorted(set(mister) | {k - offset for k in emu})
     for mf in keys:
         if mf < 0:
@@ -996,7 +995,7 @@ def segment_rows(side: Side) -> dict[int, dict[int, Row]]:
     return out
 
 
-def load_movie_pixels(side: Side, max_frames: Optional[int] = None) -> dict[int, bytes]:
+def load_movie_pixels(side: Side, max_frames: int | None = None) -> dict[int, bytes]:
     """Load pixels keyed by movie frame. A sidecar maps each <stem>_<segment>.avi frame; else 0..n."""
     out: dict[int, bytes] = {}
     segs = segment_rows(side) if side.tsv is not None else {}
@@ -1052,17 +1051,17 @@ def compare_pixels(
     crop_e: tuple[int, int, int, int],
     offset: int,
     bijection: bool,
-    pal: Optional[list[tuple[int, int, int]]],
-    tolerance: Optional[tuple[float, float]],
+    pal: list[tuple[int, int, int]] | None,
+    tolerance: tuple[float, float] | None,
     learn_n: int,
     pixel_slop: int = 16,
     overlap_only: bool = False,
-    movie: Optional[Iterable[int]] = None,
+    movie: Iterable[int] | None = None,
     skipped: Iterable[int] = (),
     capped: bool = False,
-) -> tuple[Optional[int], list[tuple[int, bool, str]], dict[int, tuple[bytes, bytes, int, int]]]:
+) -> tuple[int | None, list[tuple[int, bool, str]], dict[int, tuple[bytes, bytes, int, int]]]:
     keys = compared_frames(mister_pix, emu_pix, offset, overlap_only, movie, skipped, capped)
-    aligned: list[tuple[int, Optional[bytes], Optional[bytes]]] = []
+    aligned: list[tuple[int, bytes | None, bytes | None]] = []
     kept: dict[int, tuple[bytes, bytes, int, int]] = {}
     for mf in keys:
         mp = mister_pix.get(mf)
@@ -1119,7 +1118,7 @@ def compared_frames(
     emu_pix: dict[int, bytes],
     offset: int,
     overlap_only: bool,
-    movie: Optional[Iterable[int]],
+    movie: Iterable[int] | None,
     skipped: Iterable[int],
     capped: bool,
 ) -> list[int]:
@@ -1141,10 +1140,10 @@ def compared_frames(
     return sorted(span | both)
 
 
-def first_mismatch_streak(rows: list[tuple[int, bool, str]], n: int) -> Optional[int]:
+def first_mismatch_streak(rows: list[tuple[int, bool, str]], n: int) -> int | None:
     """First leftover miss that holds for n movie frames (ignore 1-frame spikes)."""
     run = 0
-    mark: Optional[int] = None
+    mark: int | None = None
     for mf, match, _metric in rows:
         if match:
             run = 0
@@ -1158,7 +1157,7 @@ def first_mismatch_streak(rows: list[tuple[int, bool, str]], n: int) -> Optional
     return None
 
 
-def parse_crop(text: Optional[str]) -> Optional[tuple[int, int, int, int]]:
+def parse_crop(text: str | None) -> tuple[int, int, int, int] | None:
     if not text:
         return None
     parts = [int(x) for x in text.replace("x", ",").split(",")]
@@ -1167,7 +1166,7 @@ def parse_crop(text: Optional[str]) -> Optional[tuple[int, int, int, int]]:
     return parts[0], parts[1], parts[2], parts[3]
 
 
-def parse_tolerance(text: Optional[str]) -> Optional[tuple[float, float]]:
+def parse_tolerance(text: str | None) -> tuple[float, float] | None:
     if not text:
         return None
     parts = [float(x) for x in text.split(",")]
@@ -1186,11 +1185,11 @@ def print_skipped(side: Side) -> None:
 
 def report_slip(
     mister: Side,
-    first: Optional[int],
+    first: int | None,
     off: int,
     ha: dict[int, str],
     hb: dict[int, str],
-    kept: Optional[dict[int, tuple[bytes, bytes, int, int]]],
+    kept: dict[int, tuple[bytes, bytes, int, int]] | None,
     out_dir: Path,
     around: int,
     n_rows: int,
@@ -1282,7 +1281,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.check_deps:
         return check_deps(sys.stdout)

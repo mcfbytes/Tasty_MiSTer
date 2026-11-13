@@ -32,7 +32,7 @@ UniqueFd open_rw(const char* path) noexcept {
 
 UniqueFd open_vt(VtNumber vt) noexcept {
     char path[kVtTtyPathBuf];
-    if (!format_path(std::span<char>(path), "/dev/tty%d", vt_arg(vt)))
+    if (!vt.tty_path(std::span<char>(path)))
         return {};
     return open_rw(path);
 }
@@ -65,16 +65,16 @@ std::optional<VtNumber> active_op() noexcept {
     return {};
 }
 
-void blank_op(const char* tty) noexcept {
-    const UniqueFd fd = open_rw(tty);
+void blank_op(VtNumber vt) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
     constexpr std::string_view kBlank = "\033[0m\033[?25l\033[37m\033[40m\033[2J\033[H";
     write_all(fd.get(), kBlank);
 }
 
-void restore_text_op(const char* tty) noexcept {
-    const UniqueFd fd = open_rw(tty);
+void restore_text_op(VtNumber vt) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
@@ -137,14 +137,14 @@ Ex<void> LinuxVtConsole::activate(VtNumber vt) noexcept {
     return activate_op(vt);
 }
 
-void LinuxVtConsole::blank(const char* tty) noexcept {
+void LinuxVtConsole::blank(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
-    blank_op(tty);
+    blank_op(vt);
 }
 
-void LinuxVtConsole::restore_text(const char* tty) noexcept {
+void LinuxVtConsole::restore_text(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
-    restore_text_op(tty);
+    restore_text_op(vt);
 }
 
 std::optional<VtNumber> UiVtConsole::active() noexcept {

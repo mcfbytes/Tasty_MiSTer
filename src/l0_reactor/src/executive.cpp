@@ -5,9 +5,8 @@
 #include "reactor/link_decoder.h"
 
 #include <sys/epoll.h>
-#include <sys/timerfd.h>
-#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <ctime>
@@ -26,7 +25,7 @@ std::int64_t now_ns() noexcept {
     return static_cast<std::int64_t>(ts.tv_sec) * kNsPerSec + static_cast<std::int64_t>(ts.tv_nsec);
 }
 
-enum class FdKind : std::uint32_t { Tick = 1, Kick = 2, Doorbell = 3, Borrowed = 4 };
+enum class FdKind : std::uint32_t { Kick = 2, Doorbell = 3, Borrowed = 4 };
 
 constexpr std::uint64_t ep_tag(FdKind k, std::uint32_t idx) noexcept {
     return (static_cast<std::uint64_t>(k) << std::numeric_limits<std::uint32_t>::digits) | idx;
@@ -69,15 +68,8 @@ Ex<Executive> Executive::create(xthread::RtStats& stats, const Wiring& wiring) {
     if (!ex.epfd_.valid()) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    ex.tick_fd_.reset(::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC));
-    if (!ex.tick_fd_.valid()) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
     if (auto w = ex.wake_.open_fd(); !w) {
         return std::unexpected(w.error());
-    }
-    if (auto added = ep_add(ex.epfd_.get(), ex.tick_fd_.get(), ep_tag(FdKind::Tick, 0)); !added) {
-        return std::unexpected(added.error());
     }
     if (auto added = ep_add(ex.epfd_.get(), ex.wake_.fd(), ep_tag(FdKind::Kick, 0)); !added) {
         return std::unexpected(added.error());
@@ -89,7 +81,6 @@ Executive::Executive(Executive&& o) noexcept
     : stats_(o.stats_),
       latency_(o.latency_),
       epfd_(std::move(o.epfd_)),
-      tick_fd_(std::move(o.tick_fd_)),
       wake_(std::move(o.wake_)),
       notifier_count_(o.notifier_count_),
       delivered_(o.delivered_),
@@ -97,7 +88,8 @@ Executive::Executive(Executive&& o) noexcept
       core_state_(o.core_state_),
       borrowed_count_(o.borrowed_count_),
       tick_count_(o.tick_count_),
-      deadline_ns_(o.deadline_ns_),
+      tick_(o.tick_),
+      tick_held_(o.tick_held_),
       log_lane_(o.log_lane_),
       round_timer_(o.round_timer_),
       bound_in_round_(o.bound_in_round_),
@@ -154,7 +146,7 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
         services_[row] = s;
         stats_.deadline_miss[row].set(0);
 
-        rows_[row].next_due = tick_count_ + static_cast<std::uint64_t>(s.period.count());
+        rows_[row].next_due = tick_count_.after(s.period);
         row = row.next();
     }
     service_count_ = n;
@@ -301,27 +293,22 @@ Ex<void> Executive::remove_fd(int fd) {
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), static_cast<std::uint32_t>(fd)});
 }
 
-Ex<void> Executive::enter() noexcept {
+void Executive::enter() noexcept {
 
     if (entered_.generation() == 0u)
         entered_.publish(true);
     fault_ = {};
 
-    deadline_ns_ = now_ns() + kTickNs;
-    itimerspec spec{};
-    spec.it_interval.tv_sec = 0;
-    spec.it_interval.tv_nsec = static_cast<long>(kTickNs);
-    spec.it_value.tv_sec = static_cast<time_t>(deadline_ns_ / kNsPerSec);
-    spec.it_value.tv_nsec = static_cast<long>(deadline_ns_ % kNsPerSec);
-    if (::timerfd_settime(tick_fd_.get(), TFD_TIMER_ABSTIME, &spec, nullptr) < 0) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    return {};
+    const MonoInstant now{std::chrono::nanoseconds{now_ns()}};
+    tick_ = tick_held_ ? TickDeadline::held() : TickDeadline::after(now);
 }
 
 void Executive::block() noexcept {
     for (;;) {
-        const int n = ::epoll_wait(epfd_.get(), evs_, kMaxEvents, -1);
+
+        const auto rel = tick_.timeout(MonoInstant{std::chrono::nanoseconds{now_ns()}});
+        const timespec ts = rel.value_or(timespec{});
+        const int n = ::epoll_pwait2(epfd_.get(), evs_, kMaxEvents, rel ? &ts : nullptr, nullptr);
         if (n >= 0) {
             n_ready_ = n;
             return;
@@ -346,32 +333,26 @@ bool Executive::dispatch_ready() noexcept {
     round_claimed_ = false;
     swept_ = false;
 
+    const MonoInstant wake{std::chrono::nanoseconds{t_wake_}};
+    if (const auto due = tick_.take_due(wake)) {
+
+        const auto jit = std::max(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(wake - due->latest),
+            std::chrono::nanoseconds::zero()
+        );
+        latency_.tick_jitter.record(jit);
+        if (round_timer_)
+            round_timer_->wake(jit.count(), due->periods.missed());
+        tick_count_ += due->periods;
+        swept_ = true;
+    }
+
     for (int i = 0; i < n_ready_; ++i) {
         const auto kind = static_cast<FdKind>(
             evs_[i].data.u64 >> std::numeric_limits<std::uint32_t>::digits
         );
         const auto idx = static_cast<std::uint32_t>(evs_[i].data.u64);
         switch (kind) {
-            case FdKind::Tick: {
-                std::uint64_t expiries = 0;
-                if (::read(tick_fd_.get(), &expiries, sizeof expiries)
-                        == static_cast<ssize_t>(sizeof expiries)
-                    && expiries > 0) {
-
-                    const std::int64_t latest = deadline_ns_
-                        + static_cast<std::int64_t>(expiries - 1) * kTickNs;
-                    std::int64_t jit = t_wake_ - latest;
-                    if (jit < 0)
-                        jit = 0;
-                    latency_.tick_jitter.record(std::chrono::nanoseconds{jit});
-                    if (round_timer_)
-                        round_timer_->wake(jit, expiries - 1);
-                    deadline_ns_ = latest + kTickNs;
-                    tick_count_ += expiries;
-                    swept_ = true;
-                }
-                break;
-            }
             case FdKind::Kick:
                 wake_.drain();
                 break;
@@ -425,9 +406,6 @@ void Executive::end_round(bool wrote) noexcept {
 void Executive::settle() noexcept {
     if (round_timer_)
         round_timer_->flush(now_ns());
-
-    itimerspec disarm{};
-    [[maybe_unused]] int r = ::timerfd_settime(tick_fd_.get(), 0, &disarm, nullptr);
 }
 
 void Executive::dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns) {
@@ -454,11 +432,7 @@ bool Executive::notifier_carries(const LinkDecoderDecl& s) const noexcept {
         return false;
     if (s.period == kEveryRound)
         return raise_is_recent_rounds(round_count_, at.round);
-    return raise_is_recent(
-        std::chrono::milliseconds{static_cast<std::int64_t>(tick_count_)},
-        std::chrono::milliseconds{static_cast<std::int64_t>(at.ms)},
-        s.period
-    );
+    return raise_is_recent(tick_count_.elapsed(), at.ms.elapsed(), s.period);
 }
 
 CauseSet Executive::carried_causes() const noexcept {
@@ -560,7 +534,7 @@ void Executive::run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment 
     }
 
     if (s.period != kEveryRound)
-        state.next_due = tick_count_ + static_cast<std::uint64_t>(s.period.count());
+        state.next_due = tick_count_.after(s.period);
 }
 
 void Executive::stop() noexcept {

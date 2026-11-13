@@ -31,8 +31,12 @@ struct CheatUnit {
         return CheatUnits{v == 0 ? 0u : static_cast<std::uint32_t>(bytes.v / v)};
     }
 
+    [[nodiscard]] constexpr proto::FileSize extent_of(CheatUnits n) const noexcept {
+        return proto::FileSize{std::uint64_t{n.v} * v};
+    }
+
     [[nodiscard]] constexpr bool whole(proto::FileSize bytes) const noexcept {
-        const proto::FileSize unit{v};
+        const proto::BlockSize unit{v};
         return v != 0 && bytes.whole_units(unit) == bytes.units_covering(unit);
     }
 

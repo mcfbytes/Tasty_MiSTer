@@ -5,11 +5,13 @@
 #include <string_view>
 
 #include "app/cmd_fifo.h"
+#include "connect_paths.h"
 #include "hal/bridge_sequencer.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
 #include "hal/fpga_programmer.h"
 #include "hal/kernel_contract.h"
+#include "infra/opt_ref.h"
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
 #include "hal/phys_region.h"
@@ -26,6 +28,10 @@
 #include "svc/input_enumerator.h"
 #include "svc/vfs.h"
 #include "infra/error.h"
+
+namespace mister::hal {
+class DiskLamp;
+}
 
 namespace mister::fw {
 
@@ -45,6 +51,8 @@ struct BootParts {
     os::UioLineSpace doorbell_nodes;
     hal::VideoOutDecl video;
     hal::KernelContract kernel;
+
+    infra::OptRef<hal::DiskLamp> disk_lamp{};
     const hal::ThreadMap& threads;
     reactor::Executive& exec;
     xthread::RtStats& stats;
@@ -64,6 +72,8 @@ struct BootParts {
 
     const char* cmd_fifo_path = app::kCmdFifoPath;
     const char* diag_path = kDiagPath;
+
+    ConnectPaths connect{};
 };
 
 }

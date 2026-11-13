@@ -114,7 +114,7 @@ inline constexpr std::array<RtEvidenceRow, kRtEvidenceRows> kRtEvidenceRowTable{
     affinity_row(SeatTag::RecWrite),
 };
 
-inline constexpr std::array kRtOkOptionalSeats{SeatTag::Launcher, SeatTag::HdOsd};
+inline constexpr std::array kRtOkOptionalSeats{SeatTag::Launcher, SeatTag::HdOsd, SeatTag::Connect};
 
 consteval bool rt_evidence_rows_named_once() {
     for (std::size_t i = 0; i < kRtEvidenceRows; ++i) {

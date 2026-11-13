@@ -22,9 +22,9 @@ namespace mister::ui {
 
 using RowKind = app::PageDescription::RowKind;
 
-HdListPage::HdListPage(std::unique_ptr<IHdPlan> plan, ItemId push_focus, HdFocusMemory& memory)
+HdListPage::HdListPage(std::unique_ptr<IHdPlan> plan, PageArg push_arg, HdFocusMemory& memory)
     : plan_(std::move(plan)),
-      push_focus_(push_focus),
+      push_arg_(push_arg),
       memory_(memory) {
     TASTY_SEAT_BODY(HdListPage);
     std::optional<RowIndex> start;
@@ -39,6 +39,14 @@ HdListPage::HdListPage(std::unique_ptr<IHdPlan> plan, ItemId push_focus, HdFocus
 PageId HdListPage::id() const {
     TASTY_SEAT_BODY(HdListPage);
     return plan_->id();
+}
+
+PageFacts HdListPage::facts() const {
+    TASTY_SEAT_BODY(HdListPage);
+    PageFacts f{};
+    const PageId page = plan_->id();
+    f.allows_cfg_switch = page == PageId::HdMenu || page == PageId::HdSettings;
+    return f;
 }
 
 HdListPage::PageRows HdListPage::page_rows_() const {
@@ -88,7 +96,7 @@ std::optional<RowIndex> HdListPage::first_focusable_from_(RowIndex from) const {
 
 std::optional<RowIndex> HdListPage::recalled_() const {
     const std::optional<HdFocusMemory::Focus> f = memory_.recall(
-        FocusKey{plan_->id(), push_focus_}
+        FocusKey::of(plan_->id(), push_arg_)
     );
     if (!f)
         return std::nullopt;
@@ -156,7 +164,7 @@ void HdListPage::focus_(RowIndex i) {
         return;
     const PageRows s = page_rows_();
     const std::optional<RowKey> key = i < s.end() ? row_(s, i).key() : std::optional<RowKey>{};
-    memory_.remember(FocusKey{plan_->id(), push_focus_}, HdFocusMemory::Focus{i, key});
+    memory_.remember(FocusKey::of(plan_->id(), push_arg_), HdFocusMemory::Focus{i, key});
 }
 
 MenuMask HdListPage::mask() const {
@@ -172,6 +180,8 @@ MenuMask HdListPage::mask() const {
 
 void HdListPage::set_selection(RowIndex i) {
     TASTY_SEAT_BODY(HdListPage);
+    if (i != sel_)
+        plan_->on_focus_moved();
     focus_(i);
 }
 
@@ -211,9 +221,24 @@ bool HdListPage::empty() const {
     return !first_focusable_from_(RowIndex{}).has_value();
 }
 
-std::uint32_t HdListPage::refusals() const noexcept {
+svc::Tally HdListPage::refusals() const noexcept {
     TASTY_SEAT_BODY(HdListPage);
-    return refusals_ + plan_->refusals();
+    return refusals_.sum(plan_->refusals());
+}
+
+ConnectDemand HdListPage::connect_demand() const {
+    TASTY_SEAT_BODY(HdListPage);
+    return plan_->connect_demand();
+}
+
+bool HdListPage::holds_live_script() const {
+    TASTY_SEAT_BODY(HdListPage);
+    return plan_->holds_pairing();
+}
+
+bool HdListPage::bt_pairing_active() const {
+    TASTY_SEAT_BODY(HdListPage);
+    return plan_->holds_pairing();
 }
 
 RowCount HdListPage::rows_dropped() const noexcept {
@@ -287,16 +312,16 @@ bool HdListPage::describe_hub(app::PageDescription& out) const {
 Transition HdListPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(HdListPage);
     if (ev.buttons.has_any({UiEvent::Menu}))
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
     if (ev.buttons.has_any({UiEvent::Back}))
-        return Transition{Transition::Kind::Leave};
+        return Transition::leave();
     const bool select = ev.buttons.has_any({UiEvent::Select});
     const bool step = ev.buttons.has_any({UiEvent::Plus | UiEvent::Minus});
     if (!select && !step)
         return Transition{};
     if (!focusable_(sel_)) {
         if (select)
-            ++refusals_;
+            refusals_.add();
         return Transition{};
     }
     IHdRow& row = row_(page_rows_(), sel_);

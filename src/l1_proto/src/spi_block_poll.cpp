@@ -237,7 +237,7 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
     }
 
     BlockCount blks = d.req.block_count;
-    const BlockCount staging_blocks = size.blocks_in(BlockSize{kBlockStagingBytes});
+    const BlockCount staging_blocks = size.blocks_in(FileSize{kBlockStagingBytes});
     if (!size.empty() && blks > staging_blocks) {
         ++diag_.oversize_requests;
         blks = staging_blocks;

@@ -14,6 +14,7 @@
 #include "boot_parts.h"
 #include "device_block.h"
 #include "infra/park_fds.h"
+#include "os/epoll_set.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
@@ -32,7 +33,7 @@ public:
     LauncherBlock(const LauncherBlock&) = delete;
     LauncherBlock& operator=(const LauncherBlock&) = delete;
 
-    [[nodiscard]] DeviceBlock::Parts::Frontend device_front(bool grants_uart) noexcept;
+    [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept;
 
     void open_fds(OpenVerdict& verdict) noexcept;
 
@@ -47,7 +48,7 @@ public:
     app::ScanoutChannel scanout_channel_{launcher_wake_};
     app::ScanoutRelay scanout_relay_;
     os::LinuxVtConsole vt_console_{};
-    std::optional<app::LauncherHost::Fds> host_fds_;
+    std::optional<os::EpollSet> host_epoll_;
     std::optional<xthread::ParkFds> launcher_fds_;
     std::optional<app::LauncherHost> launcher_host_;
     std::optional<app::LauncherMain> launcher_main_;

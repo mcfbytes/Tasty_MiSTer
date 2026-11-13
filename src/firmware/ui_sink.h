@@ -20,7 +20,7 @@ struct PageContext;
 
 namespace mister::app {
 class IdentityLatch;
-class InputWire;
+class CoreInputBinding;
 class MglPump;
 class VideoPump;
 }
@@ -44,7 +44,7 @@ public:
         app::MglPump& mgl;
         app::VideoPump& video;
 
-        app::InputWire& input;
+        app::CoreInputBinding& input;
 
         const app::IdentityLatch& identity;
 

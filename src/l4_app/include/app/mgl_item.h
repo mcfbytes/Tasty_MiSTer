@@ -53,7 +53,6 @@ static_assert(
 struct MglItem {
     TASTY_SEAT_EXEMPT(component);
     enum class Kind : std::uint8_t { Load, Reset, kCount };
-    enum class Slot : std::uint8_t { File, Image };
 
     static constexpr std::size_t kPathMax = infra::kPathMax;
     static constexpr std::size_t kStore = kPathMax + 8;
@@ -64,7 +63,7 @@ struct MglItem {
 
     struct Load {
         static constexpr Kind kKind = Kind::Load;
-        Slot slot = Slot::File;
+        proto::FileRowKind slot = proto::FileRowKind::File;
         proto::FileSlotDigit index{};
 
         FixedStr<kPathMax, StrFit::Clip> path{};

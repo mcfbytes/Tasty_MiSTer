@@ -3,8 +3,8 @@
 
 #include <algorithm>
 
-#include "cores/n64_path.h"
 #include "infra/endian.h"
+#include "infra/path_parts.h"
 
 namespace mister::cores::n64dd {
 namespace {
@@ -19,13 +19,11 @@ std::optional<svc::SlotPathText> ram_save_path(
     std::string_view disk_path,
     std::string_view core_dir
 ) noexcept {
-    const std::string_view leaf = n64::path_leaf(disk_path);
-    const std::size_t dot = leaf.rfind('.');
     svc::SlotPathText out{};
     bool ok = out.assign("saves/");
     ok = ok && out.append(core_dir);
     ok = ok && out.append("/");
-    ok = ok && out.append(dot == std::string_view::npos ? leaf : leaf.substr(0, dot));
+    ok = ok && out.append(infra::stem_any_sep(disk_path));
     ok = ok && out.append(".ram");
     if (!ok)
         return std::nullopt;
@@ -34,23 +32,24 @@ std::optional<svc::SlotPathText> ram_save_path(
 
 const WindowJobBuild kRamSaveKind = &build_ram_save_job;
 
-bool write_ram_save_order(
-    WindowJobOrder& order,
+std::optional<RamSaveOrder> RamSaveOrder::of(
     hal::FabricAddr load_addr,
     std::string_view disk_path,
-    std::string_view core_dir
+    const CoreDir& core_dir
 ) noexcept {
-    RamSaveJob::Order o{};
-    if (!o.disk_path.assign(disk_path) || !o.core_dir.assign(core_dir))
-        return false;
+    if (load_addr == hal::FabricAddr{} || disk_path.empty())
+        return std::nullopt;
+    RamSaveOrder o{};
+    if (!o.disk_path.assign(disk_path))
+        return std::nullopt;
     o.load_addr = load_addr;
-    order.put(o);
-    return true;
+    o.core_dir = core_dir;
+    return o;
 }
 
 IWindowJob* build_ram_save_job(JobArena& arena, const WindowJobOrder& order) noexcept {
     seat_assert<SeatTag::Io>(ERR_SITE(), "build_ram_save_job off T-IO");
-    const auto o = order.as<RamSaveJob::Order>();
+    const auto o = order.as<RamSaveOrder>();
     if (!o)
         return nullptr;
     return arena.emplace<RamSaveJob>(o->load_addr, o->disk_path.view(), o->core_dir.view());
@@ -167,7 +166,7 @@ Ex<void> RamSaveJob::compare_step_(ICoreWindow& window) {
     Work& w = *work_;
     const auto remaining = total_.after_header(proto::FileSize{off_});
     const auto n = static_cast<std::size_t>(
-        std::min<std::uint64_t>(kStepBytes, remaining.length_of(proto::BlockCount{1}))
+        std::min<std::uint64_t>(kStepBytes, remaining.file_word<std::size_t>())
     );
     if (auto r = gather_(window, off_, n); !r)
         return r;
@@ -193,9 +192,8 @@ Ex<void> RamSaveJob::write_step_(ICoreWindow& window, const svc::Vfs& vfs) {
     Work& w = *work_;
     if (!w.out) {
         const std::string_view path = w.ram_path.view();
-        const std::size_t slash = path.rfind('/');
-        if (slash != std::string_view::npos) {
-            if (auto d = vfs.ensure_dir(path.substr(0, slash)); !d)
+        if (const auto dir = infra::dirname(path); dir) {
+            if (auto d = vfs.ensure_dir(*dir); !d)
                 return d;
         }
         auto out = vfs.open(path, svc::OpenMode::Sync);
@@ -205,7 +203,7 @@ Ex<void> RamSaveJob::write_step_(ICoreWindow& window, const svc::Vfs& vfs) {
     }
     const auto remaining = total_.after_header(proto::FileSize{off_});
     const auto n = static_cast<std::size_t>(
-        std::min<std::uint64_t>(kStepBytes, remaining.length_of(proto::BlockCount{1}))
+        std::min<std::uint64_t>(kStepBytes, remaining.file_word<std::size_t>())
     );
     if (auto r = gather_(window, off_, n); !r)
         return r;

@@ -69,7 +69,7 @@ bool OwnerLadder::arm(
     if (ladder_ == nullptr)
         return false;
 
-    last_dir_.assign(ladder_->next_last_dir());
+    last_dir_.assign(ladder_->carry().last_dir);
     kind_ = LadderKind::Mount;
     moved_ = true;
     owed_ = Owed{ask.which, ask.tag};
@@ -107,11 +107,11 @@ std::optional<OwnerLadder::Ended> OwnerLadder::finish_(bool ok) {
         ++tally_.ladder_failures;
     publish_(false);
 
-    last_dir_.assign(ladder_->next_last_dir());
-    noreset_ = ladder_->next_noreset();
-    const auto paths = ladder_->next_slot_paths();
-    for (std::size_t i = 0; i < paths.size() && i < slot_paths_.size(); ++i)
-        slot_paths_[i] = paths[i];
+    const cores::LadderCarry carry = ladder_->carry();
+    last_dir_.assign(carry.last_dir);
+    noreset_ = carry.noreset;
+    for (std::size_t i = 0; i < carry.slot_paths.size() && i < slot_paths_.size(); ++i)
+        slot_paths_[i] = carry.slot_paths[i];
     const cores::BootLadder::Report rep = ladder_->report();
     if (rep.savestate_hold_expired)
         ++tally_.savestate_hold_expiries;
@@ -181,7 +181,7 @@ bool OwnerLadder::arm_start(
     kind_ = LadderKind::Start;
     owed_ = Owed{};
     index_ = sp.save ? sp.save->slot : proto::IoIndex{};
-    last_dir_.assign(ladder_->next_last_dir());
+    last_dir_.assign(ladder_->carry().last_dir);
     moved_ = true;
     ++tally_.ladders_run;
     publish_(true);

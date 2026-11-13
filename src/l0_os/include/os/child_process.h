@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
+#include "os/process_id.h"
 
 namespace mister::os {
 
@@ -34,6 +35,16 @@ public:
 
     struct SignalNumber {
         int v = 0;
+
+        struct StatusBase {
+            int v = 0;
+            friend constexpr bool operator==(StatusBase, StatusBase) = default;
+        };
+
+        [[nodiscard]] constexpr int shell_status(StatusBase base) const noexcept {
+            return base.v + v;
+        }
+
         friend constexpr bool operator==(SignalNumber, SignalNumber) = default;
     };
 
@@ -108,7 +119,7 @@ public:
 
     ~ChildProcess();
 
-    [[nodiscard]] ::pid_t pid() const noexcept { return pid_; }
+    [[nodiscard]] std::optional<ProcessId> pid() const noexcept { return ProcessId::of(pid_); }
 
     [[nodiscard]] int pidfd() const noexcept { return pidfd_; }
 

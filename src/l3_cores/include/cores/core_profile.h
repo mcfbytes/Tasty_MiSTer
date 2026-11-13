@@ -5,8 +5,8 @@
 #include <span>
 #include <string_view>
 
-#include "cores/blank_region.h"
-#include "cores/blank_save_spec.h"
+#include "svc/blank_region.h"
+#include "svc/blank_save.h"
 #include "cores/boot_asset.h"
 #include "cores/cheat_lookup.h"
 #include "cores/config_codec.h"
@@ -32,7 +32,7 @@
 namespace mister::svc {
 class IAnalogReshape;
 class ISectorProgram;
-class IDiscIdentity;
+class IDiscRules;
 }
 
 namespace mister::cores {
@@ -108,7 +108,7 @@ struct CoreProfile {
 
     StartRule start = StartRule::Chain;
     std::span<const SignatureRow> signatures;
-    BlankSaveSpec blank_save{};
+    svc::BlankSaveSpec blank_save{};
 
     bool saves_by_channel = false;
 
@@ -154,17 +154,6 @@ struct CoreProfile {
 
     bool file_tx_whole = false;
 
-    struct GzipContent {
-        std::string_view ext{};
-        proto::FileSize cap{};
-
-        [[nodiscard]] bool wants(std::string_view file_ext) const noexcept {
-            return !ext.empty() && infra::ieq(file_ext, ext);
-        }
-    };
-
-    GzipContent gzip_content{};
-
     ResetRow reset{};
 
     StartMount undeclared_start_mount = StartMount::Generic;
@@ -175,7 +164,7 @@ struct CoreProfile {
 
     infra::OptRef<const svc::ISectorProgram> sector_program{};
 
-    infra::OptRef<const svc::IDiscIdentity> disc_identity{};
+    infra::OptRef<const svc::IDiscRules> disc_rules{};
 
     infra::OptRef<const IConfigCodec> config_codec{};
 };

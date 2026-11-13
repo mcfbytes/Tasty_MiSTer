@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "board_parts.h"
 
+#include "hal/disk_lamp.h"
+
 #include <utility>
 
 #include "infra/seat.h"
@@ -38,14 +40,20 @@ std::unexpected<BoardParts::Refusal> refuse_after_link(
 
 }
 
+BoardParts::~BoardParts() = default;
+BoardParts::BoardParts(BoardParts&&) noexcept = default;
+BoardParts& BoardParts::operator=(BoardParts&&) noexcept = default;
+
 BoardParts::BoardParts(
     std::unique_ptr<hal::ILinkPort> link,
     std::unique_ptr<hal::IFpgaProgrammer> programmer,
-    std::unique_ptr<hal::IBridgeSequencer> bridges
+    std::unique_ptr<hal::IBridgeSequencer> bridges,
+    std::unique_ptr<hal::DiskLamp> lamp
 ) noexcept
     : link_(std::move(link)),
       programmer_(std::move(programmer)),
-      bridges_(std::move(bridges)) {}
+      bridges_(std::move(bridges)),
+      lamp_(std::move(lamp)) {}
 
 std::expected<BoardParts, BoardParts::Refusal> BoardParts::make(
     const hal::BoardProfile& profile,
@@ -75,29 +83,35 @@ std::expected<BoardParts, BoardParts::Refusal> BoardParts::make(
                     "BoardParts::make (cyclone_v::Bridges::open)",
                     brg.error()
                 );
+
+            auto lamp = std::make_unique<hal::DiskLamp>(*link);
             return BoardParts(
                 std::move(link),
                 std::make_unique<boards::cyclone_v::Programmer>(std::move(*prog)),
-                std::make_unique<boards::cyclone_v::Bridges>(std::move(*brg))
+                std::make_unique<boards::cyclone_v::Bridges>(std::move(*brg)),
+                std::move(lamp)
             );
         }
         case hal::BoardId::De25Nano:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
                 std::make_unique<boards::agilex_5::Programmer>(),
-                std::make_unique<boards::agilex_5::Bridges>()
+                std::make_unique<boards::agilex_5::Bridges>(),
+                nullptr
             );
         case hal::BoardId::Zynq7000:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
                 std::make_unique<boards::zynq_7000::Programmer>(),
-                std::make_unique<boards::zynq_7000::Bridges>()
+                std::make_unique<boards::zynq_7000::Bridges>(),
+                nullptr
             );
         case hal::BoardId::SpiSbc:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
                 std::make_unique<boards::spi_sbc::Programmer>(),
-                std::make_unique<boards::spi_sbc::Bridges>()
+                std::make_unique<boards::spi_sbc::Bridges>(),
+                nullptr
             );
     }
 

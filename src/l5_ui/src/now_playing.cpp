@@ -23,26 +23,26 @@ bool NowPlaying::on_done(
         return false;
     }
     const app::UiRequestRing::Pending& p = *ask;
-    if (!p.slot)
+    if (!p.row)
         return false;
-    const app::RememberedSlot slot = *p.slot;
+    const proto::FileRowId row = *p.row;
     File* at = nullptr;
     for (File& f : files_)
-        if (f.used && f.slot == slot && f.index == p.index)
+        if (f.row && *f.row == row)
             at = &f;
     if (p.path.empty()) {
         if (at != nullptr)
-            at->used = false;
+            at->row.reset();
     } else {
         if (at == nullptr) {
             at = &files_[next_file_];
             next_file_ = (next_file_ + 1) % kFiles;
         }
-        *at = File{.slot = slot, .index = p.index, .used = true, .path = p.path};
+        *at = File{.row = row, .path = p.path};
     }
 
-    const bool save = slot == app::RememberedSlot::Mount
-        && cores::role_of(slots, p.index) == cores::SlotRole::Save;
+    const bool save = row.kind == proto::FileRowKind::Mount
+        && cores::role_of(slots, row.index) == cores::SlotRole::Save;
     if (!p.game || save)
         return false;
     game_ = true;
@@ -50,8 +50,7 @@ bool NowPlaying::on_done(
     (void)title_.assign(infra::utf8_prefix(title, Title::kCapacity));
     last_ = Played{
         .core_image = core_image_,
-        .slot = slot,
-        .ioctl_index = p.index,
+        .row = row,
         .path = p.path,
         .title = title_,
         .unix_time = unix_time
@@ -69,12 +68,9 @@ void NowPlaying::on_core_loaded(infra::OptRef<const app::UiRequestRing::Pending>
     primary_ = PrimaryRead{};
 }
 
-std::string_view NowPlaying::file_of_(
-    app::RememberedSlot slot,
-    proto::IoIndex index
-) const noexcept {
+std::string_view NowPlaying::path_of(proto::FileRowId row) const noexcept {
     for (const File& f : files_)
-        if (f.used && f.slot == slot && f.index == index)
+        if (f.row && *f.row == row)
             return f.path.view();
     return {};
 }

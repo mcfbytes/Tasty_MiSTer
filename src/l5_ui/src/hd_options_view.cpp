@@ -21,7 +21,7 @@ HdOptionsView::HdOptionsView(IOptionsSurface& surface, const Spec& spec) noexcep
 HdOptionsView::~HdOptionsView() = default;
 
 std::unique_ptr<HdListPage> HdOptionsView::make_list_() const {
-    const ItemId key = item_submenu(surface_.model().page());
+    const PageArg key{surface_.model().page()};
     return std::make_unique<HdListPage>(
         std::make_unique<HdOptionsPlan>(surface_, spec_),
         key,
@@ -43,7 +43,7 @@ BuildEnv HdOptionsView::walk_env(const BuildEnv& env) const {
 
 void HdOptionsView::on_model_rebuilt() {
     TASTY_SEAT_BODY(HdOptionsView);
-    retired_refusals_ += list_->refusals();
+    retired_refusals_.add(list_->refusals());
     list_ = make_list_();
 }
 
@@ -77,9 +77,9 @@ bool HdOptionsView::empty() const {
     return list_->empty();
 }
 
-std::uint32_t HdOptionsView::refusals() const noexcept {
+svc::Tally HdOptionsView::refusals() const noexcept {
     TASTY_SEAT_BODY(HdOptionsView);
-    return retired_refusals_ + list_->refusals();
+    return retired_refusals_.sum(list_->refusals());
 }
 
 }

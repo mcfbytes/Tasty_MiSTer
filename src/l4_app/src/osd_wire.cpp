@@ -7,6 +7,8 @@ namespace mister::app {
 
 Ex<void> OsdWire::show_as(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdTarget t) noexcept {
     proto::Link link{*link_};
+
+    asleep_ = false;
     const bool drop_hdmi = proto::includes_hdmi(target_) && !proto::includes_hdmi(t);
     if (drop_hdmi) {
         if (auto e = osd_.set_target(proto::OsdTarget::Hdmi); !e)
@@ -59,6 +61,26 @@ Ex<void> OsdWire::show_as(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdT
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(s)});
 }
 
+Ex<void> OsdWire::send_rotation() noexcept {
+    const proto::OsdTarget latched = target_;
+    Ex<void> sent = osd_.set_target(proto::OsdTarget::All);
+    if (sent) {
+        proto::Link link{*link_};
+        sent = osd_.set_rotation(link, rotation_);
+    }
+    const Ex<void> restored = osd_.set_target(latched);
+    if (!sent) {
+        tally_.rotation_failures.add();
+        return sent;
+    }
+    if (!restored) {
+        tally_.rotation_failures.add();
+        return restored;
+    }
+    tally_.rotations_sent.add();
+    return {};
+}
+
 Ex<void> OsdWire::release(ShowOwner owner) noexcept {
     if (!opened_by(owner))
         return {};
@@ -67,12 +89,24 @@ Ex<void> OsdWire::release(ShowOwner owner) noexcept {
 }
 
 Ex<void> OsdWire::reassert_show() noexcept {
-    if (!reasserted_ && lit()) {
+
+    if (!reasserted_ && !asleep_ && lit()) {
 
         if (auto r = show_as(show_, ShowOwner::Policy, target_); !r)
             return r;
     }
     reasserted_ = true;
+    return {};
+}
+
+Ex<void> OsdWire::menu_ctl(bool enable) noexcept {
+    proto::Link link{*link_};
+    if (auto e = osd_.set_target(target_); !e)
+        return e;
+    if (auto e = osd_.menu_ctl(link, enable); !e)
+        return e;
+    asleep_ = !enable;
+    tally_.menu_ctls_sent.add();
     return {};
 }
 

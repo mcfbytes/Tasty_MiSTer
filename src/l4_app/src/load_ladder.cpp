@@ -22,9 +22,9 @@ Ex<LoadLadder> LoadLadder::start(
 ) {
     const cores::TransferRow& r = job.row;
     const std::uint64_t placed = r.spread_bytes(proto::FileSize{job.total})
-                                     .length_of(proto::BlockCount{1});
+                                     .file_word<std::size_t>();
     const std::uint64_t extent = r.extent_bytes(proto::FileSize{job.total})
-                                     .length_of(proto::BlockCount{1});
+                                     .file_word<std::size_t>();
 
     if (job.loader == nullptr
         || (job.file == nullptr && job.total != 0)
@@ -170,8 +170,7 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
         const Ex<std::size_t> placed = row.stride == 1
             ? window_.write(static_cast<std::size_t>(off_), std::as_bytes(piece))
             : window_.write_lanes(
-                  row.spread_at(proto::FileSize{off_}).length_of(proto::BlockCount{1})
-                      + 2u * row.lane,
+                  row.spread_at(proto::FileSize{off_}).file_word<std::size_t>() + 2u * row.lane,
                   std::as_bytes(piece),
                   row.stride
               );
@@ -196,7 +195,7 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
 
 LoadLadder::Pass LoadLadder::fill_(Host& h) {
     const std::uint64_t from = job_.row.spread_bytes(proto::FileSize{job_.total})
-                                   .length_of(proto::BlockCount{1});
+                                   .file_word<std::size_t>();
     if (fill_off_ < from)
         fill_off_ = from;
     if (fill_off_ >= extent_) {
@@ -245,11 +244,10 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
     if (!facts.empty()) {
         if (h.inbox.ring().size() >= proto::kLinkTxCapacity)
             return Pass::Waiting;
-        auto id = h.inbox.intern(facts);
-        if (!id)
-            return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
-        if (!h.inbox.push(proto::LinkOp::LoadFacts{.facts = *id}))
-            return Pass::Waiting;
+
+        const auto sent = h.inbox.push_load_facts(facts, path_.view());
+        if (!sent)
+            return sent.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
         facts_pushed_ = true;
     }
 

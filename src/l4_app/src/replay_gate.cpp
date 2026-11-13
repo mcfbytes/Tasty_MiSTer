@@ -18,20 +18,24 @@ static_assert(
 );
 
 std::chrono::nanoseconds ReplayGate::end_to_edge_() const noexcept {
-    return edge_ - end_;
+    return run_.ref.edge() - run_.began;
 }
 
 std::chrono::nanoseconds ReplayGate::into_frame_() const noexcept {
-    return now_ - edge_;
+    return now_ - run_.ref.edge();
 }
 
 std::chrono::nanoseconds ReplayGate::since_offset_() const noexcept {
-    return into_frame_() - offset_ns_;
+    return into_frame_() - facts_.offset;
 }
 
 Ex<proto::FrameCount> ReplayGate::read_counter_() noexcept {
     round_words_ += proto::FrameCounterRead::kReadWords;
     return w_.frames.read();
+}
+
+Wrapping ReplayGate::wrap_(proto::FrameCount c) noexcept {
+    return {CoreFrameCount{c.count}, CoreFrameCount{proto::FrameCounterRead::kWrapMask}};
 }
 
 void ReplayGate::sample_control_() noexcept {
@@ -53,8 +57,8 @@ void ReplayGate::tick(
     blk_seen_ = late.count;
     const StatusMicros late_max{late.max_us};
     if (level_ == ReplayLevel::Running
-        && (late.count - blk_base_ != status_.blk_late || late_max > status_.blk_late_max_us)) {
-        status_.blk_late = late.count - blk_base_;
+        && (late.count - run_.blk_base != status_.blk_late || late_max > status_.blk_late_max_us)) {
+        status_.blk_late = late.count - run_.blk_base;
         status_.blk_late_max_us = std::max(status_.blk_late_max_us, late_max);
         dirty_ = true;
     }
@@ -83,90 +87,73 @@ void ReplayGate::tick(
         return;
     if (!ready) {
         ++status_.held_rounds;
-        tick_.reset();
-        gap_ = {};
+        run_.tick.reset();
+        run_.gap = {};
         return;
     }
-    gap_ = tick_ ? now_ - *tick_ : std::chrono::nanoseconds{};
-    tick_ = now_;
+    run_.gap = run_.tick ? now_ - *run_.tick : std::chrono::nanoseconds{};
+    run_.tick = now_;
     note_gap_();
     if (!sample_ref_())
         return;
-    if (!epoch_known_) {
-        if (rule_.p0 == ReplayMsg::P0Parity::AfterSilence && now_ - end_ > kSilenceWindowNs)
+    if (!run_.epoch) {
+        if (facts_.epoch.by_silence() && now_ - run_.began > kSilenceWindowNs)
             disarm_(ReplayEnd::EpochAmbiguous, true);
         return;
     }
-    mf_ = WideMovieFrame{static_cast<std::int64_t>(frames_) - epoch_} - lead_;
+    run_.mf = WideMovieFrame{}
+        + (CoreFrameGap::of_count(run_.ref.frames()) - CoreFrameGap::of_count(*run_.epoch))
+              .movie_span()
+        - facts_.lead;
     note_depth_();
-    if (held_ && due_(*held_)) {
-        const ReplayMsg::Input r = *held_;
-        held_.reset();
+    if (run_.held && due_(*run_.held)) {
+        const ReplayMsg::Input r = *run_.held;
+        run_.held.reset();
         apply_(r);
     }
 }
 
 bool ReplayGate::sample_ref_() noexcept {
 
-    if (now_ - last_sample_ > alias_ns_) {
+    if (run_.ref.lost(now_, facts_.alias)) {
         disarm_(ReplayEnd::RefLost, true);
         return false;
     }
-    std::uint32_t raw = 0;
+    FrameReference::Step step{};
     if (status_.ref == ReplayRef::Counter) {
         const auto r = read_counter_();
         if (!r || !r->supported) {
             ++status_.link_errors;
             return false;
         }
-        raw = r->count;
+        step = run_.ref.sample(wrap_(*r), now_, dating_());
     } else {
         reactor::FrameRecord rec{};
         if (!w_.vsync || w_.vsync->sample_into(rec) == 0)
             return false;
-        raw = rec.seq.v;
-    }
-    const std::optional<os::RawMonotonicClock::time_point> prev_read = read_;
-    read_ = now_;
-    if (raw == last_raw_)
-        return true;
-    last_sample_ = now_;
-    const std::uint32_t d = (raw - last_raw_) & wrap_mask_;
-    last_raw_ = raw;
-    frames_ += d;
-    os::RawMonotonicClock::time_point edge = now_;
 
-    if (epoch_known_ && prev_read && now_ - *prev_read > kGapNs)
-        edge = std::min(now_, std::max(*prev_read, edge_ + rule_.period * d));
-    edge_gap_ = edge - edge_;
-    edge_ = edge;
-    if (d > 1)
-        status_.skipped_edges += d - 1;
-    if (!epoch_known_) {
-        if (rule_.p0 == ReplayMsg::P0Parity::AfterSilence) {
-            decide_silence_(d);
+        step = run_.ref.sample(FrameReference::VsyncSample{rec.seq, rec.edge}, now_);
+    }
+    if (!step.moved())
+        return true;
+    if (!step.single())
+        status_.skipped_edges += step.skipped();
+    if (!run_.epoch) {
+        if (facts_.epoch.by_silence()) {
+            decide_silence_(step);
         } else {
-            decide_epoch_(d);
+            decide_epoch_(step);
         }
     }
     return level_ == ReplayLevel::Running;
 }
 
+infra::OptRef<const FrameReference::Dating> ReplayGate::dating_() const noexcept {
+    return run_.epoch ? infra::OptRef<const FrameReference::Dating>{facts_.dating}
+                      : infra::OptRef<const FrameReference::Dating>{};
+}
+
 namespace {
-
-std::int64_t ceil_div(std::chrono::nanoseconds a, std::chrono::nanoseconds b) {
-    const std::int64_t periods = a / b;
-    return a % b == std::chrono::nanoseconds::zero() || a < std::chrono::nanoseconds::zero()
-        ? periods
-        : periods + 1;
-}
-
-std::int64_t released(std::int64_t j, ReplayMsg::P0Parity p0, std::uint32_t first_count) {
-    if (p0 == ReplayMsg::P0Parity::Any || j < 0)
-        return j;
-    const std::uint32_t want = p0 == ReplayMsg::P0Parity::Odd ? 1u : 0u;
-    return ((first_count + static_cast<std::uint32_t>(j)) & 1u) == want ? j : j + 1;
-}
 
 struct PadOwned {
     using Result = bool;
@@ -186,72 +173,47 @@ static_assert(LinkOpPadSink<PadOwned>);
 
 }
 
-ReplayGate::EpochPick ReplayGate::EpochRule::pick(
-    std::chrono::nanoseconds delay,
-    std::uint32_t first_count
-) const noexcept {
-    const std::chrono::nanoseconds x = poweron + period - line0 - delay;
-    return {
-        released(ceil_div(x - ReplayGate::kEndSlackNs, period), p0, first_count),
-        released(ceil_div(x + ReplayGate::kTickNs, period), p0, first_count)
-    };
-}
-
-void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
+void ReplayGate::decide_epoch_(FrameReference::Step step) noexcept {
     const std::chrono::nanoseconds d = end_to_edge_();
     status_.epoch_delay_us = us_of(d);
-    const EpochPick p = rule_.pick(d, last_raw_);
-    const bool band = p.j != p.hi;
+    const CountParity first = run_.ref.parity();
+    const EpochRule::Pick p = facts_.epoch.pick(d, first, facts_.tick);
+    const bool untimed = facts_.untimed(p);
 
-    const bool untimed = p.j == 0 && lead_ <= MovieSpan{-std::int64_t{kFloorBack}};
+    const std::optional<CoreFrameCount> slip = (untimed || p.j < CoreFrameGap{})
+        ? facts_.epoch.slip(d, first, facts_.tick)
+        : std::nullopt;
+    if (!slip && (!step.single() || p.j < CoreFrameGap{} || untimed || p.ambiguous())) {
 
-    bool slipped = false;
-    std::uint32_t slip = 0;
-    if ((untimed || p.j < 0) && rule_.p0 == ReplayMsg::P0Parity::Any && rule_.late_frames.any()) {
-        for (const std::uint32_t k : rule_.late_frames.slips()) {
-            const std::chrono::nanoseconds earlier = d - rule_.period * k;
-            const EpochPick s = rule_.pick(earlier, last_raw_);
-            if (s.j == s.hi && s.j == k) {
-                slipped = true;
-                slip = k;
-                break;
-            }
-        }
-    }
-    if (!slipped && (delta != 1 || p.j < 0 || untimed || band)) {
-
-        status_.epoch_fail = delta != 1 ? EpochFail::Retry
-            : untimed                   ? EpochFail::Untimed
-            : p.j < 0                   ? EpochFail::Before
-                                        : EpochFail::Retry;
+        status_.epoch_fail = !step.single() ? EpochFail::Retry
+            : untimed                       ? EpochFail::Untimed
+            : p.j < CoreFrameGap{}          ? EpochFail::Before
+                                            : EpochFail::Retry;
         return disarm_(ReplayEnd::EpochAmbiguous, true);
     }
 
-    epoch_ = slipped ? slip : static_cast<std::uint32_t>(1 + p.j);
-    status_.epoch_edge = epoch_;
-    epoch_known_ = true;
+    run_.epoch = slip ? *slip : (CoreFrameGap{1} + p.j).core_frames();
+    status_.epoch_edge = *run_.epoch;
 }
 
-void ReplayGate::decide_silence_(std::uint32_t delta) noexcept {
-    const std::chrono::nanoseconds gap = edge_ - prev_edge_;
-    prev_edge_ = edge_;
-    if (gap <= rule_.period + kSilenceSlackNs)
+void ReplayGate::decide_silence_(FrameReference::Step step) noexcept {
+    const std::chrono::nanoseconds gap = run_.ref.lapse_since_look();
+    if (gap <= facts_.epoch.period + kSilenceSlackNs)
         return;
 
-    if (delta != 1)
+    if (!step.single())
         return disarm_(ReplayEnd::EpochAmbiguous, true);
     status_.epoch_delay_us = us_of(end_to_edge_());
-    epoch_ = frames_;
-    status_.epoch_edge = epoch_;
-    epoch_known_ = true;
+    run_.epoch = run_.ref.frames();
+    status_.epoch_edge = *run_.epoch;
 }
 
 bool ReplayGate::pre_epoch_(MovieFrame frame) const noexcept {
-    return wide_frame(frame) + lead_ < WideMovieFrame{-static_cast<std::int64_t>(floor_back_)};
+    return wide_frame(frame) + facts_.lead < facts_.pre_epoch_below;
 }
 
 bool ReplayGate::live_() const noexcept {
-    return epoch_known_ && frames_ + floor_back_ >= epoch_;
+    return run_.epoch && run_.ref.frames() + facts_.floor_back >= *run_.epoch;
 }
 
 bool ReplayGate::due_(const ReplayMsg::Input& r) const noexcept {
@@ -259,7 +221,7 @@ bool ReplayGate::due_(const ReplayMsg::Input& r) const noexcept {
     if (!ready_ || level_ != ReplayLevel::Running || !live_())
         return false;
     const WideMovieFrame first = wide_frame(r.first);
-    return first < mf_ || (first == mf_ && since_offset_() >= std::chrono::nanoseconds{0});
+    return first < run_.mf || (first == run_.mf && since_offset_() >= std::chrono::nanoseconds{0});
 }
 
 void ReplayGate::note_late_(MovieFrame first) noexcept {
@@ -267,34 +229,34 @@ void ReplayGate::note_late_(MovieFrame first) noexcept {
     if (status_.first_late_frame >= MovieFrame{})
         return;
     status_.first_late_frame = first;
-    status_.late_gap_us = us_of(gap_);
+    status_.late_gap_us = us_of(run_.gap);
     status_.late_into_us = us_of(into_frame_());
-    status_.late_edge_us = us_of(edge_gap_);
+    status_.late_edge_us = us_of(run_.ref.edge_gap());
     status_.late_depth = queued_.value_or(0);
 }
 
 void ReplayGate::note_gap_() noexcept {
-    const StatusMicros us = us_of(gap_);
+    const StatusMicros us = us_of(run_.gap);
     if (us > status_.gap_max_us) {
         status_.gap_max_us = us;
-        status_.gap_frame = mf_.narrowed();
+        status_.gap_frame = run_.mf.narrowed();
     }
 }
 
 void ReplayGate::note_depth_() noexcept {
-    if (!queued_ || end_seen_ || !live_())
+    if (!queued_ || run_.end || !live_())
         return;
-    const auto depth = static_cast<std::int32_t>(*queued_ + (held_ ? 1u : 0u));
+    const auto depth = static_cast<std::int32_t>(*queued_ + (run_.held ? 1u : 0u));
     if (status_.depth_min < 0 || depth < status_.depth_min) {
         status_.depth_min = depth;
-        status_.depth_min_frame = mf_.narrowed();
+        status_.depth_min_frame = run_.mf.narrowed();
     }
 }
 
 void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
     const WideMovieFrame first = wide_frame(r.first);
     const WideMovieFrame last = wide_frame(r.last);
-    covered_ = std::max(covered_, last);
+    run_.covered = std::max(run_.covered, last);
     if (pre_epoch_(r.first)) {
         ++status_.pre_epoch;
         write_(r);
@@ -302,13 +264,13 @@ void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
     }
 
     const WideMovieFrame level = since_offset_() >= std::chrono::nanoseconds{0}
-        ? mf_
-        : mf_ - MovieSpan{1};
+        ? run_.mf
+        : run_.mf - MovieSpan{1};
     if (last < level) {
         ++status_.lost;
         return note_late_(r.first);
     }
-    if (first < mf_) {
+    if (first < run_.mf) {
         note_late_(r.first);
     } else {
         const StatusMicros us = us_of(into_frame_());
@@ -322,8 +284,8 @@ void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
 }
 
 void ReplayGate::write_(const ReplayMsg::Input& r) noexcept {
-    write_masks_(r.mask, ports_);
-    status_.applied_frame = std::min(mf_, wide_frame(r.last)).narrowed();
+    write_masks_(r.mask, facts_.ports);
+    status_.applied_frame = std::min(run_.mf, wide_frame(r.last)).narrowed();
 }
 
 void ReplayGate::write_masks_(
@@ -376,7 +338,7 @@ void ReplayGate::count_write_(const Ex<bool>& out, std::uint32_t held_before) no
 bool ReplayGate::wants_record() const noexcept {
     if (level_ == ReplayLevel::Idle)
         return true;
-    return !held_ && !end_seen_;
+    return !run_.held && !run_.end;
 }
 
 void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept {
@@ -384,12 +346,12 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
 
     sample_control_();
 
+    const std::optional<ArmFacts> facts = ArmFacts::of(a);
     if (level_ != ReplayLevel::Idle
         || !release_ports_.empty()
         || ctrl_.op != ReplayOp::Play
         || ctrl_.gen != h.gen
-        || a.ports.empty()
-        || a.period_ns == CodecNs::zero()) {
+        || !facts) {
         ++status_.stale;
         status_.gen = h.gen;
         status_.end = ReplayEnd::Refused;
@@ -403,35 +365,8 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     status_.level = ReplayLevel::AwaitPowerOn;
     level_ = ReplayLevel::AwaitPowerOn;
     gen_ = h.gen;
-    ports_ = a.ports.limited_to(svc::PlayerCount::of(kReplayPorts));
-    rom_index_ = a.rom_index;
-    vsync_ok_ = a.vsync_ok;
-    lead_ = a.lead.movie_span();
-    offset_ns_ = std::chrono::duration_cast<std::chrono::nanoseconds>(a.offset_us);
-    rule_ = EpochRule{
-        .poweron = a.poweron_ns,
-        .period = a.period_ns,
-        .line0 = a.line0_ns,
-        .p0 = a.p0,
-        .late_frames = a.late_frames
-    };
-    event_ = a.event;
-
-    floor_back_ = rule_.p0 == ReplayMsg::P0Parity::AfterSilence ? 0u : kFloorBack;
-    alias_ns_ = rule_.period * kAliasFrames;
-    epoch_known_ = false;
-    epoch_ = 0;
-    frames_ = 0;
-    read_.reset();
-    edge_gap_ = {};
-    tick_.reset();
-    gap_ = {};
-    mf_ = kNoWideMovieFrame;
-    covered_ = kNoWideMovieFrame;
-    underrun_at_ = kNoWideMovieFrame;
-    held_.reset();
-    end_seen_ = false;
-    end_frame_ = MovieFrame{};
+    facts_ = *facts;
+    run_ = Run{};
     dirty_ = true;
 }
 
@@ -444,7 +379,7 @@ void ReplayGate::on(const ReplayMsg::Input& r, const ReplayMsg::Head& h) noexcep
     }
     if (due_(r))
         return apply_(r);
-    held_ = r;
+    run_.held = r;
 }
 
 void ReplayGate::on(const ReplayMsg::End& e, const ReplayMsg::Head& h) noexcept {
@@ -454,8 +389,7 @@ void ReplayGate::on(const ReplayMsg::End& e, const ReplayMsg::Head& h) noexcept 
         dirty_ = true;
         return;
     }
-    end_seen_ = true;
-    end_frame_ = e.frame;
+    run_.end = e.frame;
 }
 
 void ReplayGate::misrouted(const ReplayMsg&) noexcept {
@@ -466,75 +400,100 @@ void ReplayGate::misrouted(const ReplayMsg&) noexcept {
 
 void ReplayGate::settle() noexcept {
     TASTY_SEAT_BODY(ReplayGate);
-    if (level_ == ReplayLevel::Running && live_() && mf_ >= WideMovieFrame{}) {
-        if (end_seen_ && !held_ && mf_ >= wide_frame(end_frame_)) {
-            if (mf_ > wide_frame(end_frame_) || since_offset_() >= std::chrono::nanoseconds{0})
+    if (level_ == ReplayLevel::Running && live_() && run_.mf >= WideMovieFrame{}) {
+        if (run_.end && !run_.held && run_.mf >= wide_frame(*run_.end)) {
+            if (run_.mf > wide_frame(*run_.end) || since_offset_() >= std::chrono::nanoseconds{0})
                 disarm_(ReplayEnd::Finished, true);
-        } else if (!held_ && mf_ > covered_ && mf_ != underrun_at_) {
+        } else if (!run_.held && run_.mf > run_.covered && run_.mf != run_.underrun_at) {
 
-            const WideMovieFrame at = mf_;
-            underrun_at_ = at;
+            const WideMovieFrame at = run_.mf;
+            run_.underrun_at = at;
             ++status_.underruns;
             if (status_.first_underrun_frame < MovieFrame{})
-                status_.first_underrun_frame = mf_.narrowed();
+                status_.first_underrun_frame = run_.mf.narrowed();
         }
     }
 
     if (level_ == ReplayLevel::Idle && (!dirty_ || !release_ports_.empty()))
         return;
     status_.level = level_;
-    status_.movie_frame = mf_.narrowed();
+    status_.movie_frame = run_.mf.narrowed();
     w_.status.publish(status_);
     dirty_ = false;
 }
 
 void ReplayGate::note_download_end(proto::IoIndex wire_index) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
-    if (level_ != ReplayLevel::AwaitPowerOn || event_ != ReplayMsg::PowerOnEvent::LoadEnd)
+    if (level_ != ReplayLevel::AwaitPowerOn || facts_.event != ReplayMsg::PowerOnEvent::LoadEnd)
         return;
-
-    if (rom_index_ != kNoRomSlot && proto::WideIoIndex::of(wire_index, 0).io() != rom_index_)
+    if (!facts_.admits(wire_index))
         return;
     begin_run_();
 }
 
 void ReplayGate::note_core_reset() noexcept {
     TASTY_SEAT_BODY(ReplayGate);
-    if (level_ != ReplayLevel::AwaitPowerOn || event_ != ReplayMsg::PowerOnEvent::ResetPulse)
+    if (level_ != ReplayLevel::AwaitPowerOn || facts_.event != ReplayMsg::PowerOnEvent::ResetPulse)
         return;
     begin_run_();
 }
 
 void ReplayGate::begin_run_() noexcept {
     now_ = w_.clock.now();
-    end_ = now_;
     const auto c = read_counter_();
     if (c && c->supported) {
         status_.ref = ReplayRef::Counter;
-        last_raw_ = c->count;
-        wrap_mask_ = proto::FrameCounterRead::kWrapMask;
+        run_.ref = FrameReference::at(wrap_(*c), now_);
     } else {
         reactor::FrameRecord rec{};
 
-        if (!vsync_ok_
-            || rule_.p0 != ReplayMsg::P0Parity::Any
+        if (!facts_.vsync_ok
+            || facts_.epoch.needs_counter()
             || !w_.vsync
             || w_.vsync->sample_into(rec) == 0) {
             return disarm_(ReplayEnd::NoReference, false);
         }
         status_.ref = ReplayRef::Vsync;
-        last_raw_ = rec.seq.v;
-        wrap_mask_ = 0xFFFF'FFFFu;
-        alias_ns_ = rule_.period * kAliasFrames;
+        run_.ref = FrameReference::at(Wrapping::of(rec.seq), now_);
     }
-    frames_ = 0;
-    edge_ = now_;
-    prev_edge_ = now_;
-    last_sample_ = now_;
-    read_ = now_;
-    blk_base_ = blk_seen_;
+    run_.began = now_;
+    run_.blk_base = blk_seen_;
     level_ = ReplayLevel::Running;
     dirty_ = true;
+}
+
+std::optional<ReplayGate::ArmFacts> ReplayGate::ArmFacts::of(const ReplayMsg::Arm& a) noexcept {
+    if (a.ports.empty() || a.period_ns == CodecNs::zero())
+        return std::nullopt;
+    ArmFacts f;
+    f.ports = a.ports.limited_to(svc::PlayerCount::of(kReplayPorts));
+    f.rom = a.rom_index;
+    f.vsync_ok = a.vsync_ok;
+    f.lead = a.lead.movie_span();
+    f.offset = std::chrono::duration_cast<std::chrono::nanoseconds>(a.offset_us);
+    f.tick = kTickNs;
+    f.epoch = EpochRule{
+        .poweron = a.poweron_ns,
+        .period = a.period_ns,
+        .line0 = a.line0_ns,
+        .p0 = a.p0,
+        .late_frames = a.late_frames
+    };
+    f.event = a.event;
+    f.floor_back = f.epoch.by_silence() ? CoreFrameCount{} : kFloorBack;
+    f.pre_epoch_below = WideMovieFrame{} - CoreFrameGap::of_count(f.floor_back).movie_span();
+    f.alias = kAliasFrames.lasting(f.epoch.period);
+    f.dating = {f.epoch.period, kGapNs};
+    return f;
+}
+
+bool ReplayGate::ArmFacts::admits(proto::IoIndex wire) const noexcept {
+    return rom == kNoRomSlot || proto::WideIoIndex::of(wire, 0).io() == rom;
+}
+
+bool ReplayGate::ArmFacts::untimed(const EpochRule::Pick& p) const noexcept {
+    return p.j == CoreFrameGap{}
+    && lead <= MovieSpan{} - CoreFrameGap::of_count(kFloorBack).movie_span();
 }
 
 bool ReplayGate::suppresses(const proto::LinkOp& op) noexcept {
@@ -552,14 +511,14 @@ void ReplayGate::disarm_(ReplayEnd why, bool release) noexcept {
 
     if (release && level_ == ReplayLevel::Running) {
         if (ready_) {
-            write_masks_({}, ports_);
+            write_masks_({}, facts_.ports);
         } else {
-            release_ports_ = release_ports_.with(ports_);
+            release_ports_ = release_ports_.with(facts_.ports);
         }
     }
     level_ = ReplayLevel::Idle;
     status_.end = why;
-    held_.reset();
+    run_.held.reset();
     dirty_ = true;
 }
 

@@ -1,72 +1,76 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
 #include <optional>
 
 #include "infra/error.h"
-#include "infra/lease_order.h"
+#include "infra/grant_lease.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/build_generation.h"
 
 namespace mister::app {
 
-template <class Grant, class Route, SeatTag Seat>
+template <class Grant, class Route, class Owner>
 class LwBlockEndpoint {
+    TASTY_SEAT_FROM(Owner);
+
 public:
     using GrantCell = xthread::Telemetry<Grant, SeatTag::Main>;
+    using LeaseCell = xthread::Telemetry<xthread::GrantGen, Owner::kSeatDecl>;
+    using Lease = xthread::GrantLease<Grant, Owner>;
 
-    explicit LwBlockEndpoint(const GrantCell& cell) noexcept : cell_(cell) {}
+    static_assert(
+        Owner::kSeatDecl != SeatTag::Unbound,
+        "a block endpoint's owner tag must declare a seat"
+    );
+
+    LwBlockEndpoint(const GrantCell& cell, LeaseCell& lease) noexcept : grant_lease_(cell, lease) {}
 
     LwBlockEndpoint(const LwBlockEndpoint&) = delete;
     LwBlockEndpoint& operator=(const LwBlockEndpoint&) = delete;
     virtual ~LwBlockEndpoint() = default;
 
     void serve() noexcept {
-        seat_assert<Seat>(ERR_SITE(), __func__);
+        seat_assert<Owner::kSeatDecl>(ERR_SITE(), __func__);
         take_grant_();
-        if (bound_gen_ == 0)
+        if (!grant_lease_.bound())
             return;
         serve_bound_();
     }
 
     [[nodiscard]] bool idle() const noexcept {
-        if (const std::uint32_t g = cell_.generation(); g != 0 && g != grant_rd_.seen())
-            return false;
-        return bound_gen_ == 0 || idle_bound_hook_();
+        return !grant_lease_.untaken() && (!grant_lease_.bound() || idle_bound_hook_());
     }
 
     void on_pause() noexcept {
-        seat_assert<Seat>(ERR_SITE(), __func__);
+        seat_assert<Owner::kSeatDecl>(ERR_SITE(), __func__);
         unbind_();
     }
 
     void on_resume() noexcept {
-        seat_assert<Seat>(ERR_SITE(), __func__);
-        grant_rd_.forget();
+        seat_assert<Owner::kSeatDecl>(ERR_SITE(), __func__);
+        grant_lease_.forget();
     }
 
     void on_stop() noexcept {
-        seat_assert<Seat>(ERR_SITE(), __func__);
+        seat_assert<Owner::kSeatDecl>(ERR_SITE(), __func__);
         unbind_();
     }
 
-    [[nodiscard]] bool bound() const noexcept { return bound_gen_ != 0; }
+    [[nodiscard]] bool bound() const noexcept { return grant_lease_.bound(); }
 
 protected:
     [[nodiscard]] bool lease_() noexcept {
-        tally_.leased = true;
-        publish_();
-        if (xthread::grant_unchanged(cell_, bound_gen_))
+        if (grant_lease_.lease())
             return true;
-        tally_.leased = false;
         ++tally_.revoked;
         unbind_();
         return false;
     }
 
     void release_() noexcept {
-        tally_.leased = false;
+        grant_lease_.release();
         publish_();
     }
 
@@ -77,20 +81,18 @@ protected:
 
 private:
     void take_grant_() noexcept {
-        const std::optional<Grant> g = grant_rd_.take_if_changed(cell_);
-        if (!g)
+        const std::optional<typename Lease::Taken> t = grant_lease_.take();
+        if (!t)
             return;
 
-        const std::uint32_t gen = grant_rd_.seen();
-
         unbind_();
-        if (g->live())
-            bind_(*g, gen);
+        if (t->grant.live())
+            bind_(t->grant, t->gen);
     }
 
-    void bind_(const Grant& g, std::uint32_t gen) noexcept {
+    void bind_(const Grant& g, xthread::GrantGen gen) noexcept {
         grant_ = g;
-        bound_gen_ = gen;
+        grant_lease_.bind(gen);
         prepare_hook_(g);
         if (!lease_()) {
             answer_hook_(g.gen);
@@ -112,11 +114,11 @@ private:
     }
 
     void unbind_() noexcept {
-        if (bound_gen_ == 0)
+        if (!grant_lease_.bound())
             return;
         unbind_hook_();
         grant_ = Grant{};
-        bound_gen_ = 0;
+        grant_lease_.unbind();
         tally_.on_lw = false;
         publish_();
     }
@@ -133,15 +135,13 @@ private:
 
     virtual void bound_hook_() noexcept = 0;
 
-    virtual void answer_hook_(std::uint16_t gen) noexcept = 0;
+    virtual void answer_hook_(proto::BuildGeneration gen) noexcept = 0;
 
     virtual void unbind_hook_() noexcept = 0;
     virtual void serve_bound_() noexcept = 0;
     [[nodiscard]] virtual bool idle_bound_hook_() const noexcept = 0;
 
-    const GrantCell& cell_;
-    typename GrantCell::Reader grant_rd_{};
-    std::uint32_t bound_gen_ = 0;
+    Lease grant_lease_;
 };
 
 }

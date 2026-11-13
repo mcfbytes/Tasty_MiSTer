@@ -121,7 +121,10 @@ private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
     [[nodiscard]] Ex<void> on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) override;
-    [[nodiscard]] Ex<void> on_apply_load_facts(std::span<const std::uint8_t> facts) override;
+    [[nodiscard]] Ex<void> on_apply_load_facts(
+        std::span<const std::uint8_t> facts,
+        std::string_view
+    ) override;
 
     [[nodiscard]] infra::OptRef<ISectorKick> on_sector_kick() noexcept override {
         return infra::OptRef<ISectorKick>{*this};

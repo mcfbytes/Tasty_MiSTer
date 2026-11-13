@@ -752,7 +752,7 @@ void FrameCopier::deliver_(
     frame.rgb.stride = RowBytes{h.line};
     VideoGeometryRecord g{};
     if (w_.video.sample_into(g) != 0 && g.valid && rate_is_ours_(g.core_seq))
-        frame.vtime = g.vtime;
+        frame.rate = g.rate;
     const std::size_t bytes = h.image_bytes();
     const std::span<std::byte> stripe = arena_.stripe(*w_.channel.index_of(loan));
     if (bytes > stripe.size()) {

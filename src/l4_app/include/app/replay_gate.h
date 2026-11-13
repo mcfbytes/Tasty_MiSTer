@@ -6,6 +6,8 @@
 #include <optional>
 
 #include "app/core_frame_counter.h"
+#include "app/epoch_rule.h"
+#include "app/frame_reference.h"
 #include "app/replay_control.h"
 #include "app/replay_msg.h"
 #include "app/replay_status.h"
@@ -48,13 +50,11 @@ public:
     static constexpr std::uint32_t kMaxRoundWords = 2 * proto::FrameCounterRead::kReadWords
         + (kReplayBudget + 2) * kReplayPorts * proto::JoystickPort::kMaxDigitalPushWords;
 
-    static constexpr std::uint32_t kAliasFrames = 200;
+    static constexpr CoreFrameCount kAliasFrames{200};
 
     static constexpr std::chrono::nanoseconds kTickNs{reactor::kTickNs};
 
-    static constexpr std::chrono::nanoseconds kEndSlackNs{50'000};
-
-    static constexpr std::uint32_t kFloorBack = 1;
+    static constexpr CoreFrameCount kFloorBack{1};
 
     static constexpr std::chrono::nanoseconds kSilenceSlackNs = 2 * kTickNs;
     static constexpr std::chrono::nanoseconds kSilenceWindowNs{1'000'000'000};
@@ -100,29 +100,46 @@ public:
     [[nodiscard]] const ReplayStatus& status() const noexcept { return status_; }
 
 private:
-    struct EpochPick {
-        std::int64_t j;
-        std::int64_t hi;
+    struct ArmFacts {
+        svc::PlayerMask ports{};
+        proto::IoIndex rom = kNoRomSlot;
+        bool vsync_ok = false;
+        MovieSpan lead{};
+        std::chrono::nanoseconds offset{};
+        std::chrono::nanoseconds tick{};
+        EpochRule epoch{};
+        ReplayMsg::PowerOnEvent event = ReplayMsg::PowerOnEvent::LoadEnd;
+        CoreFrameCount floor_back{};
+        WideMovieFrame pre_epoch_below{};
+        std::chrono::nanoseconds alias{};
+        FrameReference::Dating dating{};
+
+        [[nodiscard]] static std::optional<ArmFacts> of(const ReplayMsg::Arm& a) noexcept;
+        [[nodiscard]] bool admits(proto::IoIndex wire) const noexcept;
+        [[nodiscard]] bool untimed(const EpochRule::Pick& p) const noexcept;
     };
 
-    struct EpochRule {
-        std::chrono::nanoseconds poweron{};
-        std::chrono::nanoseconds period{};
-        std::chrono::nanoseconds line0{};
-        ReplayMsg::P0Parity p0 = ReplayMsg::P0Parity::Any;
-        cores::LateFrames late_frames{};
-
-        [[nodiscard]] EpochPick pick(
-            std::chrono::nanoseconds delay,
-            std::uint32_t first_count
-        ) const noexcept;
+    struct Run {
+        FrameReference ref{};
+        FrameReference::Instant began{};
+        std::optional<CoreFrameCount> epoch{};
+        std::uint32_t blk_base = 0;
+        std::optional<FrameReference::Instant> tick{};
+        std::chrono::nanoseconds gap{};
+        WideMovieFrame mf = kNoWideMovieFrame;
+        WideMovieFrame covered = kNoWideMovieFrame;
+        WideMovieFrame underrun_at = kNoWideMovieFrame;
+        std::optional<ReplayMsg::Input> held{};
+        std::optional<MovieFrame> end{};
     };
 
     void sample_control_() noexcept;
     [[nodiscard]] bool sample_ref_() noexcept;
     void begin_run_() noexcept;
-    void decide_epoch_(std::uint32_t delta) noexcept;
-    void decide_silence_(std::uint32_t delta) noexcept;
+    void decide_epoch_(FrameReference::Step step) noexcept;
+    void decide_silence_(FrameReference::Step step) noexcept;
+
+    [[nodiscard]] infra::OptRef<const FrameReference::Dating> dating_() const noexcept;
     [[nodiscard]] bool due_(const ReplayMsg::Input& r) const noexcept;
     void apply_(const ReplayMsg::Input& r) noexcept;
     void write_(const ReplayMsg::Input& r) noexcept;
@@ -146,6 +163,8 @@ private:
 
     [[nodiscard]] Ex<proto::FrameCount> read_counter_() noexcept;
 
+    [[nodiscard]] static Wrapping wrap_(proto::FrameCount c) noexcept;
+
     Wiring w_;
 
     proto::SpiFrame frame_{w_.link};
@@ -156,46 +175,19 @@ private:
 
     ReplayLevel level_ = ReplayLevel::Idle;
     ControlGeneration gen_{};
-    svc::PlayerMask ports_{};
 
     svc::PlayerMask release_ports_{};
-    proto::IoIndex rom_index_ = kNoRomSlot;
-    bool vsync_ok_ = false;
-    MovieSpan lead_{};
-    std::chrono::nanoseconds offset_ns_{};
-
-    EpochRule rule_{};
-    ReplayMsg::PowerOnEvent event_ = ReplayMsg::PowerOnEvent::LoadEnd;
-    std::uint32_t floor_back_ = kFloorBack;
-    std::chrono::nanoseconds alias_ns_{};
     CoreEdgeSeq edge_seq_{};
 
-    std::uint32_t last_raw_ = 0;
-    std::uint32_t wrap_mask_ = 0;
-    std::uint32_t frames_ = 0;
-    os::RawMonotonicClock::time_point edge_{};
-    os::RawMonotonicClock::time_point last_sample_{};
-    os::RawMonotonicClock::time_point end_{};
-    os::RawMonotonicClock::time_point prev_edge_{};
-    std::optional<os::RawMonotonicClock::time_point> read_{};
-    std::chrono::nanoseconds edge_gap_{};
+    ArmFacts facts_{};
+
+    Run run_{};
     std::uint32_t blk_seen_ = 0;
-    std::uint32_t blk_base_ = 0;
-    bool epoch_known_ = false;
-    std::uint32_t epoch_ = 0;
 
     os::RawMonotonicClock::time_point now_{};
     bool ready_ = false;
     std::uint32_t round_words_ = 0;
     std::optional<std::uint32_t> queued_{};
-    std::optional<os::RawMonotonicClock::time_point> tick_{};
-    std::chrono::nanoseconds gap_{};
-    WideMovieFrame mf_ = kNoWideMovieFrame;
-    WideMovieFrame covered_ = kNoWideMovieFrame;
-    WideMovieFrame underrun_at_ = kNoWideMovieFrame;
-    std::optional<ReplayMsg::Input> held_{};
-    bool end_seen_ = false;
-    MovieFrame end_frame_{};
 };
 
 }

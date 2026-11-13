@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "app/cheat_catalog_pack.h"
+#include "app/config_rel.h"
 #include "app/stream_io.h"
 #include "cores/cheat_records.h"
 #include "cores/core_profile.h"
@@ -138,12 +139,10 @@ void NegotiatedCore::elect_defmra_(std::string_view text, const UiRequest::LoadC
 }
 
 proto::TxSlabId NegotiatedCore::intern_saved_cfg_(std::string_view core_name) {
-    if (core_name.empty())
+    const auto rel = core_cfg_rel(core_name);
+    if (!rel)
         return {};
-    std::string rel = "config/";
-    rel += core_name;
-    rel += ".CFG";
-    return intern_exact(vfs_, inbox_, rel, kCoreCfgBytes);
+    return intern_exact(vfs_, inbox_, rel->view(), sizeof(proto::StatusWord::Bytes));
 }
 
 }

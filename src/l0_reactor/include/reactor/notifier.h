@@ -64,8 +64,6 @@ public:
 
     [[nodiscard]] static Ex<Notifier> ticker(std::chrono::nanoseconds period);
 
-    [[nodiscard]] static Ex<Notifier> frame(int eventfd);
-
     [[nodiscard]] static Ex<Notifier> test(int eventfd, Cause injected);
 
     Notifier(Notifier&&) noexcept = default;
@@ -80,7 +78,7 @@ public:
     Cause drain() { return drain_checked().cause(); }
 
 private:
-    enum class Kind : std::uint8_t { Doorbell, Ticker, Frame, Test };
+    enum class Kind : std::uint8_t { Doorbell, Ticker, Test };
     using CauseWindow = hal::RegisterWindow<hal::CauseReg>;
 
     Notifier(Kind k, UniqueFd fd, Cause delivers)

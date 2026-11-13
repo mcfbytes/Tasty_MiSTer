@@ -94,13 +94,13 @@ std::optional<std::uint8_t> MountQueue::pick_index_word_(
     if (!negotiated_.conf_str())
         return std::nullopt;
     const proto::ConfStrEntry* row = nullptr;
-    for (const proto::ConfStrEntry& e : negotiated_.conf_str()->file_slots())
-        if (e.letter == proto::ConfStrEntry::SlotLetter::Mount && e.ioctl_index == index)
+    for (const proto::ConfStrEntry& e : negotiated_.conf_str()->file_slots().rows())
+        if (e.file_row() == proto::FileRowId::mount(index))
             row = &e;
     if (row == nullptr)
         return std::nullopt;
     const proto::IoIndex entry{static_cast<std::uint8_t>(row->selentry + 1)};
-    return proto::WideIoIndex::of(entry, proto::ConfStr::ext_subindex(path, row->ext)).fio_byte();
+    return proto::WideIoIndex::of(entry, proto::ext_subindex(path, row->ext)).fio_byte();
 }
 
 void MountQueue::arm_ladder_(Host& host, const MountAsk& ask, const cores::CoreFactory& row) {
@@ -380,8 +380,7 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
         const std::string path = read_remembered_path(
             vfs_,
             negotiated_.remembered_stem(),
-            RememberedSlot::Mount,
-            digit.io_index()
+            proto::FileRowId::mount(digit.io_index())
         );
         if (path.empty())
             continue;
@@ -391,7 +390,7 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
         MountAsk ask{.which = UiRequest::Kind::MountImage, .index = io, .tag = kUncaused};
         ask.index_word = proto::WideIoIndex::of(
                              io,
-                             proto::ConfStr::ext_subindex(path, items.subfield(it, 1))
+                             proto::ext_subindex(path, items.subfield(it, 1))
         )
                              .fio_byte();
         if (!ask.path.assign(path)) {

@@ -31,7 +31,7 @@ svc::DiscMountState CdDiscSlot::refresh(infra::OptRef<CdEngine> engine) noexcept
     return st;
 }
 
-svc::DiscMountState CdDiscSlot::arm_mount(
+svc::DiscArm CdDiscSlot::arm_mount(
     svc::DiscOp op,
     infra::OptRef<const svc::CuePolicy> policy,
     std::string_view path

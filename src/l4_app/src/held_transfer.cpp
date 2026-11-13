@@ -2,6 +2,7 @@
 #include "app/held_transfer.h"
 
 #include "app/delivered.h"
+#include "infra/path_parts.h"
 
 namespace mister::app {
 
@@ -24,7 +25,7 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx)
     TASTY_SEAT_BODY(HeldTransfer);
     using Phase = proto::LinkOp::FileTxPhase;
 
-    const bool spends = a.phase != Phase::Whole;
+    const bool spends = a.phase != Phase::Whole && a.phase != Phase::Empty;
 
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
     if (!ctx.core.has_value()
@@ -43,7 +44,7 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx)
     const infra::OptRef<const InternedFile> file = ctx.tx.file(a.file);
     RtRelaxScope scope(ops_);
     cut_stage_();
-    if (a.phase == Phase::Whole || a.phase == Phase::Close)
+    if (a.phase == Phase::Whole || a.phase == Phase::Close || a.phase == Phase::Empty)
         arm_open_save_(file, ctx.tx);
 
     bool ok = false;
@@ -76,10 +77,7 @@ Ex<void> HeldTransfer::perform_file_tx_(
     cores::Core& current,
     bool remounts_saves
 ) {
-    const std::size_t dot = path.rfind('.');
-    current.set_pending_file_ext(
-        dot == std::string_view::npos ? std::string_view{} : path.substr(dot)
-    );
+    current.set_pending_file_ext(infra::suffix_from_last_dot(path));
     current.set_pending_file_path(path);
 
     ProgressImageSink& meter = binder_.file_progress();
@@ -294,10 +292,12 @@ bool HeldTransfer::stream_file_tx_(
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
     const bool opens = a.phase == Phase::Whole
         || a.phase == Phase::Open
-        || a.phase == Phase::WindowOpen;
+        || a.phase == Phase::WindowOpen
+        || a.phase == Phase::Empty;
     const bool closes = a.phase == Phase::Whole
         || a.phase == Phase::Close
-        || a.phase == Phase::WindowClose;
+        || a.phase == Phase::WindowClose
+        || a.phase == Phase::Empty;
 
     if (opens) {
         if (!open_stream_bracket_(a, file, current))
@@ -313,7 +313,7 @@ bool HeldTransfer::stream_file_tx_(
         cut_file_tx_(here);
         return true;
     }
-    if (!window) {
+    if (!window && a.phase != Phase::Empty) {
 
         if (!file) {
             ++tally_.file_tx_piece_drops;
@@ -348,7 +348,7 @@ bool HeldTransfer::open_stream_bracket_(
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
     if (ftx_open_)
         cut_file_tx_(infra::OptRef<cores::Core>{current});
-    if (!file || (!window && file->bytes.empty())) {
+    if (!file || (!window && a.phase != Phase::Empty && file->bytes.empty())) {
         if (a.phase != Phase::Whole)
             ++tally_.file_tx_piece_drops;
         if (window)
@@ -356,10 +356,7 @@ bool HeldTransfer::open_stream_bracket_(
         return false;
     }
     const std::string_view path = file->path.view();
-    const std::size_t dot = path.rfind('.');
-    current.set_pending_file_ext(
-        dot == std::string_view::npos ? std::string_view{} : path.substr(dot)
-    );
+    current.set_pending_file_ext(infra::suffix_from_last_dot(path));
     current.set_pending_file_path(path);
 
     if (!window) {
@@ -673,7 +670,10 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx&, Ans
         publish_stream(a.act, false);
     }
 
-    return Delivered{ILinkEncoder::Outcome::Dropped, a.phase != Phase::Whole};
+    return Delivered{
+        ILinkEncoder::Outcome::Dropped,
+        a.phase != Phase::Whole && a.phase != Phase::Empty
+    };
 }
 
 Delivered HeldTransfer::on(

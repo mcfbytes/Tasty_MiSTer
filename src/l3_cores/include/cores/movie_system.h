@@ -7,6 +7,7 @@
 
 #include "cores/core_profile.h"
 #include "cores/movie_codec.h"
+#include "cores/movie_frame_tally.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 
@@ -47,6 +48,13 @@ struct MovieSystem {
     const svc::Vfs& vfs,
     const IMovieFormat& format,
     std::string_view movie_path
+);
+
+[[nodiscard]] MovieFrameTally count_movie_frames(
+    const svc::Vfs& vfs,
+    const IMovieFormat& format,
+    std::string_view movie_path,
+    const MovieFacts& facts
 );
 [[nodiscard]] bool movie_system_supported(const MovieSystem& sys) noexcept;
 [[nodiscard]] bool movie_system_plays(std::string_view conf_str_name) noexcept;

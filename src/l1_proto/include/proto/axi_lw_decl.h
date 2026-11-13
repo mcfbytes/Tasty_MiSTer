@@ -10,10 +10,10 @@ namespace mister::proto {
 
 struct AxiLwDecl {
     hal::LwOffset offset;
-    std::uint32_t size;
+    hal::LwExtent size;
 
     [[nodiscard]] constexpr bool holds(hal::LwOffset abs) const noexcept {
-        return offset <= abs && abs.distance_to(offset) < size;
+        return offset <= abs && size.contains(abs.relative_to(offset));
     }
 
     friend constexpr bool operator==(AxiLwDecl, AxiLwDecl) = default;

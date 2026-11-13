@@ -11,15 +11,11 @@
 #include <string_view>
 
 #include "infra/error.h"
-#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 
 namespace mister::ui {
 
-class IBtOps;
-
-class IScriptPolicy;
 class ScriptRequest;
 
 class ScriptRunner {
@@ -34,7 +30,7 @@ public:
     ScriptRunner(const ScriptRunner&) = delete;
     ScriptRunner& operator=(const ScriptRunner&) = delete;
 
-    [[nodiscard]] Ex<void> start(const ScriptRequest& req, infra::OptRef<IBtOps> bt = {});
+    [[nodiscard]] Ex<void> start(const ScriptRequest& req);
 
     [[nodiscard]] Ex<void> pump();
 
@@ -59,7 +55,6 @@ private:
     void narrow_affinity();
 
     struct Child {
-        const IScriptPolicy* policy;
         std::FILE* pipe;
     };
 

@@ -20,12 +20,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
-#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
 
 #include "app/capture_main.h"
+#include "app/connect_main.h"
 #include "app/encode_main.h"
 #include "app/hd_osd_main.h"
 #include "app/input_build.h"
@@ -36,6 +36,7 @@
 #include "app/rt_main.h"
 #include "app/video_pump.h"
 #include "os/kernel_tid.h"
+#include "os/timer_slack.h"
 #include "os/types.h"
 #include "reactor/frame_main.h"
 #include "rt_evidence.h"
@@ -85,7 +86,7 @@ struct SpawnOutcome {
         return {std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), rc)), RtSetup{}};
     }
     pthread_t handle{};
-    (void)::pthread_attr_setstacksize(&attr, r.stack_bytes);
+    (void)::pthread_attr_setstacksize(&attr, r.stack_bytes.bytes());
     cpu_set_t set = os::cpu_set_of(r.cpu);
     (void)infra::pthread_attr_setaffinity_np(&attr, sizeof set, &set);
     (void)::pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
@@ -175,9 +176,11 @@ ThreadAssembly::ThreadAssembly(
     const UiMain::Wires& ui_wires,
     const UiMain::Wiring& ui,
     const DiagSampler::Sources& diag_sources,
-    const DiagSampler::Services& diag_services
+    const DiagSampler::Services& diag_services,
+    SeatContract contract
 ) noexcept
-    : ev_(boot),
+    : contract_(contract),
+      ev_(boot),
       threads_(threads),
       main_wake_(main_wake),
       diag_log_(diag.log),
@@ -194,41 +197,7 @@ ThreadAssembly::ThreadAssembly(
           with_ui_cells_(diag_sources, ui),
           diag_services
       ) {
-
-    contract_ = SeatContract::Declared;
     create_mains_(events, ui_wires, ui);
-}
-
-ThreadAssembly::ThreadAssembly(
-    xthread::RtStats& stats,
-    app::EventQueue<SeatTag::RT>& events,
-    const UiMain::Wiring& ui,
-    const DiagSampler::Sources& diag,
-    const DiagSampler::Services& services
-) noexcept
-    : ev_(own_ev_),
-      threads_(hal::kDe10ThreadMap),
-      main_wake_(own_main_wake_),
-      own_wires_(std::make_unique<OwnWires>()),
-      diag_log_(own_wires_->log),
-      diag_sampler_(
-          DiagSampler::Wiring{
-              .stats = stats,
-              .events = events,
-              .ev = ev_cell_,
-              .quiescing = quiescing_,
-              .transitioning = own_wires_->transitioning,
-              .diag = own_wires_->log,
-              .rt_lane = own_wires_->rt_lane
-          },
-          with_ui_cells_(diag, ui),
-          services
-      ) {
-    create_mains_(
-        events,
-        UiMain::Wires{own_wires_->ui_wake, infra::OptRef{own_wires_->uart_handoffs}},
-        ui
-    );
 }
 
 void ThreadAssembly::publish_evidence_() noexcept {
@@ -316,6 +285,7 @@ DiagSampler::Sources ThreadAssembly::with_ui_cells_(
         .video_stats = ui.video.stats_cell(),
         .video_geometry = ui.video.geometry_cell(),
         .video_wire = ui.video.wire(),
+        .prelude_stats = ui.video.prelude().stats_cell(),
         .ui_pages = s.ui_pages,
         .hd = s.hd,
         .replay = s.replay,
@@ -418,7 +388,7 @@ Ex<void> ThreadAssembly::check_presence_() const noexcept {
 Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
 
     app::RtMain* const rt = mains_.get<app::RtMain>();
-    mains_ = mains.mains;
+    mains_ = mains;
     if (!born_)
         return born_;
     mains_.bind(&*diag_main_);
@@ -463,12 +433,17 @@ Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
 
     mains_.bind(&rt);
     const std::size_t i = seat_index(SeatTag::RT);
+
+    if (auto s = os::set_timer_slack(os::kMinTimerSlack); !s) {
+        return std::unexpected(s.error());
+    }
     SpawnOutcome spawned = spawn_seat(
         hal::seat_of(threads_, SeatTag::RT),
         SeatTable::of(SeatTag::RT).body,
         this,
         mode
     );
+    [[maybe_unused]] Ex<void> restored = os::restore_default_timer_slack();
     ev_.seats[i].sched = spawned.sched;
     if (!spawned.handle)
         return std::unexpected(spawned.handle.error());

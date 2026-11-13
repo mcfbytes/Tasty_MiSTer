@@ -9,6 +9,7 @@
 #include "cores/cd_io_indices.h"
 #include "cores/cd_quirk_row.h"
 #include "cores/cd_tick_periods.h"
+#include "cores/poll_ticks.h"
 #include "cores/types.h"
 #include "infra/seat.h"
 #include "proto/reset_terms.h"
@@ -30,7 +31,7 @@ struct CdProfile {
 
     struct SeekFastPath {
         SectorCount count;
-        std::uint32_t latency_ticks;
+        PollTicks latency_ticks{};
     };
 
     struct PceScsiFacts {

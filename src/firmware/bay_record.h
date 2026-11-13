@@ -29,9 +29,11 @@ struct BayView {
     std::uint32_t lease_holds = 0;
     std::uint32_t lease_long_holds = 0;
     app::SectorRoute cd{};
+    xthread::GrantGen cd_lease{};
     std::uint32_t osd_grants = 0;
     std::uint32_t osd_refusals = 0;
     app::OsdRoute osd{};
+    xthread::GrantGen osd_lease{};
     std::uint32_t osd_page_rows_link = 0;
     std::uint32_t osd_status_rows_link = 0;
     std::uint32_t card_grants = 0;
@@ -41,6 +43,7 @@ struct BayView {
     std::uint32_t sys_refusals = 0;
     std::uint32_t sys_pin_refusals = 0;
     app::SysRoute sys{};
+    xthread::GrantGen sys_lease{};
     std::uint32_t status_lw = 0;
     std::uint32_t status_lw_adopts = 0;
     std::uint32_t status_lw_stale = 0;
@@ -59,7 +62,7 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("cdok", v.sector_grants);
     o.field("cdref", v.sector_refusals);
     o.field("cdlw", v.cd.on_lw);
-    o.field("cdlease", v.cd.leased);
+    o.field("cdlease", v.cd_lease.held());
     o.field("cdsrv", v.cd.served);
     o.field("cdres", v.cd.resends);
     o.field("cdabt", v.cd.corrupted);
@@ -79,7 +82,7 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("osdok", v.osd_grants);
     o.field("osdref", v.osd_refusals);
     o.field("osdlw", v.osd.on_lw);
-    o.field("osdlease", v.osd.leased);
+    o.field("osdlease", v.osd_lease.held());
     o.field("osdfrm", v.osd.frames);
     o.field("osdrows", v.osd.rows);
     o.field("osdrevk", v.osd.revoked);
@@ -101,7 +104,7 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("sysref", v.sys_refusals);
     o.field("syspin", v.sys_pin_refusals);
     o.field("syslw", v.sys.on_lw);
-    o.field("syslease", v.sys.leased);
+    o.field("syslease", v.sys_lease.held());
     o.field("sysdrain", v.sys.drains);
     o.field("syssnap", v.sys.snapshots);
     o.field("sysretry", v.sys.retries);
@@ -123,12 +126,21 @@ struct BayRecord {
     infra::OptRef<const app::SectorRouteCell> route{};
     infra::OptRef<const app::OsdRouteCell> osd_route{};
     infra::OptRef<const app::SysRouteCell> sys_route{};
+    infra::OptRef<const app::SectorLeaseCell> sector_lease{};
+    infra::OptRef<const app::OsdLeaseCell> osd_lease{};
+    infra::OptRef<const app::SysLeaseCell> sys_lease{};
 
     [[nodiscard]] std::optional<View> sample(const RecordCtx& ctx) const noexcept {
         const app::BayCounts c = counts.sample().value;
         const app::SectorRoute cd = route ? route->sample().value : app::SectorRoute{};
         const app::OsdRoute osd = osd_route ? osd_route->sample().value : app::OsdRoute{};
         const app::SysRoute sys = sys_route ? sys_route->sample().value : app::SysRoute{};
+        const xthread::GrantGen cd_lease = sector_lease ? sector_lease->sample().value
+                                                        : xthread::GrantGen{};
+        const xthread::GrantGen osd_lease_gen = osd_lease ? osd_lease->sample().value
+                                                          : xthread::GrantGen{};
+        const xthread::GrantGen sys_lease_gen = sys_lease ? sys_lease->sample().value
+                                                          : xthread::GrantGen{};
         return View{
             .builds = c.builds,
             .bay_full = c.bay_full,
@@ -143,9 +155,11 @@ struct BayRecord {
             .lease_holds = c.lease_holds,
             .lease_long_holds = c.lease_long_holds,
             .cd = cd,
+            .cd_lease = cd_lease,
             .osd_grants = c.osd_grants,
             .osd_refusals = c.osd_refusals,
             .osd = osd,
+            .osd_lease = osd_lease_gen,
             .osd_page_rows_link = ctx.dc.osd_page_rows_link,
             .osd_status_rows_link = ctx.dc.osd_status_rows_link,
             .card_grants = c.card_grants,
@@ -155,6 +169,7 @@ struct BayRecord {
             .sys_refusals = c.sys_refusals,
             .sys_pin_refusals = c.sys_pin_refusals,
             .sys = sys,
+            .sys_lease = sys_lease_gen,
             .status_lw = ctx.dc.status_lw,
             .status_lw_adopts = ctx.dc.status_lw_adopts,
             .status_lw_stale = ctx.dc.status_lw_stale,

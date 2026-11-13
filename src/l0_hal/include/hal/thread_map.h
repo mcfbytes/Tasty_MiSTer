@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "hal/stack_bytes.h"
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -27,7 +28,7 @@ struct ThreadRole {
     os::CpuId cpu;
     SchedPolicy policy;
     int prio;
-    std::size_t stack_bytes;
+    StackBytes stack_bytes;
     SpawnKind spawn;
     DdrMapping ddr = DdrMapping::None;
     PauseEdge pause_at = PauseEdge::Ask;
@@ -62,15 +63,17 @@ constexpr CommName comm_name(std::string_view prefix, std::string_view role) noe
     return out;
 }
 
-inline constexpr std::size_t kFifoStackBytes = 256u * 1024u;
+inline constexpr StackBytes kFifoStackBytes = StackBytes::kib(256);
 
-inline constexpr std::size_t kOtherStackBytes = 8u * 1024u * 1024u;
+inline constexpr StackBytes kOtherStackBytes = StackBytes::mib(8);
 
-inline constexpr std::size_t kRecorderStackBytes = 256u * 1024u;
+inline constexpr StackBytes kRecorderStackBytes = StackBytes::kib(256);
 
-inline constexpr std::size_t kLauncherStackBytes = 256u * 1024u;
+inline constexpr StackBytes kLauncherStackBytes = StackBytes::kib(256);
 
-inline constexpr std::size_t kHdOsdStackBytes = 2u * 1024u * 1024u;
+inline constexpr StackBytes kHdOsdStackBytes = StackBytes::mib(2);
+
+inline constexpr StackBytes kConnectStackBytes = StackBytes::kib(512);
 
 inline constexpr ThreadMap kDe10ThreadMap{{
     {.seat = SeatTag::RT,
@@ -154,6 +157,12 @@ inline constexpr ThreadMap kDe10ThreadMap{{
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kHdOsdStackBytes,
+     .spawn = SpawnKind::Create},
+    {.seat = SeatTag::Connect,
+     .cpu = os::CpuId{0},
+     .policy = SchedPolicy::Other,
+     .prio = 0,
+     .stack_bytes = kConnectStackBytes,
      .spawn = SpawnKind::Create},
 }};
 
@@ -295,9 +304,9 @@ constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
 
 constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
     for (const ThreadRole& r : m) {
-        if (r.spawn == SpawnKind::Create && r.stack_bytes == 0)
+        if (r.spawn == SpawnKind::Create && r.stack_bytes.is_main())
             return false;
-        if (r.spawn == SpawnKind::PromoteInPlace && r.stack_bytes != 0)
+        if (r.spawn == SpawnKind::PromoteInPlace && !r.stack_bytes.is_main())
             return false;
     }
     return true;

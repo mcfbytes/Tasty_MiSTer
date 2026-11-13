@@ -8,11 +8,13 @@
 #include "app/rt_park.h"
 #include "app/types.h"
 #include "hal/link_timing.h"
+#include "infra/coalesced_kick.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
+#include "infra/wake_flag.h"
 #include "proto/types.h"
 
 namespace mister::reactor {
@@ -20,11 +22,14 @@ class Executive;
 class RoundTimer;
 }
 
+namespace mister::hal {
+class DiskLamp;
+}
+
 namespace mister::app {
 
 class LinkSession;
 class InputEmit;
-class InputWire;
 template <SeatTag Producer>
 class LinkTxChannel;
 class OsdWire;
@@ -41,11 +46,14 @@ public:
         infra::OptRef<InputEmit> input{};
         infra::OptRef<OsdWire> osd{};
         infra::OptRef<reactor::RoundTimer> timer{};
-        infra::OptRef<InputWire> wire{};
+
+        infra::OptRef<xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>> input_kick{};
         infra::OptRef<CoreFrameCounter> frames{};
         infra::OptRef<ScanoutRelay> scanout{};
         infra::OptRef<ReplayGate> replay{};
         ReplayRing::Receiver replay_ring{};
+        infra::OptRef<hal::DiskLamp> lamp{};
+        infra::OptRef<const xthread::WakeFlag> disk_activity{};
     };
 
     RtMain(reactor::Executive& exec, const hal::LinkTimingValues& timing, Wiring wiring) noexcept
@@ -54,7 +62,7 @@ public:
           input_(wiring.input),
           osd_(wiring.osd),
           timer_(wiring.timer),
-          wire_(wiring.wire),
+          input_kick_(wiring.input_kick),
           park_(exec),
           replay_(
               (wiring.replay && wiring.replay_ring) ? wiring.replay : infra::OptRef<ReplayGate>{}
@@ -62,6 +70,13 @@ public:
           replay_ring_(std::move(wiring.replay_ring)),
           frames_(wiring.frames),
           scanout_(wiring.scanout),
+          lamp_(
+              (wiring.lamp && wiring.disk_activity) ? wiring.lamp : infra::OptRef<hal::DiskLamp>{}
+          ),
+          disk_activity_(
+              (wiring.lamp && wiring.disk_activity) ? wiring.disk_activity
+                                                    : infra::OptRef<const xthread::WakeFlag>{}
+          ),
           round_budget_words_(proto::FioWordCount{timing.round_budget_words}) {}
 
     RtMain(const RtMain&) = delete;
@@ -158,12 +173,14 @@ private:
 
     infra::OptRef<reactor::RoundTimer> timer_{};
 
-    infra::OptRef<InputWire> wire_{};
+    infra::OptRef<xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>> input_kick_{};
     RtPark park_;
     infra::OptRef<ReplayGate> replay_{};
     ReplayRing::Receiver replay_ring_{};
     infra::OptRef<CoreFrameCounter> frames_{};
     infra::OptRef<ScanoutRelay> scanout_{};
+    infra::OptRef<hal::DiskLamp> lamp_{};
+    infra::OptRef<const xthread::WakeFlag> disk_activity_{};
     bool stopping_ = false;
     Ex<void> result_{};
     proto::FioWordCount round_budget_words_;

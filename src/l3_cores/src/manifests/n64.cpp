@@ -5,6 +5,7 @@
 
 #include "cores/n64_core.h"
 #include "cores/n64_loader.h"
+#include "cores/n64_ram_save_order.h"
 
 namespace mister::cores::manifests {
 
@@ -28,6 +29,10 @@ static_assert(kN64.kind == CoreKind::N64);
 static_assert(
     kN64.name == std::string_view{"N64"},
     "n64.cpp is reached through is_n64(), user_io.cpp's strcasecmp against \"N64\""
+);
+static_assert(
+    kN64.name.size() <= n64dd::kCoreDirChars,
+    "the RAM save's directory is the profile's name: a name that does not fit fails boot"
 );
 static_assert(
     kN64.services[0].round_claim == RoundClaim::Always,

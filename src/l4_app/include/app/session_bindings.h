@@ -10,9 +10,9 @@
 #include <type_traits>
 
 #include "app/identity_record.h"
-#include "cores/types.h"
 #include "app/link_tx_reader.h"
 #include "app/mra_facts.h"
+#include "app/uart_binding.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -33,7 +33,6 @@ public:
 
     static constexpr std::size_t kIdentityFields = 4;
     static constexpr std::size_t kButtonListCap = kLinkTxSlabBytes;
-    static constexpr std::size_t kCapTokenCap = 96;
 
     static constexpr std::size_t kDoorbellRows = kLinkTxSlabBytes / sizeof(proto::IrqBinding);
     static_assert(
@@ -49,18 +48,6 @@ public:
         bool declares_cheats = false;
         bool declares_turbo = false;
         bool declares_info = false;
-    };
-
-    struct Uart {
-
-        static constexpr std::size_t kSpeedCount = 3;
-        static constexpr std::size_t kModeBytes = sizeof(std::uint32_t);
-        static constexpr std::size_t kSpeedsBytes = kSpeedCount * kModeBytes;
-        bool capable = false;
-        FixedStr<kCapTokenCap, StrFit::Clip> uart_token{};
-        FixedStr<kCapTokenCap, StrFit::Clip> midi_token{};
-        std::optional<std::uint32_t> mode{};
-        std::optional<std::array<cores::BaudRate, kSpeedCount>> speeds{};
     };
 
     struct Doorbells {
@@ -98,7 +85,7 @@ public:
 
     void forget_core() noexcept {
         identity_.reset();
-        uart_ = Uart{};
+        uart_ = UartBinding{};
         doorbells_ = Doorbells{};
         record_ = no_record_;
     }
@@ -113,7 +100,7 @@ public:
 
     [[nodiscard]] const std::optional<Identity>& identity() const noexcept { return identity_; }
 
-    [[nodiscard]] const Uart& uart() const noexcept { return uart_; }
+    [[nodiscard]] const UartBinding& uart() const noexcept { return uart_; }
 
     [[nodiscard]] const Doorbells& doorbells() const noexcept { return doorbells_; }
 
@@ -139,7 +126,7 @@ private:
 
     IdentityRecord no_record_{build_identity_record({}, MraFacts{})};
     IdentityRecord record_{no_record_};
-    Uart uart_{};
+    UartBinding uart_{};
     Doorbells doorbells_{};
     proto::BindGeneration gen_{};
 };

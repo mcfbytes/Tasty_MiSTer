@@ -28,11 +28,14 @@ constexpr std::size_t kSubcodeFrameBytes = svc::kSubcodeBytes + 2;
 
 constexpr std::int64_t kSeekTicksPerSpan = 120;
 constexpr std::int64_t kSeekSpanSectors = 270000;
+constexpr PollTicks::Rate kSeekRate{SectorCount{kSeekSpanSectors / kSeekTicksPerSpan}};
+static_assert(kSeekSpanSectors % kSeekTicksPerSpan == 0);
 
-[[nodiscard]] std::uint32_t seek_latency_ticks(SectorCount distance) noexcept {
-    return static_cast<std::uint32_t>(
-        (std::int64_t{distance.magnitude().v} * kSeekTicksPerSpan) / kSeekSpanSectors
-    );
+constexpr PollTicks kPlayBiasTicks{11};
+constexpr PollTicks kSubCommandGateTicks{3};
+
+[[nodiscard]] PollTicks seek_latency_ticks(SectorCount distance) noexcept {
+    return PollTicks::of_travel(distance.magnitude(), kSeekRate);
 }
 
 }
@@ -54,12 +57,12 @@ void SegaCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) noexce
     st_.loaded = loaded;
     st_.status = loaded ? SegaCddStatus::Stop : SegaCddStatus::NoDisc;
     if (loaded)
-        st_.latency = 10;
+        st_.latency = kLoadSettleTicks;
 }
 
 bool SegaCddEngine::do_streaming(const svc::DiscGeometry& geom) const noexcept {
 
-    if (st_.status != SegaCddStatus::Play || st_.latency != 0)
+    if (st_.status != SegaCddStatus::Play || st_.latency.owed())
         return false;
     const svc::Toc& toc = geom.toc;
     if (!toc.last.contains(st_.track))
@@ -71,7 +74,7 @@ bool SegaCddEngine::do_streaming(const svc::DiscGeometry& geom) const noexcept {
 
 Ex<void> SegaCddEngine::do_push_sector(CdDialectPorts& p) {
     if (st_.status != SegaCddStatus::Play
-        || st_.latency != 0
+        || st_.latency.owed()
         || !p.geom.toc.last.contains(st_.track)) {
         return {};
     }
@@ -128,8 +131,8 @@ Ex<void> SegaCddEngine::update_(CdDialectPorts& p) {
         || m.status == SegaCddStatus::Tray
         || m.status == SegaCddStatus::Open) {
 
-        if (m.latency > 0) {
-            --m.latency;
+        if (m.latency.owed()) {
+            m.latency.spend();
             return {};
         }
         if (!m.loaded)
@@ -137,16 +140,16 @@ Ex<void> SegaCddEngine::update_(CdDialectPorts& p) {
         return {};
     }
     if (m.status == SegaCddStatus::Seek) {
-        if (m.latency > 0) {
-            --m.latency;
+        if (m.latency.owed()) {
+            m.latency.spend();
             return {};
         }
         m.status = SegaCddStatus::Pause;
         return {};
     }
     if (m.status == SegaCddStatus::Play) {
-        if (m.latency > 0) {
-            --m.latency;
+        if (m.latency.owed()) {
+            m.latency.spend();
             return {};
         }
         if (!toc.last.contains(m.track)) {
@@ -241,7 +244,7 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
         }
 
         const SectorCount sectors = m.cdda.frame_sectors();
-        len = sectors.bytes(SectorBytes::of(svc::kRawFrameBytes)).length_of(proto::BlockCount{1});
+        len = sectors.bytes(SectorBytes::of(svc::kRawFrameBytes)).file_word<std::size_t>();
         idx = io_.cdda;
         if (!m.is_data) {
             const HeadLba from = m.cdda.at(m.lba);
@@ -253,7 +256,7 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
                         std::as_writable_bytes(
                             std::span(sec_buf_).subspan(
                                 i.bytes(SectorBytes::of(svc::kRawFrameBytes))
-                                    .length_of(proto::BlockCount{1}),
+                                    .file_word<std::size_t>(),
                                 svc::kRawFrameBytes
                             )
                         )
@@ -356,7 +359,7 @@ void SegaCddEngine::seek_(HeadLba lba, bool play, const svc::DiscGeometry& geom)
 
     auto& m = st_;
     const svc::Toc& toc = geom.toc;
-    m.latency = (play ? 11u : 0u) + seek_latency_ticks(lba - m.lba);
+    m.latency = (play ? kPlayBiasTicks : PollTicks{}) + seek_latency_ticks(lba - m.lba);
     m.lba = lba;
     m.track = track_scan(toc, lba);
     hint_at_(lba, geom);
@@ -369,7 +372,7 @@ void SegaCddEngine::seek_(HeadLba lba, bool play, const svc::DiscGeometry& geom)
 void SegaCddEngine::do_reset_machine() noexcept {
 
     auto& m = st_;
-    m.latency = 10;
+    m.latency = kLoadSettleTicks;
     m.track = svc::TrackIndex{};
     m.lba = HeadLba{};
     m.cdda.locate();
@@ -412,7 +415,7 @@ void SegaCddEngine::command_exec_(const Comm& frame, const svc::DiscGeometry& ge
     switch (*command) {
         case SegaCddCommand::Idle:
 
-            if (m.latency <= 3) {
+            if (m.latency <= kSubCommandGateTicks) {
                 m.stat.set_status(m.status);
                 if (m.stat.subcommand() == 0x0F) {
                     m.stat.set_subcommand(0x0);

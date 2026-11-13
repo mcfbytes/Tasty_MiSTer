@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <type_traits>
 #include <utility>
 
 #include "app/link_event_facts.h"
@@ -31,6 +32,22 @@ concept LinkEventMainSink = requires(S& s, const proto::LinkEvent& m) {
 
 template <class S>
 concept LinkEventUiSink = requires(S& s, const proto::LinkEvent& m) {
+    s.on(std::declval<const proto::LinkEvent::ButtonLevel&>());
+    s.on(std::declval<const proto::LinkEvent::OsdMask&>());
+    s.on(std::declval<const proto::LinkEvent::PolledWord&>());
+    s.on(std::declval<const proto::LinkEvent::FrameReply&>());
+    s.misrouted(m);
+};
+
+struct LinkEventMenuRoutes {
+    template <class A>
+    static constexpr bool routed = std::is_same_v<A, proto::LinkEvent::ButtonLevel>
+        || std::is_same_v<A, proto::LinkEvent::OsdMask>
+        || std::is_same_v<A, proto::LinkEvent::PolledWord>;
+};
+
+template <class S>
+concept LinkEventMenuSink = requires(S& s, const proto::LinkEvent& m) {
     s.on(std::declval<const proto::LinkEvent::ButtonLevel&>());
     s.on(std::declval<const proto::LinkEvent::OsdMask&>());
     s.on(std::declval<const proto::LinkEvent::PolledWord&>());

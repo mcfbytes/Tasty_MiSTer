@@ -19,6 +19,7 @@
 #include "app/built_core.h"
 #include "app/core_terms.h"
 #include "app/doorbell_lines.h"
+#include "app/lw_block_lend.h"
 #include "app/lw_osd.h"
 #include "app/lw_sector.h"
 #include "app/lw_sys.h"
@@ -42,6 +43,7 @@
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "proto/axi_lw_decl.h"
+#include "proto/build_generation.h"
 #include "proto/irq_binding.h"
 #include "proto/lane_block_decl.h"
 #include "proto/link_op.h"
@@ -75,17 +77,19 @@ public:
     struct SectorCells {
         SectorGrantCell& grant;
         const SectorRouteCell& route;
+        const SectorLeaseCell& lease;
         infra::OptRef<xthread::WakeFlag> wake{};
     };
 
     struct OsdCells {
         OsdGrantCell& grant;
-        const OsdRouteCell& route;
+        const OsdLeaseCell& lease;
     };
 
     struct SysCells {
         SysGrantCell& grant;
         const SysRouteCell& route;
+        const SysLeaseCell& lease;
         infra::OptRef<xthread::WakeFlag> wake{};
     };
 
@@ -151,7 +155,7 @@ public:
     ) noexcept;
 
     [[nodiscard]] static constexpr bool may_carry_pads(const proto::AxiLwDecl& decl) noexcept {
-        return decl.size >= hal::SysDirectory::kSize;
+        return decl.size.covers(hal::LwExtent::of_layout<hal::SysDirectory>());
     }
 
     struct Directory {
@@ -266,15 +270,13 @@ public:
 
     [[nodiscard]] static bool fabric_route(std::string_view name, bool manifest) noexcept;
 
-    void raise_sector() noexcept;
+    [[nodiscard]] LwBlockLend<LwSector, SectorCells>& sector() noexcept { return sector_; }
 
-    [[nodiscard]] bool retire_sector(bool fabric_ok) noexcept;
+    [[nodiscard]] const LwBlockLend<LwSector, SectorCells>& sector() const noexcept {
+        return sector_;
+    }
 
-    void abandon_sector() noexcept;
-
-    [[nodiscard]] bool sector_mapped() const noexcept { return sector_.has_value(); }
-
-    [[nodiscard]] bool sector_abandoned() const noexcept { return sector_ && sector_->fabric_lost; }
+    [[nodiscard]] proto::BuildGeneration generation() const noexcept { return gen_; }
 
     [[nodiscard]] bool bridge_refused() noexcept;
 
@@ -283,15 +285,9 @@ public:
         const proto::AxiLwDecl& decl
     ) noexcept;
 
-    void raise_osd() noexcept;
+    [[nodiscard]] LwBlockLend<LwOsd, OsdCells>& osd() noexcept { return osd_; }
 
-    [[nodiscard]] bool retire_osd(bool fabric_ok) noexcept;
-
-    void abandon_osd() noexcept;
-
-    [[nodiscard]] bool osd_mapped() const noexcept { return osd_.has_value(); }
-
-    [[nodiscard]] bool osd_abandoned() const noexcept { return osd_ && osd_->fabric_lost; }
+    [[nodiscard]] const LwBlockLend<LwOsd, OsdCells>& osd() const noexcept { return osd_; }
 
     [[nodiscard]] static Ex<LwSys> grant_sys(
         const Directory& dir,
@@ -301,13 +297,9 @@ public:
         std::span<const proto::IrqBinding> taken = {}
     ) noexcept;
 
-    void raise_sys() noexcept;
+    [[nodiscard]] LwBlockLend<LwSys, SysCells>& sys() noexcept { return sys_; }
 
-    [[nodiscard]] bool retire_sys() noexcept;
-
-    void abandon_sys() noexcept;
-
-    [[nodiscard]] bool sys_mapped() const noexcept { return sys_.has_value(); }
+    [[nodiscard]] const LwBlockLend<LwSys, SysCells>& sys() const noexcept { return sys_; }
 
     [[nodiscard]] std::uint32_t leased() const noexcept;
 
@@ -324,6 +316,15 @@ private:
     void free_(proto::CoreBaySlot slot) noexcept;
     void publish_counts_() noexcept;
     [[nodiscard]] Ex<Directory> directory_(const proto::AxiLwDecl& decl) noexcept;
+
+    struct DirHit {
+        Directory dir;
+        proto::AxiLwDecl decl;
+    };
+
+    [[nodiscard]] std::optional<DirHit> next_directory_(
+        std::span<const proto::AxiLwDecl>& rest
+    ) noexcept;
     [[nodiscard]] std::optional<proto::LaneBlockDecl> find_lane_(
         std::span<const proto::AxiLwDecl> lw
     ) noexcept;
@@ -347,28 +348,22 @@ private:
 
     void drop_unbuilt_sector_() noexcept;
     [[nodiscard]] std::optional<hal::LwOffset> unbuilt_cause_() const noexcept;
-    [[nodiscard]] bool sector_leased_() const noexcept;
-    void revoke_sector_() noexcept;
     void grant_osd_(
         std::span<const proto::AxiLwDecl> lw,
         const cores::CoreProfile& profile,
         FabricGeneration fabric_gen,
-        std::uint16_t gen
+        proto::BuildGeneration gen
     ) noexcept;
-    [[nodiscard]] bool osd_leased_() const noexcept;
-    void revoke_osd_() noexcept;
     void grant_sys_(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
         FabricGeneration fabric_gen,
-        std::uint16_t gen
+        proto::BuildGeneration gen
     ) noexcept;
 
     static constexpr std::size_t kNodeNameCap = 48;
 
     void pin_sys_line_(os::UioLine line) noexcept;
-    [[nodiscard]] bool sys_leased_() const noexcept;
-    void revoke_sys_() noexcept;
 
     CoreBay& bay_;
     const BayReleasesCell& releases_;
@@ -380,23 +375,12 @@ private:
     BayReleasesCell::Reader released_{};
     BayReleases levels_{};
     infra::IndexedArray<CoreBay::Lease, kCoreBaySlots, proto::CoreBaySlot> held_{};
-    std::uint16_t gen_ = 0;
+    proto::BuildGeneration gen_{};
     bool claimed_ = false;
-    std::optional<SectorCells> sectors_{};
-    std::optional<LwSector> sector_{};
-    bool sector_revoked_ = true;
 
-    std::uint16_t lent_gen_ = 0;
-    proto::BlockSlotMask lent_cards_{};
-    std::uint16_t judged_gen_ = 0;
-    std::optional<OsdCells> osds_{};
-    std::optional<LwOsd> osd_{};
-    bool osd_revoked_ = true;
-    std::optional<SysCells> sys_cells_{};
-    std::optional<LwSys> sys_{};
-    bool sys_revoked_ = true;
-    std::uint16_t lent_sys_gen_ = 0;
-    std::uint16_t judged_sys_gen_ = 0;
+    LwBlockLend<LwSector, SectorCells> sector_;
+    LwBlockLend<LwOsd, OsdCells> osd_;
+    LwBlockLend<LwSys, SysCells> sys_;
     std::uint32_t directory_reads_ = 0;
 
     struct DirReads {

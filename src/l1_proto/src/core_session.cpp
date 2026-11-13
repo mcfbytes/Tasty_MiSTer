@@ -140,9 +140,6 @@ void CoreSession::post(const StatusEdit& edit) noexcept {
 }
 
 Ex<void> CoreSession::pulse(StatusBit bit) {
-    if (!StatusRegister::holds(bit)) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), bit.detail()});
-    }
     if (auto r = apply(StatusEdit::bit(bit, true)); !r)
         return r;
     return apply(StatusEdit::bit(bit, false));

@@ -59,7 +59,7 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
 
     const bool dv_on = ini.direct_video_ini != 0 && !(force.replay && !force.strict_direct_video);
     ini.wire.direct_video = dv_on;
-    ini.spd_quirk = snap.spd_quirk;
+    ini.spd_quirk = svc::spd_quirk_of(svc::SpdQuirkIni{snap.spd_quirk});
 
     for (std::size_t i = 0; i < ini.ar_cust.size(); ++i)
         ini.ar_cust[i] = aspect_ratio_of(snap.custom_aspect_ratio[i]);

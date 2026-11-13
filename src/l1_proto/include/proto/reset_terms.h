@@ -4,8 +4,8 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "proto/status_bit.h"
 #include "proto/status_word.h"
-#include "proto/types.h"
 
 namespace mister::proto {
 

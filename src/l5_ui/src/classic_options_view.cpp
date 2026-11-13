@@ -57,7 +57,7 @@ std::optional<Glyph> ClassicOptionsView::leftchar_of(OsdRow row, bool has_ring) 
 template <class Visit>
 void ClassicOptionsView::for_each_drawn(Visit&& visit) const {
     for (const std::unique_ptr<OptionItem>& owned : model_.items()) {
-        if (owned->screen_row.has_value())
+        if (owned->drawn_row.has_value())
             visit(*owned);
     }
 }
@@ -85,7 +85,7 @@ ClassicOptionsView::DrawnList ClassicOptionsView::compose_drawn() const {
 void ClassicOptionsView::compose_lines(RowSpan<Line> lines) const {
     const RowCount rows = osd_height();
     for_each_drawn([&](const OptionItem& it) {
-        const RowIndex placed = row_index_of(*it.screen_row);
+        const RowIndex placed = *it.drawn_row;
         if (placed < first_row_)
             return;
         const RowCount row = placed - first_row_;
@@ -121,11 +121,10 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
         r.hd = drawn_rows[at].hd;
         r.has_hd = true;
         const OptionItem& window_item = drawn_rows[at].item.value();
-        if (!window_item.screen_row.has_value()
-            || row_index_of(*window_item.screen_row) < first_row_) {
+        if (!window_item.drawn_row.has_value() || *window_item.drawn_row < first_row_) {
             continue;
         }
-        const RowCount phys = row_index_of(*window_item.screen_row) - first_row_;
+        const RowCount phys = *window_item.drawn_row - first_row_;
         if (phys >= rows)
             continue;
         Line& line = lines[row_after(phys)];
@@ -169,7 +168,7 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
 infra::OptRef<const OptionItem> ClassicOptionsView::row_at(RowCount row) const {
     const RowIndex drawn = first_row_ + row;
     for (const std::unique_ptr<OptionItem>& it : model_.items()) {
-        if (it->screen_row.has_value() && row_index_of(*it->screen_row) == drawn) {
+        if (it->drawn_row.has_value() && *it->drawn_row == drawn) {
             return infra::OptRef<const OptionItem>{*it};
         }
     }
@@ -184,9 +183,9 @@ void ClassicOptionsView::track_viewport() noexcept {
     if (sel_ == RowIndex{})
         first_row_ = RowIndex{};
     const infra::OptRef<const OptionItem> it = model_.at_selectable(sel_);
-    if (!it || !it->screen_row.has_value())
+    if (!it || !it->drawn_row.has_value())
         return;
-    const RowIndex drawn = row_index_of(*it->screen_row);
+    const RowIndex drawn = *it->drawn_row;
     if (drawn < first_row_) {
         first_row_ = drawn;
     } else if (drawn >= first_row_ + rows) {
@@ -199,18 +198,18 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
     const OptionsKeys keys = OptionsKeys::of(ev);
 
     if (keys.menu) {
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
     }
 
     const bool at_root = (model_.page() == proto::kRootSubmenu);
 
     if (keys.back || (keys.left && !at_root)) {
-        return at_root ? Transition{Transition::Kind::Leave} : Transition{Transition::Kind::Pop};
+        return at_root ? Transition::leave() : Transition::pop();
     }
 
     if (keys.recent && !keys.select && !keys.plus && !keys.minus) {
         const infra::OptRef<const OptionItem> it = model_.at_selectable(sel_);
-        if (it && !it->disabled && it->opens_browser()) {
+        if (it && !it->disabled && it->file_row()) {
             return surface_.open_recents(*it);
         }
         surface_.refuse();

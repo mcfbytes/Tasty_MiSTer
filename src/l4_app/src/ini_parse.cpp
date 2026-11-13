@@ -5,6 +5,7 @@
 #include "app/types.h"
 #include "infra/byte_view.h"
 #include "svc/config_parser.h"
+#include "svc/ini_catalog.h"
 #include "svc/vfs.h"
 
 #include <array>
@@ -41,7 +42,7 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
     proto::FileSize got{};
     while (got < size) {
 
-        auto n = file.read_at(got.length_of(proto::BlockCount{1}), chunk);
+        auto n = file.read_at(got.file_word<std::size_t>(), chunk);
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0)
@@ -57,8 +58,11 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
     return out;
 }
 
-[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(const svc::Vfs& vfs) {
-    auto f = vfs.open("MiSTer.ini", svc::OpenMode::ReadWhole);
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(
+    const svc::Vfs& vfs,
+    std::string_view name
+) {
+    auto f = vfs.open(name, svc::OpenMode::ReadWhole);
     if (!f)
         return std::unexpected(f.error());
     return read_ini_whole(**f);
@@ -68,7 +72,8 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
     const svc::Vfs* vfs,
     const svc::ConfigSnapshot& defaults,
     std::string_view conf_str_name,
-    const MraFacts& facts
+    const MraFacts& facts,
+    const svc::IniCatalog& ini
 ) {
     svc::ConfigSnapshot next = defaults;
     if (vfs == nullptr) {
@@ -76,7 +81,7 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
         return next;
     }
     std::string text;
-    if (auto bytes = read_ini_whole(*vfs)) {
+    if (auto bytes = read_ini_whole(*vfs, ini.active_name())) {
         text.assign(infra::as_text(std::span(*bytes)));
     }
     if (!text.empty()) {
@@ -109,6 +114,15 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
 
 [[nodiscard]] proto::ConfSwitches default_conf_switches() noexcept {
     return conf_switches(svc::ConfigSnapshot{});
+}
+
+IdleKnobs idle_knobs_of(const svc::ConfigSnapshot& cfg) noexcept {
+    return IdleKnobs{
+        .osd_timeout = std::chrono::seconds{cfg.osd_timeout},
+        .video_off = std::chrono::seconds{cfg.video_off},
+        .video_off_logo = cfg.video_off_logo != 0,
+        .fb_terminal = cfg.fb_terminal != 0
+    };
 }
 
 }

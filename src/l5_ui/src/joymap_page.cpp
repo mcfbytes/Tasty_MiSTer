@@ -124,13 +124,13 @@ JoyMapPage::JoyMapPage(Spec spec)
     TASTY_SEAT_BODY(JoyMapPage);
     prompts_ = build_joymap_prompts(scope_, spec_.j_names);
     wizard_.begin(svc::DeviceIdentity{}, svc::MapKind::Joystick);
-    if (!spec_.wire || prompts_.empty()) {
+    if (!spec_.ends || prompts_.empty()) {
         done_ = true;
-        ++refusals_;
+        refusals_.add();
         return;
     }
 
-    token_ = spec_.wire->capture_arm().sample().value.token;
+    token_ = spec_.ends->arm.sample().value.token;
     arm_next();
 }
 
@@ -140,17 +140,17 @@ JoyMapPage::~JoyMapPage() {
 
 void JoyMapPage::arm_next() {
     token_ = token_.next();
-    spec_.wire->capture_arm().publish(app::CaptureArm{.token = token_, .armed = true});
+    spec_.ends->arm.publish(app::CaptureArm{.token = token_, .armed = true});
     armed_ = true;
-    spec_.wire->wake();
+    spec_.ends->input_ctrl.kick();
 }
 
 void JoyMapPage::disarm() {
-    if (!spec_.wire || !armed_)
+    if (!spec_.ends || !armed_)
         return;
-    spec_.wire->capture_arm().publish(app::CaptureArm{.token = token_, .armed = false});
+    spec_.ends->arm.publish(app::CaptureArm{.token = token_, .armed = false});
     armed_ = false;
-    spec_.wire->wake();
+    spec_.ends->input_ctrl.kick();
 }
 
 void JoyMapBlob::store(BlobWord word, svc::EvdevCode code) noexcept {
@@ -205,13 +205,13 @@ Transition JoyMapPage::finish(bool save) {
     done_ = true;
     if (!save) {
         wizard_.cancel();
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     }
     if (!lock_ || !spec_.files || lock_->id_clipped) {
 
         if (lock_)
-            ++refusals_;
-        return Transition{Transition::Kind::Pop};
+            refusals_.add();
+        return Transition::pop();
     }
     const svc::MapStore store{*spec_.files};
     svc::ButtonMap map;
@@ -229,19 +229,19 @@ Transition JoyMapPage::finish(bool save) {
     if (store.save(core, id, map, lock_->mod)) {
         saved_ = true;
 
-        spec_.wire->request(app::InputWire::kReqHotplug);
-        spec_.wire->wake();
+        spec_.ends->hotplug.request();
+        spec_.ends->input_ctrl.kick();
     } else {
-        ++refusals_;
+        refusals_.add();
     }
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 Transition JoyMapPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(JoyMapPage);
     if (done_) {
         if (ev.buttons.has_any({UiEvent::Select | UiEvent::Menu})) {
-            return Transition{Transition::Kind::Pop};
+            return Transition::pop();
         }
         return Transition{};
     }
@@ -268,10 +268,10 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
 
 Transition JoyMapPage::on_tick(PageContext&) {
     TASTY_SEAT_BODY(JoyMapPage);
-    if (done_ || !spec_.wire)
+    if (done_ || !spec_.ends)
         return Transition{};
     app::CaptureHit hit{};
-    if (!hit_reader_.take_if_changed(spec_.wire->capture_hit(), hit))
+    if (!hit_reader_.take_if_changed(spec_.ends->hit, hit))
         return Transition{};
     if (hit.token != token_)
         return Transition{};
@@ -295,7 +295,7 @@ Transition JoyMapPage::on_tick(PageContext&) {
 
     if (!wizard_advance_into(svc::MappingWizard::Step::Confirm)
         || !wizard_advance_into(svc::MappingWizard::Step::Persist)) {
-        ++refusals_;
+        refusals_.add();
         rebegin();
         arm_next();
         return Transition{};

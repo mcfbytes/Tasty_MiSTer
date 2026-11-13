@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <utility>
 
 #include "cores/types.h"
 #include "infra/seat.h"
@@ -45,8 +48,46 @@ struct SaturnCddFrame {
         Speed = 10,
     };
 
+    enum class Opcode : std::uint8_t {
+        Nop = 0x00,
+        SeekRing = 0x02,
+        Toc = 0x03,
+        Stop = 0x04,
+        Read = 0x06,
+        Pause = 0x08,
+        Seek = 0x09,
+    };
+
+    enum class StatusCode : std::uint8_t {
+        Toc = 0x06,
+        Stop = 0x12,
+        Seek = 0x22,
+        Data = 0x36,
+        Idle = 0x46,
+        Open = 0x80,
+        SeekRing = 0xB2,
+        SeekRingSecond = 0xB6,
+    };
+    enum class RingPhase : std::uint8_t { First, Second };
+
+    static constexpr std::array<Opcode, 7> kOpcodes{
+        Opcode::Nop,
+        Opcode::SeekRing,
+        Opcode::Toc,
+        Opcode::Stop,
+        Opcode::Read,
+        Opcode::Pause,
+        Opcode::Seek
+    };
+
+    static constexpr std::array<std::uint8_t, kSumBytes> kParked{0x00, 0x41, 0x01, 0x01};
+
+    static constexpr std::array<std::uint8_t, kSumBytes> kRingFirst{};
+    static constexpr std::array<std::uint8_t, kSumBytes>
+        kRingSecond{0x00, 0x48, 0x5A, 0x00, 0x00, 0x00, 0x0A, 0x0A, 0x09, 0x09, 0x00};
+
     struct Comm {
-        std::uint8_t command = 0;
+        std::optional<Opcode> command{};
         HeadLba head{};
         std::uint8_t index = 0;
         svc::TrackNumber track{};
@@ -123,6 +164,33 @@ struct SaturnCddFrame {
         return static_cast<std::uint16_t>(bytes[2 * i] | (bytes[2 * i + 1] << 8));
     }
 
+    [[nodiscard]] constexpr std::optional<Opcode> opcode() const noexcept {
+        const std::uint8_t raw = bytes[static_cast<std::size_t>(CommField::Command)];
+        for (const Opcode o : kOpcodes) {
+            if (std::to_underlying(o) == raw)
+                return o;
+        }
+        return std::nullopt;
+    }
+
+    constexpr void set_status(StatusCode c) noexcept { set(Field::Status, std::to_underlying(c)); }
+
+    constexpr void park(StatusCode c) noexcept {
+        std::ranges::copy(kParked, bytes.begin());
+        set_status(c);
+    }
+
+    constexpr void seek_ring(
+        RingPhase phase,
+        const std::array<std::uint8_t, kFadBytes>& fad
+    ) noexcept {
+        std::ranges::copy(phase == RingPhase::Second ? kRingSecond : kRingFirst, bytes.begin());
+        set_status(phase == RingPhase::Second ? StatusCode::SeekRingSecond : StatusCode::SeekRing);
+        set(Field::Index, fad.front());
+        set(Field::Minute, fad[1]);
+        set(Field::Second, fad.back());
+    }
+
     [[nodiscard]] constexpr Comm comm() const noexcept {
         const auto b = [this](CommField f) {
             return bytes[static_cast<std::size_t>(f)];
@@ -132,7 +200,7 @@ struct SaturnCddFrame {
             | (std::uint32_t{b(CommField::FadMid)} << kByteBits)
             | std::uint32_t{b(CommField::FadLow)};
         Comm out{};
-        out.command = b(CommField::Command);
+        out.command = opcode();
         out.head = HeadLba::of(proto::Lba{fad}) - kPregap;
         out.index = b(CommField::Index);
         out.track = svc::TrackNumber{b(CommField::Track)};

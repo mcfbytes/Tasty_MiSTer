@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "cores/bk2_column.h"
 #include "cores/movie_archive.h"
 #include "cores/movie_codec.h"
 #include "cores/types.h"
@@ -19,16 +20,6 @@ class NesBk2Codec final : public IMovieFormat {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    static constexpr std::uint8_t kColReset = 1;
-    static constexpr std::uint8_t kColPower = 2;
-    static constexpr std::uint8_t kColPad = 0x80;
-    static constexpr std::uint8_t kColGroupEnd = 0xFF;
-
-    static constexpr std::uint8_t kMovieVersion = 0x01;
-    static constexpr std::uint8_t kPlatform = 0x02;
-    static constexpr std::uint8_t kLogKey = 0x04;
-    static constexpr std::uint8_t kSha1 = 0x08;
-
     static constexpr std::string_view kPlatformName = "NES";
 
     static constexpr ReplayLead kNesHawkLead{-2};
@@ -79,7 +70,9 @@ public:
          {"A", 4}}
     };
 
-    [[nodiscard]] static Ex<std::uint8_t> column_of(std::string_view name) noexcept;
+    static constexpr bool kReservesGroupEnd = true;
+
+    [[nodiscard]] static Ex<Bk2Column> column_of(std::string_view name) noexcept;
 };
 
 consteval bool nes_bk2_pad_bits_are_a_permutation() {

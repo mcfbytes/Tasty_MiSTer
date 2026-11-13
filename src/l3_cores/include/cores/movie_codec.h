@@ -22,15 +22,15 @@ namespace mister::cores {
 
 inline constexpr std::size_t kMovieLineMax = 256;
 
-inline constexpr proto::FileSize kCopierGrid{1024};
+inline constexpr proto::BlockSize kCopierGrid{1024};
 inline constexpr proto::FileSize kCopierHeader{512};
 inline constexpr proto::FileSize kSmdHeader{128};
 
 [[nodiscard]] constexpr proto::FileSize tail_remainder(
     proto::FileSize size,
-    proto::FileSize grid
+    proto::BlockSize grid
 ) noexcept {
-    return size - proto::FileSize{grid.length_of(size.whole_units(grid))};
+    return size - grid.extent(size.whole_units(grid));
 }
 
 [[nodiscard]] constexpr proto::FileSize copier_header(proto::FileSize size) noexcept {

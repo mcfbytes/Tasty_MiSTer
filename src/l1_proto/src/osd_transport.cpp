@@ -9,7 +9,6 @@ namespace mister::proto {
 
 namespace {
 
-constexpr std::uint16_t kRowMask = 0x1F;
 constexpr std::uint16_t kModeMask = 0x0A;
 
 }
@@ -38,11 +37,10 @@ Ex<void> OsdTransport::flush_row(proto::Link& link, OsdRow r, std::span<const st
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.v});
     }
     if (bytes.size() != OsdSurface::kRowBytes) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(bytes.size())}
-        );
+        return std::unexpected(OsdRowBytes::of(bytes).refused(Errc::bad_format, ERR_SITE()));
     }
-    const auto cmd = osd_word(OsdOp::Write, static_cast<std::uint16_t>(r.v & kRowMask));
+
+    const auto cmd = osd_word(OsdOp::Write, r.wire_word());
     if (auto e = link.command(chip_select(), cmd); !e)
         return std::unexpected(e.error());
     for (const std::uint8_t b : bytes) {
@@ -88,8 +86,11 @@ Ex<void> OsdTransport::set_rotation(proto::Link& link, OsdRotation rotate) {
         if (auto e = link.word(0); !e)
             return e;
     }
-    if (auto e = link.word(static_cast<std::uint16_t>(rotate)); !e)
-        return e;
+
+    for (const std::uint16_t word : rotation_words(rotate)) {
+        if (auto e = link.word(word); !e)
+            return e;
+    }
     link.close();
     return {};
 }

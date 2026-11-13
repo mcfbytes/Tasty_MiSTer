@@ -6,26 +6,17 @@
 #include <vector>
 
 #include "cores/wav_data.h"
+#include "infra/path_parts.h"
 #include "svc/track.h"
 
 namespace mister::cores::mdp {
 
-namespace {
-
-std::string_view base_dir_of(std::string_view rom_path) {
-    const std::size_t slash = rom_path.rfind('/');
-    return slash == std::string_view::npos ? rom_path : rom_path.substr(0, slash);
-}
-
-}
-
 CueWavSource::CueWavSource(const svc::Vfs& vfs, std::string_view rom_path) noexcept : vfs_(&vfs) {
 
-    const std::size_t dot = rom_path.rfind('.');
-    const auto stem = dot == std::string_view::npos ? rom_path : rom_path.substr(0, dot);
+    const std::string_view stem = infra::cut_at_last_dot(rom_path);
     (void)cue_.assign(stem);
     (void)cue_.append(".cue");
-    (void)base_.assign(base_dir_of(rom_path));
+    (void)base_.assign(infra::dir_or_self(rom_path));
 }
 
 Ex<void> CueWavSource::ensure_parsed_() {

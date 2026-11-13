@@ -43,16 +43,17 @@ void DiscReadService::drain_() noexcept {
         if (!l)
             return;
         const DiscReadSlot& s = *l;
+        if (s.gen != gen_) {
+
+            stale_drops_.add(1);
+            continue;
+        }
         const DiscAsk done = s.ask();
         for (std::optional<DiscAsk>& f : inflight_) {
             if (f == done) {
                 f.reset();
                 break;
             }
-        }
-        if (s.gen != gen_) {
-            stale_drops_.add(1);
-            continue;
         }
 
         for (Resident& r : resident_) {
@@ -171,47 +172,51 @@ void DiscReadService::serve_(DiscReadSlot& s) noexcept {
     s.ok = true;
 }
 
-DiscMountState DiscReadService::arm_mount(
+DiscArm DiscReadService::arm_mount(
     DiscOp op,
     infra::OptRef<const CuePolicy> policy,
     std::string_view path,
-    infra::OptRef<const IDiscIdentity> identity
+    infra::OptRef<const IDiscRules> rules
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiscReadService, A);
     poll_mounts_();
 
     if (mount_live_)
-        return DiscMountState::Pending;
-    if (mount_state_ != DiscMountState::Idle && op == armed_op_ && armed_path_.view() == path) {
-        return mount_state_;
+        return same_request_(op, path) ? DiscArm::Pending : DiscArm::Declined;
+    if (mount_state_ != DiscMountState::Idle && same_request_(op, path)) {
+        return mount_state_ == DiscMountState::Mounted ? DiscArm::Mounted : DiscArm::Failed;
     }
     if (!mounter_) {
         refusals_.add(1);
-        return DiscMountState::Failed;
+        return DiscArm::Failed;
     }
     auto l = mounts_.acquire();
     if (!l) {
         refusals_.add(1);
-        return DiscMountState::Pending;
+        return DiscArm::Declined;
     }
 
     set_generation(gen_.next());
     if (!armed_path_.assign(path)) {
         refusals_.add(1);
-        return DiscMountState::Failed;
+        return DiscArm::Failed;
     }
     armed_op_ = op;
     DiscMountSlot& m = *l;
     (void)m.path.assign(path);
     m.policy = policy;
-    m.identity = identity;
+    m.rules = rules;
     m.gen = gen_;
     m.op = op;
     m.mounted = false;
     mount_live_ = true;
     mount_state_ = DiscMountState::Pending;
     mounts_.send(std::move(l));
-    return DiscMountState::Pending;
+    return DiscArm::Pending;
+}
+
+bool DiscReadService::same_request_(DiscOp op, std::string_view path) const noexcept {
+    return op == armed_op_ && armed_path_.view() == path;
 }
 
 void DiscReadService::release() noexcept {
@@ -221,7 +226,7 @@ void DiscReadService::release() noexcept {
         DiscMountSlot& m = *l;
         m.path.clear();
         m.policy.reset();
-        m.identity.reset();
+        m.rules.reset();
         m.gen = gen_;
         m.op = DiscOp::Release;
         m.mounted = false;
@@ -278,13 +283,12 @@ void DiscReadService::serve_mounts_io_() noexcept {
         if (!j)
             return;
         DiscMountSlot& m = *j;
-        m.mounted = (mounter_ && mounter_->apply(m.op, m.policy, m.path.view(), m.identity));
+        m.mounted = (mounter_ && mounter_->apply(m.op, m.policy, m.path.view(), m.rules));
         j.complete();
     }
 }
 
-void DiscReadService::serve() noexcept {
-    TASTY_SEAT_BODY_MEDIATOR(DiscReadService, B);
+void DiscReadService::serve_all_() noexcept {
     serve_mounts_io_();
     for (;;) {
         auto j = chan_.take();
@@ -293,6 +297,11 @@ void DiscReadService::serve() noexcept {
         serve_(*j);
         j.complete();
     }
+}
+
+void DiscReadService::serve() noexcept {
+    TASTY_SEAT_BODY_MEDIATOR(DiscReadService, B);
+    serve_all_();
 }
 
 void DiscReadService::serve_on_io(DiscReadSlot& s) noexcept {
@@ -305,14 +314,7 @@ bool DiscReadService::idle() const noexcept {
 }
 
 void DiscReadService::pump_on_caller() noexcept {
-    serve_mounts_io_();
-    for (;;) {
-        auto j = chan_.take();
-        if (!j)
-            return;
-        serve_(*j);
-        j.complete();
-    }
+    serve_all_();
 }
 
 }

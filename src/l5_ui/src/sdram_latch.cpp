@@ -20,7 +20,7 @@ void SdramLatch::on_mask(
         if (push_ask(asks, app::UiRequest::SdramDetected{.osd_mask = *cfg_})) {
             reported_ = true;
         } else {
-            ++refusals_;
+            refusals_.add();
         }
     }
 }

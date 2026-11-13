@@ -29,7 +29,6 @@ class InputEmitter;
 namespace mister::app {
 
 class OsdWire;
-class VideoWire;
 
 class SpiEncoder final : public ILinkEncoder {
     TASTY_SEAT_RESIDENT(RT);
@@ -41,7 +40,6 @@ public:
         proto::CoreSession& session,
         OsdWire& osd,
         proto::BlockSlots& slots,
-        VideoWire& video,
         svc::InputEmitter& em,
         SessionTally& session_tally
     ) noexcept;
@@ -65,8 +63,8 @@ public:
     Outcome on(const proto::LinkOp::SaveUpload& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::Ps2Frame& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetOsdVisible& a, const LinkOpCtx& ctx) noexcept;
+    Outcome on(const proto::LinkOp::MenuCtl& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::PulseOption& a, const LinkOpCtx& ctx) noexcept;
-    Outcome on(const proto::LinkOp::SetVideoMode& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::ApplyCheats& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetDip& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetCoreOption& a, const LinkOpCtx& ctx) noexcept;
@@ -90,7 +88,6 @@ private:
     proto::CoreSession& session_;
     OsdWire& osd_;
     proto::BlockSlots& slots_;
-    VideoWire& video_;
     svc::InputEmitter& em_;
 
     SessionTally& session_tally_;

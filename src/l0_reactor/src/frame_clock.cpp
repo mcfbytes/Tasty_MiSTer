@@ -8,6 +8,8 @@
 #include <ctime>
 #include <utility>
 
+#include "infra/unique_fd.h"
+
 namespace mister::reactor {
 
 namespace {
@@ -26,18 +28,15 @@ void back_off() {
 
 }
 
-Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path) {
+Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path, const Wiring& wiring) {
     if (fbdev_path == nullptr)
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
     UniqueFd fb{::open(fbdev_path, O_RDWR | O_CLOEXEC)};
     if (!fb.valid()) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    std::unique_ptr<FrameClock> fc(new FrameClock());
+    std::unique_ptr<FrameClock> fc(new FrameClock(wiring));
     fc->fb_ = os::Framebuffer::adopt(std::move(fb));
-    if (auto w = fc->frame_wake_.open_fd(); !w) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), w.error().detail});
-    }
     return fc;
 }
 
@@ -52,10 +51,12 @@ void FrameClock::wait_vsync() noexcept {
             back_off();
             return;
     }
+    const os::RawMonotonicClock::time_point edge = clock_.now();
     seq_ = seq_.next();
 
-    cell_.publish(FrameRecord{seq_});
-    frame_wake_.kick();
+    cell_.publish(FrameRecord{.seq = seq_, .edge = edge});
+    if (round_wake_)
+        round_wake_->kick();
 }
 
 }

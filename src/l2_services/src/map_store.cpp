@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <utility>
 
+#include "infra/path_parts.h"
 #include "input_rules.h"
 #include "input_service_detail.h"
 
@@ -114,8 +115,7 @@ Ex<void> MapStore::save(
     {
         std::string rel("config/");
         rel.append(paths.primary);
-        const auto slash = rel.rfind('/');
-        if (auto r = vfs_->ensure_dir(rel.substr(0, slash)); !r)
+        if (auto r = vfs_->ensure_dir(infra::dir_or_empty(rel)); !r)
             return r;
     }
 

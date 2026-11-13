@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/seat.h"
+#include "svc/crc32_accumulator.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -17,11 +18,11 @@ public:
 
     void feed(std::span<const std::uint8_t> bytes) noexcept;
 
-    [[nodiscard]] svc::Crc32 value() const noexcept { return crc_; }
+    [[nodiscard]] svc::Crc32 value() const noexcept { return crc_.value(); }
 
 private:
     std::uint64_t skip_;
-    svc::Crc32 crc_{};
+    svc::Crc32AccumulatorT<seat_owner::Main> crc_{};
 };
 
 }

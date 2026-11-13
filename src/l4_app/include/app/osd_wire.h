@@ -38,6 +38,10 @@ public:
 
     [[nodiscard]] OsdPageRoute page_route() const noexcept { return route_; }
 
+    void bind_rotation(proto::OsdRotation rotation) noexcept { rotation_ = rotation; }
+
+    [[nodiscard]] Ex<void> send_rotation() noexcept;
+
     enum class ShowOwner : std::uint8_t { Policy, Bar };
 
     [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s) noexcept {
@@ -68,11 +72,14 @@ public:
         show_ = proto::LinkOp::OsdShow::Off;
         opener_.reset();
         reasserted_ = false;
+        asleep_ = false;
     }
 
     [[nodiscard]] Ex<void> set_visible(bool on) noexcept {
         return set_show(on ? proto::LinkOp::OsdShow::Menu : proto::LinkOp::OsdShow::Off);
     }
+
+    [[nodiscard]] Ex<void> menu_ctl(bool enable) noexcept;
 
     std::uint32_t rows_flushed() const noexcept { return tally_.rows_flushed; }
 
@@ -92,9 +99,17 @@ public:
 
     svc::Tally visibility_writes() const noexcept { return vis_writes_; }
 
+    svc::Tally menu_ctls_sent() const noexcept { return tally_.menu_ctls_sent; }
+
+    bool asleep() const noexcept { return asleep_; }
+
     svc::Tally info_window_writes() const noexcept { return info_writes_; }
 
     svc::Tally info_window_failures() const noexcept { return info_failures_; }
+
+    svc::Tally rotations_sent() const noexcept { return tally_.rotations_sent; }
+
+    svc::Tally rotation_failures() const noexcept { return tally_.rotation_failures; }
 
     proto::LinkOp::OsdShow show() const noexcept { return show_; }
 
@@ -137,7 +152,11 @@ private:
 
     std::optional<ShowOwner> opener_{};
     bool reasserted_ = false;
+
+    bool asleep_ = false;
     proto::OsdTarget target_ = proto::OsdTarget::All;
+
+    proto::OsdRotation rotation_ = proto::OsdRotation::None;
 };
 
 }

@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/core_window_decl.h"
+#include "cores/row_shape_key.h"
 #include "cores/types.h"
 #include "cores/post_notify.h"
 #include "hal/phys_region.h"
@@ -25,7 +26,7 @@ struct TransferRow {
 
     RowDest dest = RowDest::Fio;
     bool shaped = false;
-    std::uint8_t shape = 0;
+    RowShapeKey shape{};
     bool byte_words = false;
     proto::WideIoIndex index{};
     std::uint32_t addr = 0;

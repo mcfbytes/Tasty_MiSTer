@@ -5,40 +5,46 @@
 
 #include "infra/error.h"
 #include "proto/bit_field.h"
+#include "proto/status_bit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
 
 namespace mister::proto {
 
 struct StatusEdit {
+
     StatusWord bits{};
     StatusWord mask{};
 
+    [[nodiscard]] static constexpr StatusEdit seeded(const StatusWord& base) noexcept {
+        return {.bits = base, .mask = {}};
+    }
+
+    [[nodiscard]] constexpr StatusEdit then(const StatusEdit& next) const noexcept {
+        return {
+            .bits = next.over(bits),
+            .mask = StatusEdit{.bits = next.mask, .mask = next.mask}.over(mask)
+        };
+    }
+
     [[nodiscard]] static constexpr StatusEdit bit(StatusBit b, bool value) noexcept {
-        return field(BitField{b, 1}, FieldValue{value ? 1u : 0u});
+        return field(BitField{b, 1}, FieldValue::flag(value));
     }
 
     [[nodiscard]] static constexpr StatusEdit field(BitField bits, FieldValue value) noexcept {
-        return field(bits.start, bits.width, value);
-    }
-
-    [[nodiscard]] static constexpr StatusEdit field(
-        StatusBit start,
-        unsigned width,
-        FieldValue value
-    ) noexcept {
         StatusEdit e{};
-        if (width == 0)
+        if (!bits.valid())
             return e;
-        if (start.v >= StatusWord::kBits || width > StatusWord::kBits - start.v) {
-            fatal(Error{Errc::slot_range, ERR_SITE(), start.v}, "status edit");
+        if (!bits.fits_status()) {
+            fatal(Error{Errc::slot_range, ERR_SITE(), bits.start.index()}, "status edit");
         }
-        unsigned i = 0;
-        for (const StatusBit n : BitField{start, static_cast<std::uint8_t>(width)}.each_bit()) {
-            e.mask = e.mask.with(n, true);
-            if (i < 32u && ((value.v >> i) & 1u) != 0u)
-                e.bits = e.bits.with(n, true);
-            ++i;
+        for (unsigned i = 0; i < bits.width; ++i) {
+            const auto n = bits.start.plus(i);
+            if (!n)
+                break;
+            e.mask = e.mask.with(*n, true);
+            if (i < BitField::kWordBits && ((value.v >> i) & 1u) != 0u)
+                e.bits = e.bits.with(*n, true);
         }
         return e;
     }

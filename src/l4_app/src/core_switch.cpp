@@ -178,11 +178,11 @@ std::optional<proto::BindGeneration> CoreSwitch::try_program(Host& host) {
 
 bool CoreSwitch::hold_on_lease_() noexcept {
 
-    const bool sector_free = !builder_.sector_mapped()
-        || builder_.retire_sector(readiness_.fabric_configured());
-    const bool osd_free = !builder_.osd_mapped()
-        || builder_.retire_osd(readiness_.fabric_configured());
-    const bool sys_free = !builder_.sys_mapped() || builder_.retire_sys();
+    const bool sector_free = !builder_.sector().mapped()
+        || builder_.sector().retire(readiness_.fabric_configured());
+    const bool osd_free = !builder_.osd().mapped()
+        || builder_.osd().retire(readiness_.fabric_configured());
+    const bool sys_free = !builder_.sys().mapped() || builder_.sys().retire();
     if (sector_free && osd_free && sys_free) {
         lease_hold_.reset();
         return false;

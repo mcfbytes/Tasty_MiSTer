@@ -28,7 +28,6 @@
 #include "thread_assembly.h"
 
 namespace mister::app {
-class BtPump;
 class HpsFramebuffer;
 class LauncherScreen;
 class LinkSession;
@@ -62,7 +61,6 @@ public:
             infra::OptRef<app::IEventSink> shot_sink{};
             infra::OptRef<app::MglPump> mgl{};
             infra::OptRef<app::HpsFramebuffer> fb{};
-            infra::OptRef<app::BtPump> bt{};
             infra::OptRef<app::LauncherScreen> launcher_screen{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};

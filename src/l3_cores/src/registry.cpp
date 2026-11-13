@@ -47,7 +47,10 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
     {.profile = manifests::kSgb,
      .make = &manifests::make_sgb,
      .make_companion = &manifests::make_msu_companion},
-    {.profile = manifests::kElectron, .make = &manifests::make_electron},
+    {.profile = manifests::kElectron,
+     .make = &manifests::make_electron,
+     .make_loader = &manifests::make_uef_loader,
+     .derives_content = true},
     {.profile = manifests::kAtariSt,
      .make = &manifests::make_st,
      .make_ladder = &manifests::make_st_ladder},
@@ -276,21 +279,42 @@ static_assert(
     "backup RAM as corrupt (pass BS / row item)"
 );
 
+consteval bool blank_fills_are_the_two_typed_bytes() {
+
+    constexpr std::byte kZero{};
+    for (const CoreFactory& f : kCoreTable) {
+        const std::byte fill = f.profile.blank_save.fill;
+        if (fill != kZero && fill != svc::BlankSaveSpec::kErased)
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    blank_fills_are_the_two_typed_bytes(),
+    "a profile's blank_save.fill is std::byte{0x00} or BlankSaveSpec::kErased"
+);
+
 consteval std::size_t boot_buffers_of(std::span<const BootAsset> rows) {
     std::size_t outside = 0;
     bool group0 = false;
     for (const BootAsset& r : rows) {
-        group0 = group0 || r.group == 0;
-        outside += r.group == 0 ? 0u : 1u;
+        group0 = group0 || r.group == BootGroup::First;
+        outside += r.group == BootGroup::First ? 0u : 1u;
     }
     return outside + (group0 ? 1u : 0u);
 }
 
-consteval BootAsset row_in(std::uint8_t group) {
+consteval BootAsset row_in(BootGroup group) {
     return BootAsset{.name = {}, .where = {}, .group = group};
 }
 
-constexpr BootAsset kTwoLayeredRows[] = {row_in(0), row_in(0), row_in(1), row_in(1)};
+constexpr BootAsset kTwoLayeredRows[] = {
+    row_in(BootGroup::First),
+    row_in(BootGroup::First),
+    row_in(BootGroup::Second),
+    row_in(BootGroup::Second)
+};
 static_assert(boot_buffers_of(kTwoLayeredRows) == 3);
 
 consteval bool boot_buffers_fit_the_ceiling() {
@@ -471,6 +495,16 @@ static_assert(
     loader_rows_stream(),
     "a row with a MAIN loader answers the stream role: its profile is not file_tx_whole"
 );
+
+consteval bool derived_rows_have_a_loader() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.derives_content && f.make_loader == nullptr)
+            return false;
+    }
+    return true;
+}
+
+static_assert(derived_rows_have_a_loader(), "derives_content implies make_loader");
 
 consteval bool loader_rows_keep_their_loader() {
     for (const CoreFactory& f : kCoreTable) {

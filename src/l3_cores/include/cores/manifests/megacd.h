@@ -3,6 +3,7 @@
 
 #include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
+#include "proto/status_bit.h"
 
 #include <array>
 #include <cstddef>
@@ -134,9 +135,9 @@ inline constexpr std::array<B, 64> kMegaCdExtFormat{{
 
 inline constexpr proto::Lba kMegaCdIntLba{0xF};
 inline constexpr proto::Lba kMegaCdExtLba{0x40F};
-inline constexpr std::uint32_t kMegaCdFormatOffset = 448;
+inline constexpr proto::FileSize kMegaCdFormatOffset{448};
 
-inline constexpr auto kMegaCdBlankRegions = std::to_array<BlankRegion>({
+inline constexpr auto kMegaCdBlankRegions = std::to_array<svc::BlankRegion>({
     {.block = kMegaCdIntLba,
      .within = kMegaCdFormatOffset,
      .bytes = megacd_blank::kMegaCdIntFormat},
@@ -145,7 +146,7 @@ inline constexpr auto kMegaCdBlankRegions = std::to_array<BlankRegion>({
      .bytes = megacd_blank::kMegaCdExtFormat},
 });
 
-inline constexpr BlankSaveSpec kMegaCdBlankSave{
+inline constexpr svc::BlankSaveSpec kMegaCdBlankSave{
     .fill = std::byte{0x00},
     .header = {},
     .regions = kMegaCdBlankRegions,
@@ -159,7 +160,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageParentDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0,
+     .group = BootGroup::First,
      .group_required = true},
 
     {.name = "boot.rom",
@@ -168,7 +169,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::Search,
      .subdir = "MEGACD",
      .dest = WideIoIndex{0},
-     .group = 0,
+     .group = BootGroup::First,
      .group_required = true},
 
     {.name = "cd_bios.rom",
@@ -177,7 +178,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 1},
+     .group = BootGroup::Second},
 
     {.name = "cart.rom",
      .where = {},
@@ -185,7 +186,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{0x40},
-     .group = 2},
+     .group = BootGroup::Third},
 });
 
 inline constexpr StagingPolicy kMegaCdStaging{

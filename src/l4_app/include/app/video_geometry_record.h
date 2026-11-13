@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/frame_ticks.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -16,7 +17,7 @@ struct VideoGeometryRecord {
     std::uint16_t res = 0;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
-    std::uint32_t vtime = 0;
+    FrameTicks rate{};
     std::uint32_t core_seq = 0;
 };
 

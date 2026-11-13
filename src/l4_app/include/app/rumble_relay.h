@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "app/input_wire.h"
+#include "app/rumble_players_cell.h"
 #include "infra/diag_log.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"

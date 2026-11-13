@@ -10,7 +10,6 @@ namespace mister::reactor {
 enum class Cause : std::uint8_t {
     None,
     Tick,
-    Frame,
     Blk,
     Fifo,
     Ring,

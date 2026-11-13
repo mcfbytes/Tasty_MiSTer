@@ -18,6 +18,7 @@
 #include "ui/browser_host.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -83,7 +84,7 @@ public:
     Transition on_cancel() override;
     Transition on_eject() override;
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CoreSettingsPage);
         return refusals_;
     }
@@ -157,7 +158,7 @@ private:
     RowIndex first_row_{};
     bool armed_ = false;
     proto::IoIndex pending_slot_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

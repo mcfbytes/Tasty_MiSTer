@@ -17,8 +17,6 @@ class Vfs;
 
 namespace mister::app {
 
-enum class RememberedSlot : std::uint8_t { File, Mount };
-
 inline constexpr std::size_t kRememberedBlob = 1024;
 
 class RememberedStem {
@@ -48,17 +46,12 @@ private:
     FixedStr<kMax, StrFit::Clip> text_{};
 };
 
-[[nodiscard]] std::string remembered_blob_name(
-    const RememberedStem& stem,
-    RememberedSlot s,
-    proto::IoIndex index
-);
+[[nodiscard]] std::string remembered_blob_name(const RememberedStem& stem, proto::FileRowId row);
 
 [[nodiscard]] std::string read_remembered_path(
     const svc::Vfs& vfs,
     const RememberedStem& stem,
-    RememberedSlot s,
-    proto::IoIndex index
+    proto::FileRowId row
 );
 
 }

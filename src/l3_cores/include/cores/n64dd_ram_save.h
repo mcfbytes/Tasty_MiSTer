@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "cores/core_window.h"
+#include "cores/n64_ram_save_order.h"
 #include "cores/n64dd_disk_map.h"
 #include "cores/n64dd_geometry.h"
 #include "cores/n64dd_system_area.h"
@@ -25,8 +26,6 @@
 
 namespace mister::cores::n64dd {
 
-inline constexpr std::size_t kCoreDirChars = 32;
-
 [[nodiscard]] std::optional<svc::SlotPathText> ram_save_path(
     std::string_view disk_path,
     std::string_view core_dir
@@ -39,14 +38,6 @@ class RamSaveJob final : public IWindowJob {
 
 public:
     static constexpr std::size_t kStepBytes = 256u * 1024u;
-
-    struct Order {
-        hal::FabricAddr load_addr{};
-        svc::SlotPathText disk_path{};
-        FixedStr<kCoreDirChars, StrFit::Reject> core_dir{};
-    };
-
-    static_assert(std::is_trivially_copyable_v<Order> && WindowJobOrder::fits<Order>);
 
     RamSaveJob(
         hal::FabricAddr load_addr,
@@ -86,7 +77,7 @@ private:
 
     hal::FabricAddr addr_;
     svc::SlotPathText disk_path_{};
-    FixedStr<kCoreDirChars, StrFit::Reject> core_dir_{};
+    CoreDir core_dir_{};
     bool path_ok_ = false;
     Phase phase_ = Phase::Open;
     std::uint64_t off_ = 0;
@@ -100,12 +91,5 @@ private:
 [[nodiscard]] IWindowJob* build_ram_save_job(JobArena& arena, const WindowJobOrder& order) noexcept;
 
 extern const WindowJobBuild kRamSaveKind;
-
-[[nodiscard]] bool write_ram_save_order(
-    WindowJobOrder& order,
-    hal::FabricAddr load_addr,
-    std::string_view disk_path,
-    std::string_view core_dir
-) noexcept;
 
 }

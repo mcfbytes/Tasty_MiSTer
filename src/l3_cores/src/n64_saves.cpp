@@ -5,22 +5,12 @@
 #include <algorithm>
 #include <utility>
 
+#include "infra/path_parts.h"
+
 namespace mister::cores::n64 {
-namespace {
 
-std::string_view basename_of(std::string_view path) noexcept {
-    const auto slash = path.find_last_of('/');
-    return slash == std::string_view::npos ? path : path.substr(slash + 1);
-}
-
-std::string_view stem_of(std::string_view name) noexcept {
-    const auto dot = name.rfind('.');
-    return dot == std::string_view::npos ? name : name.substr(0, dot);
-}
-
-}
-
-SaveChannel::SaveChannel(const svc::Vfs& vfs) noexcept : io_(vfs) {}
+SaveChannel::SaveChannel(const svc::Vfs& vfs, infra::OptRef<xthread::WakeFlag> activity) noexcept
+    : io_(vfs, activity) {}
 
 Ex<void> SaveChannel::plan(
     const ILayoutKeySource& live,
@@ -58,7 +48,7 @@ Ex<void> SaveChannel::plan(
     bool ok = stock.assign("saves/");
     ok = ok && stock.append(core_dir);
     ok = ok && stock.append("/");
-    ok = ok && stock.append(stem_of(basename_of(image_path)));
+    ok = ok && stock.append(infra::stem(image_path));
     ok = ok && stock.append(".sav");
     if (!ok)
         stock.clear();

@@ -35,7 +35,7 @@ HdDisplayPlan::HdDisplayPlan(const HdPlanInputs& in)
     TASTY_SEAT_BODY(HdDisplayPlan);
     refs_ = {style_row_, layout_row_, colors_row_, display_row_, opacity_row_};
     if (!in.ctx.launches.confirm)
-        ++refusals_;
+        refusals_.add();
 }
 
 PageId HdDisplayPlan::id() const {
@@ -53,7 +53,7 @@ std::span<const std::reference_wrapper<IHdRow>> HdDisplayPlan::rows() const {
     return refs_;
 }
 
-std::uint32_t HdDisplayPlan::refusals() const noexcept {
+svc::Tally HdDisplayPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdDisplayPlan);
     return refusals_;
 }
@@ -65,16 +65,15 @@ std::uint32_t HdDisplayPlan::commands_published() const noexcept {
 
 Transition HdDisplayPlan::ClassicAction::on_yes() {
     TASTY_SEAT_BODY(ClassicAction);
-    plan_.style_.choose_classic();
     if (!push_ask(
             plan_.ctx_.ui_requests,
             app::UiRequest::SetOsdStyle{.style = app::OsdStyle::Classic}
         )) {
-        ++plan_.refusals_;
+        plan_.refusals_.add();
     } else {
         ++plan_.published_;
     }
-    return Transition{Transition::Kind::Reopen};
+    return Transition::choose_classic_style();
 }
 
 app::PageDescription::Row HdDisplayPlan::LookRow::describe() const {
@@ -103,7 +102,7 @@ Transition HdDisplayPlan::LookRow::step(CycleDir dir) {
             plan_.ctx_.ui_requests,
             app::UiRequest::SetHdLook{.field = field_, .value = next}
         )) {
-        ++plan_.refusals_;
+        plan_.refusals_.add();
     } else {
         ++plan_.published_;
     }

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include "app/input_wire.h"
+#include "app/joymap_ends.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -17,6 +17,7 @@
 #include "svc/mapping_wizard.h"
 #include "ui/page.h"
 #include "ui/joymap_blob.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -39,7 +40,7 @@ class JoyMapPage final : public Page {
 
 public:
     struct Spec {
-        infra::OptRef<app::InputWire> wire{};
+        infra::OptRef<const app::JoyMapEnds> ends{};
         infra::OptRef<const svc::Vfs> files{};
         bool front_end = false;
         std::string core;
@@ -69,7 +70,7 @@ public:
         return f;
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(JoyMapPage);
         return refusals_;
     }
@@ -119,7 +120,7 @@ private:
 
     svc::MappingWizard wizard_{};
     app::CaptureHitCell::Reader hit_reader_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 };
 
 }

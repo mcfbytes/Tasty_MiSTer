@@ -12,8 +12,10 @@
 
 #include "cores/boot_asset.h"
 #include "cores/core_profile.h"
+#include "cores/ladder_carry.h"
 #include "cores/ladder_context.h"
 #include "cores/ladder_host.h"
+#include "cores/ladder_pc.h"
 #include "cores/payload_pieces.h"
 #include "cores/wire_word.h"
 #include "infra/error.h"
@@ -45,44 +47,35 @@ public:
         proto::FileSize bytes_downloaded{};
     };
 
-    static constexpr std::uint8_t kDone = 0xFF;
-
     virtual ~BootLadder() = default;
     BootLadder(const BootLadder&) = delete;
     BootLadder& operator=(const BootLadder&) = delete;
 
     [[nodiscard]] Ex<bool> step();
 
-    [[nodiscard]] virtual std::uint8_t pc() const noexcept = 0;
+    [[nodiscard]] LadderPc pc() const noexcept { return do_pc(); }
 
-    [[nodiscard]] bool done() const noexcept { return pc() == kDone; }
+    [[nodiscard]] bool done() const noexcept { return pc().is_done(); }
 
     [[nodiscard]] const Report& report() const noexcept { return report_; }
 
-    [[nodiscard]] virtual std::string_view next_last_dir() const noexcept { return image_dir_; }
+    [[nodiscard]] LadderCarry carry() const noexcept { return do_carry(); }
 
-    [[nodiscard]] virtual bool next_noreset() const noexcept { return false; }
+private:
+    [[nodiscard]] virtual LadderPc do_pc() const noexcept = 0;
 
-    [[nodiscard]] virtual std::span<const std::string> next_slot_paths() const noexcept {
-        return {};
+    [[nodiscard]] virtual LadderCarry do_carry() const noexcept {
+        return LadderCarry{.last_dir = image_dir_};
     }
-
-protected:
-    BootLadder(const CoreProfile& profile, const LadderContext& ctx);
 
     [[nodiscard]] virtual Ex<bool> on_step() = 0;
 
     [[nodiscard]] virtual bool steps_at_core_start() const noexcept { return false; }
 
+protected:
+    BootLadder(const CoreProfile& profile, const LadderContext& ctx);
+
     [[nodiscard]] bool core_start_armed() const noexcept { return core_start_; }
-
-    static std::string_view dir_of(std::string_view path);
-
-    static std::string_view dir_or_empty(std::string_view path);
-    static std::string_view base_of(std::string_view path);
-
-    static std::string_view ext_of(std::string_view path);
-    static std::string strip_disc_word(std::string path, std::span<const std::string_view> words);
 
     [[nodiscard]] std::optional<std::string> resolve_row(const BootAsset& row) const;
 
@@ -90,7 +83,7 @@ protected:
 
     [[nodiscard]] Ex<AssetWait> step_pieces_();
 
-    [[nodiscard]] bool group_gates(std::uint8_t group) const;
+    [[nodiscard]] bool group_gates(BootGroup group) const;
 
     [[nodiscard]] Ex<std::string> save_path_for(std::string_view image);
 
@@ -152,10 +145,11 @@ protected:
     FixedStr<1024, StrFit::Clip> load_path_{};
     std::optional<PayloadPieces> pieces_{};
 
-    std::uint8_t row_i_ = 0;
-
-    std::uint8_t sub_ = 0;
-    bool marker_seen_ = false;
+    enum class Half : std::uint8_t {
+        Fresh,
+        FirstOrdered,
+        Settled,
+    };
 
     Report report_{};
 

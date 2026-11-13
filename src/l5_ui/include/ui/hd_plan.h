@@ -7,9 +7,11 @@
 #include <string_view>
 
 #include "infra/opt_ref.h"
+#include "ui/connect_demand.h"
 #include "ui/types.h"
 #include "ui/hd_row.h"
 #include "ui/page_id.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -37,7 +39,13 @@ public:
 
     virtual infra::OptRef<IHdRewalk> rewalker() { return {}; }
 
-    [[nodiscard]] virtual std::uint32_t refusals() const noexcept { return 0; }
+    [[nodiscard]] virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
+
+    [[nodiscard]] virtual ConnectDemand connect_demand() const { return ConnectDemand{}; }
+
+    virtual void on_focus_moved() {}
+
+    [[nodiscard]] virtual bool holds_pairing() const { return false; }
 
     [[nodiscard]] virtual bool hub() const noexcept { return false; }
 

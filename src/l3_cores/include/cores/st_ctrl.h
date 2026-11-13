@@ -9,6 +9,7 @@
 #include "cores/st_sysctrl.h"
 #include "cores/types.h"
 #include "infra/endian.h"
+#include "proto/status_bit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
 #include "cores/st_slot.h"
@@ -106,14 +107,14 @@ struct CtrlWord {
     [[nodiscard]] constexpr proto::StatusWord status_word() const noexcept {
         proto::StatusWord w{};
         w.words[0] = static_cast<std::uint16_t>(v);
-        w.words[1] = static_cast<std::uint16_t>(v >> proto::StatusWord::kBitsPerWord);
+        w.words[1] = static_cast<std::uint16_t>(v >> proto::StatusBit::kWordBits);
         return w;
     }
 
     [[nodiscard]] static constexpr CtrlWord of(const proto::StatusWord& w) noexcept {
         return CtrlWord{
             static_cast<std::uint32_t>(w.words[0])
-            | (static_cast<std::uint32_t>(w.words[1]) << proto::StatusWord::kBitsPerWord)
+            | (static_cast<std::uint32_t>(w.words[1]) << proto::StatusBit::kWordBits)
         };
     }
 

@@ -105,6 +105,11 @@ public:
 
         [[nodiscard]] bool completed() const noexcept { return done_; }
 
+        [[nodiscard]] PoolSlot slot() const noexcept {
+            (void)checked_();
+            return lease_ == nullptr ? PoolSlot{} : ch_->index_of(*this).value_or(PoolSlot{});
+        }
+
     private:
         friend class LoanChannel;
 
@@ -225,6 +230,10 @@ public:
 
         [[nodiscard]] Loan reap() noexcept { return ch_->reap(); }
 
+        [[nodiscard]] bool returns_pending() const noexcept { return ch_->returns_pending(); }
+
+        [[nodiscard]] bool has_free() const noexcept { return ch_->has_free(); }
+
         [[nodiscard]] std::size_t reclaim_all_parked() noexcept {
             return ch_->reclaim_all_parked();
         }
@@ -326,6 +335,10 @@ public:
     LoanChannel(WakeFlag& worker_wake, Polled) noexcept
         requires(SeatMayBlock<OwnerSeat> && SeatMayBlock<WorkerSeat>)
         : worker_wake_(worker_wake) {}
+
+    LoanChannel(Polled, WakeFlag& owner_wake) noexcept
+        requires(SeatMayBlock<OwnerSeat> && SeatMayBlock<WorkerSeat>)
+        : owner_wake_(owner_wake) {}
 
     LoanChannel(const LoanChannel&) = delete;
     LoanChannel& operator=(const LoanChannel&) = delete;
@@ -486,6 +499,13 @@ public:
     }
 
     [[nodiscard]] std::size_t outbound() const noexcept { return out_.size(); }
+
+    [[nodiscard]] bool returns_pending() const noexcept { return back_.size() != 0; }
+
+    [[nodiscard]] bool has_free() const noexcept {
+        seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::has_free off the owner seat");
+        return pool_.available() != 0;
+    }
 
     [[nodiscard]] std::uint8_t live() const noexcept {
         seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::live off the owner seat");

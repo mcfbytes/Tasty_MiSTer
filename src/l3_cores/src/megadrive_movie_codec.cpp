@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 
+#include "cores/bk2_log.h"
+#include "cores/bk2_text.h"
 #include "cores/movie_archive.h"
 #include "cores/movie_refusal.h"
 #include "infra/ascii.h"
@@ -30,25 +32,6 @@ using GpgxRegion = MegaDriveMovieCodec::Layout::GpgxRegion;
 using CoreRegion = MegaDriveMovieCodec::Layout::CoreRegion;
 
 constexpr MovieRevision kBizHawkRevision{2};
-
-std::optional<bool> boolean(std::string_view v) {
-    if (v == "1" || infra::ieq(v, "true"))
-        return true;
-    if (v == "0" || infra::ieq(v, "false"))
-        return false;
-    return std::nullopt;
-}
-
-std::optional<DigestValue> read_digest(std::string_view v) {
-    constexpr std::size_t kHexPerByte = 2;
-    if (const auto colon = v.find(':'); colon != std::string_view::npos)
-        v.remove_prefix(colon + 1);
-    for (const DigestKind k : {DigestKind::Sha1, DigestKind::Md5, DigestKind::Crc32}) {
-        if (v.size() == kHexPerByte * digest_len(k))
-            return parse_hex_digest(v, k);
-    }
-    return std::nullopt;
-}
 
 [[nodiscard]] Ex<GpgxRegion> gpgx_region(std::string_view v) {
     constexpr std::size_t kGpgxRegionDigits = 1;
@@ -477,18 +460,17 @@ bool MegaDriveGmvFormat::rom_matches(const DigestValue& d, const MovieFacts& f) 
 }
 
 bool MegaDriveBk2Format::starts_log(std::string_view line) const noexcept {
-    return !line.empty() && line.front() == '|';
+    return bk2_starts_log(line);
 }
 
 bool MegaDriveBk2Format::ends_log(std::string_view line) const noexcept {
-    return IMovieFormat::trim(line) == "[/Input]";
+    return bk2_ends_log(line);
 }
 
 Ex<MovieFacts> MegaDriveBk2Format::header_line(
     std::string_view line,
     const MovieFacts& so_far
 ) const noexcept {
-    constexpr std::string_view kLogKeyPrefix = "LogKey:";
     constexpr std::size_t kGpgxRegionDigits = 1;
     constexpr std::size_t kFlagDigits = 3;
     constexpr std::uint32_t kFlagsMax = 0xFF;
@@ -498,37 +480,33 @@ Ex<MovieFacts> MegaDriveBk2Format::header_line(
     constexpr unsigned kDigitsGmvVersion = 3;
     MovieFacts f = so_far;
     Layout l = f.layout.view_as<Layout>();
-    line = IMovieFormat::trim(line);
-    if (line.empty())
-        return f;
-
-    if (line == "@Core"
-        || line == "@CoreText"
-        || line == "@SaveRam"
-        || line.starts_with("SavestateBinaryBase64Blob")) {
-        return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
+    const auto read = bk2_read_line(line);
+    if (!read)
+        return std::unexpected(read.error());
+    const Bk2Line& ln = *read;
+    switch (ln.kind) {
+        case Bk2Line::Kind::Blank:
+        case Bk2Line::Kind::Long:
+            return f;
+        case Bk2Line::Kind::LogKey: {
+            const auto k = read_log_key(ln.value, l);
+            if (!k || (l.gmv && k->sys != Sys::None))
+                return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
+            l = *k;
+            svc::PlayerMask ports{};
+            if (l.p1 != Pad::None)
+                ports = ports.with(svc::kPlayers[0]);
+            if (l.p2 != Pad::None)
+                ports = ports.with(svc::kPlayers[1]);
+            f.ports = ports;
+            f.layout = FormatLayout::of(l.bits());
+            return f;
+        }
+        case Bk2Line::Kind::Pair:
+            break;
     }
-    if (line.starts_with(kLogKeyPrefix)) {
-        const auto k = read_log_key(line.substr(kLogKeyPrefix.size()), l);
-        if (!k || (l.gmv && k->sys != Sys::None))
-            return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
-        l = *k;
-        svc::PlayerMask ports{};
-        if (l.p1 != Pad::None)
-            ports = ports.with(svc::kPlayers[0]);
-        if (l.p2 != Pad::None)
-            ports = ports.with(svc::kPlayers[1]);
-        f.ports = ports;
-        f.layout = FormatLayout::of(l.bits());
-        return f;
-    }
-    if (line.size() > kMovieLineMax)
-        return f;
-    const std::size_t sp = line.find(' ');
-    const std::string_view key = line.substr(0, sp);
-    const std::string_view val = sp == std::string_view::npos
-        ? std::string_view{}
-        : IMovieFormat::trim(line.substr(sp + 1));
+    const std::string_view key = ln.key;
+    const std::string_view val = ln.value;
     const auto set_region = [&] {
         const bool pal = l.region == GpgxRegion::Europe
             || (l.region == GpgxRegion::Auto && l.pal_key);
@@ -539,7 +517,7 @@ Ex<MovieFacts> MegaDriveBk2Format::header_line(
     if (gmv_key != l.gmv && (key != "GmvVersion" || !f.version.unset() || l.bits() != 0))
         return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     if (key == "MovieVersion") {
-        if (!val.starts_with("BizHawk v2"))
+        if (!bk2_version_ok(val))
             return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         f.version = kBizHawkRevision;
     } else if (key == "Platform") {
@@ -551,19 +529,8 @@ Ex<MovieFacts> MegaDriveBk2Format::header_line(
         if (val != "Genplus-gx")
             return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         l.core = true;
-    } else if (key == "StartsFromSavestate" || key == "StartsFromSaveRam") {
-        const auto b = boolean(val);
-        if (!b)
-            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
-        if (*b)
-            return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
-    } else if (key == "SHA1" || (key == "MD5" && !f.digest)) {
-        const auto d = read_digest(val);
-        if (!d)
-            return std::unexpected(movie_refusal(CR::Checksum, ERR_SITE()));
-        f.digest = *d;
     } else if (key == "PAL") {
-        const auto b = boolean(val);
+        const auto b = bk2_boolean(val);
         if (!b)
             return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         l.pal_key = *b;
@@ -580,7 +547,7 @@ Ex<MovieFacts> MegaDriveBk2Format::header_line(
         if (!(v == 0u || infra::ieq(val, "Disabled")))
             return std::unexpected(movie_refusal(CR::Setting, ERR_SITE()));
     } else if (key == "SyncSettings.o.LoadBIOS" || key == "SyncSettings.LoadBIOS") {
-        const auto b = boolean(val);
+        const auto b = bk2_boolean(val);
         if (!b || *b)
             return std::unexpected(movie_refusal(CR::Setting, ERR_SITE()));
     } else if (key == "GmvVersion") {
@@ -619,6 +586,12 @@ Ex<MovieFacts> MegaDriveBk2Format::header_line(
                 return std::unexpected(movie_refusal(CR::Multitap, ERR_SITE()));
             f.region = (*v & kGmvFlagPal) != 0 ? MovieRegion::Pal : MovieRegion::Ntsc;
         }
+    } else {
+        const auto d = bk2_prefixed_digest(key, val, f.digest.has_value());
+        if (!d)
+            return std::unexpected(d.error());
+        if (*d)
+            f.digest = **d;
     }
     if (const auto n = rerecord_count(key, val))
         f.rerecords = n;
@@ -648,10 +621,10 @@ Ex<MovieFrame> MegaDriveBk2Format::frame(
 ) const noexcept {
     constexpr std::size_t kSystemGroupBits = 2;
     constexpr std::size_t kGroupsMax = 3;
-    while (!line.empty() && line.back() == '\r')
-        line.remove_suffix(1);
-    if (line.size() > kMovieLineMax || !starts_log(line))
-        return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
+    const auto text = bk2_frame_text(line);
+    if (!text)
+        return std::unexpected(text.error());
+    line = *text;
     const Layout l = f.layout.view_as<Layout>();
 
     std::array<LogGroup, kGroupsMax> groups{};

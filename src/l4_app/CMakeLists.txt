@@ -1,5 +1,17 @@
+set(_tasty_logo_png "${CMAKE_SOURCE_DIR}/src/l4_app/assets/logo.png")
+set(_tasty_logo_table "${CMAKE_CURRENT_BINARY_DIR}/front_end_logo_table.cpp")
+add_custom_command(
+  OUTPUT "${_tasty_logo_table}"
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/src/tools/embed_logo.py"
+          "${_tasty_logo_png}" "${_tasty_logo_table}"
+  DEPENDS "${_tasty_logo_png}" "${CMAKE_SOURCE_DIR}/src/tools/embed_logo.py"
+          "${CMAKE_SOURCE_DIR}/src/tools/embed_splash.py"
+  VERBATIM)
+set_source_files_properties("${_tasty_logo_table}" PROPERTIES GENERATED TRUE)
+
 add_library(mister_app STATIC
   src/addon_send.cpp
+  src/audio_pump.cpp
   src/avi_encoder.cpp
   src/avi_format.cpp
   src/avi_writer.cpp
@@ -9,7 +21,6 @@ add_library(mister_app STATIC
   src/bitstream_resolve.cpp
   src/board_ops.cpp
   src/board_reboot.cpp
-  src/bt_pump.cpp
   src/capture_main.cpp
   src/cheat_catalog_pack.cpp
   src/cheat_link.cpp
@@ -45,16 +56,21 @@ add_library(mister_app STATIC
   src/file_bytes.cpp
   src/file_tx_pieces.cpp
   src/frame_arena.cpp
+  src/frame_codec.cpp
   src/frame_copier.cpp
   src/frame_numbering.cpp
   src/frame_hasher.cpp
   src/half_scaler.cpp
   src/hd_crumb.cpp
   src/hd_dirty_ledger.cpp
+  src/connect_main.cpp
   src/hd_osd_main.cpp
   src/hd_osd_screen.cpp
   src/hd_glass.cpp
+  src/front_end_logo.cpp
+  src/wallpaper_pattern.cpp
   src/hd_renderer.cpp
+  ${_tasty_logo_table}
   src/backdrop_job.cpp
   src/hd_theme.cpp
   src/hps_framebuffer.cpp
@@ -64,13 +80,16 @@ add_library(mister_app STATIC
   src/info_decoder.cpp
   src/ini_parse.cpp
   src/input_build.cpp
+  src/host_led_watch.cpp
   src/input_decode.cpp
   src/input_emit.cpp
   src/input_main.cpp
   src/input_pipeline.cpp
-  src/input_wire.cpp
+  src/core_input_binding.cpp
   src/joy_level_emitter.cpp
+  src/joy_menu_chords.cpp
   src/mouse_divider.cpp
+  src/ps2_egress.cpp
   src/intern_exact.cpp
   src/launcher_host.cpp
   src/launcher_latch.cpp
@@ -104,6 +123,7 @@ add_library(mister_app STATIC
   src/pcm_main.cpp
   src/pcm_ring_feeder.cpp
   src/png_encoder.cpp
+  src/prelude_composer.cpp
   src/process_integration.cpp
   src/quiesce_ack.cpp
   src/rbf_resolve.cpp
@@ -150,8 +170,11 @@ add_library(mister_app STATIC
   src/start_chain.cpp
   src/stdout_router.cpp
   src/stream_io.cpp
+  src/baud_table.cpp
+  src/uart_binding.cpp
   src/uart_mode.cpp
   src/uart_performer.cpp
+  src/uart_persist.cpp
   src/adv7513_seat.cpp
   src/video_ini.cpp
   src/video_pump.cpp
@@ -202,6 +225,7 @@ if(TASTY_WITH_HDOSD)
 endif()
 
 tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
+  app/baud_table.h
   app/baud_words.h
   app/mgl_hold.h
   app/percent.h
@@ -210,15 +234,20 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/px_plane.h
   app/avi_encoder.h
   app/avi_format.h
+  app/avi_frame_count.h
+  app/avi_frame_index.h
   app/avi_write_status.h
   app/avi_writer.h
   app/bitstream_programmer.h
   app/bitstream_resolve.h
   app/capture_main.h
+  app/chunk_dispatch.h
+  app/chunk_place.h
   app/chunk_slot.h
   app/core_frame_counter.h
   app/cscd_codec.h
   app/frame_codec.h
+  app/frame_ticks.h
   app/rec_every.h
   app/rec_options.h
   app/zmbv_codec.h
@@ -226,6 +255,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/encode_main.h
   app/encode_status.h
   app/frame_arena.h
+  app/frame_budget.h
   app/frame_copier.h
   app/frame_numbering.h
   app/frame_demand.h
@@ -240,10 +270,26 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/backdrop_job.h
   app/backdrop_sampler.h
   app/backdrop_scaler.h
+  app/band_fade_pattern.h
+  app/band_gradient_pattern.h
+  app/black_pattern.h
+  app/checkers_pattern.h
+  app/front_end_logo.h
+  app/front_end_pattern.h
+  app/front_end_status.h
+  app/spectrum_pattern.h
+  app/wallpaper_pattern.h
   app/bay_counts.h
   app/fb_view.h
   app/hd_dirty_ledger.h
   app/hd_flip_slot.h
+  app/connect_cells.h
+  app/connect_channel.h
+  app/connect_fd_sync.h
+  app/connect_host.h
+  app/connect_main.h
+  app/connect_sink.h
+  app/view_mark.h
   app/hd_help.h
   app/hd_layout.h
   app/hd_look.h
@@ -292,7 +338,6 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/sidecar_msg.h
   app/sidecar_writer.h
   app/board_ops.h
-  app/bt_pump.h
   app/capture_arm.h
   app/capture_hit.h
   app/cheat_record.h
@@ -331,26 +376,37 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/event_sink.h
   app/owner_tick.h
   app/ui_round_port.h
+  app/ui_pass_work.h
   app/frame_source.h
   app/game_id.h
   app/info_sink.h
   app/info_origin.h
   app/input_build.h
+  app/host_led_watch.h
   app/input_decode.h
   app/input_decode_tally.h
   app/joy_level_emitter.h
+  app/joy_menu_chords.h
   app/mouse_accumulator.h
   app/mouse_divider.h
+  app/ps2_egress.h
   app/input_main.h
   app/input_park.h
   app/input_emit.h
   app/input_pipeline.h
   app/input_sample.h
-  app/input_wire.h
+  app/input_gates_cell.h
+  app/input_key_counts.h
+  app/core_input_binding.h
+  app/core_input_facts.h
+  app/joymap_ends.h
+  app/key_focus.h
+  app/rumble_players_cell.h
   app/load_request.h
   app/mgl.h
   app/mgl_player.h
   app/mgl_pump.h
+  app/midi_link_facts.h
   app/mra_facts.h
   app/name_config.h
   app/remembered_path.h
@@ -395,6 +451,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/run_stage.h
   app/scan_stage.h
   app/settle_stage.h
+  app/epoch_rule.h
+  app/frame_reference.h
   app/replay_gate.h
   app/replay_msg.h
   app/replay_ring.h
@@ -411,6 +469,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/identity_latch.h
   app/identity_record.h
   app/info_decoder.h
+  app/idle_knobs.h
   app/rumble_relay.h
   app/echo_rate.h
   app/echo_wait.h
@@ -427,6 +486,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/rung_mask.h
   app/picked_load.h
   app/window_tally.h
+  app/ini_cell.h
   app/ini_parse.h
   app/content_request.h
   app/file_bytes.h
@@ -459,6 +519,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/doorbell_lines.h
   app/lw_pads.h
   app/lw_line.h
+  app/lw_grant_stamp.h
   app/lw_block_endpoint.h
   app/lw_sector.h
   app/lw_sector_endpoint.h
@@ -485,12 +546,20 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/stdout_paths.h
   app/stdout_router.h
   app/types.h
+  app/uart_binding.h
   app/uart_handoff.h
   app/uart_mode.h
+  app/uart_mode_facts.h
   app/uart_modes.h
   app/uart_performer.h
+  app/uart_persist.h
   app/ui_request_ring.h
   app/adv7513_seat.h
+  app/audio_pump.h
+  app/prelude_composer.h
+  app/prelude_stats.h
+  app/staged_frame.h
+  app/staged_frame_dispatch.h
   app/video_ini.h
   app/video_pump.h
   app/video_pump_stats.h

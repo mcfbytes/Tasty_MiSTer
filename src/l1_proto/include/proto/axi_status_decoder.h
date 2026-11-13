@@ -22,7 +22,7 @@ public:
           cell_(cell),
           live_(live) {}
 
-    void bind(infra::OptRef<const StatusSnapshotCell> src, std::uint16_t gen) noexcept;
+    void bind(infra::OptRef<const StatusSnapshotCell> src, BuildGeneration gen) noexcept;
 
     void service() noexcept;
 
@@ -42,7 +42,7 @@ private:
     const ISessionLive& live_;
     infra::OptRef<const StatusSnapshotCell> src_{};
     StatusSnapshotCell::Reader reader_{};
-    std::uint16_t gen_ = 0;
+    BuildGeneration gen_{};
     std::uint8_t last_ = 0;
     std::uint32_t flush_refusals_ = 0;
     std::uint32_t adopted_ = 0;

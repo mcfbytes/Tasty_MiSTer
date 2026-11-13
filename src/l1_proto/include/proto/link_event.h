@@ -14,6 +14,7 @@
 #include "proto/save_kind.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_shape.h"
+#include "proto/window_fails.h"
 
 namespace mister::proto {
 
@@ -34,6 +35,7 @@ struct LinkEvent {
         StartRefused,
         RebootQuiesced,
         PolledWord,
+        FrameReply,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -134,6 +136,26 @@ struct LinkEvent {
         std::uint8_t pad_[2]{};
     };
 
+    enum class ReplyWindow : std::uint8_t {
+        FbufAck,
+        HdmiInt,
+        GammaCap,
+        FltNum,
+        ShadowCap,
+        AfilterProbe,
+        kCount,
+    };
+
+    struct FrameReply {
+        static constexpr Kind kKind = Kind::FrameReply;
+        ReplyWindow window{};
+        WindowFails fails{};
+        ReplyWord word{};
+        BindGeneration bind_gen{};
+        std::byte pad_[2]{};
+        StageGen gen{};
+    };
+
     struct PolledWord {
         static constexpr Kind kKind = Kind::PolledWord;
         user_io::PollShape shape{};
@@ -157,7 +179,8 @@ struct LinkEvent {
         Ps2ControlEnded,
         StartRefused,
         RebootQuiesced,
-        PolledWord>;
+        PolledWord,
+        FrameReply>;
     Kind kind = Kind::ReadyEdge;
     std::uint8_t pad_[3]{};
     alignas(4) std::array<std::byte, kStore> store{};
@@ -165,7 +188,11 @@ struct LinkEvent {
 
 static_assert(infra::MessageSum<LinkEvent> && infra::alternatives_are_total<LinkEvent>());
 static_assert(sizeof(LinkEvent) == 16 && alignof(LinkEvent) == 4);
-static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 14);
+static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 15);
+static_assert(
+    sizeof(LinkEvent::FrameReply) == 12 && alignof(LinkEvent::FrameReply) == 4,
+    "FrameReply: window@0 fails@1 word@2 bind_gen@4 pad_@6 gen@8, no hole"
+);
 
 inline constexpr std::size_t kLinkRxCapacity = 64;
 using LinkRxRing = xthread::SpscRing<LinkEvent, kLinkRxCapacity>;

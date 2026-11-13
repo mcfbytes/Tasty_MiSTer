@@ -7,7 +7,7 @@ Ex<std::span<std::byte>> DiscStore::read_engine_(
     DiscForm form,
     proto::Lba lba,
     std::span<std::byte> dst,
-    SectorHeader header
+    std::optional<SectorHeader> header
 ) {
     DiscEngine& engine = *engine_;
     switch (form) {
@@ -28,26 +28,69 @@ bool DiscStore::mounted_for_test() const noexcept {
     return engine_.has_value() && engine_->mounted();
 }
 
-void DiscStore::publish_(infra::OptRef<const IDiscIdentity> identity) noexcept {
+void DiscStore::publish_(infra::OptRef<const IDiscRules> rules) noexcept {
 
     if (engine_.has_value()) {
         DiscGeometry shape = engine_->geometry();
 
-        if (shape.mounted && identity)
-            shape.identity = identity->identify(shape, *this);
+        if (shape.mounted && rules)
+            shape.identity = rules->identify(shape, *this);
         geom_.publish(shape);
         counters_.publish(engine_->counters());
+        shape_ = shape;
+        rules_ = shape.mounted ? rules : infra::OptRef<const IDiscRules>{};
     } else {
-        geom_.publish(DiscGeometry{});
+        const DiscGeometry shape{};
+        geom_.publish(shape);
         counters_.publish(DiscCounters{});
+        shape_ = shape;
+        rules_ = {};
     }
+}
+
+Ex<std::span<std::uint8_t>> DiscStore::read_at(proto::FileSize at, std::span<std::uint8_t> dst) {
+    TASTY_SEAT_BODY(DiscStore);
+    if (!engine_.has_value() || !rules_) {
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    }
+    const infra::OptRef<const IDiscRules> rules = rules_;
+    const proto::BlockSize bs = rules->block_size();
+    proto::Lba lba = proto::end_lba(at, bs);
+
+    const DiscGeometry shape = shape_;
+
+    const std::size_t block_bytes = bs.length_of(proto::BlockCount{1});
+    std::span<std::uint8_t> rest = dst;
+    while (rest.size() >= block_bytes) {
+        rules->fill(shape, *this, lba, bs.block_of(rest));
+        rest = rest.subspan(block_bytes);
+        lba = lba + proto::BlockCount{1};
+    }
+    return dst.first(dst.size() - rest.size());
+}
+
+Ex<std::span<const std::uint8_t>> DiscStore::write_at(
+    proto::FileSize,
+    std::span<const std::uint8_t>
+) {
+    TASTY_SEAT_BODY(DiscStore);
+    return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+}
+
+Ex<proto::FileSize> DiscStore::open_extent(proto::SlotIndex, const BlockCtl::StorageOrder&) {
+    TASTY_SEAT_BODY(DiscStore);
+    return proto::FileSize{};
+}
+
+void DiscStore::release(proto::SlotIndex) noexcept {
+    TASTY_SEAT_BODY(DiscStore);
 }
 
 Ex<std::span<std::byte>> DiscStore::read_form(
     DiscForm form,
     proto::Lba lba,
     std::span<std::byte> dst,
-    SectorHeader header
+    std::optional<SectorHeader> header
 ) {
     TASTY_SEAT_BODY(DiscStore);
     if (!engine_.has_value())
@@ -96,7 +139,7 @@ bool DiscStore::ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept {
 bool DiscStore::do_mount(
     infra::OptRef<const CuePolicy> policy,
     std::string_view path,
-    infra::OptRef<const IDiscIdentity> identity
+    infra::OptRef<const IDiscRules> rules
 ) noexcept {
     TASTY_SEAT_BODY(DiscStore);
     if (!ensure_engine_(policy))
@@ -108,7 +151,7 @@ bool DiscStore::do_mount(
         return false;
     }
     const bool ok = engine_->mount(path).has_value();
-    publish_(ok ? identity : infra::OptRef<const IDiscIdentity>{});
+    publish_(ok ? rules : infra::OptRef<const IDiscRules>{});
     return ok;
 }
 

@@ -26,6 +26,7 @@
 #include "ui/options_model.h"
 #include "ui/placer.h"
 #include "ui/slot_pick_host.h"
+#include "svc/types.h"
 
 namespace mister::app {
 class RecentGames;
@@ -56,7 +57,7 @@ public:
     void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
     enum class RootRow : std::uint8_t {
@@ -189,7 +190,7 @@ private:
     bool reset_ = false;
     bool core_settings_ = false;
     bool main_menu_ = false;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     ResetAction reset_action_{*this};

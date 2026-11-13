@@ -8,6 +8,7 @@
 #include "cores/boot_ladder.h"
 #include "cores/core_profile.h"
 #include "cores/ladder_host.h"
+#include "cores/row_cursor.h"
 #include "infra/error.h"
 #include "os/clock.h"
 #include "svc/vfs.h"
@@ -18,14 +19,16 @@ class MegaCdLadder final : public BootLadder {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    MegaCdLadder(const CoreProfile& profile, const LadderContext& ctx) : BootLadder(profile, ctx) {}
-
-    [[nodiscard]] std::uint8_t pc() const noexcept override {
-        TASTY_SEAT_BODY(MegaCdLadder);
-        return static_cast<std::uint8_t>(rung_);
-    }
+    MegaCdLadder(const CoreProfile& profile, const LadderContext& ctx)
+        : BootLadder(profile, ctx),
+          row_(profile.boot_assets) {}
 
 private:
+    [[nodiscard]] LadderPc do_pc() const noexcept override {
+        TASTY_SEAT_BODY(MegaCdLadder);
+        return LadderPc::of(rung_);
+    }
+
     enum class Rung : std::uint8_t {
         Unload = 0,
         Detach = 1,
@@ -35,11 +38,12 @@ private:
         MountDisc = 5,
         LayeredBios = 6,
         MountSave = 7,
-        Done = kDone,
+        Done = LadderPc::kDone,
     };
 
     [[nodiscard]] Ex<bool> on_step() override;
 
+    RowCursor row_;
     Rung rung_ = Rung::Unload;
 };
 

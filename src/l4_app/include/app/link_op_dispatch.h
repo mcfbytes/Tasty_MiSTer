@@ -10,6 +10,7 @@
 #include "app/link_op_ctx.h"
 #include "app/link_op_facts.h"
 #include "infra/message_sum.h"
+#include "proto/link.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -60,10 +61,10 @@ concept LinkOpWireSink = std::same_as<typename S::Result, ILinkEncoder::Outcome>
                s.on(std::declval<const proto::LinkOp::SetOsdVisible&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
-               s.on(std::declval<const proto::LinkOp::PulseOption&>(), c)
+               s.on(std::declval<const proto::LinkOp::MenuCtl&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
-               s.on(std::declval<const proto::LinkOp::SetVideoMode&>(), c)
+               s.on(std::declval<const proto::LinkOp::PulseOption&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
                s.on(std::declval<const proto::LinkOp::ApplyCheats&>(), c)
@@ -75,6 +76,15 @@ concept LinkOpWireSink = std::same_as<typename S::Result, ILinkEncoder::Outcome>
                s.on(std::declval<const proto::LinkOp::SetCoreOption&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            { s.misrouted(m, c) } -> std::same_as<ILinkEncoder::Outcome>;
+       };
+
+template <class S>
+concept LinkOpFrameSink = std::same_as<typename S::Result, Delivered>
+    && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c, proto::Link& link) {
+           {
+               s.on(std::declval<const proto::LinkOp::StagedFrame&>(), c, link)
+           } -> std::same_as<Delivered>;
+           { s.misrouted(m, c, link) } -> std::same_as<Delivered>;
        };
 
 template <class S>
@@ -115,18 +125,6 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
                s.on(std::declval<const proto::LinkOp::SessionUp&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::SetMute&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::SetAttenuation&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::NudgeVolume&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::ToggleMute&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
                s.on(std::declval<const proto::LinkOp::CoreReset&>(), c)
@@ -204,6 +202,8 @@ concept LinkOpOptionsSink = std::same_as<typename S::Result, ILinkEncoder::Outco
             return !c.windows_closed;
         case Window::FramedLive:
             return !c.windows_closed && c.live;
+        case Window::FramedReady:
+            return !c.windows_closed && c.live && c.core_ready;
     }
     return false;
 }

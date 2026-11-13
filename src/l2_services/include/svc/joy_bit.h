@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "svc/types.h"
 
@@ -9,6 +11,8 @@ namespace mister::svc {
 
 struct JoyBit {
     std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr std::optional<JoyBit> of(std::size_t index) noexcept;
 
     [[nodiscard]] constexpr JoyBit next() const noexcept {
         return JoyBit{static_cast<std::uint8_t>(v + 1u)};
@@ -34,5 +38,11 @@ inline constexpr JoyBit kJoyBitL2{12};
 inline constexpr JoyBit kJoyBitR2{13};
 
 inline constexpr JoyBit kJoyBitEnd{32};
+
+constexpr std::optional<JoyBit> JoyBit::of(std::size_t index) noexcept {
+    if (index >= kJoyBitEnd.v)
+        return std::nullopt;
+    return JoyBit{static_cast<std::uint8_t>(index)};
+}
 
 }

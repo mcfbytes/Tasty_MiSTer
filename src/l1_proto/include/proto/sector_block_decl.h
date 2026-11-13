@@ -8,8 +8,12 @@
 #include "hal/register_window.h"
 #include "hal/sector_block.h"
 #include "hal/sys_directory.h"
+#include "hal/types.h"
 #include "infra/error.h"
+#include "os/map_length.h"
+#include "os/types.h"
 #include "proto/declared_line.h"
+#include "proto/dir_version.h"
 #include "proto/sys_directory_image.h"
 #include "proto/types.h"
 
@@ -19,41 +23,43 @@ struct SectorBlockDecl {
 
     struct Card {
 
-        static constexpr std::uint32_t kMinFrameBytes = SdStatusWord::kMinBlockBytes;
-        static constexpr std::uint32_t kMaxFrameBytes = hal::SectorBlock::kMaxFrameWords
-            * hal::SectorBlock::kWordBytes;
+        static constexpr BlockSize kMinFrameBytes{SdStatusWord::kMinBlockBytes};
+        static constexpr BlockSize kMaxFrameBytes{
+            hal::SectorBlock::kMaxFrameWords * hal::SectorBlock::kWordBytes
+        };
         SlotIndex slot{};
         bool reads = false;
         bool writes = false;
         std::uint16_t frame_words = 0;
-        std::uint32_t wsrc = 0;
-        std::uint32_t extent = 0;
+        os::PhysAddr wsrc{};
+        os::MapLength extent{};
 
-        [[nodiscard]] constexpr bool declared() const noexcept { return slot.v != 0 && wsrc != 0; }
+        [[nodiscard]] constexpr bool declared() const noexcept {
+            return slot.v != 0 && wsrc != os::PhysAddr{};
+        }
 
         [[nodiscard]] constexpr BlockSize frame_bytes() const noexcept {
             return BlockSize{std::uint32_t{frame_words} * hal::SectorBlock::kWordBytes};
         }
 
         [[nodiscard]] constexpr bool frame_admitted() const noexcept {
-            const std::uint32_t bytes = std::uint32_t{frame_words} * hal::SectorBlock::kWordBytes;
+            const BlockSize bytes = frame_bytes();
             return bytes >= kMinFrameBytes
                 && bytes <= kMaxFrameBytes
-                && (bytes & (bytes - 1u)) == 0u
-                && extent >= bytes
-                && extent % bytes == 0u;
+                && bytes.power_of_two()
+                && extent.holds_whole(bytes.map_length());
         }
     };
 
     static constexpr std::size_t kCards = 2;
-    std::uint32_t offset = 0;
-    std::uint32_t size = 0;
+    hal::LwOffset offset{};
+    hal::LwExtent size{};
     SlotIndex slot{};
     std::uint16_t frame_words = 0;
-    std::uint32_t cause = 0;
+    hal::LwOffset cause{};
     std::uint16_t fifo_depth = 0;
     std::uint16_t strobe_gap = 0;
-    std::uint16_t minor = 0;
+    DirVersion version{};
     std::array<Card, kCards> cards{};
     DeclaredLine line_decl{};
 
@@ -73,7 +79,7 @@ static_assert(
 
 [[nodiscard]] Ex<SectorBlockDecl> find_sector_block(
     const SysDirectoryImage& dir,
-    std::uint32_t window_size
+    hal::LwExtent window
 ) noexcept;
 
 }

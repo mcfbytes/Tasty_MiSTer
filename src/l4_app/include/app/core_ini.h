@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "app/board_ops.h"
+#include "app/ini_cell.h"
 #include "app/ini_parse.h"
 #include "app/launcher_profile.h"
 #include "app/mra_facts.h"
@@ -15,6 +16,10 @@
 
 namespace mister::svc {
 class Vfs;
+}
+
+namespace mister::hal {
+class IBootHandoff;
 }
 
 namespace mister::app {
@@ -29,10 +34,18 @@ public:
         infra::OptRef<const LauncherProfile> launcher{};
     };
 
-    CoreIni(ConfigCell& cell, const svc::Vfs& vfs, infra::OptRef<ISleeper> sleeper) noexcept
+    CoreIni(
+        ConfigCell& cell,
+        IniCell& ini_cell,
+        const svc::Vfs& vfs,
+        infra::OptRef<ISleeper> sleeper,
+        infra::OptRef<hal::IBootHandoff> handoff
+    ) noexcept
         : cell_(cell),
+          ini_cell_(ini_cell),
           vfs_(vfs),
-          sleeper_(sleeper) {}
+          sleeper_(sleeper),
+          handoff_(handoff) {}
 
     CoreIni(const CoreIni&) = delete;
     CoreIni& operator=(const CoreIni&) = delete;
@@ -45,6 +58,8 @@ public:
 
     [[nodiscard]] ConfigCell& cell() noexcept { return cell_; }
 
+    [[nodiscard]] svc::IniCatalog catalog() const noexcept { return ini_cell_.sample().value; }
+
     [[nodiscard]] bool boot_parsed() const noexcept { return !boot_pending_; }
 
     [[nodiscard]] const std::string& boot_handoff() const noexcept { return boot_handoff_; }
@@ -54,15 +69,20 @@ public:
         return dv_cell_;
     }
 
+    [[nodiscard]] const IdleKnobsCell& idle_cell() const noexcept { return idle_cell_; }
+
 private:
     [[nodiscard]] bool wait_for_mount_(std::string_view needle);
 
     ConfigCell& cell_;
+    IniCell& ini_cell_;
     const svc::Vfs& vfs_;
     infra::OptRef<ISleeper> sleeper_;
+    infra::OptRef<hal::IBootHandoff> handoff_;
     bool replay_ = false;
     bool strict_ = false;
     xthread::Telemetry<std::uint8_t, SeatTag::Main> dv_cell_{};
+    IdleKnobsCell idle_cell_{};
     bool boot_pending_ = true;
     std::string boot_handoff_;
 };

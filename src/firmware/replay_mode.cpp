@@ -18,20 +18,22 @@
 #include "hal/region_id.h"
 #include "hal/thread_map.h"
 #include "infra/persist.h"
+#include "os/child_process.h"
+#include "os/process_id.h"
 #include "os/process_title.h"
 #include "process_standup.h"
 #include "report.h"
 #include "svc/vfs.h"
+#include "tasty_owner_lock.h"
+#include "tasty_pid_file.h"
+#include "tasty_preflight.h"
+#include "tasty_record.h"
+#include "tasty_say.h"
+#include "tasty_writeback.h"
 
 namespace mister::fw {
 
 namespace {
-
-enum class HomeLane : int { Idle = 0, Open = 1, Stopping = 2, Left = 3 };
-std::atomic<HomeLane> g_home_owed TASTY_PERSIST(proc, tasty_home_owed){HomeLane::Idle};
-std::atomic<int> g_deferred_stop TASTY_PERSIST(proc, tasty_deferred_stop){0};
-static_assert(std::atomic<HomeLane>::is_always_lock_free);
-static_assert(std::atomic<int>::is_always_lock_free);
 
 inline constexpr std::size_t kFatalStackBytes = 32 * 1024;
 #if !defined(__GLIBC__)
@@ -56,24 +58,22 @@ const TastyVoice kTastyVoice{};
 namespace {
 
 using namespace mister;
-using fw::HomeLane;
 
 extern "C" void on_tasty_stop(int sig) {
     if (fw::ProcessStandup::latch_stop())
         return;
-    const HomeLane lane = fw::g_home_owed.load(std::memory_order_seq_cst);
-    if (lane == HomeLane::Open) {
-        (void)fw::tasty_launch_home();
-        ::_exit(fw::kSignalExitBase + sig);
-    }
+    const fw::RunExit status = fw::after_signal(os::ChildProcessExit::SignalNumber{sig});
+    const fw::HomeLane::Lane lane = fw::HomeLane::lane();
+    if (lane == fw::HomeLane::Lane::Open)
+        fw::HomeLane::launch_and_exit(status);
 
-    if (lane == HomeLane::Stopping)
-        fw::g_deferred_stop.store(sig, std::memory_order_seq_cst);
+    if (lane == fw::HomeLane::Lane::Stopping)
+        fw::HomeLane::defer_stop(status);
 }
 
 extern "C" void on_tasty_fatal(int sig) {
-    if (fw::g_home_owed.load(std::memory_order_seq_cst) == HomeLane::Open)
-        (void)fw::tasty_launch_home();
+    if (fw::HomeLane::lane() == fw::HomeLane::Lane::Open)
+        fw::HomeLane::launch();
     sigset_t set;
     ::sigemptyset(&set);
     ::sigaddset(&set, sig);
@@ -83,7 +83,7 @@ extern "C" void on_tasty_fatal(int sig) {
     ::sigemptyset(&sa.sa_mask);
     (void)::sigaction(sig, &sa, nullptr);
     (void)::raise(sig);
-    ::_exit(fw::kSignalExitBase + sig);
+    ::_exit(fw::process_status(fw::after_signal(os::ChildProcessExit::SignalNumber{sig})));
 }
 
 }
@@ -92,34 +92,6 @@ namespace mister::fw {
 
 const std::atomic<int>& tasty_owner_stop_flag() noexcept {
     return ProcessStandup::stop_latch();
-}
-
-void tasty_owe_home() noexcept {
-    g_home_owed.store(HomeLane::Open, std::memory_order_seq_cst);
-}
-
-bool tasty_home_may_launch() noexcept {
-    const HomeLane lane = g_home_owed.load(std::memory_order_seq_cst);
-    return lane != HomeLane::Stopping && lane != HomeLane::Left;
-}
-
-int tasty_stop_and_owe() noexcept {
-    g_deferred_stop.store(0, std::memory_order_seq_cst);
-    g_home_owed.store(HomeLane::Stopping, std::memory_order_seq_cst);
-    bool gone = false;
-    if (const auto stopped = tasty_stop_stock())
-        gone = *stopped;
-    if (!gone) {
-        g_home_owed.store(HomeLane::Left, std::memory_order_seq_cst);
-        tasty_say("tasty: the menu was left running");
-        return 1;
-    }
-    tasty_owe_home();
-    if (const int sig = g_deferred_stop.exchange(0, std::memory_order_seq_cst)) {
-        (void)tasty_launch_home();
-        ::_exit(kSignalExitBase + sig);
-    }
-    return 0;
 }
 
 void tasty_arm_owner_signals() noexcept {
@@ -171,53 +143,59 @@ ReplayMode::Exit ReplayMode::prepare() {
     auto resolved = tasty_resolve_args(args_);
     if (!resolved) {
         tasty_say("tasty: cannot resolve paths");
-        return 1;
+        return as_exit(mister::fw::refused());
     }
     args_ = std::move(*resolved);
-    if (args_.verb == TastyVerb::Play) {
+    if (run_.replays()) {
         if (::access(args_.movie.c_str(), R_OK) != 0) {
             char buf[app::kPathMax + 32];
-            std::snprintf(buf, sizeof buf, "tasty: missing movie %s", args_.movie.c_str());
-            tasty_say(buf);
-            return 1;
+            tasty_say(
+                tasty_render(buf, "tasty: missing movie {}", std::string_view{args_.movie.c_str()})
+            );
+            return as_exit(mister::fw::refused());
         }
         auto vfs = svc::Vfs::create_at("/");
         if (vfs) {
-            auto rom = tasty_prepare_play(*vfs, args_);
+            auto rom = TastyPreflight{*vfs}.play_rom(args_);
             if (!rom)
-                return 1;
+                return as_exit(mister::fw::refused());
             args_.rom = *rom;
         } else if (args_.rom.empty()) {
             tasty_say("tasty: pass --rom");
-            return 1;
+            return as_exit(mister::fw::refused());
         }
         if (args_.rom.empty() || ::access(args_.rom.c_str(), R_OK) != 0) {
             char buf[app::kPathMax + 32];
-            std::snprintf(buf, sizeof buf, "tasty: missing rom %s", args_.rom.c_str());
-            tasty_say(buf);
-            return 1;
+            tasty_say(
+                tasty_render(buf, "tasty: missing rom {}", std::string_view{args_.rom.c_str()})
+            );
+            return as_exit(mister::fw::refused());
         }
     }
     if (args_.record) {
         auto rec = tasty_prepare_record(*args_.record, args_.movie.view());
         if (!rec)
-            return 1;
+            return as_exit(mister::fw::refused());
         args_.record = *rec;
     }
-    auto lock = tasty_lock_owner();
+    auto lock = TastyOwnerLock::take(rt_.paths);
     if (!lock) {
         if (lock.error().code == Errc::busy) {
-            tasty_say(tasty_busy_text());
-            return kExitBusyOwner;
+            tasty_say(TastyPidFile{rt_.paths}.busy_text());
+            return as_exit(busy_owner());
         }
         report("tasty lock", lock.error());
-        return kExitBusyOwner;
+        return as_exit(busy_owner());
     }
     home_.emplace();
-    home_->lock_fd = std::move(*lock);
-    if (const int held = tasty_stop_and_owe())
-        return held;
-    (void)tasty_write_pid(::getpid(), args_.movie.view());
+    const TastyOwnerLock& held = home_->adopt(std::move(*lock));
+    if (auto stopped = HomeLane::stop_and_owe(stock_); !stopped)
+        return as_exit(mister::fw::refused());
+
+    if (auto wrote = held.write_pid(os::ProcessId::self(), args_.movie.view()); !wrote) {
+        report("tasty pid", wrote.error());
+        return as_exit(mister::fw::refused());
+    }
     return {};
 }
 
@@ -234,14 +212,7 @@ void ReplayMode::QuietVoice::board(
         if (!blob.contains(s))
             continue;
         char buf[128];
-        std::snprintf(
-            buf,
-            sizeof buf,
-            "tasty: board %.*s",
-            static_cast<int>(board.model.size()),
-            board.model.data()
-        );
-        tasty_say(buf);
+        tasty_say(tasty_render(buf, "tasty: board {}", board.model));
         break;
     }
     if (args_.record)
@@ -261,7 +232,7 @@ void ReplayMode::QuietVoice::fabric_not_ready(const hal::BoardProfile&) const {
 
 void ReplayMode::QuietVoice::wedged(std::string_view line) const noexcept {
     tasty_say(line);
-    (void)tasty_launch_home();
+    HomeLane::launch();
 }
 
 int ReplayMode::exit_status(const Ex<void>& ran) const noexcept {
@@ -289,7 +260,7 @@ std::unique_ptr<SessionMode::Tail> ReplayMode::tail(
     ReplayBlock& replay,
     RecorderBlock& rec
 ) {
-    return std::make_unique<Owner>(plat, device, replay, rec, run_exit_, args_);
+    return std::make_unique<Owner>(plat, device, replay, rec, run_exit_, args_, run_, status_);
 }
 
 ReplayMode::Owner::Owner(
@@ -298,7 +269,9 @@ ReplayMode::Owner::Owner(
     ReplayBlock& replay,
     RecorderBlock& rec,
     RunExitCell& run_exit,
-    const TastyArgs& args
+    const TastyArgs& args,
+    const TastySession::Run& run,
+    TastyStatusFile& status
 )
     : feeder_{replay.replay_feeder_},
       session_{
@@ -315,10 +288,12 @@ ReplayMode::Owner::Owner(
            .vfs = plat.vfs,
            .stop = ProcessStandup::stop_latch(),
            .run_exit = run_exit,
+           .status = status,
            .video_fb = hal::declared_region(plat.regions, hal::RegionId::VideoFb)
                            .value_or(hal::PhysRegion{}),
            .direct_video_ini = device.owner_.direct_video_ini_cell()},
-          args
+          args,
+          run
       } {
 
     device.video_pump_.force_vsync_adjust(args.vsync_adjust);
@@ -339,19 +314,9 @@ void ReplayMode::FeederReplay::take_stop() noexcept {
     (void)f.take_stop();
 }
 
-app::FrameCount ReplayMode::FeederReplay::frames() const noexcept {
-    TASTY_SEAT_BODY(FeederReplay);
-    return f.pushed();
-}
-
 app::FrameCount ReplayMode::FeederReplay::movie_frames() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
     return f.movie_frames();
-}
-
-bool ReplayMode::FeederReplay::refused() const noexcept {
-    TASTY_SEAT_BODY(FeederReplay);
-    return f.last_refusal() != app::ReplayFeeder::Refusal::None;
 }
 
 bool ReplayMode::FeederReplay::active() const noexcept {
@@ -379,17 +344,22 @@ std::optional<ReplayRefusal> ReplayMode::FeederReplay::refusal() const noexcept 
     return r;
 }
 
-std::size_t ReplayMode::FeederReplay::settings_set() const noexcept {
+IReplayPort::SettingNo ReplayMode::FeederReplay::settings_set() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    return f.settings_set().size();
+    return SettingNo{f.settings_set().size()};
 }
 
-std::string ReplayMode::FeederReplay::setting_line(std::size_t i) const {
+std::string ReplayMode::FeederReplay::setting_line(IReplayPort::SettingNo i) const {
     TASTY_SEAT_BODY(FeederReplay);
-    if (i >= f.settings_set().size())
+    const app::ReplayFeeder::SetSetting* s = i.row_in(f.settings_set());
+    if (s == nullptr)
         return {};
-    const app::ReplayFeeder::SetSetting& s = f.settings_set()[i];
-    return std::string(s.name) + ": using " + s.now + " for this run (your setting: " + s.was + ")";
+    return std::string(s->name)
+        + ": using "
+        + s->now
+        + " for this run (your setting: "
+        + s->was
+        + ")";
 }
 
 }

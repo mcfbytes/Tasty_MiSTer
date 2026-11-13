@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "svc/asset_name.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"
@@ -16,10 +17,13 @@
 namespace mister::svc {
 
 using detail::compose;
+using infra::cut_at_last_dot;
+using infra::dirname;
 using infra::ifind;
 using detail::path_is_regular;
 using detail::zip_archive_opens;
 using infra::iends_with;
+using infra::leaf_in_dir;
 
 namespace {
 
@@ -32,10 +36,10 @@ bool valid_asset(const std::string& p, bool require_zip = false) {
 }
 
 std::optional<std::string> asset_in_same_dir(const std::string& rom_full, std::string_view ext) {
-    const std::size_t slash = rom_full.rfind('/');
-    if (slash == std::string::npos)
+    const std::optional<std::string_view> dir_view = dirname(rom_full);
+    if (!dir_view)
         return std::nullopt;
-    const std::string dir = rom_full.substr(0, slash);
+    const std::string dir(*dir_view);
 
     ::DIR* d = ::opendir(dir.c_str());
     if (d == nullptr)
@@ -89,9 +93,7 @@ std::optional<std::string> asset_by_crc(Crc32 crc, std::string_view ext, const s
 }
 
 std::string retarget_extension(std::string p, std::string_view infix, std::string_view ext) {
-    const std::size_t dot = p.rfind('.');
-    if (dot != std::string::npos)
-        p.resize(dot);
+    p.resize(cut_at_last_dot(p).size());
     p.append(infix);
     p.append(ext);
     return p;
@@ -121,10 +123,10 @@ Ex<std::string> GameAssetFinder::find(const AssetQuery& q) const {
         }
     }
 
-    const std::size_t slash = q.rom_path.rfind('/');
-    if (slash != std::string_view::npos) {
+    if (const std::optional<std::string_view> leaf = leaf_in_dir(q.rom_path)) {
         std::string cand(cd_dir);
-        cand.append(q.rom_path.substr(slash));
+        cand.push_back('/');
+        cand.append(*leaf);
         cand = retarget_extension(std::move(cand), cd_layout ? " []" : "", q.ext);
         if (valid_asset(cand, q.require_zip))
             return cand;

@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "app/link_session.h"
+#include "app/video_wire.h"
 #include "infra/message_sum.h"
 #include "proto/link_event.h"
 #include "proto/spi_block_decoder.h"
@@ -28,6 +29,7 @@ struct Unproduced {
 
 using LinkEventProducers = std::tuple<
     LinkSession,
+    VideoWire,
     proto::SpiIdentifyDecoder,
     proto::SpiConfStrDecoder,
     proto::SpiSampler,

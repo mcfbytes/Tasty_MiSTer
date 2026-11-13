@@ -17,7 +17,8 @@
 namespace mister::svc {
 
 struct PresetMode {
-    std::uint32_t vpar[8];
+    AxisTiming h;
+    AxisTiming v;
     double fpix_mhz;
     std::uint8_t vic;
     std::uint8_t pr;

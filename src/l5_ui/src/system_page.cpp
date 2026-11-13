@@ -33,7 +33,6 @@
 #include "ui/confirm_page.h"
 #include "ui/page_context.h"
 #include "ui/page_launches.h"
-#include "ui/script_kind.h"
 #include "ui/script_launch.h"
 #include "ui/script_pick_host.h"
 #include "ui/ui_event.h"
@@ -409,15 +408,15 @@ Transition SystemPage::handle(const UiEvent& ev) {
     if (ev.buttons.has_any({UiEvent::Menu})) {
         if (session_.front_end && !session_.in_hd_tree)
             return open_core_browser(false);
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
     }
 
     if (ev.buttons.has_any({UiEvent::Left})) {
         (void)reboot_release(ev);
 
         if (session_.front_end)
-            return Transition{Transition::Kind::Stay};
-        return Transition{Transition::Kind::Replace, PageId::CoreOptions};
+            return Transition{};
+        return Transition::replace(PageId::CoreOptions);
     }
 
     if (ev.buttons.has_any({UiEvent::Recent}) && item_selected(SystemItem::Core)) {
@@ -428,7 +427,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
 
     const auto item = system_item_of(sel_);
     if (!item) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     switch (*item) {
@@ -436,22 +435,22 @@ Transition SystemPage::handle(const UiEvent& ev) {
 
             return open_core_browser(false);
         case SystemItem::Exit:
-            return Transition{Transition::Kind::Leave};
+            return Transition::leave();
         case SystemItem::Scripts:
             return open_scripts_confirm();
         case SystemItem::SaveSettings: {
 
             if (!session_.core_loaded) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
 
             if (!push_ask(ui_requests_, app::UiRequest::SaveConfig{})) {
-                ++refusals_;
+                refusals_.add();
             } else {
                 ++published_;
             }
-            return Transition{Transition::Kind::Replace, PageId::CoreOptions};
+            return Transition::replace(PageId::CoreOptions);
         }
         case SystemItem::Reboot: {
 
@@ -464,19 +463,19 @@ Transition SystemPage::handle(const UiEvent& ev) {
             return use_hd_();
         case SystemItem::DefineJoystick:
 
-            return Transition{Transition::Kind::Push, PageId::JoyMap};
+            return Transition::push(PageId::JoyMap);
         case SystemItem::SwitchStorage:
         case SystemItem::RemapKeyboard:
         case SystemItem::Help:
 
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         case SystemItem::kCount:
 
             break;
     }
 
-    ++refusals_;
+    refusals_.add();
     return Transition{};
 }
 
@@ -505,27 +504,27 @@ Transition SystemPage::reboot_release(const UiEvent& ev) {
     if (route_ && route_->on(menu)) {
         ++published_;
     } else {
-        ++refusals_;
+        refusals_.add();
     }
     return Transition{};
 }
 
 Transition SystemPage::use_hd_() {
     if (!session_.shows_hd_switch()) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     if (!push_ask(ui_requests_, app::UiRequest::SetOsdStyle{.style = app::OsdStyle::Hd})) {
-        ++refusals_;
+        refusals_.add();
     } else {
         ++published_;
     }
-    return Transition{Transition::Kind::Replace, PageId::HdMenu};
+    return Transition::choose_hd_style();
 }
 
 bool SystemPage::ask_reboot_() {
     if (!push_ask(ui_requests_, app::UiRequest::Reboot{})) {
-        ++refusals_;
+        refusals_.add();
         return false;
     }
     ++published_;
@@ -534,10 +533,10 @@ bool SystemPage::ask_reboot_() {
 
 Transition SystemPage::open_scripts_confirm() {
     if (names_ && names_->scripts_confirm_skippable()) {
-        return open_scripts_browser(Transition::Kind::Push);
+        return arm_scripts_browser_() ? Transition::push(PageId::Browser) : Transition{};
     }
     if (!launches_ || !launches_->confirm) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     ConfirmPage::Spec spec;
@@ -546,14 +545,14 @@ Transition SystemPage::open_scripts_confirm() {
     spec.choices = kScriptsWarningChoices;
     spec.host = infra::opt_ref_of(static_cast<IConfirmHost*>(this));
     launches_->confirm->pending = spec;
-    return Transition{Transition::Kind::Push, PageId::Confirm};
+    return Transition::push(PageId::Confirm);
 }
 
-Transition SystemPage::open_scripts_browser(Transition::Kind kind) {
+bool SystemPage::arm_scripts_browser_() {
     const infra::OptRef<BrowserLaunch> browser = browser_();
     if (!browser || !storage_) {
-        ++refusals_;
-        return kind == Transition::Kind::Replace ? Transition{Transition::Kind::Pop} : Transition{};
+        refusals_.add();
+        return false;
     }
     BrowserSession::Request r;
     r.extensions = "SH";
@@ -564,7 +563,7 @@ Transition SystemPage::open_scripts_browser(Transition::Kind kind) {
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&script_pick_));
     browser->pending = static_cast<BrowserSession::Request&&>(r);
 
-    return Transition{kind, PageId::Browser};
+    return true;
 }
 
 Transition SystemPage::open_root_child(PageContext&) {
@@ -580,40 +579,37 @@ Transition SystemPage::open_scripts(PageContext&) {
 Transition SystemPage::open_core_browser(bool recents_first) {
     const infra::OptRef<BrowserLaunch> browser = browser_();
     if (!browser || !storage_) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     BrowserSession::Request r;
     r.extensions = "RBFMRAMGL";
     r.scan.cores_only = true;
-    const app::RecentsStore::ListId cores_list{
-        app::RecentsStore::ListId::Kind::Cores,
-        proto::IoIndex{}
-    };
+    const app::RecentsStore::ListId cores_list = app::RecentsStore::ListId::cores();
     r.recents = cores_list;
     r.recents_first = recents_first;
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&core_pick_));
     if (recents_first) {
 
-        if (!recents_ || recents_->load("", cores_list).empty()) {
-            ++refusals_;
+        if (!recents_ || recents_->load(app::RecentsStore::kNoCore, cores_list).empty()) {
+            refusals_.add();
             return Transition{};
         }
     }
     browser->pending = static_cast<BrowserSession::Request&&>(r);
-    return Transition{Transition::Kind::Push, PageId::Browser};
+    return Transition::push(PageId::Browser);
 }
 
 Transition SystemPage::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(SystemPage);
     if (choice == kConfirmCancel)
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     if (choice == kConfirmRememberScripts) {
 
         if (!names_ || !names_->remember_scripts_confirm())
-            ++refusals_;
+            refusals_.add();
     }
-    return open_scripts_browser(Transition::Kind::Replace);
+    return arm_scripts_browser_() ? Transition::replace(PageId::Browser) : Transition::pop();
 }
 
 std::unique_ptr<SystemPage> make_system_page(

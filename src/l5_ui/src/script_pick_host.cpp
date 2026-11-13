@@ -17,7 +17,7 @@ void ScriptPickHost::bind(Borrows b) noexcept {
 
 Transition ScriptPickHost::on_cancel() {
     TASTY_SEAT_BODY(ScriptPickHost);
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 Transition ScriptPickHost::on_picked(const BrowserEntry&, std::string_view path) {
@@ -26,12 +26,12 @@ Transition ScriptPickHost::on_picked(const BrowserEntry&, std::string_view path)
     const infra::OptRef<ScriptLaunch> script = b_.launches ? b_.launches->script
                                                            : infra::OptRef<ScriptLaunch>{};
     if (!script || !b_.storage || path.empty()) {
-        ++refusals_;
-        return Transition{Transition::Kind::Pop};
+        refusals_.add();
+        return Transition::pop();
     }
     const std::string argv0 = std::string(b_.storage->root_path()) + "/" + std::string(path);
     script->pending = ScriptLaunch::Request::script(argv0);
-    return Transition{Transition::Kind::Replace, PageId::ScriptRun};
+    return Transition::replace(PageId::ScriptRun);
 }
 
 }

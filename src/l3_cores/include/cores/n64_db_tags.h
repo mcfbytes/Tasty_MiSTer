@@ -14,6 +14,7 @@
 #include "cores/n64_options.h"
 #include "cores/n64_patch_table.h"
 #include "cores/n64_system_type.h"
+#include "proto/bit_field.h"
 
 namespace mister::cores::n64 {
 
@@ -134,7 +135,7 @@ inline constexpr std::string_view kTagSeparators = "| ";
 
 struct FeatureRow {
     Tag tag;
-    StatusField field;
+    proto::BitField field;
     std::string_view info;
     std::optional<PadType> pad;
     bool from_header;
@@ -160,11 +161,11 @@ namespace detail {
 [[nodiscard]] consteval bool feature_rows_are_one_per_tag() noexcept {
     for (std::size_t i = 0; i < kFeatureRows.size(); ++i) {
         const FeatureRow& r = kFeatureRows[i];
-        if (r.info.empty() || !feature_row(r.tag))
+        if (r.info.empty() || !feature_row(r.tag) || !r.field.valid())
             return false;
         for (std::size_t j = i + 1; j < kFeatureRows.size(); ++j) {
             const FeatureRow& o = kFeatureRows[j];
-            if (r.tag == o.tag || r.field.lo == o.field.lo)
+            if (r.tag == o.tag || r.field.start == o.field.start)
                 return false;
         }
     }

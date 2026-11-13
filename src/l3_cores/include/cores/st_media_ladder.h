@@ -24,21 +24,24 @@ class StMediaLadder final : public BootLadder {
 public:
     StMediaLadder(const CoreProfile& profile, const LadderContext& ctx);
 
-    [[nodiscard]] std::uint8_t pc() const noexcept override {
-        TASTY_SEAT_BODY(StMediaLadder);
-        return static_cast<std::uint8_t>(rung_);
-    }
-
-    [[nodiscard]] std::span<const std::string> next_slot_paths() const noexcept override {
-        TASTY_SEAT_BODY(StMediaLadder);
-        return std::span<const std::string>(paths_.begin(), paths_.size());
-    }
-
     static constexpr std::uint64_t kTosReadCap = 1024u * 1024u;
 
     [[nodiscard]] static std::vector<std::uint8_t> read_whole(svc::IFile& f, std::uint64_t cap);
 
 private:
+    [[nodiscard]] LadderPc do_pc() const noexcept override {
+        TASTY_SEAT_BODY(StMediaLadder);
+        return LadderPc::of(rung_);
+    }
+
+    [[nodiscard]] LadderCarry do_carry() const noexcept override {
+        TASTY_SEAT_BODY(StMediaLadder);
+        return LadderCarry{
+            .last_dir = image_dir(),
+            .slot_paths = std::span<const std::string>(paths_.begin(), paths_.size())
+        };
+    }
+
     enum class Rung : std::uint8_t {
         Bind = 0,
         Restore = 1,
@@ -52,7 +55,7 @@ private:
         Cart = 9,
         CartAnswer = 10,
         Release = 11,
-        Done = kDone,
+        Done = LadderPc::kDone,
     };
 
     [[nodiscard]] Ex<bool> on_step() override;

@@ -67,12 +67,7 @@ public:
 
     [[nodiscard]] CoreScope scope() const noexcept { return scope_; }
 
-    void remember(
-        MglItemNo i,
-        const RememberedStem& stem,
-        RememberedSlot slot,
-        proto::IoIndex ioctl_index
-    ) noexcept;
+    void remember(MglItemNo i, const RememberedStem& stem, proto::FileRowId row) noexcept;
 
     [[nodiscard]] std::uint32_t remembered() const noexcept { return remembered_; }
 
@@ -127,14 +122,9 @@ private:
     UiRequestRing& asks_;
     NameConfig& names_;
 
-    struct RememberAt {
-        RememberedSlot slot = RememberedSlot::File;
-        proto::IoIndex ioctl_index{};
-    };
-
     struct PlaylistEntry {
         MglItem item{};
-        std::optional<RememberAt> remember{};
+        std::optional<proto::FileRowId> remember{};
         CorrelationTag tag{};
     };
 

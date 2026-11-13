@@ -25,4 +25,12 @@ enum class MidiLinkMode : std::uint8_t {
     UsbSer = 6,
 };
 
+enum class BaudSpace : std::uint8_t {
+    Uart,
+    Midi,
+    Mlink,
+};
+
+enum class MidiLinkGroup : std::uint8_t { Local, Network, Neither };
+
 }

@@ -57,48 +57,9 @@ constexpr os::ChildProcessExit::ExitStatus kExecFailed{127};
     return unimplemented(ERR_SITE());
 }
 
-[[nodiscard]] Ex<void> bluetoothd_hcireset() {
-
-    const std::array<const char*, 2> argv{"/bin/bluetoothd", "hcireset"};
-    return os::run_detached(argv);
-}
-
-[[nodiscard]] Ex<void> bluetoothd_renew() {
-
-    const std::array<const char*, 2> argv{"/bin/bluetoothd", "renew"};
-    auto rc = os::run_sync(argv);
-    if (!rc)
-        return std::unexpected(rc.error());
-    if (rc->exited_with(kExecFailed))
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
-    return {};
-}
-
-[[nodiscard]] Ex<void> hciconfig_reset() {
-
-    const std::array<const char*, 3> argv{"hciconfig", "hci0", "reset"};
-    auto rc = os::run_sync(argv);
-    if (!rc)
-        return std::unexpected(rc.error());
-    if (rc->exited_with(kExecFailed))
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
-    return {};
-}
-
 [[nodiscard]] Ex<void> btctl_disconnect(std::string_view) {
 
     return unimplemented(ERR_SITE());
-}
-
-[[nodiscard]] Ex<void> killall_sigint_bt() {
-
-    const std::array<const char*, 4> argv{"killall", "-SIGINT", "btpair", "btctl"};
-    auto rc = os::run_sync(argv);
-    if (!rc)
-        return std::unexpected(rc.error());
-    if (rc->exited_with(kExecFailed))
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
-    return {};
 }
 
 [[nodiscard]] Ex<bool> bt_adapter_up() {

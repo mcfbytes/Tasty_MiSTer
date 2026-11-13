@@ -4,13 +4,13 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "infra/grant_gen.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
 namespace mister::app {
 
 struct OsdRoute {
-    bool leased = false;
     bool on_lw = false;
     std::uint32_t frames = 0;
     std::uint32_t rows = 0;
@@ -20,5 +20,7 @@ struct OsdRoute {
 
 static_assert(std::is_trivially_copyable_v<OsdRoute>);
 using OsdRouteCell = xthread::Telemetry<OsdRoute, SeatTag::Ui>;
+
+using OsdLeaseCell = xthread::Telemetry<xthread::GrantGen, SeatTag::Ui>;
 
 }

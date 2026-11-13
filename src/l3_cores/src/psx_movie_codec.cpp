@@ -1,26 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/psx_movie_codec.h"
+#include "cores/bk2_log.h"
+#include "cores/bk2_text.h"
 #include "cores/movie_codec.h"
 #include "cores/movie_refusal.h"
 #include "cores/psx_bk2_format.h"
 
-#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "cores/manifests/psx.h"
 #include "cores/movie_archive.h"
-#include "cores/q_control.h"
+#include "cores/psx_disc_key.h"
 #include "infra/ascii.h"
-#include "infra/byte_view.h"
-#include "infra/endian.h"
 #include "infra/parse_int.h"
-#include "svc/chd_meta_row.h"
+#include "infra/path_parts.h"
 #include "svc/chd_source.h"
-#include "svc/chd_track.h"
 #include "svc/file.h"
-#include "svc/msf.h"
 #include "svc/types.h"
 #include "svc/vfs.h"
 
@@ -42,56 +39,28 @@ constexpr std::array<FirmwareRegion, 4> kRegionByCode{
     FirmwareRegion::Europe
 };
 
-struct Fields {
-    std::array<std::string_view, 4> f{};
-    std::string_view rest{};
-};
-
-Fields fields(std::string_view s) {
-    Fields out{};
-    s = IMovieFormat::trim(s);
-    for (std::size_t i = 0; i < out.f.size() && !s.empty(); ++i) {
-        const std::size_t sp = std::min(s.find(' '), s.find('\t'));
-        out.f[i] = s.substr(0, sp);
-        s = IMovieFormat::trim(s.substr(out.f[i].size()));
-        if (i == 0)
-            out.rest = s;
-    }
-    return out;
-}
-
-std::optional<bool> boolean(std::string_view v) {
-    if (v == "1" || ieq(v, "true"))
-        return true;
-    if (v == "0" || ieq(v, "false"))
-        return false;
-    return std::nullopt;
-}
-
-using ColumnRole = PsxBk2Format::ColumnRole;
-using MovieCommand = PsxBk2Format::ColumnRole::MovieCommand;
-
-std::optional<ColumnRole> column_role(std::string_view name) {
+std::optional<Bk2Column> column_of(std::string_view name) {
     if (name == "Disc Select" || name == "Disk Index")
-        return ColumnRole::command(MovieCommand::Value);
+        return Bk2Column::disc_index();
     if (name == "Open" || name == "Close" || name == "Open Tray" || name == "Close Tray")
-        return ColumnRole::command(MovieCommand::Tray);
+        return Bk2Column::tray();
     if (name == "Reset")
-        return ColumnRole::command(MovieCommand::Reset);
+        return Bk2Column::reset();
     if (name == "Power")
-        return ColumnRole::command(MovieCommand::Power);
-    if (!name.starts_with("P1 "))
+        return Bk2Column::power();
+    const auto pad = bk2_pad_name(name);
+
+    if (!pad || pad->port != svc::kPlayers.front())
         return std::nullopt;
-    name.remove_prefix(3);
     for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
-        if (name == b.octoshock || name == b.nymashock)
-            return ColumnRole::pad(b.bit);
+        if (pad->name == b.octoshock || pad->name == b.nymashock)
+            return Bk2Column::pad(svc::kPlayers.front(), b.bit);
     }
     return std::nullopt;
 }
 
 std::optional<MovieFacts> read_log_key(std::string_view key, MovieFacts f) {
-    f.columns_n = ColumnCount{};
+    f.columns = Bk2Columns{};
     proto::JoyMask bits{};
     while (!key.empty()) {
         const std::size_t end = key.find_first_of("|#");
@@ -99,190 +68,22 @@ std::optional<MovieFacts> read_log_key(std::string_view key, MovieFacts f) {
         key.remove_prefix(end == std::string_view::npos ? key.size() : end + 1);
         if (name.empty())
             continue;
-        const auto role = column_role(name);
-        if (!role || !f.columns_n.within(ColumnCount::of(f.columns.size())))
+        const auto c = column_of(name);
+        if (!c)
             return std::nullopt;
-        if (role->is_pad()) {
-            if (bits.any(role->pad_mask()))
+        if (const auto cell = c->pad_cell()) {
+            if (bits.any(cell->bit.mask()))
                 return std::nullopt;
-            bits = bits.with(role->pad_mask());
+            bits = bits.with(cell->bit.mask());
         }
-        f.columns[f.columns_n.size()] = role->v;
-        f.columns_n = f.columns_n.next();
+        const auto next = f.columns.append(*c);
+        if (!next)
+            return std::nullopt;
+        f.columns = *next;
     }
     if (bits != PsxMovieCodec::kPadBitMask)
         return std::nullopt;
     return f;
-}
-
-struct TocTrack {
-    svc::TrackNumber number{};
-    QControl control{};
-    bool mode2 = false;
-    proto::BlockCount lba{};
-};
-
-struct CueTrack {
-    TocTrack track{};
-    proto::BlockCount index1{};
-    std::uint16_t file = 0;
-};
-
-struct Cue {
-    std::vector<std::string> files;
-    std::vector<CueTrack> tracks;
-
-    std::vector<bool> index1_seen;
-};
-
-[[nodiscard]] std::optional<proto::BlockCount> parse_cue_msf(std::string_view s) noexcept {
-    constexpr std::size_t kDigits = 2;
-    constexpr std::size_t kFields = 3;
-    constexpr std::size_t kLen = kFields * kDigits + (kFields - 1);
-    if (s.size() != kLen || s[2] != ':' || s[5] != ':')
-        return std::nullopt;
-    const auto m = infra::parse_int<std::uint32_t>(s.substr(0, kDigits));
-    const auto sec = infra::parse_int<std::uint32_t>(s.substr(3, kDigits));
-    const auto fr = infra::parse_int<std::uint32_t>(s.substr(6, kDigits));
-    if (!m || !sec || !fr || *sec >= svc::kSecondsPerMinute || *fr >= svc::kFramesPerSecond)
-        return std::nullopt;
-    return proto::BlockCount{(*m * svc::kSecondsPerMinute + *sec) * svc::kFramesPerSecond + *fr};
-}
-
-[[nodiscard]] Ex<Cue> parse_cue(std::string_view text) {
-    Cue c;
-    while (!text.empty()) {
-        const std::size_t nl = text.find('\n');
-        const Fields fl = fields(text.substr(0, nl));
-        text.remove_prefix(nl == std::string_view::npos ? text.size() : nl + 1);
-        const std::string_view kw = fl.f[0];
-        if (ieq(kw, "FILE")) {
-            std::string_view name;
-            std::string_view type;
-            if (!fl.rest.empty() && fl.rest.front() == '"') {
-                const std::size_t q = fl.rest.find('"', 1);
-                if (q == std::string_view::npos)
-                    return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-                name = fl.rest.substr(1, q - 1);
-                type = fields(fl.rest.substr(q + 1)).f[0];
-            } else {
-                name = fl.f[1];
-                type = fl.f[2];
-            }
-            if (name.empty() || !ieq(type, "BINARY") || c.files.size() == PsxBk2Format::kMaxFiles)
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            c.files.emplace_back(name);
-        } else if (ieq(kw, "TRACK")) {
-            const auto n = fl.f[1].size() <= 2 ? infra::parse_int<std::uint32_t>(fl.f[1])
-                                               : std::nullopt;
-            const std::string_view type = fl.f[2];
-            if (c.files.empty() || !n || *n != c.tracks.size() + 1)
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            CueTrack t{.file = static_cast<std::uint16_t>(c.files.size() - 1)};
-            t.track.number = svc::TrackNumber::of(*n);
-            if (ieq(type, "MODE2/2352") || ieq(type, "MODE1/2352")) {
-                t.track.control = t.track.control.with_data();
-                t.track.mode2 = ieq(type, "MODE2/2352");
-            } else if (!ieq(type, "AUDIO")) {
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            }
-            c.tracks.push_back(t);
-            c.index1_seen.push_back(false);
-        } else if (ieq(kw, "INDEX")) {
-            const auto n = fl.f[1].size() <= 2 ? infra::parse_int<std::uint32_t>(fl.f[1])
-                                               : std::nullopt;
-            const auto at = parse_cue_msf(fl.f[2]);
-            if (c.tracks.empty() || !n || !at)
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            CueTrack& t = c.tracks.back();
-
-            if (*n == 1 && t.file == c.files.size() - 1) {
-                t.index1 = *at;
-                c.index1_seen.back() = true;
-            } else if (*n == 1) {
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            }
-        } else if (ieq(kw, "FLAGS")) {
-            if (c.tracks.empty())
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            QControl& control = c.tracks.back().track.control;
-            for (std::size_t i = 1; i < fl.f.size() && !fl.f[i].empty(); ++i) {
-                const std::string_view flag = fl.f[i];
-                if (ieq(flag, "PRE")) {
-                    control = control.with_pre();
-                } else if (ieq(flag, "DCP")) {
-                    control = control.with_dcp();
-                } else if (ieq(flag, "4CH")) {
-                    control = control.with_four_channel();
-                } else if (!ieq(flag, "SCMS")) {
-                    return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-                }
-            }
-        } else if (ieq(kw, "PREGAP") || ieq(kw, "POSTGAP")) {
-            return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-        }
-    }
-    if (c.tracks.empty() || c.tracks.size() > PsxBk2Format::kMaxFiles)
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    for (const bool seen : c.index1_seen)
-        if (!seen)
-            return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-
-    const CueTrack& t1 = c.tracks.front();
-    if (!t1.track.control.is_data() || t1.file != 0 || t1.index1 != proto::BlockCount{})
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    return c;
-}
-
-template <class W>
-void put_toc_word(std::span<std::uint8_t, 4> dst, const W& w) {
-    if constexpr (std::is_integral_v<W>)
-        infra::store_le<std::uint32_t>(dst, static_cast<std::uint32_t>(w));
-    else
-        w.store_le32(dst);
-}
-
-template <class A, class B, class C>
-std::array<std::uint8_t, 12> le32x3(const A& a, const B& b, const C& c) {
-    std::array<std::uint8_t, 12> out{};
-    const std::span<std::uint8_t, 12> all(out);
-    put_toc_word(all.subspan<0, 4>(), a);
-    put_toc_word(all.subspan<4, 4>(), b);
-    put_toc_word(all.subspan<8, 4>(), c);
-    return out;
-}
-
-std::vector<std::uint8_t> toc_bytes(std::span<const TocTrack> tracks, proto::BlockCount lead_out) {
-    std::vector<std::uint8_t> out;
-    out.reserve(PsxBk2Format::kTocPrefixBytes);
-    const auto add = [&out](const std::array<std::uint8_t, 12>& e) {
-        out.insert(out.end(), e.begin(), e.end());
-    };
-
-    const bool xa = std::any_of(tracks.begin(), tracks.end(), [](const TocTrack& t) {
-        return t.mode2;
-    });
-    add(le32x3(
-        std::to_underlying(xa ? DiscType::CdRomXa : DiscType::CdRom),
-        tracks.front().number,
-        tracks.back().number
-    ));
-    for (std::size_t i = 1; i <= 100; ++i) {
-        if (i <= tracks.size()) {
-            const TocTrack& t = tracks[i - 1];
-            add(le32x3(t.control, 1, t.lba));
-        } else if (i == 100) {
-            add(le32x3(0, 1, lead_out));
-        } else {
-            add(le32x3(0, 0, 0));
-        }
-    }
-    return out;
-}
-
-std::string_view dir_of(std::string_view path) {
-    const std::size_t slash = path.rfind('/');
-    return slash == std::string_view::npos ? std::string_view{} : path.substr(0, slash + 1);
 }
 
 struct SettingRule {
@@ -387,11 +188,11 @@ infra::OptRef<const MovieArchiveFormat> PsxBk2Format::archive() const noexcept {
 }
 
 bool PsxBk2Format::starts_log(std::string_view line) const noexcept {
-    return !line.empty() && line.front() == '|';
+    return bk2_starts_log(line);
 }
 
 bool PsxBk2Format::ends_log(std::string_view line) const noexcept {
-    return IMovieFormat::trim(line) == "[/Input]";
+    return bk2_ends_log(line);
 }
 
 Ex<MovieFacts> PsxBk2Format::header_line(
@@ -400,32 +201,31 @@ Ex<MovieFacts> PsxBk2Format::header_line(
 ) const noexcept {
     MovieFacts f = so_far;
     Layout l = f.layout.view_as<Layout>();
-    line = IMovieFormat::trim(line);
-    if (line.empty())
-        return f;
-    if (line == "@Core"
-        || line == "@CoreText"
-        || line == "@SaveRam"
-        || line.starts_with("SavestateBinaryBase64Blob")) {
-        return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
+    const auto read = bk2_read_line(line);
+    if (!read)
+        return std::unexpected(read.error());
+    const Bk2Line& ln = *read;
+    switch (ln.kind) {
+        case Bk2Line::Kind::Blank:
+        case Bk2Line::Kind::Long:
+            return f;
+        case Bk2Line::Kind::LogKey: {
+            const auto k = read_log_key(ln.value, f);
+            if (!k)
+                return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
+            f = *k;
+            f.ports = svc::PlayerMask{}.with(svc::kPlayers[0]);
+            l.log_key = true;
+            f.layout = FormatLayout::of(l.bits());
+            return f;
+        }
+        case Bk2Line::Kind::Pair:
+            break;
     }
-    if (line.starts_with("LogKey:")) {
-        const auto k = read_log_key(line.substr(7), f);
-        if (!k)
-            return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
-        f = *k;
-        f.ports = svc::PlayerMask{}.with(svc::kPlayers[0]);
-        l.log_key = true;
-        f.layout = FormatLayout::of(l.bits());
-        return f;
-    }
-    if (line.size() > kMovieLineMax)
-        return f;
-    const Fields kv = fields(line);
-    const std::string_view key = kv.f[0];
-    const std::string_view val = kv.rest;
+    const std::string_view key = ln.key;
+    const std::string_view val = ln.value;
     if (key == "MovieVersion") {
-        if (!val.starts_with("BizHawk v2"))
+        if (!bk2_version_ok(val))
             return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         f.version = MovieRevision{2};
     } else if (key == "Platform") {
@@ -441,12 +241,6 @@ Ex<MovieFacts> PsxBk2Format::header_line(
         } else {
             return std::unexpected(movie_refusal(CR::System, ERR_SITE()));
         }
-    } else if (key == "StartsFromSavestate" || key == "StartsFromSaveRam") {
-        const auto b = boolean(val);
-        if (!b)
-            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
-        if (*b)
-            return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
     } else if (key == "SHA1") {
 
         const auto d = parse_hex_digest(val, DigestKind::Crc32);
@@ -480,7 +274,7 @@ Ex<MovieFacts> PsxBk2Format::header_line(
                 l.pad_digital = true;
         } else if (k.starts_with("FIOConfig.Memcards.")) {
             const auto n = index(k.substr(19));
-            const auto b = boolean(val);
+            const auto b = bk2_boolean(val);
             if (!n || !b)
                 return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
             if (*b)
@@ -488,7 +282,7 @@ Ex<MovieFacts> PsxBk2Format::header_line(
             if (*n == 0)
                 l.card_off = true;
         } else if (k.starts_with("FIOConfig.Multitaps.")) {
-            const auto b = boolean(val);
+            const auto b = bk2_boolean(val);
             if (!b)
                 return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
             if (*b)
@@ -532,58 +326,7 @@ Ex<void> PsxBk2Format::finish_header(const MovieFacts& f) const noexcept {
 }
 
 Ex<MovieFrame> PsxBk2Format::frame(std::string_view line, const MovieFacts& f) const noexcept {
-    while (!line.empty() && line.back() == '\r')
-        line.remove_suffix(1);
-    if (line.size() > kMovieLineMax || !starts_log(line))
-        return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-    MovieFrame out{};
-    MovieCommandMask commands{};
-    std::size_t at = 0;
-    for (const std::size_t c : f.columns_n.indices()) {
-        while (at < line.size() && line[at] == '|')
-            ++at;
-        if (at == line.size())
-            return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-        const ColumnRole role{f.columns[c]};
-        if (!role.is_pad() && role.command() == MovieCommand::Value) {
-
-            const std::size_t comma = line.find(',', at);
-            if (comma == std::string_view::npos)
-                return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-            const std::string_view disc = IMovieFormat::trim(line.substr(at, comma - at));
-            if (disc.size() > 3 || !infra::parse_int<std::uint32_t>(disc))
-                return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-            at = comma + 1;
-            continue;
-        }
-        const auto ch = static_cast<unsigned char>(line[at++]);
-        if (ch == '.')
-            continue;
-
-        if (ch <= ' ' || ch >= 0x7F)
-            return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-        if (role.is_pad()) {
-            out.mask[0] = out.mask[0].with(role.pad_mask());
-            continue;
-        }
-        switch (role.command()) {
-            case MovieCommand::Tray:
-                return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-            case MovieCommand::Reset:
-                commands = commands.with_reset();
-                break;
-            case MovieCommand::Power:
-                commands = commands.with_power();
-                break;
-            case MovieCommand::Value:
-                break;
-        }
-    }
-    for (; at < line.size(); ++at)
-        if (line[at] != '|')
-            return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
-    out.commands = commands;
-    return out;
+    return bk2_decode_flat(line, f);
 }
 
 IReplayCore::SettingNeeds PsxMovieCodec::setting_needs(const MovieFacts& f) const noexcept {
@@ -624,100 +367,6 @@ IReplayCore::PowerOn PsxMovieCodec::power_on(const MovieFacts&) const noexcept {
     return {.p0 = Parity::AfterSilence, .event = PowerOnEvent::ResetPulse};
 }
 
-Ex<std::vector<std::uint8_t>> PsxBk2Format::toc_prefix(
-    std::string_view cue,
-    std::span<const proto::FileSize> file_sizes
-) {
-    const auto c = parse_cue(cue);
-    if (!c)
-        return std::unexpected(c.error());
-    if (file_sizes.size() != c->files.size())
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-
-    constexpr proto::FileSize kSectorSize{svc::kRawFrameBytes};
-    std::vector<proto::BlockCount> base(c->files.size() + 1);
-    for (std::size_t i = 0; i < c->files.size(); ++i)
-        base[i + 1] = base[i] + file_sizes[i].whole_units(kSectorSize);
-    if (file_sizes.front() < proto::FileSize{kKeySectors * kSectorBytes})
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    std::vector<TocTrack> toc;
-    toc.reserve(c->tracks.size());
-    for (const CueTrack& ct : c->tracks) {
-        TocTrack t = ct.track;
-        t.lba = base[ct.file] + ct.index1;
-        toc.push_back(t);
-    }
-    return toc_bytes(toc, base.back());
-}
-
-Ex<std::vector<std::uint8_t>> PsxBk2Format::chd_key(svc::IChdSource& chd) {
-
-    std::vector<TocTrack> toc;
-    proto::BlockCount at{};
-    proto::BlockCount first_frames{};
-    for (std::uint32_t i = 0;; ++i) {
-        const auto row = chd.track_metadata(svc::TrackIndex::of(i));
-        if (!row)
-            break;
-        const auto t = svc::parse_chd_track(*row);
-        if (!t || !t->number.matches(svc::CueField{i + 1}) || i == PsxBk2Format::kMaxFiles)
-            return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-        TocTrack e{.number = t->number};
-
-        if (t->sector_size != svc::ChdSectorSize::Raw)
-            return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-        if (t->type != svc::TrackType::Cdda) {
-            e.control = e.control.with_data();
-            e.mode2 = t->type == svc::TrackType::Mode2;
-        }
-
-        if ((t->pregap != proto::BlockCount{} && !t->pregap_held)
-            || t->postgap != proto::BlockCount{})
-            return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-        e.lba = at + t->pregap;
-        at += t->frames;
-        if (i == 0)
-            first_frames = t->frames;
-        toc.push_back(e);
-    }
-    if (toc.empty()
-        || !toc.front().control.is_data()
-        || toc.front().lba != proto::BlockCount{}
-        || first_frames < proto::BlockCount{kKeySectors})
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    std::vector<std::uint8_t> out = toc_bytes(toc, at);
-
-    const svc::IChdSource::Geometry geo = chd.geometry();
-    if (geo.unit_bytes != proto::FileSize{kChdFrameBytes}
-        || geo.hunk_bytes < geo.unit_bytes
-        || geo.hunk_bytes > proto::FileSize{kChdHunkMax})
-        return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    std::vector<std::byte> hunk(geo.hunk_extent());
-    std::optional<svc::HunkIndex> held_hunk{};
-    out.reserve(out.size() + kKeySectors * kSectorBytes);
-    for (std::uint32_t f = 0; f < kKeySectors; ++f) {
-        const svc::ChdUnit unit{f};
-        const svc::HunkIndex wanted = geo.hunk_of(unit);
-        if (held_hunk != wanted) {
-            if (auto r = chd.read_hunk(wanted, hunk); !r)
-                return std::unexpected(r.error());
-            held_hunk = wanted;
-        }
-        const auto* p = infra::byte_cast<const std::uint8_t>(std::span(hunk)).data()
-            + geo.offset_in_hunk(unit);
-        out.insert(out.end(), p, p + kSectorBytes);
-    }
-    return out;
-}
-
-Error PsxBk2Format::chd_open_error(const Error& e) noexcept {
-    if (e.code == Errc::mount_failed)
-        return movie_refusal(CR::ChdUnsupported, ERR_SITE());
-    if (e.code == Errc::bad_format)
-        return movie_refusal(CR::Disk, ERR_SITE());
-    return e;
-}
-
 namespace {
 
 [[nodiscard]] Ex<IMovieFormat::DigestSource> chd_digest_source(
@@ -729,8 +378,8 @@ namespace {
         return std::unexpected(f.error());
     auto chd = svc::open_chd(std::move(*f));
     if (!chd)
-        return std::unexpected(PsxBk2Format::chd_open_error(chd.error()));
-    auto key = PsxBk2Format::chd_key(**chd);
+        return std::unexpected(PsxDiscKey::chd_open_error(chd.error()));
+    auto key = PsxDiscKey::chd_key(**chd);
     if (!key)
         return std::unexpected(key.error());
     return IMovieFormat::DigestSource{
@@ -764,12 +413,12 @@ Ex<IMovieFormat::DigestSource> PsxBk2Format::digest_source(
     if (!got)
         return std::unexpected(got.error());
     text.resize(*got);
-    const auto c = parse_cue(text);
-    if (!c)
-        return std::unexpected(c.error());
-    const std::string dir(dir_of(rom));
+    const auto files = PsxDiscKey::cue_files(text);
+    if (!files)
+        return std::unexpected(files.error());
+    const std::string dir(infra::dir_prefix(rom));
     std::vector<proto::FileSize> sizes;
-    for (const std::string& name : c->files) {
+    for (const std::string& name : *files) {
         auto f = vfs.open(dir + name, svc::OpenMode::Read);
         if (!f)
             return std::unexpected(f.error());
@@ -778,12 +427,14 @@ Ex<IMovieFormat::DigestSource> PsxBk2Format::digest_source(
             return std::unexpected(s.error());
         sizes.push_back(*s);
     }
-    auto prefix = toc_prefix(text, sizes);
+    auto prefix = PsxDiscKey::toc_prefix(text, sizes);
     if (!prefix)
         return std::unexpected(prefix.error());
     return DigestSource{
-        .file = dir + c->files.front(),
-        .span = {.offset = {}, .length = proto::FileSize{kKeySectors * kSectorBytes}},
+        .file = dir + files->front(),
+        .span =
+            {.offset = {},
+             .length = proto::FileSize{PsxDiscKey::kKeySectors * PsxDiscKey::kSectorBytes}},
         .prefix = std::move(*prefix)
     };
 }
@@ -795,7 +446,7 @@ std::optional<IReplayCore::Companion> PsxMovieCodec::companion(
     if (!f.firmware)
         return std::nullopt;
 
-    const std::string_view dir = dir_of(rom);
+    const std::string_view dir = infra::dir_prefix(rom);
     const std::string_view up = dir.empty() ? dir : dir.substr(0, dir.size() - 1);
     Companion c{};
     std::size_t n = 0;
@@ -808,7 +459,7 @@ std::optional<IReplayCore::Companion> PsxMovieCodec::companion(
         } else if (
             row.anchor == AssetAnchor::ImageParentDir && up.find('/') != std::string_view::npos
         ) {
-            c.paths[n++] = std::string(dir_of(up)) + std::string(row.name);
+            c.paths[n++] = std::string(infra::dir_prefix(up)) + std::string(row.name);
         }
     }
     if (n == 0)

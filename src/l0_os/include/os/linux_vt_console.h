@@ -14,8 +14,8 @@ class LinuxVtConsole final : public IVtSwitch {
 public:
     [[nodiscard]] std::optional<VtNumber> active() noexcept override;
     [[nodiscard]] Ex<void> activate(VtNumber vt) noexcept override;
-    void blank(const char* tty) noexcept override;
-    void restore_text(const char* tty) noexcept override;
+    void blank(VtNumber vt) noexcept override;
+    void restore_text(VtNumber vt) noexcept override;
 };
 
 }

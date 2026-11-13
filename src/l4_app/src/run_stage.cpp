@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <string_view>
 
-#include "app/input_wire.h"
+#include "app/core_input_binding.h"
 #include "app/osd_close.h"
 #include "app/screenshot_pump.h"
 #include "app/ui_request.h"
@@ -225,7 +225,7 @@ IReplayStage::Step RunStage::finish_(Ctx ctx, const ReplayStatus& s) noexcept {
         return arm_(ctx);
     }
 
-    ctx.w.input.publish_edge_reset();
+    ctx.w.input.reset_joy_edges();
     return Step::done();
 }
 

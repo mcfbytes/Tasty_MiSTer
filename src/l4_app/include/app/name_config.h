@@ -23,8 +23,6 @@ public:
     static constexpr std::size_t kPathBlob = kRememberedBlob;
     static constexpr std::size_t kCidLen = 32;
 
-    using Slot = RememberedSlot;
-
     explicit NameConfig(const svc::Vfs& vfs, std::string cid_path)
         : vfs_(&vfs),
           cid_path_(static_cast<std::string&&>(cid_path)) {}
@@ -33,8 +31,7 @@ public:
 
     [[nodiscard]] Ex<void> save_path(
         const RememberedStem& stem,
-        Slot s,
-        proto::IoIndex index,
+        proto::FileRowId row,
         std::string_view path
     );
 

@@ -16,6 +16,7 @@
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
 #include "ui/system_page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -35,7 +36,7 @@ public:
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
     void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     RowCount pinned() const noexcept override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
@@ -67,11 +68,12 @@ private:
 
     PageContext& ctx_;
     std::unique_ptr<SystemPage> sys_;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
     RebootAction reboot_action_{*this};
     HdPushRow controllers_;
     HdPushRow display_;
+    HdPushRow network_;
     ScriptsRow scripts_{*this};
     HdPushRow about_;
     HdAskRow reboot_;

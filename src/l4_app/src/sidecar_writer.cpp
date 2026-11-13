@@ -96,7 +96,7 @@ void SidecarWriter::on(const SidecarMsg::Row& row, const SidecarMsg::Head& head)
     const int len = std::snprintf(
         line,
         sizeof line,
-        "%" PRIu64 "\t%s\t%" PRId64 "\t%s\t%s\t%s\t%s\t%s\t%" PRId32 "\t%" PRId32 "\n",
+        "%" PRIu64 "\t%s\t%" PRId64 "\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
         row.stamp.core_frame.number(),
         row.stamp.header_ctr.text().c_str(),
         row.stamp.capture_ns,
@@ -105,8 +105,8 @@ void SidecarWriter::on(const SidecarMsg::Row& row, const SidecarMsg::Head& head)
         hash_hex,
         row.width.text().c_str(),
         row.height.text().c_str(),
-        row.segment,
-        row.seg_frame
+        row.place.segment_column().c_str(),
+        row.place.frame_column().c_str()
     );
     const auto n = static_cast<std::size_t>(len > 0 ? len : 0);
     if (n != 0 && used_ + n > kSpillBytes)

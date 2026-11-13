@@ -17,10 +17,11 @@
 #include "svc/disc_engine.h"
 #include "svc/image_opener.h"
 #include "svc/disc_geometry.h"
-#include "svc/disc_identity_role.h"
+#include "svc/disc_rules.h"
 #include "svc/disc_mounter.h"
 #include "svc/disc_reader.h"
 #include "svc/sector_header.h"
+#include "svc/storage_backend.h"
 #include "svc/vfs.h"
 #include "svc/vfs_image_opener.h"
 
@@ -28,7 +29,7 @@ namespace mister::svc {
 
 class ChdPrefetch;
 
-class DiscStore final : public IDiscReader, public IDiscMounter {
+class DiscStore final : public IDiscReader, public IDiscMounter, public IStorageBackend {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
@@ -57,16 +58,30 @@ public:
         DiscForm form,
         proto::Lba lba,
         std::span<std::byte> dst,
-        SectorHeader header = {}
+        std::optional<SectorHeader> header = {}
     ) override;
 
     [[nodiscard]] bool mounted_for_test() const noexcept;
+
+    [[nodiscard]] Ex<std::span<std::uint8_t>> read_at(
+        proto::FileSize at,
+        std::span<std::uint8_t> dst
+    ) override;
+    [[nodiscard]] Ex<std::span<const std::uint8_t>> write_at(
+        proto::FileSize at,
+        std::span<const std::uint8_t> src
+    ) override;
+    [[nodiscard]] Ex<proto::FileSize> open_extent(
+        proto::SlotIndex slot,
+        const BlockCtl::StorageOrder& order
+    ) override;
+    void release(proto::SlotIndex slot) noexcept override;
 
 private:
     [[nodiscard]] bool do_mount(
         infra::OptRef<const CuePolicy> policy,
         std::string_view path,
-        infra::OptRef<const IDiscIdentity> identity
+        infra::OptRef<const IDiscRules> rules
     ) noexcept override;
     [[nodiscard]] bool do_unmount(infra::OptRef<const CuePolicy> policy) noexcept override;
     void do_release() noexcept override;
@@ -77,10 +92,10 @@ private:
         DiscForm form,
         proto::Lba lba,
         std::span<std::byte> dst,
-        SectorHeader header
+        std::optional<SectorHeader> header
     );
 
-    void publish_(infra::OptRef<const IDiscIdentity> identity = {}) noexcept;
+    void publish_(infra::OptRef<const IDiscRules> rules = {}) noexcept;
 
     std::unique_ptr<IImageOpener> owned_opener_;
     const IImageOpener& opener_;
@@ -89,6 +104,9 @@ private:
     ChdPrefetch& prefetch_;
 
     infra::OptRef<const CuePolicy> policy_;
+
+    DiscGeometry shape_{};
+    infra::OptRef<const IDiscRules> rules_{};
 
     proto::Lba next_lba_{};
     std::optional<DiscEngine> engine_;

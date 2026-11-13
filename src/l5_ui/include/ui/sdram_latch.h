@@ -7,6 +7,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 #include "ui/types.h"
 
 namespace mister::app {
@@ -23,11 +24,11 @@ public:
 
     [[nodiscard]] std::optional<proto::OsdMask> cfg() const noexcept { return cfg_; }
 
-    [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_; }
+    [[nodiscard]] svc::Tally refusals() const noexcept { return refusals_; }
 
 private:
     std::optional<proto::OsdMask> cfg_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     bool reported_ = false;
 };
 

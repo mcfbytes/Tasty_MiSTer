@@ -5,9 +5,6 @@
 namespace mister::proto {
 
 void StatusRegister::set_bit(StatusBit bit, bool value) {
-    if (bit.v >= kBits) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), bit.v}, "status bit");
-    }
     const StatusWord next = shadow_.with(bit, value);
     if (next != shadow_) {
         shadow_ = next;
@@ -35,9 +32,6 @@ StatusWord StatusRegister::value() const noexcept {
 }
 
 bool StatusRegister::get_bit(StatusBit bit) const {
-    if (bit.v >= kBits) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), bit.v}, "status bit");
-    }
     return shadow_.has(bit);
 }
 

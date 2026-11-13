@@ -9,6 +9,7 @@
 
 #include "cores/st_config.h"
 #include "infra/endian.h"
+#include "infra/path_parts.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -95,9 +96,11 @@ void put_text(std::span<std::byte> dst, std::string_view text, std::byte pad) no
 AcsiServant::AcsiServant(
     infra::OptRef<const svc::Vfs> vfs,
     std::span<const svc::DiskFormatRow> formats,
-    std::string_view serial
+    std::string_view serial,
+    infra::OptRef<xthread::WakeFlag> activity
 ) noexcept
     : vfs_(vfs),
+      activity_(activity),
       formats_(formats) {
     (void)serial_.assign(serial);
 }
@@ -137,7 +140,7 @@ MountState AcsiServant::bind(proto::DiskUnit unit, std::string_view path) noexce
     if (!img)
         return MountState::Failed;
     slot.image.hold(std::move(*img));
-    (void)slot.name.assign(StConfig::leaf_of(path));
+    (void)slot.name.assign(infra::basename(path));
     return MountState::Done;
 }
 
@@ -356,12 +359,16 @@ void AcsiServant::answer_blocks_(Slot& slot, const Cdb& cdb) {
 }
 
 void AcsiServant::read_blocks_(Slot&, const Cdb& cdb) {
+    if (activity_)
+        activity_->request();
     cmd_.transfer = ReadTransfer{.lba = cdb.lba, .length = cdb.transfer};
 }
 
 void AcsiServant::write_blocks_(Slot& slot, const Cdb& cdb) {
     if (!image_of_(slot).writable())
         return answer_(slot, ScsiStatus::Check, SenseCode::WriteProtected);
+    if (activity_)
+        activity_->request();
     cmd_.transfer = WriteTransfer{.lba = cdb.lba, .length = cdb.transfer};
 }
 

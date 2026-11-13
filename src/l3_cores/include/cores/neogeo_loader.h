@@ -8,12 +8,15 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "cores/core_profile.h"
 #include "cores/fix_shape.h"
 #include "cores/i_rom_shape.h"
+#include "cores/neogeo_walk_tally.h"
 #include "cores/loader.h"
+#include "cores/row_shape_key.h"
 #include "cores/neo_transform.h"
 #include "cores/romset_file.h"
 #include "cores/spr_dbl_shape.h"
@@ -23,6 +26,7 @@
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/status_bit.h"
 #include "proto/status_word.h"
 #include "svc/vfs.h"
 
@@ -43,6 +47,28 @@ inline constexpr proto::StatusBit kCdzBit{2};
 inline constexpr proto::StatusBit kOriginalBiosBit{22};
 
 enum class Shape : std::uint8_t { None, Crom, Fix, SprDbl, SprDblSwap };
+
+[[nodiscard]] constexpr RowShapeKey shape_key_of(Shape kind) noexcept {
+    return RowShapeKey{std::to_underlying(kind)};
+}
+
+[[nodiscard]] constexpr std::optional<Shape> shape_of(RowShapeKey key) noexcept {
+    switch (key.v) {
+        case std::to_underlying(Shape::None):
+            return Shape::None;
+        case std::to_underlying(Shape::Crom):
+            return Shape::Crom;
+        case std::to_underlying(Shape::Fix):
+            return Shape::Fix;
+        case std::to_underlying(Shape::SprDbl):
+            return Shape::SprDbl;
+        case std::to_underlying(Shape::SprDblSwap):
+            return Shape::SprDblSwap;
+        default:
+            break;
+    }
+    return std::nullopt;
+}
 
 [[nodiscard]] constexpr bool notify_memcp(FileIndex index, bool force = false) noexcept {
     return force || !(index == FileIndex::M1 || index.is_vrom());
@@ -133,64 +159,23 @@ public:
         return {};
     }
 
-    [[nodiscard]] std::uint32_t skipped() const noexcept { return skipped_; }
+    [[nodiscard]] std::uint32_t skipped() const noexcept { return walked_.skipped; }
 
-    [[nodiscard]] std::uint32_t config() const noexcept { return config_; }
+    [[nodiscard]] std::uint32_t config() const noexcept { return walked_.config; }
 
 private:
-    struct Span {
-        std::uint32_t size = 0;
-        std::uint64_t rest = 0;
-    };
-
-    [[nodiscard]] std::optional<Span> entry_span_(
-        std::string_view path,
-        std::uint32_t offset,
-        std::uint32_t size
-    ) const;
-    [[nodiscard]] bool exists_(std::string_view path) const;
-    [[nodiscard]] std::string home_(std::string_view dir) const;
-    [[nodiscard]] Ex<void> frame_save_(LoadPlan& p, std::string_view pick);
-
-    [[nodiscard]] Ex<TransferRow*> add_row_(LoadPlan& p, std::string_view path, RowDest dest);
-    [[nodiscard]] Ex<std::uint32_t> add_entry_(LoadPlan& p, const neogeo::RomsetFile& e);
-    [[nodiscard]] Ex<std::uint32_t> add_crom_(LoadPlan& p, const neogeo::RomsetFile& e);
-    [[nodiscard]] Ex<std::uint32_t> add_rom_(
-        LoadPlan& p,
-        std::string_view path,
-        const neogeo::RomsetFile& e,
-        std::uint32_t concat
-    );
-    [[nodiscard]] Ex<void> flush_crom_(LoadPlan& p);
-    [[nodiscard]] Ex<void> add_notify_(LoadPlan& p, const PostNotify& n);
-
-    [[nodiscard]] Ex<bool> add_lo_rom_(LoadPlan& p, std::string_view home);
-    [[nodiscard]] Ex<void> add_fill_(LoadPlan& p);
-    void reset_walk_() noexcept;
-
-    [[nodiscard]] Ex<LoadPlan> plan_cart_(std::string_view pick, const proto::StatusWord& status);
-    [[nodiscard]] Ex<LoadPlan> plan_cd_(std::string_view pick, const proto::StatusWord& status);
-    [[nodiscard]] Ex<std::optional<std::uint32_t>> add_neo_(LoadPlan& p, std::string_view pick);
-    [[nodiscard]] Ex<std::optional<std::uint32_t>> add_xml_(
-        LoadPlan& p,
-        std::string_view pick,
-        std::string_view home
-    );
-
     [[nodiscard]] neogeo::IRomShape* shaper_(neogeo::Shape kind) noexcept;
 
     const svc::Vfs* vfs_;
     const CoreProfile& profile_;
+
     std::array<FixedStr<kPathChars, StrFit::Reject>, kMaxTransferRows> paths_{};
     FixedStr<kPathChars, StrFit::Reject> save_{};
     neogeo::FixShape fix_shape_{};
     neogeo::SprShape spr_shape_{};
     neogeo::SprDblShape spr_dbl_shape_{};
     neogeo::SprDblSwapShape spr_dbl_swap_shape_{};
-    std::uint32_t skipped_ = 0;
-    std::uint32_t crom_sz_ = 0;
-    std::size_t last_crom_ = 0;
-    std::uint32_t config_ = 0;
+    neogeo::WalkTally walked_{};
 };
 
 }

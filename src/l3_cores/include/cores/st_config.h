@@ -44,7 +44,6 @@ struct StConfig {
     [[nodiscard]] static FixedStr<kConfigPreviewChars, StrFit::Clip> preview(
         ConfigBlob blob
     ) noexcept;
-    [[nodiscard]] static std::string_view leaf_of(std::string_view path) noexcept;
 };
 
 static_assert(

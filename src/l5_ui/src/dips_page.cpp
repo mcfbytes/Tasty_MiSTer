@@ -68,7 +68,7 @@ void DipsPage::on_enter(PageContext& ctx) {
 void DipsPage::save_dips() {
     TASTY_SEAT_BODY(DipsPage);
     if (!push_ask(asks_, app::UiRequest::SaveDips{})) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -78,7 +78,7 @@ template <class A>
 void DipsPage::push_op(const A& op) {
     TASTY_SEAT_BODY(DipsPage);
     if (!link_tx_ || !link_tx_->push(op)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -204,7 +204,7 @@ Transition DipsPage::handle(const UiEvent& ev) {
     if (back) {
 
         save_dips();
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     }
     if (!ev.buttons.has_any({UiEvent::Select}))
         return Transition{};
@@ -213,13 +213,13 @@ Transition DipsPage::handle(const UiEvent& ev) {
 
         save_dips();
         push_op(proto::LinkOp::PulseOption{.bit = proto::kResetBit});
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
     }
     if (sel_ < reset_row()) {
         const proto::DipRowIndex dip_at = dip_row_of(sel_);
         const app::DipLabels::Row& row = table_->row(dip_at);
         if (row.choices.empty()) {
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         }
 
@@ -227,7 +227,7 @@ Transition DipsPage::handle(const UiEvent& ev) {
         push_op(proto::LinkOp::SetDip{.row = dip_at, .choice = next});
         return Transition{};
     }
-    ++refusals_;
+    refusals_.add();
     return Transition{};
 }
 

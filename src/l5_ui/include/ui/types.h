@@ -27,19 +27,6 @@ enum class KeyEdge : std::uint8_t { Make, Break };
 
 using app::CycleDir;
 
-struct ItemId {
-    std::uint16_t v = 0;
-
-    [[nodiscard]] constexpr proto::SubmenuNo submenu() const noexcept {
-        constexpr unsigned kLowByte = 0xFFu;
-        return proto::SubmenuNo{static_cast<std::uint8_t>(v & kLowByte)};
-    }
-
-    friend constexpr bool operator==(ItemId, ItemId) = default;
-};
-
-inline constexpr ItemId kNoItem{0};
-
 struct StackDepth {
     std::size_t v = 0;
 
@@ -70,14 +57,6 @@ using app::row_index_of;
 using app::RowCount;
 using app::RowIndex;
 using app::saturating_sub;
-
-[[nodiscard]] constexpr ItemId item_submenu(proto::SubmenuNo n) noexcept {
-    return ItemId{n.v};
-}
-
-[[nodiscard]] constexpr ItemId item_row(RowIndex r) noexcept {
-    return ItemId{static_cast<std::uint16_t>(r.v)};
-}
 
 template <class T>
 using RowSpan = infra::IndexedSpan<T, RowIndex>;
@@ -146,9 +125,15 @@ struct RowDigest {
 };
 
 struct RowKey {
+
+    struct Ordinal {
+        std::uint16_t v = 0;
+        friend constexpr bool operator==(Ordinal, Ordinal) = default;
+    };
+
     std::uint32_t v = 0;
 
-    [[nodiscard]] static constexpr RowKey in_space(RowKeySpace space, ItemId ordinal) noexcept {
+    [[nodiscard]] static constexpr RowKey in_space(RowKeySpace space, Ordinal ordinal) noexcept {
         return RowKey{tag_of(space) | ordinal.v};
     }
 
@@ -157,7 +142,7 @@ struct RowKey {
     }
 
     [[nodiscard]] static constexpr RowKey save() noexcept {
-        return in_space(RowKeySpace::Save, kNoItem);
+        return in_space(RowKeySpace::Save, Ordinal{});
     }
 
     [[nodiscard]] static constexpr RowKey hashed(RowKeySpace space, RowDigest digest) noexcept {
@@ -174,22 +159,13 @@ private:
     }
 };
 
-static_assert(
-    RowKey::hashed(RowKeySpace::Recent, RowDigest{})
-    > RowKey::in_space(RowKeySpace::Push, ItemId{std::numeric_limits<std::uint16_t>::max()})
-);
-static_assert(
-    RowKey::hashed(RowKeySpace::Recent, RowDigest{})
-    > RowKey::in_space(RowKeySpace::Slot, ItemId{std::numeric_limits<std::uint16_t>::max()})
-);
-
 struct RowKeyBounds {
     RowKey low;
     RowKey high;
 };
 
 [[nodiscard]] consteval RowKeyBounds row_key_bounds(RowKeySpace space) noexcept {
-    constexpr ItemId kLastItem{std::numeric_limits<std::uint16_t>::max()};
+    constexpr RowKey::Ordinal kLastItem{std::numeric_limits<std::uint16_t>::max()};
     constexpr proto::ItemOrdinal kLastOrdinal{std::numeric_limits<std::uint16_t>::max()};
     constexpr RowDigest kLastHash{std::numeric_limits<std::uint32_t>::max()};
     switch (space) {
@@ -203,7 +179,7 @@ struct RowKeyBounds {
         case RowKeySpace::Push:
         case RowKeySpace::Slot:
             return RowKeyBounds{
-                RowKey::in_space(space, ItemId{}),
+                RowKey::in_space(space, RowKey::Ordinal{}),
                 RowKey::in_space(space, kLastItem)
             };
         case RowKeySpace::Recent:
@@ -235,6 +211,11 @@ struct RowKeyBounds {
 }
 
 static_assert(row_key_spaces_are_disjoint());
+
+static_assert(
+    row_key_bounds(RowKeySpace::Recent).low > row_key_bounds(RowKeySpace::Push).high
+    && row_key_bounds(RowKeySpace::Recent).low > row_key_bounds(RowKeySpace::Slot).high
+);
 
 struct MenuMask {
     std::uint64_t v = 0;

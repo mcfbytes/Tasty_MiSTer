@@ -24,11 +24,11 @@ std::optional<ChdUnit> chd_sector_pos(const Track& t, Lba lba) noexcept {
 
 Ex<void> ChdBacking::attach(ChdHandles handles) {
     const ChdGeometry geo = handles.primary->geometry();
-    if (geo.hunk_extent() == 0 || geo.hunk_bytes < geo.unit_bytes) {
+    if (geo.hunk_extent() == 0 || geo.hunk_bytes < geo.unit_bytes.extent(proto::BlockCount{1})) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
     }
 
-    if (geo.unit_bytes != proto::FileSize{kFullFrameBytes}) {
+    if (geo.unit_bytes != proto::BlockSize{kFullFrameBytes}) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.unit_detail()});
     }
     geo_ = geo;

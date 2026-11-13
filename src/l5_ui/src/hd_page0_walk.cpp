@@ -13,14 +13,6 @@ BuildEnv HdPage0Walk::page0_of(const BuildEnv& env) noexcept {
     return page0;
 }
 
-SlotFocus HdPage0Walk::focus_of(const OptionItem& it) const {
-    TASTY_SEAT_BODY(HdPage0Walk);
-    return SlotFocus{
-        it.mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        it.ioctl_index
-    };
-}
-
 bool HdPage0Walk::run(
     const proto::ItemTable& table,
     const BuildEnv& env,
@@ -37,12 +29,13 @@ bool HdPage0Walk::run(
     return placer_.has_value();
 }
 
-infra::OptRef<const OptionItem> HdPage0Walk::slot_row(SlotFocus want) const {
+infra::OptRef<const OptionItem> HdPage0Walk::slot_row(proto::FileRowId want) const {
     TASTY_SEAT_BODY(HdPage0Walk);
     if (!placer_)
         return {};
     for (const OptionItem* it : placer_->slots()) {
-        if (focus_of(*it) == want)
+        const std::optional<proto::FileRowId> row = it->file_row();
+        if (row && *row == want)
             return infra::OptRef<const OptionItem>{*it};
     }
     return {};

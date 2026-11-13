@@ -10,26 +10,21 @@
 
 namespace mister::app {
 
-std::string remembered_blob_name(
-    const RememberedStem& stem,
-    RememberedSlot s,
-    proto::IoIndex index
-) {
+std::string remembered_blob_name(const RememberedStem& stem, proto::FileRowId row) {
     std::string n{stem.view()};
-    n += (s == RememberedSlot::File) ? ".f" : ".s";
-    n += index.text().c_str();
+    n += (row.kind == proto::FileRowKind::File) ? ".f" : ".s";
+    n += row.index.text().c_str();
     return n;
 }
 
 std::string read_remembered_path(
     const svc::Vfs& vfs,
     const RememberedStem& stem,
-    RememberedSlot s,
-    proto::IoIndex index
+    proto::FileRowId row
 ) {
     if (stem.empty())
         return {};
-    auto f = vfs.open("config/" + remembered_blob_name(stem, s, index), svc::OpenMode::ReadWhole);
+    auto f = vfs.open("config/" + remembered_blob_name(stem, row), svc::OpenMode::ReadWhole);
     if (!f)
         return {};
     std::array<std::byte, kRememberedBlob> blob{};

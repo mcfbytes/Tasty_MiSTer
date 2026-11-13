@@ -88,9 +88,8 @@ LoadWalk::Pass LoadWalk::step(Host& h) {
 bool LoadWalk::status_bit0_(Host& h, bool asserted) {
     return h.rung.inbox.push(
         proto::LinkOp::WriteStatus{
-            .start = proto::kResetBit,
-            .width = 1,
-            .value = asserted ? 1u : 0u
+            .field = proto::kResetField,
+            .value = proto::FieldValue::flag(asserted)
         }
     );
 }
@@ -144,7 +143,7 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
     const auto fabric = cores::row_address(r, windows_, h.aperture.phys);
     if (!fabric)
         return fail_(h);
-    const std::uint64_t extent = r.extent_bytes(r.file_len).length_of(proto::BlockCount{1});
+    const std::uint64_t extent = r.extent_bytes(r.file_len).file_word<std::size_t>();
     auto w = LoadWindow<seat_owner::Main>::open(h.map, h.aperture, hal::to_phys(*fabric), extent);
     if (!w)
         return fail_(h);
@@ -170,7 +169,7 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
         LoadLadder::Job{
             .loader = std::move(loader_),
             .file = std::move(file),
-            .total = r.file_len.length_of(proto::BlockCount{1}),
+            .total = r.file_len.file_word<std::size_t>(),
             .wire_index = r.index,
             .act = act,
             .row = quiet,
@@ -209,7 +208,7 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
     auto file = h.vfs.open(r.source, svc::OpenMode::ReadWhole);
     if (!file)
         return skip_(r);
-    std::vector<std::uint8_t> raw(r.file_len.length_of(proto::BlockCount{1}));
+    std::vector<std::uint8_t> raw(r.file_len.file_word<std::size_t>());
     std::size_t got = 0;
     while (got < raw.size()) {
         auto n = (*file)->read_at(
@@ -220,10 +219,7 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
             break;
         got += *n;
     }
-    raw.resize(
-        std::max<std::size_t>(got, r.extent.length_of(proto::BlockCount{1})),
-        std::uint8_t{0}
-    );
+    raw.resize(std::max<std::size_t>(got, r.extent.file_word<std::size_t>()), std::uint8_t{0});
     cores::WireChunk window = kStockFileTxChunk;
     if (r.byte_words) {
 

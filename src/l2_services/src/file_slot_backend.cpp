@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/byte_view.h"
+#include "infra/path_parts.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
@@ -23,20 +24,20 @@ std::span<const std::byte> as_bytes_const(std::span<const std::uint8_t> s) noexc
 
 Ex<proto::FileSize> FileSlotBackend::open_extent(
     proto::SlotIndex,
-    std::span<const std::byte> order
+    const BlockCtl::StorageOrder& order
 ) {
     TASTY_SEAT_BODY(FileSlotBackend);
     file_.reset();
     path_.clear();
 
-    if (!path_.assign(infra::as_text(order)) || path_.view().empty()) {
+    if (!path_.assign(infra::as_text(order.view())) || path_.view().empty()) {
         path_.clear();
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
     const std::string_view path = path_.view();
 
-    if (const std::size_t slash = path.rfind('/'); slash != std::string_view::npos && slash > 0) {
-        (void)vfs_.ensure_dir(path.substr(0, slash));
+    if (const std::optional<std::string_view> dir = infra::nested_dir(path)) {
+        (void)vfs_.ensure_dir(*dir);
     }
     auto f = vfs_.open(path, OpenMode::ReadWrite);
     if (!f) {
@@ -53,24 +54,35 @@ Ex<proto::FileSize> FileSlotBackend::open_extent(
     return *size;
 }
 
-Ex<std::size_t> FileSlotBackend::read_at(std::uint64_t offset, std::span<std::uint8_t> dst) {
+Ex<std::span<std::uint8_t>> FileSlotBackend::read_at(
+    proto::FileSize at,
+    std::span<std::uint8_t> dst
+) {
     TASTY_SEAT_BODY(FileSlotBackend);
     if (file_ == nullptr)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    return file_->read_at(offset, as_bytes_mut(dst));
+    auto n = file_->read_at(at, as_bytes_mut(dst));
+    if (!n)
+        return std::unexpected(n.error());
+    return dst.first(*n);
 }
 
-Ex<std::size_t> FileSlotBackend::write_at(std::uint64_t offset, std::span<const std::uint8_t> src) {
+Ex<std::span<const std::uint8_t>> FileSlotBackend::write_at(
+    proto::FileSize at,
+    std::span<const std::uint8_t> src
+) {
     TASTY_SEAT_BODY(FileSlotBackend);
     if (file_ == nullptr)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    auto n = file_->write_at(offset, as_bytes_const(src));
+    auto n = file_->write_at(at.file_word<std::uint64_t>(), as_bytes_const(src));
 
     if (n) {
         if (auto r = file_->flush(); !r)
             return std::unexpected(r.error());
     }
-    return n;
+    if (!n)
+        return std::unexpected(n.error());
+    return src.first(*n);
 }
 
 Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first) {

@@ -17,7 +17,7 @@
 #include "infra/telemetry.h"
 #include "svc/disc_counters.h"
 #include "svc/disc_geometry.h"
-#include "svc/disc_identity_role.h"
+#include "svc/disc_rules.h"
 #include "svc/disc_mount_slot.h"
 #include "svc/disc_mounter.h"
 #include "svc/disc_read_slot.h"
@@ -49,19 +49,15 @@ public:
 
     DiscReadService(xthread::WakeFlag& io_wake, const Wiring& w) noexcept;
 
-    [[nodiscard]] GeomCell& geometry_cell() noexcept { return geom_cell_; }
-
-    [[nodiscard]] CountCell& counters_cell() noexcept { return count_cell_; }
-
     void set_generation(Generation g) noexcept;
 
     [[nodiscard]] Generation generation() const noexcept { return gen_; }
 
-    [[nodiscard]] DiscMountState arm_mount(
+    [[nodiscard]] DiscArm arm_mount(
         DiscOp op,
         infra::OptRef<const CuePolicy> policy,
         std::string_view path,
-        infra::OptRef<const IDiscIdentity> identity = {}
+        infra::OptRef<const IDiscRules> rules = {}
     ) noexcept;
 
     void release() noexcept;
@@ -103,8 +99,10 @@ private:
     [[nodiscard]] bool in_flight_(DiscAsk ask) const noexcept;
     void serve_(DiscReadSlot& s) noexcept;
 
+    [[nodiscard]] bool same_request_(DiscOp op, std::string_view path) const noexcept;
     void poll_mounts_() noexcept;
     void serve_mounts_io_() noexcept;
+    void serve_all_() noexcept;
 
     Chan chan_;
     MountChan mounts_;

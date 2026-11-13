@@ -39,7 +39,10 @@ public:
     static constexpr SaveRow kCartRow{0};
     static constexpr std::size_t kPathChars = SavePath::kCapacity;
 
-    explicit SaveChannel(const svc::Vfs& vfs) noexcept;
+    explicit SaveChannel(
+        const svc::Vfs& vfs,
+        infra::OptRef<xthread::WakeFlag> activity = {}
+    ) noexcept;
     SaveChannel(const SaveChannel&) = delete;
     SaveChannel& operator=(const SaveChannel&) = delete;
 

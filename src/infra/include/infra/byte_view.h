@@ -32,6 +32,11 @@ template <ByteLike B, std::size_t N>
     return {c.data(), c.size()};
 }
 
+template <ByteLike B>
+[[nodiscard]] inline std::string_view as_text(std::span<B> s) noexcept {
+    return {reinterpret_cast<const char*>(s.data()), s.size()};
+}
+
 template <ByteLike B = const std::byte>
     requires std::is_const_v<B>
 [[nodiscard]] inline std::span<B> text_bytes(std::string_view s) noexcept {
@@ -40,8 +45,8 @@ template <ByteLike B = const std::byte>
 
 template <ByteLike B, std::size_t N>
 [[nodiscard]] inline std::string_view text_until_nul(std::span<B, N> field) noexcept {
-    const char* c = reinterpret_cast<const char*>(field.data());
-    return {c, ::strnlen(c, field.size())};
+    const std::span<const char> c = byte_cast<const char>(field);
+    return {c.data(), ::strnlen(c.data(), c.size())};
 }
 
 template <class T>

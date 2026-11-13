@@ -4,26 +4,32 @@
 #include <cstdint>
 
 #include "app/input_decode_tally.h"
-#include "app/input_wire.h"
+#include "infra/counter.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
+#include "infra/wake_flag.h"
+#include "svc/input_gates.h"
 #include "svc/input_service.h"
 
 namespace mister::app {
 template <SeatTag Seat>
 class LinkTxChannel;
 
+struct JoyLevelEmitterTestAccess;
+
 class JoyLevelEmitter {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
     JoyLevelEmitter(
-        InputWire& wire,
+        const xthread::WakeFlag& edge_reset,
+        xthread::Counter& activity,
         svc::InputService& svc,
         LinkTxChannel<SeatTag::Input>& inbox,
         InputDecodeTally& tally
     ) noexcept
-        : wire_(wire),
+        : edge_reset_(edge_reset),
+          activity_(activity),
           svc_(svc),
           inbox_(inbox),
           tally_(tally) {}
@@ -31,14 +37,16 @@ public:
     JoyLevelEmitter(const JoyLevelEmitter&) = delete;
     JoyLevelEmitter& operator=(const JoyLevelEmitter&) = delete;
 
-    void publish(bool muted);
+    void publish(bool muted, svc::InputGates gates);
 
-    [[nodiscard]] bool owes_publish() const noexcept {
-        return reset_seen_.peek(wire_.edge_reset()) || wire_.gates() != wm_gates_;
+    [[nodiscard]] bool owes_publish(svc::InputGates gates) const noexcept {
+        return reset_seen_.peek(edge_reset_) || gates != wm_gates_;
     }
 
 private:
-    InputWire& wire_;
+    friend struct JoyLevelEmitterTestAccess;
+    const xthread::WakeFlag& edge_reset_;
+    xthread::Counter& activity_;
     svc::InputService& svc_;
     LinkTxChannel<SeatTag::Input>& inbox_;
     InputDecodeTally& tally_;
@@ -53,7 +61,7 @@ private:
 
     infra::IndexedArray<PlayerLevel, svc::kMaxPlayers, svc::PlayerIndex> levels_{};
     xthread::WakeFlag::Cursor reset_seen_{};
-    InputGateBits wm_gates_{};
+    svc::InputGates wm_gates_{};
 };
 
 }

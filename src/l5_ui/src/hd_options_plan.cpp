@@ -42,7 +42,7 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
         const OptionItem& it = *owned;
         const Placement p = placer_.of(it);
         about = about || host_of(p) == PageId::HdCoreAbout;
-        if (!it.screen_row || host_of(p) != PageId::HdCoreSettings)
+        if (!it.drawn_row || host_of(p) != PageId::HdCoreSettings)
             continue;
 
         if (!it.selectable_index) {

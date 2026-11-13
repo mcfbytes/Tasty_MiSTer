@@ -20,7 +20,7 @@ namespace mister::cores {
 N64Core::N64Core(const CoreProfile& p, const HostServices& h)
     : Core(p, h),
       cheats_(h.clock, h.windows.named(manifests::kN64Windows[0].region.name)),
-      saves_(h.vfs) {}
+      saves_(h.vfs, h.disk_activity) {}
 
 using n64::SystemType;
 
@@ -28,11 +28,15 @@ Ex<void> N64Core::do_adopt(const CoreAdopt& a) {
 
     session_ = infra::OptRef<proto::CoreSession>{a.session};
     turbo_core_ = a.declares_turbo;
+
+    if (!core_dir_.assign(profile().name)) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    }
     return {};
 }
 
 Ex<void> N64Core::do_reset() {
-    if (cheats_enabled_())
+    if (options_().cheats_enabled())
         cheats_.rearm_boot_codes();
     return {};
 }
@@ -44,12 +48,11 @@ void N64Core::service_cheat_tick() noexcept {
 
     saves_.note_layout(*this);
 
-    const proto::FieldValue sys_choice = read_(n64::opt::kSysType);
-    const proto::FieldValue pal_choice{static_cast<std::uint32_t>(SystemType::Pal)};
-    const SystemType system = sys_choice == pal_choice ? SystemType::Pal : SystemType::Ntsc;
+    const n64::Options opts = options_();
+    const SystemType system = opts.system() == SystemType::Pal ? SystemType::Pal : SystemType::Ntsc;
 
     const n64::CheatTick t = cheats_.tick(
-        {.loaded = loaded_, .system = system, .enabled = cheats_enabled_(), .gs_pressed = false}
+        {.loaded = loaded_, .system = system, .enabled = opts.cheats_enabled(), .gs_pressed = false}
     );
     if (t == n64::CheatTick::Invalid)
         disable_cheats_();
@@ -62,10 +65,6 @@ void N64Core::on_status_changed() noexcept {
 
 void N64Core::on_set_pending_file_ext(std::string_view ext) noexcept {
     (void)ext_.assign(ext);
-}
-
-void N64Core::on_set_pending_file_path(std::string_view path) noexcept {
-    (void)rom_path_.assign(path);
 }
 
 Ex<proto::SessionParams> N64Core::stream_opening(IoIndex index) {
@@ -103,13 +102,19 @@ void N64Core::stream_closed(const StreamLoadEnd& end) noexcept {
         session_->post(proto::StatusEdit{});
 }
 
-Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
+Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts, std::string_view image) {
 
     saves_.forget_plan();
     const auto decoded = n64::LoadFacts::of(facts);
     if (decoded && decoded->kind == n64::FactsKind::Disk) {
-        disk_addr_ = decoded->load_addr;
-        disk_path_ = rom_path_;
+        const auto order = n64dd::RamSaveOrder::of(decoded->load_addr, image, core_dir_);
+        if (!order) {
+            ++facts_refusals_;
+            return std::unexpected(
+                Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(facts.size())}
+            );
+        }
+        disk_ = *order;
         return {};
     }
     if (!session_ || !decoded) {
@@ -119,24 +124,24 @@ Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
         );
     }
     const n64::LoadFacts& f = *decoded;
-    session_->stage(proto::StatusEdit{.bits = f.bits, .mask = f.mask});
+    session_->stage(f.edit);
     crc32_ = f.crc32;
     if (f.kind == n64::FactsKind::IplPreload)
         return {};
     if (f.kind == n64::FactsKind::IplBoot) {
 
-        adopt_save_plan_(n64::SaveRows{});
+        adopt_save_plan_(n64::SaveRows{}, image);
         return {};
     }
 
     if (auto r = session_->flush_status(); !r)
         return r;
 
-    adopt_save_plan_(f.saves);
+    adopt_save_plan_(f.saves, image);
     return {};
 }
 
-void N64Core::adopt_save_plan_(const n64::SaveRows& plan) {
+void N64Core::adopt_save_plan_(const n64::SaveRows& plan, std::string_view image) {
 
     infra::IndexedArray<SavePartition, n64::kMaxSaveRows, SaveRow> mounts{};
     const n64::SaveRowCount n = plan.count.fits() ? plan.count
@@ -145,51 +150,39 @@ void N64Core::adopt_save_plan_(const n64::SaveRows& plan) {
     for (; row != n.end(); row = row.next())
         mounts[row] = n64::save_row_partition(infra::at_index(plan.kinds, row), plan.cart);
 
-    if (auto r = saves_.plan(*this, rom_path_.view(), profile().name, mounts.prefix(n)); !r) {
+    FixedStr<n64::SaveChannel::kPathChars + 1, StrFit::Clip> path{};
+    (void)path.assign(image);
+    if (auto r = saves_.plan(*this, path.view(), core_dir_.view(), mounts.prefix(n)); !r) {
         ++save_plan_errors_;
         saves_.clear();
     }
 }
 
-proto::FieldValue N64Core::read_(n64::StatusField f) const noexcept {
-    return f.read(session_->status().value());
-}
-
-bool N64Core::cheats_enabled_() const noexcept {
-    return read_(n64::opt::kCheats) == proto::FieldValue{};
+n64::Options N64Core::options_() const noexcept {
+    return n64::Options{session_->status().value()};
 }
 
 void N64Core::disable_cheats_() noexcept {
 
-    session_->post(
-        proto::StatusEdit::field(
-            proto::StatusBit{n64::opt::kCheats.lo},
-            n64::opt::kCheats.width,
-            proto::FieldValue{1}
-        )
-    );
+    session_->post(proto::StatusEdit::field(n64::opt::kCheats, proto::FieldValue{1}));
 }
 
 n64::SaveLayoutKey N64Core::layout_key(n64::SaveRowCount rows) const noexcept {
     TASTY_SEAT_BODY(N64Core);
-    return n64::SaveLayoutKey{
-        n64::save_type_of(read_(n64::opt::kSaveType)),
-        read_(n64::opt::kTpak) != proto::FieldValue{},
-        rows
-    };
+    const n64::Options opts = options_();
+    return n64::SaveLayoutKey{opts.cart_save_type(), opts.tpak(), rows};
 }
 
 WindowJobBuild N64Core::order_ram_save_(WindowJobOrder& order) noexcept {
-    if (disk_addr_ == hal::FabricAddr{})
+    if (!disk_)
         return nullptr;
-    const bool
-        ok = n64dd::write_ram_save_order(order, disk_addr_, disk_path_.view(), profile().name);
-    return ok ? n64dd::kRamSaveKind : nullptr;
+    order.put(*disk_);
+    return n64dd::kRamSaveKind;
 }
 
 WindowJobBuild N64Core::on_osd_open(WindowJobOrder& order) noexcept {
     TASTY_SEAT_BODY(N64Core);
-    if (!loaded_ || read_(n64::opt::kAutosave) != proto::FieldValue{})
+    if (!loaded_ || !options_().autosave())
         return {};
     return order_ram_save_(order);
 }
@@ -201,23 +194,22 @@ WindowJobBuild N64Core::on_reset_edge(
     TASTY_SEAT_BODY(N64Core);
     const bool save_row = edge.source == proto::ResetSource::OsdToggle
         && !edge.ex
-        && edge.bit == proto::StatusBit{n64::opt::kSaveBackup.lo};
+        && edge.bit == n64::opt::kSaveBackup.start;
     return save_row ? order_ram_save_(order) : nullptr;
 }
 
 bool N64Core::owes_flush(proto::IoIndex index) const noexcept {
     TASTY_SEAT_BODY(N64Core);
     const n64::FileRoute route = n64::stream_route(index);
-    return disk_addr_ != hal::FabricAddr{}
-    && (route == n64::FileRoute::DiskImage || route == n64::FileRoute::Rom);
+    return disk_.has_value()
+        && (route == n64::FileRoute::DiskImage || route == n64::FileRoute::Rom);
 }
 
 WindowJobBuild N64Core::take_flush(proto::IoIndex index, WindowJobOrder& order) noexcept {
     TASTY_SEAT_BODY(N64Core);
     const WindowJobBuild kind = order_ram_save_(order);
     if (n64::stream_route(index) == n64::FileRoute::DiskImage) {
-        disk_addr_ = {};
-        disk_path_.clear();
+        disk_.reset();
     }
     return kind;
 }

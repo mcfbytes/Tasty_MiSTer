@@ -84,12 +84,6 @@ public:
 
     [[nodiscard]] std::uint32_t wire_faults() const noexcept { return wire_faults_; }
 
-    [[nodiscard]] std::uint32_t filler_sectors() const noexcept { return filler_sectors_; }
-
-    [[nodiscard]] std::uint32_t pregap_zero_sectors() const noexcept {
-        return pregap_zero_sectors_;
-    }
-
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
     void set_region(proto::RegionCode region) override;
 
@@ -108,16 +102,6 @@ public:
     void service_kick() noexcept override;
 
     proto::SlotAttributes attributes(proto::SlotIndex slot) const override;
-    [[nodiscard]] Ex<std::size_t> read_at(
-        proto::SlotIndex slot,
-        std::uint64_t offset,
-        std::span<std::uint8_t> dst
-    ) override;
-    [[nodiscard]] Ex<std::size_t> write_at(
-        proto::SlotIndex slot,
-        std::uint64_t offset,
-        std::span<const std::uint8_t> src
-    ) override;
 
     proto::BlockGeometry geometry_for(
         proto::SlotIndex slot,
@@ -145,10 +129,7 @@ private:
         return infra::OptRef<const ICdDiagnostics>{*this};
     }
 
-    [[nodiscard]] bool serve_sector_(proto::Lba lba, std::span<std::uint8_t> out) noexcept;
-
-    void warm_window_(proto::Lba lba0, std::size_t sectors) noexcept;
-
+    void clear_mount_() noexcept;
     svc::DiscMountState refresh_disc_() noexcept;
 
     [[nodiscard]] bool finish_mount_();
@@ -159,7 +140,6 @@ private:
 
     infra::OptRef<svc::DiscReadService> discs_{};
     svc::DiscCounters counters_{};
-    svc::DiscReadService::CountCell::Reader counts_{};
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
 
     svc::DiscGeometry geom_{};
@@ -171,8 +151,6 @@ private:
     std::uint32_t kicks_ = 0;
     std::uint32_t held_kicks_ = 0;
     std::uint32_t wire_faults_ = 0;
-    std::uint32_t filler_sectors_ = 0;
-    std::uint32_t pregap_zero_sectors_ = 0;
 };
 
 }

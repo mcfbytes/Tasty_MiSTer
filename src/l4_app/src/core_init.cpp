@@ -8,8 +8,8 @@ namespace mister::app {
     return {};
 }
 
-[[nodiscard]] Ex<void> init_arm_video_prelude(CoreInitContext& ctx) {
-    ctx.host.arm_video_prelude();
+[[nodiscard]] Ex<void> init_bind_video_prelude(CoreInitContext& ctx) {
+    ctx.host.bind_video_prelude();
     return {};
 }
 

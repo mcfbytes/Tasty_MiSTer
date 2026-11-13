@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
 #include <span>
 
 #include "infra/error.h"
@@ -20,7 +21,7 @@ public:
         DiscForm form,
         proto::Lba lba,
         std::span<std::byte> dst,
-        SectorHeader header = {}
+        std::optional<SectorHeader> header = {}
     ) = 0;
 
 protected:

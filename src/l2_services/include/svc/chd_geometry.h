@@ -28,7 +28,7 @@ struct ChdUnitInHunk {
 
 struct ChdGeometry {
     proto::FileSize hunk_bytes{};
-    proto::FileSize unit_bytes{};
+    proto::BlockSize unit_bytes{};
     HunkCount hunk_count{};
 
     [[nodiscard]] constexpr proto::BlockCount sectors_per_hunk() const noexcept {
@@ -56,7 +56,7 @@ struct ChdGeometry {
     }
 
     [[nodiscard]] constexpr std::uint32_t unit_detail() const noexcept {
-        return static_cast<std::uint32_t>(unit_bytes.v);
+        return unit_bytes.extent(proto::BlockCount{1}).detail();
     }
 
     friend constexpr bool operator==(ChdGeometry, ChdGeometry) = default;

@@ -294,7 +294,7 @@ Transition BrowserPage::handle(const UiEvent& ev) {
     const infra::OptRef<IBrowserHost> host = session_.request().host;
 
     if (ev.buttons.has_any({UiEvent::Menu})) {
-        return host ? host->on_cancel() : Transition{Transition::Kind::Pop};
+        return host ? host->on_cancel() : Transition::pop();
     }
 
     if (ev.buttons.has_any({UiEvent::Back})) {
@@ -305,11 +305,11 @@ Transition BrowserPage::handle(const UiEvent& ev) {
             if (policy.clear_on_backspace && host) {
 
                 const Transition t = host->on_clear();
-                if (t.kind == Transition::Kind::Stay)
-                    ++refusals_;
+                if (t.kind() == Transition::Kind::Stay)
+                    refusals_.add();
                 return t;
             }
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         }
         session_.clear_filter();
@@ -366,7 +366,7 @@ Transition BrowserPage::handle(const UiEvent& ev) {
 Transition BrowserPage::open_recents_list() {
     const BrowserSession::Request& req = session_.request();
     if (!recents_ || !req.recents.has_value()) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     auto rows = recents_->load(req.recents_core, *req.recents);
@@ -392,13 +392,13 @@ Transition BrowserPage::handle_recents(const UiEvent& ev) {
 
     if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Recent})) {
         if (session_.request().recents_first) {
-            return host ? host->on_cancel() : Transition{Transition::Kind::Pop};
+            return host ? host->on_cancel() : Transition::pop();
         }
         (void)session_.exit_recents();
         return Transition{};
     }
     if (ev.buttons.has_any({UiEvent::Back})) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_HOME})) {
@@ -411,11 +411,11 @@ Transition BrowserPage::handle_recents(const UiEvent& ev) {
         const auto e = session_.view().selected();
 
         if (!e || e->stippled) {
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         }
         const std::string full = session_.selected_full_path();
-        return host ? host->on_picked(*e, full) : Transition{Transition::Kind::Pop};
+        return host ? host->on_picked(*e, full) : Transition::pop();
     }
     return Transition{};
 }
@@ -450,7 +450,7 @@ Transition BrowserPage::select_current() {
     const infra::OptRef<IBrowserHost> host = session_.request().host;
     const auto e = session_.view().selected();
     if (!e) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
 
@@ -476,7 +476,7 @@ Transition BrowserPage::select_current() {
                 picked.kind = EntryKind::File;
                 child.push_back('/');
                 child.append(picked.name);
-                return host ? host->on_picked(picked, child) : Transition{Transition::Kind::Pop};
+                return host ? host->on_picked(picked, child) : Transition::pop();
             }
         }
         (void)session_.change_dir(e->name);
@@ -484,7 +484,7 @@ Transition BrowserPage::select_current() {
     }
 
     const std::string full = session_.selected_full_path();
-    return host ? host->on_picked(*e, full) : Transition{Transition::Kind::Pop};
+    return host ? host->on_picked(*e, full) : Transition::pop();
 }
 
 }

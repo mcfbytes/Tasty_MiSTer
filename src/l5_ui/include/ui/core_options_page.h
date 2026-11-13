@@ -23,6 +23,7 @@
 #include "ui/slot_pick_host.h"
 #include "ui/status_view.h"
 #include "ui/types.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -85,6 +86,13 @@ public:
         return model_.page();
     }
 
+    PageFacts facts() const override {
+        TASTY_SEAT_BODY(CoreOptionsPage);
+        PageFacts f{};
+        f.allows_cfg_switch = model_.page() == proto::kRootSubmenu;
+        return f;
+    }
+
     proto::FieldValue status_field(BitField b) const noexcept {
         return status_ ? status_->field(b) : proto::FieldValue{};
     }
@@ -103,9 +111,9 @@ public:
         return view_->empty();
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CoreOptionsPage);
-        return refusals_ + view_->refusals() + (picks_ ? picks_->refusals() : 0u);
+        return refusals_.sum(view_->refusals()).sum(picks_ ? picks_->refusals() : svc::Tally{});
     }
 
     std::uint32_t commands_published() const noexcept {
@@ -148,7 +156,7 @@ private:
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
 
     std::optional<SlotPickHost> picks_;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     std::unique_ptr<IOptionsView> view_;

@@ -8,7 +8,6 @@
 #include "app/link_op_dispatch.h"
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
-#include "app/video_wire.h"
 #include "hal/reg_block.h"
 #include "app/save_flush.h"
 #include "app/cheat_apply.h"
@@ -33,7 +32,6 @@ namespace {
 constexpr proto::OsdRow kOsdRowLimit = proto::OsdSurface::kMaxRows.end();
 constexpr proto::PlayerIndex kPlayerLimit{proto::JoystickPort::kMaxPorts};
 constexpr proto::SlotIndex kBlockSlotLimit{proto::kBlockSlots};
-constexpr proto::StatusBit kStatusBitLimit{proto::StatusRegister::kBits};
 }
 
 SpiEncoder::SpiEncoder(
@@ -42,7 +40,6 @@ SpiEncoder::SpiEncoder(
     proto::CoreSession& session,
     OsdWire& osd,
     proto::BlockSlots& slots,
-    VideoWire& video,
     svc::InputEmitter& em,
     SessionTally& session_tally
 ) noexcept
@@ -51,7 +48,6 @@ SpiEncoder::SpiEncoder(
       session_(session),
       osd_(osd),
       slots_(slots),
-      video_(video),
       em_(em),
       session_tally_(session_tally) {}
 
@@ -84,14 +80,9 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (session_.type() != proto::CoreType::EightBit) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const std::uint32_t width = a.width == 0 ? 1u : a.width;
-    if (static_cast<std::uint32_t>(a.start.v) + width > proto::StatusRegister::kBits) {
+    if (!a.field.fits_status())
         return ILinkEncoder::Outcome::Dropped;
-    }
-    if (auto r = session_.apply(
-            proto::StatusEdit::field(a.start, width, proto::FieldValue{a.value})
-        );
-        !r) {
+    if (auto r = session_.apply(proto::StatusEdit::field(a.field, a.value)); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::EncodedStatusChange;
@@ -239,28 +230,12 @@ ILinkEncoder::Outcome SpiEncoder::on(
 }
 
 ILinkEncoder::Outcome SpiEncoder::on(
-    const proto::LinkOp::SetVideoMode& a,
-    const LinkOpCtx& ctx
-) noexcept {
-    TASTY_SEAT_BODY(SpiEncoder);
-
-    proto::Link link{link_};
-    if (!video_.emit(link, a, infra::OptRef<proto::IResetFence>{ctx.fence})) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
-    return ILinkEncoder::Outcome::Encoded;
-}
-
-ILinkEncoder::Outcome SpiEncoder::on(
     const proto::LinkOp::PulseOption& a,
     const LinkOpCtx&
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
     if (session_.type() != proto::CoreType::EightBit) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
-    if (a.bit >= kStatusBitLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (auto r = session_.pulse(a.bit); !r)
@@ -323,6 +298,14 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (!osd_.set_show(a.show, a.target)) {
         return ILinkEncoder::Outcome::Dropped;
     }
+    return ILinkEncoder::Outcome::Encoded;
+}
+
+ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::MenuCtl& a, const LinkOpCtx&) noexcept {
+    TASTY_SEAT_BODY(SpiEncoder);
+
+    if (!osd_.menu_ctl(a.enable))
+        return ILinkEncoder::Outcome::Dropped;
     return ILinkEncoder::Outcome::Encoded;
 }
 

@@ -7,6 +7,7 @@
 #include "infra/seat.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/block_geometry.h"
+#include "proto/storage_request.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -24,7 +25,7 @@ struct SlotRecord {
     TASTY_SEAT_RESIDENT(RT);
 
     struct Slot {
-        enum class State : std::uint8_t { Empty, Mounted };
+        enum class State : std::uint8_t { Empty, Mounted, Changing };
         State state = State::Empty;
         BlockSize block_size{kDefaultBlockBytes};
         FileSize size_bytes{};
@@ -37,77 +38,27 @@ struct SlotRecord {
         bool deferred_create = false;
     };
 
-    struct Window {
-        Lba base{};
-        std::uint32_t valid_bytes = 0;
-        BlockSize block_size{};
-        ArenaHalf half{};
+    struct Credit {
+        enum class Phase : std::uint8_t { Live, Expired, Rearmed };
+        StorageRequest::Kind kind{};
+        MountEpoch epoch{};
+        os::RawMonotonicClock::time_point due = kNoDue;
+        Phase phase = Phase::Live;
 
-        [[nodiscard]] bool covers(Lba lba, BlockCount blocks, BlockCount capacity) const noexcept {
-            return lba >= base && blocks <= capacity && (lba - base) <= (capacity - blocks);
+        [[nodiscard]] bool overdue(os::RawMonotonicClock::time_point now) const noexcept {
+            return now >= due;
+        }
+
+        [[nodiscard]] bool stale(MountEpoch current) const noexcept {
+            return phase != Phase::Live || epoch != current;
         }
     };
 
-    struct SlotGate {
-        enum class State : std::uint8_t { Idle, Fetching, Committing, Staging };
-        State state = State::Idle;
-        StorageSeq seq{};
-        std::uint32_t epoch = 0;
-        Lba base{};
-        BlockSize block_size{};
-        std::uint64_t offset = 0;
-        std::uint32_t len = 0;
-
-        os::RawMonotonicClock::time_point due = kNoDue;
-        bool answer_owed = false;
-        bool blank_next = false;
-    };
-
-    static constexpr std::uint8_t kNoHalf = ArenaHalf::kCount;
-
     Slot slot{};
-    Window window{};
-    SlotGate gate{};
+    MountEpoch epoch{};
+    Credit data{}, ctl{};
 
-    std::uint8_t half_busy = 0;
-    std::uint32_t epoch = 0;
-
-    os::RawMonotonicClock::time_point no_half_due = kNoDue;
-
-    os::RawMonotonicClock::time_point resident_due = kNoDue;
-
-    [[nodiscard]] bool half_held(ArenaHalf h) const noexcept {
-        return (half_busy & h.mask<std::uint8_t>()) != 0;
-    }
-
-    void lend_half(ArenaHalf h) noexcept { half_busy |= h.mask<std::uint8_t>(); }
-
-    void reclaim_half(ArenaHalf h) noexcept {
-        half_busy &= static_cast<std::uint8_t>(~h.mask<std::uint8_t>());
-    }
-
-    [[nodiscard]] ArenaHalf fill_half() const noexcept {
-        const ArenaHalf other = window.half.other();
-        if (!half_held(other))
-            return other;
-        const ArenaHalf served = window.half;
-        if (!half_held(served))
-            return served;
-        return ArenaHalf{kNoHalf};
-    }
-
-    void drop_window() noexcept {
-        window = Window{};
-        gate.blank_next = false;
-        resident_due = kNoDue;
-        no_half_due = kNoDue;
-        ++epoch;
-    }
-
-    void finish_gate(bool blank_next) noexcept {
-        gate = SlotGate{};
-        gate.blank_next = blank_next;
-    }
+    os::RawMonotonicClock::time_point change_due = kNoDue;
 };
 
 }

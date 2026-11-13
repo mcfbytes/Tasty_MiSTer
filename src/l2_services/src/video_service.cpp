@@ -272,8 +272,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     const ModeSpec& s = *scanned;
 
-    video_timing::ParsedMode out{};
-    Modeline& m = out.mode;
+    Modeline m{};
     m.rb = rb_byte(ReducedBlanking::On);
 
     if (auto flagged = apply_mode_flags(s, m); !flagged)
@@ -282,9 +281,11 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     const std::size_t cnt = s.integers.count;
     if (cnt == kArityPreset) {
 
-        out.how = ModeRequest::PresetIndex;
-        out.preset_index = PresetIndex::of(s.val[kTokenWidth]);
-        return out;
+        return video_timing::ParsedMode{video_timing::PresetPick{
+            .index = PresetIndex::of(s.val[kTokenWidth]),
+            .hpol = m.hpol,
+            .vpol = m.vpol
+        }};
     }
 
     if (cnt == kArityCvt) {
@@ -294,16 +295,15 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         const bool hpol = m.hpol;
         const bool vpol = m.vpol;
         const Resolution active{s.val[kTokenWidth], s.val[kTokenHeight]};
-        out.mode = calculate_cvt(
+        m = calculate_cvt(
             active,
             static_cast<float>(rate),
             reduced_blanking_of(m.rb).value_or(ReducedBlanking::On),
             supports_pr_
         );
-        out.mode.hpol = hpol;
-        out.mode.vpol = vpol;
-        out.how = ModeRequest::Triple;
-        return out;
+        m.hpol = hpol;
+        m.vpol = vpol;
+        return video_timing::ParsedMode{video_timing::CustomMode{.mode = m}};
     }
 
     if (cnt >= kArityRaw) {
@@ -315,7 +315,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
                 kModelineTimings
             )
         );
-        out.raw_pll = PllBlock::from_item_words(
+        const PllBlock raw_pll = PllBlock::from_item_words(
             std::span<const std::uint32_t, PllBlock::kItemWords>(
                 s.val.data() + item(ModelineItem::PllFirst),
                 PllBlock::kItemWords
@@ -337,8 +337,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
             m.pixel_repeat = (s.val[item(ModelineItem::PixelRepeat)] != 0);
         }
 
-        out.how = ModeRequest::RawModeline;
-        return out;
+        return video_timing::ParsedMode{video_timing::CustomMode{.mode = m, .raw_pll = raw_pll}};
     }
 
     if (cnt == kArityTimings || cnt == kArityTimingsPolarity) {
@@ -352,11 +351,8 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
 
             m.hpol = (s.val[kTokenShortHpol] != 0);
             m.vpol = (s.val[kTokenShortVpol] != 0);
-            out.how = ModeRequest::Eleven;
-        } else {
-            out.how = ModeRequest::Nine;
         }
-        return out;
+        return video_timing::ParsedMode{video_timing::CustomMode{.mode = m}};
     }
 
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(cnt)});

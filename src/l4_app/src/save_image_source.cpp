@@ -33,7 +33,7 @@ bool SaveImageSource::bind(
     proto::SlotIndex slot,
     std::string_view path,
     bool manual,
-    const cores::BlankSaveSpec& blank
+    const svc::BlankSaveSpec& blank
 ) noexcept {
     const auto b = find(slot);
     if (!b)
@@ -131,7 +131,7 @@ void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
     b->size = proto::FileSize{};
 
     b->path.clear();
-    b->blank = cores::BlankSaveSpec{};
+    b->blank = svc::BlankSaveSpec{};
     b->manual = false;
     b->close_owed = false;
     b->attach = Attach::Detached;
@@ -169,7 +169,7 @@ bool SaveImageSource::fill_blank(
     const auto b = find(slot);
     if (!b || !b->blank.declared())
         return false;
-    cores::render_blank(b->blank, b->blank.lba_bytes.position_of(lba), window);
+    svc::render_blank(b->blank, proto::byte_offset(lba, b->blank.lba_bytes), window);
     return true;
 }
 

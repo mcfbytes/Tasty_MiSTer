@@ -5,21 +5,19 @@
 
 #include "app/log_clock.h"
 #include "app/raw_frame_dispatch.h"
-#include "infra/byte_view.h"
 #include "infra/message_sum.h"
+#include "svc/crc32_accumulator.h"
 #include "svc/types.h"
 
 namespace mister::app {
 
 svc::Crc32 FrameHasher::hash_rows(const RawFrameSlot::Frame& s) noexcept {
-    svc::Crc32 crc{};
+    svc::Crc32AccumulatorT<seat_owner::Encode> crc;
     if (s.rgb.bytes.empty())
-        return crc;
+        return crc.value();
     const RowBytes row = rgb_row_of(s.width);
-    s.rgb.each_row(row, [&](std::span<const std::byte> line) {
-        crc = svc::crc32_extend(crc, infra::byte_cast<const std::uint8_t>(line));
-    });
-    return crc;
+    s.rgb.each_row(row, [&](std::span<const std::byte> line) { crc.extend(line); });
+    return crc.value();
 }
 
 bool FrameHasher::idle() const noexcept {
@@ -69,9 +67,7 @@ bool FrameHasher::chunk_(
             return false;
         chunked_ = true;
     }
-    const AviEncoder::Position p = w_.video.position();
-    row.segment = p.segment;
-    row.seg_frame = p.lost ? -1 : p.frame;
+    row.place = w_.video.place();
     return true;
 }
 
@@ -121,7 +117,7 @@ bool FrameHasher::on(const RawFrameSlot::Frame& s, ControlGeneration head) noexc
     if (!chunk_(s, head, real, row) || !push_row_(row, head))
         return false;
 
-    if (!w_.video.position().lost)
+    if (w_.video.place().shows_hash())
         prev_hash_ = row.hash;
     return true;
 }
@@ -153,7 +149,7 @@ bool FrameHasher::misrouted(const RawFrameSlot&) noexcept {
 }
 
 bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
-    return app::dispatch(s, *this);
+    return infra::dispatch<RawFrameRoutes>(s, *this);
 }
 
 void FrameHasher::serve() noexcept {

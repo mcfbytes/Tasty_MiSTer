@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "svc/axis_timing.h"
 #include "svc/pll_block.h"
 
 namespace mister::svc {
@@ -38,8 +39,8 @@ static_assert(
 static_assert(!reduced_blanking_of(3).has_value(), "3 is not a blanking request");
 
 struct Modeline {
-    std::uint32_t hact = 0, hfp = 0, hs = 0, hbp = 0;
-    std::uint32_t vact = 0, vfp = 0, vs = 0, vbp = 0;
+    AxisTiming h{};
+    AxisTiming v{};
     double fpix_mhz = 0.0;
     bool hpol = false, vpol = false;
     std::uint8_t vic = 0;

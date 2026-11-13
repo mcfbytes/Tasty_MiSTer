@@ -139,13 +139,10 @@ ZmbvCodec::~ZmbvCodec() {
     release_();
 }
 
-Ex<void> ZmbvCodec::begin(PictureSize size) noexcept {
+Ex<void> ZmbvCodec::begin_(PictureSize size) noexcept {
     constexpr std::size_t kStripePlanes = 2;
     constexpr std::size_t kDeflateStreamSlack = 8;
     TASTY_SEAT_BODY(ZmbvCodec);
-    end();
-    if (size.empty())
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     const MvBlocks blocks = MvBlocks::of_grid(size);
     const std::size_t pic = rows_span(
         size.stride_bytes(PixelBytes::of(ZmbvLayout::kPixelBytes)),
@@ -420,14 +417,16 @@ std::span<const std::byte> ZmbvCodec::build_inter_() noexcept {
     return plain_.first(static_cast<std::size_t>(xor_at - plain_bytes));
 }
 
-std::span<const std::byte> ZmbvCodec::encode(
+IFrameCodec::Encoded ZmbvCodec::encode(
     RgbRows rgb,
     bool key,
-    std::span<std::byte> out
+    std::span<std::byte> out,
+    const FrameBudget& budget
 ) noexcept {
     constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open() || !rgb.covers(rgb_row_of(size_.width), size_.rows))
+    arm_(budget);
+    if (size_.empty() || !rgb.covers(rgb_row_of(size_.width), size_.rows))
         return {};
     sad_calls_ = 0;
     cut_frame_ = false;
@@ -461,10 +460,10 @@ std::span<const std::byte> ZmbvCodec::encode(
         if (motion_ == RecMotion::Auto)
             note_(t1 - frame_t0_, cut_frame_);
     }
-    return chunk;
+    return Encoded{chunk, search()};
 }
 
-void ZmbvCodec::restart(const RecOptions& opt) noexcept {
+IFrameCodec::Search ZmbvCodec::restart(const RecOptions& opt) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     const RecMotion motion = opt.motion;
     motion_ = motion;
@@ -489,12 +488,13 @@ void ZmbvCodec::restart(const RecOptions& opt) noexcept {
             rung_ = MeRung::first();
             break;
     }
+    return search();
 }
 
-void ZmbvCodec::arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_ns) noexcept {
+void ZmbvCodec::arm_(const FrameBudget& budget) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    clock_ = clock;
-    threshold_ns_ = budget_ns > 0 ? budget_ns : 0;
+    clock_ = budget.clock;
+    threshold_ns_ = budget.threshold.count() > 0 ? budget.threshold.count() : 0;
     std::int64_t room = threshold_ns_ - post_ns_;
     if (room < kMeSearchFloorNs)
         room = kMeSearchFloorNs;
@@ -540,7 +540,7 @@ void ZmbvCodec::note_(std::int64_t spent, bool cut) noexcept {
 std::span<const std::byte> ZmbvCodec::rekey(std::span<std::byte> out) noexcept {
     constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open())
+    if (size_.empty())
         return {};
     const std::size_t picture = rows_span(
         size_.stride_bytes(PixelBytes::of(kBgr0Bytes)),
@@ -551,7 +551,7 @@ std::span<const std::byte> ZmbvCodec::rekey(std::span<std::byte> out) noexcept {
 
 std::span<const std::byte> ZmbvCodec::dup() noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open() || pkt_.empty())
+    if (size_.empty() || pkt_.empty())
         return {};
     return emit_inter_(dup_plain_.first(dup_plain_len_), pkt_.first(max_payload_));
 }

@@ -33,6 +33,7 @@
 #include "ui/menu_core_binding.h"
 #include "ui/navigator.h"
 #include "ui/now_playing.h"
+#include "ui/page_arg.h"
 #include "ui/saved_baseline.h"
 #include "ui/osd_style_preference.h"
 #include "ui/page.h"
@@ -45,6 +46,7 @@
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
+#include "svc/types.h"
 
 namespace mister::app {
 class IdentityLatch;
@@ -105,6 +107,8 @@ public:
     [[nodiscard]] bool open_classic_root(PageContext& ctx);
 
     void open_bt_pairing(PageContext& ctx);
+
+    [[nodiscard]] bool open_select_ini(PageContext& ctx);
 
     std::uint32_t bt_refusals() const noexcept { return bt_refusals_; }
 
@@ -173,6 +177,8 @@ public:
 
     [[nodiscard]] bool cells_pending() const noexcept;
 
+    [[nodiscard]] bool connect_pending(const PageContext& ctx) const noexcept;
+
     std::uint32_t cell_refusals() const noexcept { return mirror_.cell_refusals(); }
 
     void set_status_words(StatusView s) noexcept;
@@ -227,6 +233,10 @@ public:
 
     bool front_end() const noexcept { return binding_.front_end(); }
 
+    [[nodiscard]] bool launcher_hosting() const noexcept {
+        return launcher_cell_.sample().value.hosting;
+    }
+
     void set_hd_root(bool on) noexcept { hd_root_ = on; }
 
     bool hd_root() const noexcept { return hd_root_; }
@@ -274,7 +284,7 @@ public:
         return sdram_latch_.cfg().value_or(proto::OsdMask{});
     }
 
-    std::uint32_t sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
+    svc::Tally sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
 
     std::uint32_t pump_calls() const noexcept { return pumps_; }
 
@@ -290,11 +300,13 @@ public:
 
     std::uint32_t progress_refusals() const noexcept { return progress_refusals_; }
 
-    std::uint32_t page_refusals() const noexcept { return stack_.page_refusals(); }
+    svc::Tally page_refusals() const noexcept { return stack_.page_refusals(); }
 
 private:
     void open_root_(PageContext& ctx, bool hd_allowed);
     void apply(const Transition& t, PageContext& ctx);
+
+    void reopen_root_(PageContext& ctx);
 
     void forget_hd_window_(StackDepth level) noexcept;
 
@@ -329,16 +341,19 @@ private:
 
     bool show_progress(PageContext& ctx, cores::Progress progress);
 
-    std::unique_ptr<Page> make_page(PageId id, ItemId focus, PageContext& ctx);
+    std::unique_ptr<Page> make_page(PageId id, const PageArg& arg, PageContext& ctx);
 
-    [[nodiscard]] HdPlanInputs plan_inputs_(PageContext& ctx, ItemId focus);
+    [[nodiscard]] HdPlanInputs plan_inputs_(PageContext& ctx, const PageArg& arg);
 
     void refresh_recent_(PageContext& ctx);
 
     [[nodiscard]] std::span<const app::PlayedHistory::Record> played_records_(PageContext& ctx);
     [[nodiscard]] app::RecentGames::Played played_record_() const noexcept;
 
-    [[nodiscard]] std::unique_ptr<Page> make_hd_list_(std::unique_ptr<IHdPlan> plan, ItemId focus);
+    [[nodiscard]] std::unique_ptr<Page> make_hd_list_(
+        std::unique_ptr<IHdPlan> plan,
+        const PageArg& arg
+    );
 
     PageStack stack_;
     NowPlaying now_playing_{};

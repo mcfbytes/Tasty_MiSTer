@@ -74,7 +74,7 @@ private:
               title_{title} {}
 
         [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept override {
-            return launcher_.device_front(true);
+            return launcher_.device_front();
         }
 
         [[nodiscard]] infra::OptRef<app::ScanoutRelay> scanout() noexcept override {

@@ -16,8 +16,6 @@ struct PcmFeedState {
 
     std::uint32_t served = 0;
 
-    std::uint32_t attaches = 0;
-
     friend constexpr bool operator==(const PcmFeedState&, const PcmFeedState&) = default;
 };
 

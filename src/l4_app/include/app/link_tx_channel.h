@@ -74,6 +74,32 @@ public:
         return bytes_.get(id);
     }
 
+    [[nodiscard]] Ex<void> push_load_facts(
+        std::span<const std::uint8_t> facts,
+        std::string_view image
+    ) {
+        seat_assert<Producer>(ERR_SITE(), "LinkTxChannel::push_load_facts off the producer seat");
+        if (tx_.size() >= proto::kLinkTxCapacity) {
+            return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+        }
+        proto::FileId path{};
+        if (!image.empty()) {
+            auto id = files_.intern_path(image, proto::FileSize{});
+            if (!id)
+                return std::unexpected(id.error());
+            path = *id;
+        }
+        const auto slab = bytes_.intern(facts);
+        if (!slab) {
+            files_.unstage_path(path);
+            return std::unexpected(slab.error());
+        }
+        const bool pushed = push(proto::LinkOp::LoadFacts{.facts = *slab, .image = path});
+        if (!pushed)
+            return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+        return {};
+    }
+
     [[nodiscard]] Ex<proto::FileId> intern_file(FileIntern&& file) {
         return files_.intern(std::move(file));
     }
@@ -89,6 +115,10 @@ public:
         std::uint32_t aux = 0
     ) {
         return files_.intern_path(path, size, crc, aux);
+    }
+
+    [[nodiscard]] Ex<proto::FileId> intern_empty_file(FileIntern&& file) {
+        return files_.intern_empty(std::move(file));
     }
 
     [[nodiscard]] std::size_t retained_file_bytes() const noexcept {

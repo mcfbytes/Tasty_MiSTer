@@ -18,6 +18,7 @@
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/wake_flag.h"
 #include "infra/seat.h"
 #include "proto/disk_act.h"
 #include "svc/disk_format_row.h"
@@ -45,7 +46,8 @@ public:
     AcsiServant(
         infra::OptRef<const svc::Vfs> vfs,
         std::span<const svc::DiskFormatRow> formats,
-        std::string_view serial
+        std::string_view serial,
+        infra::OptRef<xthread::WakeFlag> activity = {}
     ) noexcept;
 
     [[nodiscard]] MountState bind(proto::DiskUnit unit, std::string_view path) noexcept override;
@@ -205,6 +207,7 @@ private:
     [[nodiscard]] proto::DiskAct next_act_(std::span<std::byte, proto::kDiskActBytes> bytes);
 
     infra::OptRef<const svc::Vfs> vfs_;
+    infra::OptRef<xthread::WakeFlag> activity_;
     std::span<const svc::DiskFormatRow> formats_;
     infra::IndexedArray<Slot, kTargets, AcsiTarget> slot_{};
     FixedStr<kInquirySerialBytes + 1, StrFit::Clip> serial_{};

@@ -1,138 +1,350 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_wire.h"
 
+#include "app/link_op_dispatch.h"
+
 #include <cstring>
 
-#include "svc/audio_service.h"
-#include "svc/probe_ops.h"
-#include "svc/but_sw_wire.h"
+#include "app/staged_frame_dispatch.h"
 #include "hal/spi_sample.h"
+#include "svc/audio_service.h"
+#include "svc/but_sw_wire.h"
+#include "svc/probe_ops.h"
 
 namespace mister::app {
 
-Ex<void> VideoWire::publish(proto::UioOp opcode, std::span<const std::uint16_t> words) {
-    return stage(opcode, words);
+namespace {
+
+constexpr FrameWordCount kModeWordLimit{VideoWire::kWords};
+constexpr FrameWordCount kChunkWordLimit{kCoeffChunkWords};
+
+constexpr proto::StageSlot kTableSlots{VideoWire::kSlots};
+
 }
 
-Ex<void> VideoWire::stage(proto::UioOp opcode, std::span<const std::uint16_t> words) {
-    if (words.empty() || words.size() > kWords) {
-        staged_rejected_.add();
-        return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
-        );
+Ex<void> VideoWire::stage(const StagedFrame& f, proto::BindGeneration core) {
+
+    if (const auto mode = infra::as<StagedFrame::Mode>(f)) {
+        if (mode->m.count.is_empty() || mode->m.count.exceeds(kModeWordLimit)) {
+            staged_rejected_.add();
+            return std::unexpected(
+                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(mode->m.count.v)}
+            );
+        }
+    }
+    if (const auto chunk = infra::as<StagedFrame::CoeffChunk>(f)) {
+        if (chunk->count.exceeds(kChunkWordLimit)) {
+            staged_rejected_.add();
+            return std::unexpected(
+                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(chunk->count.v)}
+            );
+        }
     }
 
-    const std::uint32_t gen = (gen_ + 1u) != 0u ? gen_ + 1u : 1u;
-    const std::size_t slot = static_cast<std::size_t>(gen) % kSlots;
+    const proto::StageGen gen = gen_.next();
+    const proto::StageSlot slot = gen.slot_in(kTableSlots);
 
-    BlockPayload p{};
-    std::memcpy(p.words, words.data(), words.size() * sizeof(std::uint16_t));
-    p.opcode = opcode;
-    p.count = static_cast<std::uint8_t>(words.size());
-    table_[slot].write(gen, p);
+    table_[slot.table_index()].write(gen.stamp(), f);
 
-    const proto::LinkOp::SetVideoMode mode{.block = static_cast<std::uint8_t>(slot), .gen = gen};
-    if (!link_tx_.push(mode)) {
+    const proto::LinkOp::StagedFrame op{.slot = slot, .bind_gen = core, .gen = gen};
+    if (!link_tx_.push(op)) {
 
         staged_rejected_.add();
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), gen});
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), gen.stamp()});
     }
     gen_ = gen;
     staged_.add();
     return {};
 }
 
-Ex<void> VideoWire::emit(
-    proto::Link& link,
-    const proto::LinkOp::SetVideoMode& mode,
-    infra::OptRef<proto::IResetFence> fence
-) {
+std::optional<BoundCore> VideoWire::bound_core() const noexcept {
 
-    if (prelude_running() && !pre_replaying_) {
-        parked_ = mode;
-        ++pre_.parked;
-        publish_prelude();
-        return {};
+    const auto s = bound_cell_.sample();
+    if (!s)
+        return std::nullopt;
+    return s.value;
+}
+
+void VideoWire::bind_core(
+    CoreEdgeSeq seq,
+    proto::BindGeneration gen,
+    os::RawMonotonicClock::time_point now
+) noexcept {
+
+    bound_ = gen;
+    bound_once_ = true;
+    bound_at_ = now;
+    settle_bound_fired_ = false;
+    bound_cell_.publish(BoundCore{.gen = gen, .core_seq = seq});
+}
+
+void VideoWire::take_ui_cells() noexcept {
+
+    PreludeLevel level;
+    if (level_seen_.take_if_changed(level_cell_, level))
+        level_ = level;
+}
+
+bool VideoWire::prelude_settled(os::RawMonotonicClock::time_point now) noexcept {
+
+    if (level_.core == bound_ && level_.settled)
+        return true;
+    if (bound_once_ && now - bound_at_ >= kSettleBound) {
+
+        if (!settle_bound_fired_) {
+            settle_bound_fired_ = true;
+            settle_bound_fires_.add();
+        }
+        return true;
     }
-    const std::size_t slot = mode.block;
-    if (slot >= kSlots) {
+    return false;
+}
+
+Delivered VideoWire::on(
+    const proto::LinkOp::StagedFrame& op,
+    const LinkOpCtx& ctx,
+    proto::Link& link
+) noexcept {
+
+    if (op.bind_gen != bound_) {
+        stale_core_.add();
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
+    }
+    const proto::StageSlot slot = op.slot;
+    if (!slot.within(kTableSlots)) {
         emit_rejected_.add();
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), mode.block});
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
 
-    BlockPayload local{};
-    if (mode.gen == 0u
-        || table_[slot].try_read(local) != mode.gen
-        || local.count == 0u
-        || local.count > kWords) {
+    StagedFrame local{};
+    if (!op.gen.is_set() || table_[slot.table_index()].try_read(local) != op.gen.stamp()) {
         stale_.add();
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), mode.gen});
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
-    const std::uint8_t count = local.count;
-    const auto r = svc::emit_video_words(
-        link.frame(),
-        local.opcode,
-        std::span<const std::uint16_t>(local.words, count)
-    );
+
+    const std::size_t k = infra::ordinal(local.kind);
+    if (k >= kStagedFrameFacts.size() || !admitted(kStagedFrameFacts[k].window, ctx)) {
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
+    }
+    return run_frame_(local, op, link, infra::OptRef<proto::IResetFence>{ctx.fence});
+}
+
+Delivered VideoWire::run_frame_(
+    const StagedFrame& f,
+    const proto::LinkOp::StagedFrame& op,
+    proto::Link& link,
+    infra::OptRef<proto::IResetFence> fence
+) noexcept {
+    FrameArms arms{.link = link, .fence = fence, .replies = replies_, .self = *this, .op = op};
+    return infra::dispatch<StagedFrameRoutes>(f, arms);
+}
+
+Delivered VideoWire::misrouted(const proto::LinkOp&, const LinkOpCtx&, proto::Link&) noexcept {
+    return Delivered{ILinkEncoder::Outcome::Dropped, false};
+}
+
+void VideoWire::FrameArms::answer_(
+    proto::LinkEvent::ReplyWindow w,
+    proto::WindowFails fails,
+    proto::ReplyWord word
+) noexcept {
+    const proto::LinkEvent::FrameReply
+        reply{.window = w, .fails = fails, .word = word, .bind_gen = self.bound_, .gen = op.gen};
+    if (!replies.push(reply))
+        self.reply_drops_.add();
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::Mode& m) noexcept {
+    const auto r = svc::emit_video_words(link.frame(), m.m.opcode, m.m.count.prefix_of(m.m.w));
     if (!r) {
 
-        partial_.add();
-        return r;
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
-    emitted_.add();
+    self.emitted_.add();
 
-    if (!pre_in_block_) {
-        if (auto arm = emit_but_sw_(link, tail_but_sw_, fence); !arm) {
+    if (auto arm = self.emit_but_sw_(link, self.tail_but_sw_, fence); !arm)
+        self.arm_fail_.add();
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
+}
 
-            arm_fail_.add();
+Delivered VideoWire::FrameArms::on(const StagedFrame::ModeInBlock& m) noexcept {
+    const auto r = svc::emit_video_words(link.frame(), m.m.opcode, m.m.count.prefix_of(m.m.w));
+    if (!r) {
+
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    self.emitted_.add();
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
+    svc::ProbeOps ops{link};
+
+    {
+        const auto fb = svc::emit_fbuf(link.frame(), 0x0000);
+        proto::ReplyWord word{};
+        proto::WindowFails fails{};
+        if (fb) {
+            word = proto::ReplyWord{*fb};
+        } else {
+            fails = fails.with(FbufWindow::Fbuf);
+            self.partial_.add();
         }
-    }
-    return {};
-}
-
-bool VideoWire::update_but_sw(
-    proto::Link& link,
-    hal::ButtonMask buttons,
-    bool osd_visible,
-    infra::OptRef<proto::IResetFence> fence
-) noexcept {
-
-    auto map = static_cast<std::uint16_t>(tail_but_sw_ & ~(kButton1 | kButton2));
-    if (buttons.has(hal::SpiSample::kMenuButton))
-        map |= kButton1;
-    if (buttons.has(hal::SpiSample::kUserButton))
-        map |= kButton2;
-
-    const std::uint16_t composed = map;
-    if (but_sw_seen_ && composed == but_sw_shadow_)
-        return false;
-
-    std::uint16_t wire = composed;
-    if (osd_visible)
-        wire = static_cast<std::uint16_t>(wire & ~kButton2);
-    tail_but_sw_ = wire;
-    ++but_sw_writes_;
-    if (auto r = emit_but_sw_(link, wire, fence); !r) {
-        ++but_sw_errors_;
-        return false;
+        answer_(proto::LinkEvent::ReplyWindow::FbufAck, fails, word);
     }
 
-    but_sw_shadow_ = composed;
-    but_sw_seen_ = true;
-    return true;
+    {
+        const auto hi = ops.emit_hdmi_int_probe();
+        proto::ReplyWord word{};
+        proto::WindowFails fails{};
+        if (hi) {
+            word = proto::ReplyWord{*hi};
+        } else {
+            fails = fails.with(FbufWindow::HdmiProbe);
+            self.partial_.add();
+        }
+        answer_(proto::LinkEvent::ReplyWindow::HdmiInt, fails, word);
+    }
+    {
+        const auto gm = ops.emit_gamma_probe();
+        proto::ReplyWord word{};
+        proto::WindowFails fails{};
+        if (gm) {
+            word = proto::ReplyWord{*gm};
+        } else {
+            fails = fails.with(FbufWindow::GammaProbe);
+            self.partial_.add();
+        }
+        answer_(proto::LinkEvent::ReplyWindow::GammaCap, fails, word);
+    }
+
+    if (auto ar = svc::emit_ar_custom(link.frame(), f.ar_custom); !ar)
+        self.partial_.add();
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
-Ex<void> VideoWire::emit_but_sw_(
-    proto::Link& link,
-    std::uint16_t word,
-    infra::OptRef<proto::IResetFence> fence
-) noexcept {
-    if (fence)
-        fence->before_buttons(but_sw_sent_, word);
-    auto r = svc::emit_but_sw(link.frame(), word);
-    if (r)
-        but_sw_sent_ = word;
-    return r;
+Delivered VideoWire::FrameArms::on(const StagedFrame::FilterMode& m) noexcept {
+    svc::ProbeOps ops{link};
+    const auto f = ops.emit_filter_mode(m.mode);
+    if (!f) {
+        self.partial_.add();
+        answer_(
+            proto::LinkEvent::ReplyWindow::FltNum,
+            proto::WindowFails{}.with(FrameWindow::FltNum),
+            proto::ReplyWord{}
+        );
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    const svc::FltFlags flt{*f};
+
+    if (flt.present())
+        self.geo_gate_.last_flt_flags = flt;
+    answer_(proto::LinkEvent::ReplyWindow::FltNum, proto::WindowFails{}, proto::ReplyWord{*f});
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::CoeffChunk& c) noexcept {
+    if (auto r = svc::emit_filter_coeff_chunk(link.frame(), c.count.prefix_of(c.w)); !r)
+        self.partial_.add();
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::ShadowMask& s) noexcept {
+    svc::ProbeOps ops{link};
+    const auto r = ops.emit_shadow_mask(s.flag);
+    if (!r) {
+        self.partial_.add();
+        answer_(
+            proto::LinkEvent::ReplyWindow::ShadowCap,
+            proto::WindowFails{}.with(FrameWindow::ShadowCap),
+            proto::ReplyWord{}
+        );
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    answer_(proto::LinkEvent::ReplyWindow::ShadowCap, proto::WindowFails{}, proto::ReplyWord{*r});
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::AudioTail& t) noexcept {
+    svc::ProbeOps ops{link};
+    proto::WindowFails fails{};
+    proto::ReplyWord r{};
+    if (const auto p = ops.emit_afilter_probe(); p) {
+        r = proto::ReplyWord{*p};
+    } else {
+        fails = fails.with(TailWindow::Probe);
+    }
+
+    if (r.nonzero()) {
+        const svc::CoreVolume lead = t.lead.pick(r);
+        Ex<void> pushed{};
+        switch (t.push) {
+            case AfilterPushForm::Withheld:
+                break;
+            case AfilterPushForm::Byte:
+                pushed = svc::emit_afilter_volume(link.frame(), lead);
+                break;
+            case AfilterPushForm::Stream:
+                pushed = svc::emit_afilter_stream(link.frame(), lead, t.count.prefix_of(t.words));
+                break;
+        }
+        if (!pushed)
+            fails = fails.with(TailWindow::Push);
+    }
+
+    if (auto e = svc::emit_audvol(link.frame(), t.audvol.pick(r)); !e)
+        fails = fails.with(TailWindow::AudVol);
+
+    if (auto e = self.emit_but_sw_(link, self.tail_but_sw_, fence); !e)
+        fails = fails.with(TailWindow::ButSw);
+
+    answer_(proto::LinkEvent::ReplyWindow::AfilterProbe, fails, r);
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::AudVol& a) noexcept {
+
+    if (auto e = svc::emit_audvol(link.frame(), a.vol); !e)
+        self.partial_.add();
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::on(const StagedFrame::AfilterPush& a) noexcept {
+
+    svc::ProbeOps ops{link};
+    proto::WindowFails fails{};
+    proto::ReplyWord r{};
+    if (const auto p = ops.emit_afilter_probe(); p) {
+        r = proto::ReplyWord{*p};
+    } else {
+        fails = fails.with(TailWindow::Probe);
+    }
+
+    if (r.nonzero()) {
+        const svc::CoreVolume lead = a.lead.pick(r);
+        Ex<void> pushed{};
+        switch (a.push) {
+            case AfilterPushForm::Withheld:
+                break;
+            case AfilterPushForm::Byte:
+                pushed = svc::emit_afilter_volume(link.frame(), lead);
+                break;
+            case AfilterPushForm::Stream:
+                pushed = svc::emit_afilter_stream(link.frame(), lead, a.count.prefix_of(a.words));
+                break;
+        }
+        if (!pushed)
+            fails = fails.with(TailWindow::Push);
+    }
+
+    answer_(proto::LinkEvent::ReplyWindow::AfilterProbe, fails, r);
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
+}
+
+Delivered VideoWire::FrameArms::misrouted(const StagedFrame&) noexcept {
+    return Delivered{ILinkEncoder::Outcome::Dropped, false};
 }
 
 VideoWire::Stats VideoWire::stats() const noexcept {
@@ -145,6 +357,9 @@ VideoWire::Stats VideoWire::stats() const noexcept {
     s.emit_rejected = emit_rejected_.get();
     s.rejected = s.staged_rejected + s.emit_rejected;
     s.arm_fail = arm_fail_.get();
+    s.stale_core = stale_core_.get();
+    s.reply_drops = reply_drops_.get();
+    s.settle_bound_fires = settle_bound_fires_.get();
     return s;
 }
 
@@ -155,25 +370,16 @@ void VideoWire::on_rt_round(
 ) {
 
     const os::RawMonotonicClock::time_point now{std::chrono::nanoseconds{now_ns}};
+    (void)fence;
     svc::ProbeOps ops{link};
     geo_rounds_.add();
 
+    take_ui_cells();
+
     if (auto v = policy_seen_.take_if_changed(policy_cell_))
         policy_ = *v;
-    if (auto v = ar_cust_seen_.take_if_changed(ar_cust_))
-        ar_cust_bits_ = *v;
-    if (auto v = shadow_seen_.take_if_changed(shadow_mask_))
-        shadow_mask_word_ = *v;
 
-    if (step_prelude(link, fence))
-        return;
-
-    if (fs_.active()) {
-        fs_.step(stream_ports_(), link);
-        return;
-    }
-
-    if (service_filter_publish(link))
+    if (!prelude_settled(now))
         return;
 
     if (!geo_next_) {
@@ -208,7 +414,14 @@ void VideoWire::on_rt_round(
     if (pass->resent)
         geo_resends_.add();
 
-    geo_cell_.publish(VideoGeoLatch{.sample = pass->sample, .core_seq = geo_core_seq_});
+    geo_cell_.publish(
+        VideoGeoLatch{
+            .sample = pass->sample,
+            .core_seq = geo_core_seq_,
+            .filter_seq = filter_seq_,
+            .scaling_seq = scaling_seq_
+        }
+    );
 }
 
 void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
@@ -224,12 +437,10 @@ void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
 
 Ex<svc::VideoSample> VideoWire::sample() {
     geo_reads_.add();
-
     if (const auto s = geo_cell_.sample()) {
         sampled_seq_ = s.value.core_seq;
         return s.value.sample;
     }
-
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
 
@@ -247,456 +458,89 @@ VideoWire::GeoStats VideoWire::geo_stats() const noexcept {
     return s;
 }
 
-void VideoWire::arm_prelude() noexcept {
-    pre_step_ = PreludeStep::Fbuf;
-    pre_barrier_ = 0;
-    pre_flt_barrier_ = 0;
-
-    parked_.reset();
-    pre_.hdmi_int = 0;
-    pre_.gamma_cap = 0;
-    pre_.af_flags = 0;
-    pre_.tail_fail = 0;
-
-    fs_ = FilterStream{};
-    flt_have_ = false;
-    flt_seen_gen_ = flt_cell_.generation();
-    sent_horiz_ = svc::FilterBank{};
-    sent_vert_ = svc::FilterBank{};
-    ++pre_.arms;
-    publish_prelude();
-}
-
-void VideoWire::replay_parked_(
+bool VideoWire::update_but_sw(
     proto::Link& link,
-    infra::OptRef<proto::IResetFence> fence,
-    bool with_but_sw
+    hal::ButtonMask buttons,
+    bool osd_visible,
+    infra::OptRef<proto::IResetFence> fence
 ) noexcept {
-    const proto::LinkOp::SetVideoMode mode = *parked_;
-    parked_.reset();
+    auto map = static_cast<std::uint16_t>(tail_but_sw_ & ~(kButton1 | kButton2));
+    if (buttons.has(hal::SpiSample::kMenuButton))
+        map |= kButton1;
+    if (buttons.has(hal::SpiSample::kUserButton))
+        map |= kButton2;
 
-    pre_replaying_ = true;
-    pre_in_block_ = !with_but_sw;
-    (void)emit(link, mode, fence);
-    pre_in_block_ = false;
-    pre_replaying_ = false;
-}
-
-bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence> fence) {
-    if (!prelude_running())
+    const std::uint16_t composed = map;
+    if (but_sw_seen_ && composed == but_sw_shadow_)
         return false;
-    svc::ProbeOps ops{link};
 
-    switch (pre_step_) {
-        case PreludeStep::Fbuf: {
-
-            auto r = svc::emit_fbuf(link.frame(), 0x0000);
-            if (!r) {
-                ++pre_.errors;
-            } else {
-                pre_.fb_ack = static_cast<std::uint16_t>(*r);
-            }
-
-            {
-                auto hi = ops.emit_hdmi_int_probe();
-                if (!hi)
-                    ++pre_.errors;
-                pre_.hdmi_int = static_cast<std::uint16_t>(hi ? *hi : 0u);
-                auto gm = ops.emit_gamma_probe();
-                if (!gm)
-                    ++pre_.errors;
-                pre_.gamma_cap = static_cast<std::uint16_t>(gm ? *gm : 0u);
-            }
-
-            {
-                const ArCustomWords arc = unpack_ar_custom(ar_cust_bits_);
-                auto a = svc::emit_ar_custom(link.frame(), arc);
-                if (!a)
-                    ++pre_.errors;
-            }
-            pre_step_ = PreludeStep::FltNum;
-            break;
-        }
-
-        case PreludeStep::FltNum: {
-
-            const std::uint32_t g = flt_cell_.generation();
-            if (g == 0u || g == flt_seen_gen_) {
-                if (pre_flt_barrier_ < kBarrierRounds) {
-                    ++pre_flt_barrier_;
-                    flt_waits_.add();
-                    return true;
-                }
-                flt_wait_timeouts_.add();
-            } else if (!consume_filters()) {
-                return true;
-            }
-
-            const svc::ScalerSlotMode mode = flt_have_ ? flt_local_.filter_mode()
-                                                       : policy().filter_mode;
-            auto f = ops.emit_filter_mode(mode);
-            if (!f) {
-
-                ++pre_.errors;
-                pre_step_ = PreludeStep::Burst;
-                break;
-            }
-            pre_.flt_flags = *f;
-            const svc::FltFlags flt{*f};
-
-            if (flt.present())
-                geo_gate_.last_flt_flags = flt;
-            if (!flt.present()) {
-                ++pre_.coeff_skips;
-                pre_step_ = PreludeStep::Burst;
-                break;
-            }
-            if (flt_have_) {
-                svc::VideoSample s{};
-                s.flt_flags = flt;
-                if (!fs_.arm(
-                        stream_ports_(),
-                        flt,
-                        select_slot(s),
-                        FilterStream::Counting::Prelude,
-                        std::nullopt
-                    )) {
-
-                    if (auto e = svc::emit_filter_coeff_chunk(link.frame(), {}); !e)
-                        ++pre_.errors;
-                    ++pre_.chunks;
-                    pre_step_ = PreludeStep::Burst;
-                    break;
-                }
-            } else {
-
-                fs_.arm_generated(flt, FilterStream::Counting::Prelude);
-            }
-            pre_step_ = PreludeStep::FltCoef;
-            break;
-        }
-
-        case PreludeStep::FltCoef: {
-
-            fs_.step(stream_ports_(), link);
-            if (!fs_.active())
-                pre_step_ = PreludeStep::Burst;
-            break;
-        }
-
-        case PreludeStep::Burst: {
-
-            if (!parked_) {
-                ++pre_barrier_;
-                ++pre_.barrier_waits;
-                if (pre_barrier_ < kBarrierRounds) {
-                    publish_prelude();
-                    return true;
-                }
-
-                ++pre_.barrier_timeouts;
-                pre_step_ = PreludeStep::ShadowMask;
-                break;
-            }
-            pre_step_ = PreludeStep::ShadowMask;
-            replay_parked_(link, fence, false);
-            break;
-        }
-
-        case PreludeStep::ShadowMask: {
-
-            auto r = ops.emit_shadow_mask(static_cast<std::uint16_t>(shadow_mask_word_.v));
-            if (!r) {
-                ++pre_.errors;
-            } else {
-                pre_.sm_cap = static_cast<std::uint16_t>(*r);
-            }
-
-            pre_step_ = PreludeStep::Tail;
-            break;
-        }
-
-        case PreludeStep::Tail: {
-
-            std::uint16_t tf = 0;
-            std::uint16_t af = 0;
-            if (auto p = ops.emit_afilter_probe(); !p) {
-                ++pre_.errors;
-                tf |= kTailFailProbe;
-            } else {
-                af = *p;
-            }
-            pre_.af_flags = af;
-
-            audio_.accept_probe_reply(static_cast<std::uint8_t>(af), policy().front_end);
-            if (auto f = audio_.flush(); !f) {
-                ++pre_.errors;
-                tf |= kTailFailFlush;
-            }
-            const std::uint8_t push_vol = audio_.core_volume_byte();
-            const std::uint8_t audvol = audio_.audvol_wire_byte();
-
-            if (af != 0) {
-                if (auto r = svc::emit_afilter_volume(link.frame(), push_vol); !r) {
-                    ++pre_.errors;
-                    tf |= kTailFailPush;
-                }
-            } else {
-                ++pre_.afilter_skips;
-            }
-
-            if (auto r = svc::emit_audvol(link.frame(), audvol); !r) {
-                ++pre_.errors;
-                tf |= kTailFailVol;
-            }
-            if (auto r = emit_but_sw_(link, tail_but_sw_, fence); !r) {
-                ++pre_.errors;
-                tf |= kTailFailButSw;
-            }
-            pre_.tail_fail = tf;
-
-            pre_step_ = PreludeStep::Done;
-
-            ++pre_.completions;
-
-            if (parked_)
-                replay_parked_(link, fence, true);
-            break;
-        }
-
-        case PreludeStep::Idle:
-        case PreludeStep::ArCust:
-        case PreludeStep::Done:
-            return false;
+    std::uint16_t wire = composed;
+    if (osd_visible)
+        wire = static_cast<std::uint16_t>(wire & ~kButton2);
+    tail_but_sw_ = wire;
+    ++but_sw_writes_;
+    if (auto r = emit_but_sw_(link, wire, fence); !r) {
+        ++but_sw_errors_;
+        return false;
     }
-
-    ++pre_.steps;
-    publish_prelude();
+    but_sw_shadow_ = composed;
+    but_sw_seen_ = true;
     return true;
 }
 
-void VideoWire::publish_filters(const svc::FilterSet& s) noexcept {
-    flt_cell_.publish(s);
-    flt_published_.add();
-}
-
-bool VideoWire::consume_filters() {
-    const std::uint32_t g = flt_cell_.sample_into(flt_local_);
-    if (g == 0u)
-        return false;
-    flt_seen_gen_ = g;
-    flt_have_ = true;
-    flt_consumed_.add();
-    return true;
-}
-
-svc::VFilter VideoWire::select_slot(const svc::VideoSample& s) const {
-    const auto enabled = flt_local_.enabled();
-    return svc::video_timing::select_vfilter(s, enabled);
-}
-
-bool VideoWire::service_filter_publish(proto::Link& link) {
-    svc::ProbeOps ops{link};
-    const std::uint32_t g = flt_cell_.generation();
-    if (g == 0u || g == flt_seen_gen_)
-        return false;
-    if (!consume_filters())
-        return false;
-
-    auto f = ops.emit_filter_mode(flt_local_.filter_mode());
-    if (!f) {
-        flt_stream_errors_.add();
-        return true;
-    }
-    const svc::FltFlags flt{*f};
-    if (!flt.present())
-        return true;
-    geo_gate_.last_flt_flags = flt;
-    svc::VideoSample s = geo_gate_.last;
-    s.flt_flags = flt;
-    if (!fs_.arm(
-            stream_ports_(),
-            flt,
-            select_slot(s),
-            FilterStream::Counting::Stream,
-            std::nullopt
-        )) {
-
-        if (auto e = svc::emit_filter_coeff_chunk(link.frame(), {}); !e)
-            flt_stream_errors_.add();
-    }
-    return true;
-}
-
-bool FilterStream::arm(
-    const Ports& p,
-    svc::FltFlags flt_flags,
-    svc::VFilter slot,
-    Counting where_counted,
-    std::optional<svc::ScalingWords> tail
+Ex<void> VideoWire::emit_but_sw_(
+    proto::Link& link,
+    std::uint16_t word,
+    infra::OptRef<proto::IResetFence> fence
 ) noexcept {
-    const svc::FilterFormat fmt = flt_flags.format();
-    const svc::FilterBank& h = p.set.bank(svc::VFilter::Horz);
-    const svc::FilterBank& b = p.set.bank(slot);
-    const bool send_h = !svc::same_digest(h, p.sent_horiz);
-    const bool send_v = !svc::same_digest(b, p.sent_vert);
-    const svc::FilterSendPlan planned = svc::plan_filter_banks(h, b, fmt, send_h, send_v);
-    if (planned.count == 0) {
-
-        p.sent_horiz = h;
-        p.sent_vert = b;
-        return false;
-    }
-    plan = planned;
-    format = fmt;
-    vert_slot = slot;
-    seg_i = 0;
-    cursor = 0;
-    generated = false;
-    counting = where_counted;
-    tail_words = tail;
-    armed = true;
-    p.streams.add();
-    return true;
+    if (fence)
+        fence->before_buttons(but_sw_sent_, word);
+    auto r = svc::emit_but_sw(link.frame(), word);
+    if (r)
+        but_sw_sent_ = word;
+    return r;
 }
 
-void FilterStream::arm_generated(svc::FltFlags flt_flags, Counting where_counted) noexcept {
-    generated = true;
-    counting = where_counted;
-    format = flt_flags.format();
-    cursor = 0;
-    tail_words.reset();
-    armed = true;
-}
+bool VideoWire::plan_filter_send(const svc::VideoSample&, bool resend) {
 
-bool VideoWire::plan_filter_send(const svc::VideoSample& s, bool resend) {
-
-    if (!flt_have_)
-        return false;
-
-    std::optional<svc::ScalingWords> tail;
+    filter_seq_ = filter_seq_.next();
     if (resend)
-        tail = svc::scaling_words(s, geo_gate_.policy);
-    return fs_
-        .arm(stream_ports_(), s.flt_flags, select_slot(s), FilterStream::Counting::Stream, tail);
+        scaling_seq_ = scaling_seq_.next();
+    return true;
 }
 
-void FilterStream::step(const Ports& p, proto::Link& link) noexcept {
-    constexpr std::size_t kChunkWords = VideoWire::kCoeffChunkWords;
-    std::uint16_t buf[kChunkWords];
-    std::size_t n = 0;
-    const std::size_t total = generated ? svc::filter_coeff_word_count(format)
-                                        : svc::filter_bank_word_count(format);
-    if (generated) {
-        const std::size_t remaining = total - cursor;
-        n = remaining < kChunkWords ? remaining : kChunkWords;
-        for (std::size_t i = 0; i < n; ++i)
-            buf[i] = svc::filter_coeff_word(format, svc::FilterBankWordIndex{cursor + i});
-    } else {
-        const svc::FilterSendPlan::Seg& seg = plan.segs[seg_i];
-        const svc::FilterBank& b = svc::is_vert(seg.bank) ? p.set.bank(vert_slot)
-                                                          : p.set.bank(svc::VFilter::Horz);
-        const auto& ph = svc::is_adaptive(seg.bank) ? b.adaptive : b.phases;
-        const std::size_t remaining = total - cursor;
-        n = remaining < kChunkWords ? remaining : kChunkWords;
-        for (std::size_t i = 0; i < n; ++i) {
-            buf[i] = svc::filter_bank_word(
-                std::span<const svc::FilterPhase>(ph),
-                format,
-                seg.bank,
-                svc::FilterBankWordIndex{cursor + i}
-            );
-        }
-    }
-
-    if (auto r = svc::emit_filter_coeff_chunk(link.frame(), std::span<const std::uint16_t>(buf, n));
-        !r) {
-
-        p.errors.add();
-        if (counting == Counting::Prelude)
-            ++p.pre.errors;
-        armed = false;
-        tail_words.reset();
-        return;
-    }
-    if (counting == Counting::Prelude) {
-        ++p.pre.chunks;
-        p.pre.coeff_words += static_cast<std::uint32_t>(n);
-    } else {
-        p.words.add(static_cast<std::uint32_t>(n));
-    }
-
-    cursor += n;
-    bool done = false;
-    if (cursor >= total) {
-        if (generated) {
-            done = true;
-        } else {
-            cursor = 0;
-            ++seg_i;
-            done = seg_i >= plan.count;
-        }
-    }
-    if (!done)
-        return;
-
-    armed = false;
-
-    if (generated) {
-        p.sent_horiz = svc::nearest_neighbour_bank();
-        p.sent_vert = p.sent_horiz;
-        generated = false;
-    } else {
-        p.sent_horiz = p.set.bank(svc::VFilter::Horz);
-        p.sent_vert = p.set.bank(vert_slot);
-    }
-    if (tail_words) {
-        const svc::ScalingWords tw = *tail_words;
-        tail_words.reset();
-
-        {
-            if (auto r = link.command(proto::UioOp::SetHeight); !r) {
-                p.errors.add();
-                return;
-            }
-            if (auto r = link.word(tw.height); !r) {
-                p.errors.add();
-                return;
-            }
-        }
-        {
-            if (auto r = link.command(proto::UioOp::SetWidth); !r) {
-                p.errors.add();
-                return;
-            }
-            if (auto r = link.word(tw.width); !r) {
-                p.errors.add();
-                return;
-            }
-        }
-        link.close();
-    }
+std::optional<VideoGeoLatch> VideoWire::geo_latch() const noexcept {
+    const auto s = geo_cell_.sample();
+    if (!s)
+        return std::nullopt;
+    return s.value;
 }
 
-VideoWire::FilterStats VideoWire::filter_stats() const noexcept {
-    FilterStats s;
-    s.published = flt_published_.get();
-    s.consumed = flt_consumed_.get();
-    s.waits = flt_waits_.get();
-    s.wait_timeouts = flt_wait_timeouts_.get();
-    s.streams = flt_streams_.get();
-    s.stream_words = flt_stream_words_.get();
-    s.stream_errors = flt_stream_errors_.get();
-    return s;
+svc::ScalingPolicy VideoWire::published_policy() const noexcept {
+
+    return policy_cell_.sample().value;
 }
 
-void VideoWire::publish_prelude() noexcept {
-    pre_.step = pre_step_;
-    prelude_cell_.publish(pre_);
-}
+Delivered VideoWire::FrameArms::on(const StagedFrame::ScalingPair& p) noexcept {
 
-PreludeStats VideoWire::prelude_stats() const noexcept {
-    return prelude_cell_.sample().value;
+    if (auto r = link.command(proto::UioOp::SetHeight); !r) {
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    if (auto r = link.word(p.words.height); !r) {
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    if (auto r = link.command(proto::UioOp::SetWidth); !r) {
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    if (auto r = link.word(p.words.width); !r) {
+        self.partial_.add();
+        return Delivered{ILinkEncoder::Outcome::Encoded, true};
+    }
+    link.close();
+    return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 }

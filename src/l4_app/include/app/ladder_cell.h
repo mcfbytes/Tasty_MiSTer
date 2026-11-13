@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
-
 #include "cores/boot_ladder.h"
+#include "cores/ladder_pc.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -11,7 +10,7 @@ namespace mister::app {
 
 struct LadderCell {
     cores::BootLadder::Report report{};
-    std::uint8_t pc = 0;
+    cores::LadderPc pc{};
     bool live = false;
 };
 

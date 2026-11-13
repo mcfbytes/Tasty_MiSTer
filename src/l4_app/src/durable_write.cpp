@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "infra/path_parts.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -17,8 +18,8 @@ namespace mister::app {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
-    if (const std::size_t slash = rel.rfind('/'); slash != std::string_view::npos && slash > 0) {
-        if (auto r = vfs.ensure_dir(rel.substr(0, slash)); !r)
+    if (const std::optional<std::string_view> dir = infra::nested_dir(rel)) {
+        if (auto r = vfs.ensure_dir(*dir); !r)
             return r;
     }
 

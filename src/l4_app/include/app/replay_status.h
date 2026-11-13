@@ -14,7 +14,16 @@
 
 namespace mister::app {
 
-enum class ReplayLevel : std::uint8_t { Idle, AwaitPowerOn, Running };
+enum class ReplayLevel : std::uint8_t { Idle, AwaitPowerOn, Running, kCount };
+
+inline constexpr std::array<const char*, static_cast<std::size_t>(ReplayLevel::kCount)>
+    kReplayLevelNames{"idle", "arming", "running"};
+static_assert(infra::json_clean_names(kReplayLevelNames), "a name is rendered unescaped");
+
+[[nodiscard]] constexpr const char* replay_level_name(ReplayLevel level) noexcept {
+    const auto i = static_cast<std::size_t>(level);
+    return i < kReplayLevelNames.size() ? kReplayLevelNames[i] : "?";
+}
 
 enum class ReplayEnd : std::uint8_t {
     None,
@@ -47,7 +56,7 @@ struct ReplayStatus {
     std::uint32_t late = 0;
     std::uint32_t pre_epoch = 0;
     std::uint32_t underruns = 0;
-    std::uint32_t skipped_edges = 0;
+    CoreFrameCount skipped_edges{};
     std::uint32_t held_rounds = 0;
     std::uint32_t pad_drops = 0;
     std::uint32_t stale = 0;
@@ -57,7 +66,7 @@ struct ReplayStatus {
     StatusMicros apply_min_us{};
     StatusMicros apply_max_us{};
     StatusMicros epoch_delay_us{};
-    std::uint32_t epoch_edge = 0;
+    CoreFrameCount epoch_edge{};
     std::uint32_t blk_late = 0;
     StatusMicros blk_late_max_us{};
     std::uint32_t lost = 0;

@@ -2,7 +2,9 @@
 #include "cores/movie_system.h"
 
 #include "cores/movie_archive.h"
+#include "cores/movie_lines.h"
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "movie_codec_detail.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
@@ -40,7 +42,7 @@ std::optional<MovieSystem> system_for_platform(
     std::string_view platform,
     std::string_view movie_path
 ) noexcept {
-    const std::string_view ext = movie_path_extension(movie_path);
+    const std::string_view ext = infra::extension_bare(movie_path);
     for (const MovieCodecRow& r : movie_codec_rows()) {
         if (r.bk2_platform != platform || !infra::ieq(r.ext, ext))
             continue;
@@ -112,7 +114,7 @@ std::optional<std::string> movie_bk2_platform(std::string_view text) noexcept {
     const svc::Vfs& vfs,
     std::string_view movie_path
 ) {
-    if (!infra::ieq(movie_path_extension(movie_path), "bk2"))
+    if (!infra::ieq(infra::extension_bare(movie_path), "bk2"))
         return std::optional<std::string>{};
     auto f = open_movie_archive(vfs, movie_path, kBk2Archive);
     if (!f)
@@ -126,7 +128,7 @@ std::optional<MovieSystem> movie_system_for(
 ) noexcept {
     if (auto u = movie_system_for_path(movie_path))
         return u;
-    if (!infra::ieq(movie_path_extension(movie_path), "bk2"))
+    if (!infra::ieq(infra::extension_bare(movie_path), "bk2"))
         return std::nullopt;
     const auto plat = movie_bk2_platform(vfs, movie_path);
     if (!plat || !*plat)
@@ -152,7 +154,7 @@ std::string movie_unplayable_reason(
 }
 
 std::string movie_unplayable_reason(const svc::Vfs& vfs, std::string_view movie_path) {
-    if (!infra::ieq(movie_path_extension(movie_path), "bk2") || !vfs.file_exists(movie_path))
+    if (!infra::ieq(infra::extension_bare(movie_path), "bk2") || !vfs.file_exists(movie_path))
         return {};
     return movie_unplayable_reason(movie_bk2_platform(vfs, movie_path), movie_path);
 }
@@ -166,45 +168,57 @@ std::string movie_unplayable_reason(const svc::Vfs& vfs, std::string_view movie_
     if (!f)
         return std::unexpected(f.error());
     MovieFacts facts{};
-    std::vector<char> buf(4096);
-    std::string line;
-    std::uint64_t off = 0;
-    for (;;) {
-        const auto got = (*f)->read_at(
-            off,
-            std::as_writable_bytes(std::span(buf.data(), buf.size()))
-        );
-        if (!got)
-            return std::unexpected(got.error());
-        if (*got == 0)
-            break;
-        off += *got;
-        for (std::size_t i = 0; i < *got; ++i) {
-            const char ch = buf[i];
-            if (ch == '\n') {
-                std::string_view row{line};
-                if (!row.empty() && row.back() == '\r')
-                    row.remove_suffix(1);
-                if (format.starts_log(row)) {
-                    if (auto d = format.finish_header(facts); !d)
-                        return std::unexpected(d.error());
-                    return facts;
-                }
-                auto next = format.header_line(row, facts);
-                if (!next)
-                    return std::unexpected(next.error());
-                facts = *next;
-                line.clear();
-            } else if (line.size() < kMovieLineMax) {
-                line.push_back(ch);
-            }
+    std::optional<Error> refused;
+    const auto walked = for_each_movie_line(**f, [&](const MovieLines::Line& l) {
+        if (format.starts_log(l.text))
+            return false;
+        auto next = format.header_line(l.text, facts);
+        if (!next) {
+            refused = next.error();
+            return false;
         }
-        if (*got < buf.size())
-            break;
-    }
+        facts = *next;
+        return true;
+    });
+    if (!walked)
+        return std::unexpected(walked.error());
+    if (refused)
+        return std::unexpected(*refused);
     if (auto d = format.finish_header(facts); !d)
         return std::unexpected(d.error());
     return facts;
+}
+
+[[nodiscard]] MovieFrameTally count_movie_frames(
+    const svc::Vfs& vfs,
+    const IMovieFormat& format,
+    std::string_view movie_path,
+    const MovieFacts& facts
+) {
+    auto f = format.open_movie(vfs, movie_path);
+    if (!f)
+        return {};
+    MovieFrameTally tally{};
+    bool in_log = false;
+    const auto walked = for_each_movie_line(**f, [&](const MovieLines::Line& l) {
+        if (!in_log) {
+            if (!format.starts_log(l.text))
+                return true;
+            in_log = true;
+        }
+        if (format.ends_log(l.text))
+            return false;
+        if (!format.frame(l.text, facts))
+            return true;
+        if (tally.frames.reached(kMovieFrameCap)) {
+            tally.capped = true;
+            return false;
+        }
+        tally.frames = tally.frames.next();
+        return true;
+    });
+    (void)walked;
+    return tally;
 }
 
 bool movie_system_supported(const MovieSystem& sys) noexcept {

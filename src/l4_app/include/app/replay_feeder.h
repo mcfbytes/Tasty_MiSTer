@@ -87,8 +87,6 @@ public:
 
     [[nodiscard]] std::uint32_t scanned() const noexcept { return play_.scan.scanned; }
 
-    [[nodiscard]] FrameCount pushed() const noexcept { return play_.run.pushed; }
-
     [[nodiscard]] FrameCount movie_frames() const noexcept { return play_.scan.movie_frames; }
 
     [[nodiscard]] std::uint32_t tries() const noexcept { return play_.run.tries; }

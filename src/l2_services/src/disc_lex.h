@@ -34,11 +34,6 @@ inline constexpr std::string_view kExtCdg = ".cdg";
     return line.substr(kw.size());
 }
 
-inline std::string_view dir_of(std::string_view path) noexcept {
-    const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string_view::npos ? std::string_view{} : path.substr(0, slash + 1);
-}
-
 inline std::string_view lstrip(std::string_view s) noexcept {
     std::size_t i = 0;
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))

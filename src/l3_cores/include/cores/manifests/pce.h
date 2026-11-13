@@ -3,6 +3,7 @@
 
 #include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
+#include "proto/status_bit.h"
 
 #include <array>
 #include <cstddef>
@@ -65,8 +66,8 @@ inline constexpr svc::CuePolicy kPceCdCuePolicy{
 };
 
 inline constexpr auto kPceCdSeekFastPaths = std::to_array<CdProfile::SeekFastPath>({
-    {.count = SectorCount{120}, .latency_ticks = 0},
-    {.count = SectorCount{252}, .latency_ticks = 5},
+    {.count = SectorCount{120}, .latency_ticks = PollTicks{}},
+    {.count = SectorCount{252}, .latency_ticks = PollTicks{5}},
 });
 
 inline constexpr CdProfile kPceCdProfile{
@@ -113,11 +114,8 @@ inline constexpr auto kPceCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0,
-     .group_required = false,
-     .marker_sibling = "sgx",
-     .dest_if_marker = WideIoIndex{1},
-     .loader = AssetLoader::PceBios},
+     .group = BootGroup::First,
+     .group_required = false},
 
     {.name = "cd_bios.rom",
      .where = kCoreHomeDir,
@@ -125,11 +123,8 @@ inline constexpr auto kPceCdBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::Search,
      .subdir = "TGFX16-CD",
      .dest = WideIoIndex{0},
-     .group = 0,
-     .group_required = false,
-     .marker_sibling = {},
-     .dest_if_marker = WideIoIndex{1},
-     .loader = AssetLoader::PceBios},
+     .group = BootGroup::First,
+     .group_required = false},
 });
 
 inline constexpr std::array<std::byte, 8> kPceCdBramHeader{
@@ -143,7 +138,7 @@ inline constexpr std::array<std::byte, 8> kPceCdBramHeader{
     std::byte{0x80},
 };
 
-inline constexpr BlankSaveSpec kPceCdBlankSave{
+inline constexpr svc::BlankSaveSpec kPceCdBlankSave{
     .fill = std::byte{0x00},
     .header = kPceCdBramHeader,
     .regions = {},

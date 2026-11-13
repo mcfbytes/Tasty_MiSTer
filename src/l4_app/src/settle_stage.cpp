@@ -16,6 +16,7 @@
 #include "proto/conf_str.h"
 #include "proto/item_table.h"
 #include "proto/link_op.h"
+#include "proto/status_bit.h"
 #include "proto/types.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
@@ -208,11 +209,7 @@ bool SettleStage::set_unmet_(
     }
     const auto put = [&ctx](const cores::IReplayCore::SettingNeed& n, unsigned value) {
         return ctx.w.settings_tx.push(
-            proto::LinkOp::WriteStatus{
-                .start = n.field.start,
-                .width = n.field.width,
-                .value = value
-            }
+            proto::LinkOp::WriteStatus{.field = n.field, .value = proto::FieldValue{value}}
         );
     };
     for (const std::size_t k : needs.n.indices()) {
@@ -305,13 +302,9 @@ std::optional<proto::IoIndex> SettleStage::rom_slot_(Ctx ctx) noexcept {
     const auto table = proto::ItemTable::parse(conf_.view());
     if (!table)
         return std::nullopt;
-    const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
+    const proto::FileSlots slots = proto::FileSlots::of(*table);
     const proto::FileSlotDigit digit = ctx.request.codec->core().rom_slot_digit();
-    const proto::FileSlotHit hit = proto::ConfStr::find_slot_in(
-        slots,
-        proto::ConfStrEntry::SlotLetter::Load,
-        digit
-    );
+    const proto::FileSlotHit hit = slots.find(proto::FileRowKind::File, digit);
     if (!hit.entry)
         return std::nullopt;
     return hit.entry->ioctl_index;

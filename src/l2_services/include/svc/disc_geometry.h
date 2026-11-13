@@ -22,7 +22,8 @@ using SeekTime = std::chrono::duration<std::uint32_t, std::milli>;
 [[nodiscard]] SeekTime seek_time(Lba from_lba, Lba to_lba) noexcept;
 
 struct DiscGeometry {
-    TASTY_SEAT_RESIDENT(RT);
+
+    TASTY_SEAT_EXEMPT(const_shared);
 
     Toc toc{};
 

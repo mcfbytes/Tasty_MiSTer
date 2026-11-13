@@ -2,8 +2,10 @@
 #include "hd_osd_block.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 
+#include "app/front_end_logo.h"
 #include "app/hd_look_ini.h"
 #include "hal/fpga_memory.h"
 #include "hal/scaler_buffers.h"
@@ -13,6 +15,16 @@
 #endif
 
 namespace mister::fw {
+
+namespace {
+
+constexpr std::array<app::LogoRotation, 3> kLogoRotationByIni{
+    app::LogoRotation::Upright,
+    app::LogoRotation::Left,
+    app::LogoRotation::Right
+};
+
+}
 
 std::optional<app::HdRenderer::Frame> HdOsdBlock::map_frame_(
     const BootParts& plat,
@@ -45,7 +57,12 @@ HdOsdBlock::HdOsdBlock(
     OpenVerdict& verdict
 )
     : hd_renderer_{
-          app::HdRenderer::Wiring{.clock = clock, .ask = hd_ask_, .status = hd_status_},
+          app::HdRenderer::Wiring{
+              .clock = clock,
+              .ask = hd_ask_,
+              .status = hd_status_,
+              .vfs = infra::OptRef<const svc::Vfs>{plat.vfs}
+          },
           map_frame_(plat, verdict)
       },
       hd_screen_{app::HdOsdScreen::Wiring{
@@ -84,8 +101,18 @@ bool HdOsdBlock::open_seat(
         return false;
     hd_renderer_.set_fps(c.hd_osd_fps);
     hd_renderer_.set_look(app::hd_look_from_ini(c));
+    const app::LogoRotation rotation = c.osd_rotate < kLogoRotationByIni.size()
+        ? kLogoRotationByIni[c.osd_rotate]
+        : app::LogoRotation::Upright;
+    hd_renderer_.set_logo(
+        app::FrontEndLogoKnobs{
+            .show = c.logo != 0,
+            .rotation = rotation,
+            .direct_video = svc::direct_video_resolved(c) != svc::DirectVideo::Off
+        }
+    );
     hd_main_.emplace(hd_renderer_, std::move(seated(hd_fds_, "T-HDOSD bound past a refused open")));
-    mains.mains.bind(&*hd_main_);
+    mains.bind(&*hd_main_);
     return true;
 }
 

@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "cores/bk2_column.h"
 #include "cores/movie_archive.h"
 #include "cores/movie_codec.h"
 #include "cores/snes_movie_codec.h"
@@ -21,16 +22,6 @@ class SnesBk2Codec final : public IMovieFormat {
 
 public:
     using Button = SnesMovieCodec::Button;
-
-    static constexpr std::uint8_t kColReset = 1;
-    static constexpr std::uint8_t kColPower = 2;
-    static constexpr std::uint8_t kColSubframe = 3;
-    static constexpr std::uint8_t kColResetDelay = 4;
-    static constexpr std::uint8_t kColPad = 0x80;
-    static constexpr std::uint8_t kPortShift = 4;
-    static constexpr std::uint8_t kPortMask = 0x7;
-    static constexpr std::uint8_t kButtonMask = 0xF;
-    static constexpr std::uint8_t kColGroupEnd = 0xFF;
 
     static constexpr Bk2Layout kMovieVersion = Bk2Layout::MovieVersion;
     static constexpr Bk2Layout kPlatform = Bk2Layout::Platform;
@@ -96,51 +87,7 @@ public:
          {"R", Button::R}}
     };
 
-    struct Bk2Column {
-        std::uint8_t v = 0;
-
-        [[nodiscard]] static constexpr Bk2Column pad(
-            svc::PlayerIndex port,
-            SnesMovieCodec::Button button
-        ) noexcept {
-            return Bk2Column{static_cast<std::uint8_t>(
-                static_cast<unsigned>(kColPad)
-                | (static_cast<unsigned>(port.v) << kPortShift)
-                | static_cast<unsigned>(button)
-            )};
-        }
-
-        [[nodiscard]] constexpr bool is_pad() const noexcept { return (v & kColPad) != 0; }
-
-        [[nodiscard]] constexpr bool is_group_end() const noexcept { return v == kColGroupEnd; }
-
-        [[nodiscard]] constexpr bool is_reset_delay() const noexcept { return v == kColResetDelay; }
-
-        [[nodiscard]] constexpr bool is_reset() const noexcept { return v == kColReset; }
-
-        [[nodiscard]] constexpr bool is_power() const noexcept { return v == kColPower; }
-
-        [[nodiscard]] constexpr bool is_subframe() const noexcept { return v == kColSubframe; }
-
-        [[nodiscard]] constexpr svc::PlayerIndex port() const noexcept {
-            return svc::PlayerIndex::of(static_cast<unsigned>((v >> kPortShift) & kPortMask));
-        }
-
-        [[nodiscard]] constexpr JoyBit bit() const noexcept {
-            return JoyBit{static_cast<std::uint8_t>(v & kButtonMask)};
-        }
-
-        [[nodiscard]] constexpr bool append_to(MovieFacts& f) const noexcept {
-            const std::span<std::uint8_t> slots = f.columns_n.slots_from(f.columns);
-            if (slots.empty())
-                return false;
-            slots[0] = v;
-            f.columns_n = f.columns_n.next();
-            return true;
-        }
-
-        friend constexpr bool operator==(Bk2Column, Bk2Column) = default;
-    };
+    static constexpr bool kReservesGroupEnd = false;
 
     [[nodiscard]] static Ex<Bk2Column> column_of(std::string_view name) noexcept;
 };

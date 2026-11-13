@@ -9,6 +9,7 @@
 
 #include "svc/adv7513_init_options.h"
 #include "svc/config_snapshot.h"
+#include "svc/dv1_spd.h"
 #include "app/types.h"
 #include "svc/modeline.h"
 #include "svc/video_sample.h"
@@ -57,7 +58,7 @@ struct VideoIni {
 
     svc::Modeline::WireOptions wire{};
     svc::adv7513::InitOptions init{};
-    std::uint8_t spd_quirk = 0;
+    svc::SpdQuirk spd_quirk = svc::SpdQuirk::Full;
 
     VfilterSeeds vfilter_seeds{};
 

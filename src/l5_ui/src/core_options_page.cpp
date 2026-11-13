@@ -60,7 +60,7 @@ void CoreOptionsPage::on_enter(PageContext& ctx) {
     link_tx_ = ctx.link_tx;
 
     if (picks_) {
-        refusals_ += picks_->refusals();
+        refusals_.add(picks_->refusals());
         published_ += picks_->commands_published();
     }
     picks_.emplace(
@@ -103,7 +103,7 @@ StatusView CoreOptionsPage::live_words() const {
 Transition CoreOptionsPage::open_recents(const OptionItem& it) {
     TASTY_SEAT_BODY(CoreOptionsPage);
     if (!picks_) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     return picks_->open_recents(it);
@@ -112,7 +112,7 @@ Transition CoreOptionsPage::open_recents(const OptionItem& it) {
 void CoreOptionsPage::save_config() {
     TASTY_SEAT_BODY(CoreOptionsPage);
     if (!push_ask(asks_, app::UiRequest::SaveConfig{})) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -120,12 +120,12 @@ void CoreOptionsPage::save_config() {
 
 void CoreOptionsPage::refuse() {
     TASTY_SEAT_BODY(CoreOptionsPage);
-    ++refusals_;
+    refusals_.add();
 }
 
 void CoreOptionsPage::write_status(BitField bits, proto::FieldValue value) {
     TASTY_SEAT_BODY(CoreOptionsPage);
-    push_op(proto::LinkOp::WriteStatus{.start = bits.start, .width = bits.width, .value = value.v});
+    push_op(proto::LinkOp::WriteStatus{.field = bits, .value = value});
 }
 
 void CoreOptionsPage::toggle(BitField bits, bool ex) {
@@ -135,7 +135,7 @@ void CoreOptionsPage::toggle(BitField bits, bool ex) {
         .scope = app::CoreScope{env_.conf_gen}
     };
     if (!push_ask(asks_, ask)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -144,7 +144,7 @@ void CoreOptionsPage::toggle(BitField bits, bool ex) {
 template <class A>
 void CoreOptionsPage::push_op(const A& op) {
     if (!link_tx_ || !link_tx_->push(op)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -153,7 +153,7 @@ void CoreOptionsPage::push_op(const A& op) {
 Transition CoreOptionsPage::open_browser(const OptionItem& it) {
     TASTY_SEAT_BODY(CoreOptionsPage);
     if (!picks_) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     return picks_->open(it);

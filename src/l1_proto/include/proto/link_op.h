@@ -5,15 +5,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
+#include <type_traits>
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "infra/spsc_ring.h"
-#include "proto/types.h"
+#include "proto/bit_field.h"
 #include "proto/conf_switches.h"
 #include "proto/mailbox_act.h"
 #include "proto/mailbox_poll.h"
+#include "proto/osd_rotation.h"
 #include "proto/osd_target.h"
 #include "proto/ps2_frame.h"
 #include "proto/reset_edge.h"
@@ -22,7 +24,6 @@
 #include "proto/save_kind.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
-#include "proto/types.h"
 
 namespace mister::proto {
 
@@ -64,14 +65,10 @@ struct LinkOp {
         StageCheats,
         SetOsdVisible,
         PulseOption,
-        SetVideoMode,
+        StagedFrame,
         ApplyCheats,
         SetDip,
         SetCoreOption,
-        SetMute,
-        SetAttenuation,
-        NudgeVolume,
-        ToggleMute,
         AnnounceMount,
         SetWideIndex,
         CoreReset,
@@ -79,6 +76,7 @@ struct LinkOp {
         MailboxWrite,
         AttachSave,
         DetachSave,
+        MenuCtl,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -101,11 +99,16 @@ struct LinkOp {
 
     struct WriteStatus {
         static constexpr Kind kKind = Kind::WriteStatus;
-        StatusBit start{};
-        std::uint8_t width = 0;
+        BitField field{};
         std::uint8_t pad_[2]{};
-        std::uint32_t value = 0;
+        FieldValue value{};
     };
+
+    static_assert(
+        sizeof(WriteStatus) == 8
+        && offsetof(WriteStatus, value) == 4
+        && std::is_trivially_copyable_v<WriteStatus>
+    );
 
     struct OsdFlush {
         static constexpr Kind kKind = Kind::OsdFlush;
@@ -163,6 +166,7 @@ struct LinkOp {
         Close = 3,
         WindowOpen = 4,
         WindowClose = 5,
+        Empty = 6,
     };
 
     struct FileTx {
@@ -187,20 +191,16 @@ struct LinkOp {
         static constexpr Kind kKind = Kind::BindConfig;
         bool savestate_dir_ready = false;
         bool waitmount_exhausted = false;
-        std::uint8_t pad_[2]{};
+        std::uint8_t pad_[1]{};
+        OsdRotation osd_rotation{};
         TxSlabId cfg{};
         ConfSwitches conf{};
     };
 
     struct BindUart {
         static constexpr Kind kKind = Kind::BindUart;
-        bool probe_usb_ser = false;
-        bool usb_ser = false;
-        bool capable = false;
-        std::uint8_t pad_{};
-        TxSlabId mode{};
-        TxSlabId speeds{};
-        TxSlabId tokens{};
+
+        TxSlabId binding{};
     };
 
     struct BindSlotConfig {
@@ -358,12 +358,18 @@ struct LinkOp {
         StatusBit bit{};
     };
 
-    struct SetVideoMode {
-        static constexpr Kind kKind = Kind::SetVideoMode;
-        std::uint8_t block = 0;
-        std::uint8_t pad_[3]{};
-        std::uint32_t gen = 0;
+    struct StagedFrame {
+        static constexpr Kind kKind = Kind::StagedFrame;
+        StageSlot slot{};
+        std::byte pad_{};
+        BindGeneration bind_gen{};
+        StageGen gen{};
     };
+
+    static_assert(
+        sizeof(StagedFrame) == 8 && alignof(StagedFrame) == 4,
+        "StagedFrame: slot@0 pad_@1 bind_gen@2 gen@4, no hole"
+    );
 
     struct ApplyCheats {
         static constexpr Kind kKind = Kind::ApplyCheats;
@@ -380,25 +386,6 @@ struct LinkOp {
         OptionRowIndex row{};
         std::uint8_t pad_[3]{};
         FieldValue choice{};
-    };
-
-    struct SetMute {
-        static constexpr Kind kKind = Kind::SetMute;
-        bool on = false;
-    };
-
-    struct SetAttenuation {
-        static constexpr Kind kKind = Kind::SetAttenuation;
-        Attenuation attenuation{};
-    };
-
-    struct NudgeVolume {
-        static constexpr Kind kKind = Kind::NudgeVolume;
-        VolumeStep step = VolumeStep::Louder;
-    };
-
-    struct ToggleMute {
-        static constexpr Kind kKind = Kind::ToggleMute;
     };
 
     struct AnnounceMount {
@@ -420,6 +407,7 @@ struct LinkOp {
     struct LoadFacts {
         static constexpr Kind kKind = Kind::LoadFacts;
         TxSlabId facts{};
+        FileId image{};
     };
 
     struct AttachSave {
@@ -444,6 +432,11 @@ struct LinkOp {
         std::byte pad_{};
         CompanionBindGen gen{};
         MailboxWords words{};
+    };
+
+    struct MenuCtl {
+        static constexpr Kind kKind = Kind::MenuCtl;
+        bool enable = false;
     };
 
     using Alternatives = std::tuple<
@@ -482,21 +475,18 @@ struct LinkOp {
         StageCheats,
         SetOsdVisible,
         PulseOption,
-        SetVideoMode,
+        StagedFrame,
         ApplyCheats,
         SetDip,
         SetCoreOption,
-        SetMute,
-        SetAttenuation,
-        NudgeVolume,
-        ToggleMute,
         AnnounceMount,
         SetWideIndex,
         CoreReset,
         LoadFacts,
         MailboxWrite,
         AttachSave,
-        DetachSave>;
+        DetachSave,
+        MenuCtl>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(std::uint32_t) std::array<std::byte, kStore> store{};
@@ -504,7 +494,7 @@ struct LinkOp {
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
 static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == alignof(std::uint32_t));
-static_assert(infra::ordinal(LinkOp::Kind::kCount) == 50);
+static_assert(infra::ordinal(LinkOp::Kind::kCount) == 47);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
     return a.region != RegionCode::kNone;

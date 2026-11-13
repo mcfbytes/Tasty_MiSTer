@@ -9,7 +9,7 @@
 #include "infra/opt_ref.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
-#include "svc/disc_identity_role.h"
+#include "svc/disc_rules.h"
 #include "svc/disc_mounter.h"
 #include "svc/types.h"
 
@@ -26,7 +26,7 @@ struct DiscMountSlot {
 
     infra::OptRef<const CuePolicy> policy{};
 
-    infra::OptRef<const IDiscIdentity> identity{};
+    infra::OptRef<const IDiscRules> rules{};
     Generation gen{};
     DiscOp op = DiscOp::Mount;
     bool mounted = false;

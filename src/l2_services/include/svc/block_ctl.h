@@ -11,10 +11,14 @@
 #include "infra/seat.h"
 #include "proto/storage_completion.h"
 #include "proto/storage_request.h"
-#include "svc/storage_backend.h"
 #include "svc/types.h"
 
 namespace mister::svc {
+
+class IStorageBackend;
+struct BlankSaveSpec;
+
+inline constexpr std::size_t kStorageOrderBytes = 2304;
 
 struct BlockCtl {
     TASTY_SEAT_MEDIATOR(Any, Any);
@@ -49,11 +53,14 @@ struct BlockCtl {
 
     StorageOrder order{};
 
+    infra::OptRef<const BlankSaveSpec> blank{};
+
     infra::OptRef<IStorageBackend> stage{};
 };
 
 static_assert(
-    std::is_trivially_copyable_v<BlockCtl> && sizeof(BlockCtl) <= 96u + kStorageOrderBytes
+    std::is_trivially_copyable_v<BlockCtl>
+    && sizeof(BlockCtl) <= 96u + kStorageOrderBytes + sizeof(infra::OptRef<const BlankSaveSpec>)
 );
 
 }

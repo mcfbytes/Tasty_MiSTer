@@ -29,17 +29,16 @@ std::string NameConfig::card_cid_path(std::string_view sd_block) {
 
 Ex<void> NameConfig::save_path(
     const RememberedStem& stem,
-    Slot s,
-    proto::IoIndex index,
+    proto::FileRowId row,
     std::string_view path
 ) {
     TASTY_SEAT_BODY(NameConfig);
 
     if (stem.empty())
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), index.v});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), row.index.v});
     std::array<std::byte, kPathBlob> blob{};
     std::memcpy(blob.data(), path.data(), std::min(path.size(), kPathBlob - 1));
-    return durable_write(*vfs_, "config/" + remembered_blob_name(stem, s, index), blob);
+    return durable_write(*vfs_, "config/" + remembered_blob_name(stem, row), blob);
 }
 
 Ex<std::array<std::byte, NameConfig::kCidLen>> NameConfig::read_card_cid() const {

@@ -10,8 +10,16 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
     ask.open = is_open;
     ask.epoch = epoch_;
     ask.look = look_;
+    ask.bg = bg_;
+    ask.idle = idle_;
+    ask.ini_label = ini_label_;
     look_sent_ = look_;
+    bg_sent_ = bg_;
+    idle_sent_ = idle_;
+    ini_label_sent_ = ini_label_;
     if (is_open) {
+        ask.shows = shows_;
+        shows_sent_ = shows_;
         ask.surface = surface_;
         ask.video_applies = applies_seen_;
         ask.page = page_;
@@ -232,19 +240,27 @@ void HdOsdScreen::tick(
     infra::OptRef<const PageDescription> page,
     HdOsdStatus::Badge badge,
     HdStatusSlots slots,
-    HdLook look
+    HdLook look,
+    FrontEndBg bg,
+    FrontEndIdle idle,
+    std::string_view ini_label
 ) noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
     look_ = look;
+    bg_ = bg;
+    idle_ = idle;
+    (void)ini_label_.assign(ini_label);
     retry_drop_();
     (void)status_seen_.take_if_changed(w_.status, status_);
     const bool live = status_.state == HdOsdStatus::State::Ready
         || status_.state == HdOsdStatus::State::Showing;
-    if (!page || !live) {
+
+    if (!live || (!page && !paints_pattern(bg))) {
         close_();
         return;
     }
-    page_ = *page;
+    shows_ = page ? HdOsdShows::Menu : HdOsdShows::Background;
+    page_ = page ? *page : PageDescription{};
     badge_ = badge;
     slots_ = slots;
     if (open_ && w_.fb.held()) {
@@ -257,7 +273,14 @@ void HdOsdScreen::tick(
         if (available())
             (void)try_open_();
     } else if (
-        page_ != page_sent_ || badge_ != badge_sent_ || slots_ != slots_sent_ || look_ != look_sent_
+        page_ != page_sent_
+        || badge_ != badge_sent_
+        || slots_ != slots_sent_
+        || look_ != look_sent_
+        || bg_ != bg_sent_
+        || idle_ != idle_sent_
+        || ini_label_ != ini_label_sent_
+        || shows_ != shows_sent_
     ) {
         publish_ask_(true);
     }
@@ -269,7 +292,7 @@ void HdOsdScreen::tick(
 
 bool HdOsdScreen::intends_hdmi() const noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
-    return intends_;
+    return intends_ && shows_ == HdOsdShows::Menu;
 }
 
 bool HdOsdScreen::covers_hdmi() const noexcept {

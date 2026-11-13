@@ -9,6 +9,7 @@
 
 #include "infra/ascii.h"
 #include "infra/fixed_str.h"
+#include "svc/joy_bit.h"
 #include "svc/sys_button.h"
 
 namespace mister::svc {
@@ -98,12 +99,10 @@ std::optional<SysButton> sys_for_button_name(std::string_view n) noexcept {
 
 }
 
-JoyPlan build_joy_plan(
-    std::string_view j_list,
-    std::string_view jn_list,
-    std::string_view jp_list,
-    bool gamepad_defaults
-) noexcept {
+JoyPlan build_joy_plan(const ButtonLists& lists, bool gamepad_defaults) noexcept {
+    const std::string_view j_list = lists.j;
+    const std::string_view jn_list = lists.jn;
+    const std::string_view jp_list = lists.jp;
     JoyPlan plan{};
 
     std::array<NameBuf, kMaxJoyButtons> raw{};
@@ -151,10 +150,10 @@ JoyPlan build_joy_plan(
             plan.src[idx] = sys;
 
         const std::size_t bar = name.find('|');
-        if (plan.paddle_idx == JoyPlan::kNone
+        if (!plan.paddle_idx
             && bar != std::string_view::npos
             && infra::ieq(name.substr(bar), "|P")) {
-            plan.paddle_idx = static_cast<std::int8_t>(idx);
+            plan.paddle_idx = JoyBit::of(idx);
         }
         ++n;
     }

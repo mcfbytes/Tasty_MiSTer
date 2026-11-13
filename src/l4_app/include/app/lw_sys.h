@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
-
+#include "app/lw_grant_stamp.h"
+#include "app/sys_grant.h"
 #include "app/types.h"
 #include "hal/register_window.h"
 #include "hal/sys_block.h"
@@ -14,12 +14,19 @@ namespace mister::app {
 
 struct LwSys {
     TASTY_SEAT_EXEMPT(component);
+    using Grant = SysGrant;
+
+    static constexpr bool kHasEnable = false;
     hal::RegisterWindow<hal::SysBlock> regs;
     os::UioHandle line{};
     proto::SysBlockDecl block{};
-    std::uint16_t gen = 0;
-    FabricGeneration fabric_gen{};
-    bool fabric_lost = false;
+    LwGrantStamp stamp{};
+
+    [[nodiscard]] Grant lend() const noexcept {
+        return Grant{.block = regs.lend(), .line = line.borrow(), .gen = stamp.gen()};
+    }
+
+    void disable() noexcept {}
 };
 
 }

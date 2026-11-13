@@ -40,7 +40,7 @@ namespace {
     if (sz->v == 0 || sz->v > kDocMax) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), sz->detail()});
     }
-    std::string doc(sz->length_of(proto::BlockCount{1}), '\0');
+    std::string doc(sz->file_word<std::size_t>(), '\0');
     std::size_t got = 0;
     while (got < doc.size()) {
         auto r = (*f)->read_at(got, std::as_writable_bytes(std::span<char>(doc).subspan(got)));

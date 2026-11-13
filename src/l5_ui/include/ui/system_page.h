@@ -19,6 +19,7 @@
 #include "ui/page_launches.h"
 #include "ui/script_pick_host.h"
 #include "ui/system_facts.h"
+#include "svc/types.h"
 
 namespace mister::app {
 class ICmdVerbSink;
@@ -150,9 +151,9 @@ public:
         session_ = s;
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(SystemPage);
-        return refusals_ + script_pick_.refusals() + core_pick_.refusals();
+        return refusals_.sum(script_pick_.refusals()).sum(core_pick_.refusals());
     }
 
 private:
@@ -166,7 +167,8 @@ private:
     void for_each_row(Visit&& visit) const;
 
     Transition open_scripts_confirm();
-    Transition open_scripts_browser(Transition::Kind kind);
+
+    bool arm_scripts_browser_();
     Transition open_core_browser(bool recents_first);
     Transition reboot_release(const UiEvent& ev);
     Transition use_hd_();
@@ -174,7 +176,7 @@ private:
 
     Transition on_cancel() override {
         TASTY_SEAT_BODY(SystemPage);
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     }
 
     Transition on_confirm(RowIndex choice) override;
@@ -182,7 +184,7 @@ private:
     SystemFacts facts_{};
     SessionFacts session_{};
     RowIndex sel_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     RebootHold reboot_{};

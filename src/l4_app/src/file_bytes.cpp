@@ -140,6 +140,32 @@ Ex<proto::FileId> FileBytes<P>::intern_path(
 }
 
 template <SeatTag P>
+void FileBytes<P>::unstage_path(proto::FileId file) noexcept {
+    const std::optional<proto::SlotIndex> slot = pooled_slot_(file);
+    if (slot)
+        slab_.producer().unstage(*slot);
+}
+
+template <SeatTag P>
+Ex<proto::FileId> FileBytes<P>::intern_empty(FileIntern&& file) {
+    if (!file.bytes.empty() || file.path.empty()) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    }
+    reap_all_();
+    const auto i = stage_(file.path);
+    if (!i)
+        return std::unexpected(i.error());
+    const infra::OptRef<InternedFile> staged = slab_.producer().staged(*i);
+    if (!staged)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    InternedFile& s = *staged;
+    s.crc = file.crc;
+    s.save = file.save;
+    s.edge = file.edge;
+    return proto::FileId::of_slot(*i);
+}
+
+template <SeatTag P>
 bool FileBytes<P>::stamp_remount(proto::FileId file) noexcept {
     const infra::OptRef<InternedFile> s = staged_payload_(file);
     if (!s)

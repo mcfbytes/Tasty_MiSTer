@@ -20,7 +20,15 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
       cores_(make_system_page(in.ctx.sys, in.ctx.session)),
       launch_(in),
-      pair_(in.ctx, app::RowTier::Verb),
+      pair_(
+          HdPushRow::Spec{
+              .label = "Pair Bluetooth controller",
+              .page = PageId::BtPair,
+              .arg = PageArg{PairStart::AutoFirst},
+              .tier = app::RowTier::Verb,
+              .icon = app::PageDescription::RowIcon::Bluetooth
+          }
+      ),
       all_row_(
           HdPushRow::Spec{
               .label = "All recent games",
@@ -55,7 +63,7 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     refs_.emplace_back(separator_);
     refs_.emplace_back(settings_);
     if (!ctx_.launches.script)
-        ++refusals_;
+        refusals_.add();
 }
 
 PageId HdHomePlan::id() const {
@@ -83,9 +91,10 @@ bool HdHomePlan::remembers_focus() const noexcept {
     return false;
 }
 
-std::uint32_t HdHomePlan::refusals() const noexcept {
+svc::Tally HdHomePlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdHomePlan);
-    return refusals_ + (cores_ != nullptr ? cores_->refusals() : 0u) + launch_.refusals();
+    return refusals_.sum(cores_ != nullptr ? cores_->refusals() : svc::Tally{})
+        .sum(launch_.refusals());
 }
 
 bool HdHomePlan::BrowseRow::shown() const {

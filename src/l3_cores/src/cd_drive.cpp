@@ -10,6 +10,7 @@
 #include "cores/cd_command_round.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_flow.h"
+#include "cores/mount_answer.h"
 #include "cores/mounted_path.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -33,7 +34,7 @@ void CdDrive::service_tick(proto::IImageSink& sink) noexcept {
 
     (void)slot_.refresh(engine_ref_());
     CdWireLink link{wire_, sink};
-    CdDialectPorts p{slot_.geometry(), link};
+    CdDialectPorts p{slot_.geometry(), link, lamp_};
     if (auto r = engine_->on_tick(p); !r)
         wire_.count_fault();
 }
@@ -118,6 +119,7 @@ std::optional<CdFlow> CdDrive::cd_flow() const noexcept {
 CdDrive::CdDrive(const CdProfile& cd, const HostServices& host, infra::OptRef<ICoreWindow> window)
     : cd_(cd),
       granted_discs_(host.discs),
+      lamp_(host.lamp),
       wire_(cd, host) {
 
     if (!granted_discs_)
@@ -156,12 +158,14 @@ Ex<void> CdDrive::arm_disc(const MountedPath& p) {
     }
 
     const auto op = p.path.empty() ? svc::DiscOp::Unmount : svc::DiscOp::Mount;
-    const svc::DiscMountState st = slot_.arm_mount(
+    const svc::DiscArm arm = slot_.arm_mount(
         op,
         infra::OptRef<const svc::CuePolicy>{cd_.cue},
         p.path
     );
-    if (st == svc::DiscMountState::Failed) {
+    if (arm == svc::DiscArm::Declined)
+        return std::unexpected(mount_declined(ERR_SITE()));
+    if (arm == svc::DiscArm::Failed) {
         engine_->notify_disc(false, slot_.geometry());
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     }

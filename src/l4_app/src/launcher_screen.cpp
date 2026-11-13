@@ -39,6 +39,9 @@ void LauncherScreen::tick() noexcept {
     }
     applies_seen_ = applies;
 
+    if (last_.owns_screen && !last_.scanout_owned && !w_.fb.raised())
+        raise_owed_ = true;
+
     if (raise_owed_ && last_.owns_screen && raise_()) {
         raise_owed_ = false;
         acked_gen_ = last_.screen_gen;

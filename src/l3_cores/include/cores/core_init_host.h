@@ -8,7 +8,7 @@ public:
     virtual ~ICoreInitHost() = default;
 
     virtual void reset_video_geometry() = 0;
-    virtual void arm_video_prelude() = 0;
+    virtual void bind_video_prelude() = 0;
     virtual void publish_core_identity() = 0;
 
 protected:

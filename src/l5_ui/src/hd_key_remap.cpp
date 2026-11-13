@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_key_remap.h"
 
+#include <array>
 #include <optional>
 
 #include "app/hd_themes.h"
 #include "app/page_description.h"
+#include "infra/message_sum.h"
 #include "ui/menu_model.h"
 #include "ui/page.h"
 
@@ -96,20 +98,38 @@ HdKeyRemap::Refresh HdKeyRemap::refresh(const MenuModel& model, const UiEvent& e
     return out;
 }
 
+namespace {
+
+enum class PadBack : std::uint8_t { Keep, Back, BackDropped };
+
+struct PadBackRow {
+    Transition::Kind kind;
+    PadBack settles;
+};
+
+constexpr auto kPadBack = std::to_array<PadBackRow>({
+    {Transition::Kind::Stay, PadBack::Keep},
+    {Transition::Kind::Push, PadBack::BackDropped},
+    {Transition::Kind::Pop, PadBack::Keep},
+    {Transition::Kind::Replace, PadBack::BackDropped},
+    {Transition::Kind::CloseAll, PadBack::Back},
+    {Transition::Kind::Leave, PadBack::Back},
+    {Transition::Kind::ChooseHdStyle, PadBack::BackDropped},
+    {Transition::Kind::ChooseClassicStyle, PadBack::Back},
+});
+static_assert(infra::rows_are_ordinal(kPadBack), "every Transition kind names its pad-B answer");
+
+}
+
 HdKeyRemap::Settled HdKeyRemap::settle(const Transition& answer, std::size_t depth) noexcept {
     TASTY_SEAT_BODY(HdKeyRemap);
-    const Transition back = depth > 1 ? Transition{Transition::Kind::Pop}
-                                      : Transition{Transition::Kind::CloseAll};
-    switch (answer.kind) {
-        case Transition::Kind::Stay:
-        case Transition::Kind::Pop:
+    const Transition back = depth > 1 ? Transition::pop() : Transition::close_all();
+    switch (kPadBack[infra::ordinal(answer.kind())].settles) {
+        case PadBack::Keep:
             return Settled{answer, false};
-        case Transition::Kind::CloseAll:
-        case Transition::Kind::Reopen:
-        case Transition::Kind::Leave:
+        case PadBack::Back:
             return Settled{back, false};
-        case Transition::Kind::Push:
-        case Transition::Kind::Replace:
+        case PadBack::BackDropped:
             return Settled{back, true};
     }
     return Settled{back, false};

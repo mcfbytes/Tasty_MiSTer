@@ -195,13 +195,12 @@ ScalerSlots<ScalerSlot> decode_scaler_cfg(
     return out;
 }
 
-void load_filter_set(
+std::unique_ptr<FilterSet> load_filter_set(
     const Vfs& vfs,
     std::string_view core,
-    const ScalerSeeds& seeds,
-    FilterSet& out
+    const ScalerSeeds& seeds
 ) {
-    out = FilterSet{};
+    auto out = std::make_unique<FilterSet>();
 
     std::string cfg_path{"config/"};
     cfg_path += core;
@@ -219,9 +218,10 @@ void load_filter_set(
         const std::string_view text = bytes.empty() ? std::string_view{}
                                                     : infra::as_text(std::span(bytes));
         const FilterParse parsed = parse_video_filter(text);
-        out.slots[slot].bank = parsed.bank;
-        out.slots[slot].mode = parsed.parsed() ? slots[slot].mode : ScalerSlotMode::off();
+        out->slots[slot].bank = parsed.bank;
+        out->slots[slot].mode = parsed.parsed() ? slots[slot].mode : ScalerSlotMode::off();
     }
+    return out;
 }
 
 namespace {

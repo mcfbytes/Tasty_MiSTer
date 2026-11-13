@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -45,6 +47,19 @@ inline constexpr std::uint32_t kGapBytes = 0x0080'0000u;
 
 inline constexpr std::uint32_t kStockDataBound = 0x1F20'0000u;
 inline constexpr proto::FileSize kDataBound{0x1EA0'0000u};
+
+struct TrackCursor {
+    std::uint64_t v = 0;
+    using affine_count = proto::FileSize;
+
+    template <std::integral Word>
+    [[nodiscard]] constexpr Word file_word() const noexcept {
+        return static_cast<Word>(v);
+    }
+
+    friend constexpr bool operator==(TrackCursor, TrackCursor) = default;
+    friend constexpr auto operator<=>(TrackCursor, TrackCursor) = default;
+};
 
 [[nodiscard]] constexpr proto::MailboxWords set_words(std::uint64_t v) noexcept {
     return {

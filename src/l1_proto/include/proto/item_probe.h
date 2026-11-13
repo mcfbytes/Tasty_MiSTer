@@ -5,7 +5,6 @@
 #include <type_traits>
 
 #include "proto/bit_field.h"
-#include "proto/status_word.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -18,9 +17,7 @@ struct ItemProbe {
         BitField bits,
         FieldValue active
     ) noexcept {
-        if (!bits.valid())
-            return std::nullopt;
-        if (unsigned{bits.start.v} + bits.width > StatusWord::kBits)
+        if (!bits.fits_status())
             return std::nullopt;
         return ItemProbe{bits, active};
     }

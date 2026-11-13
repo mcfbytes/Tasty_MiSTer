@@ -13,10 +13,10 @@
 #include "ui/hd_plan.h"
 #include "ui/recent_row.h"
 #include "ui/hd_rows/hd_gated_row.h"
-#include "ui/hd_rows/hd_pair_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
 #include "ui/system_page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -36,7 +36,7 @@ public:
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
     RowCount pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
 
 private:
     class BrowseRow final : public IHdRow {
@@ -55,13 +55,13 @@ private:
 
     PageContext& ctx_;
     std::unique_ptr<SystemPage> cores_;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 
     RecentLaunch launch_;
     std::vector<RecentRow> played_;
     bool has_any_ = false;
     BrowseRow browse_{*this};
-    HdPairRow pair_;
+    HdPushRow pair_;
     HdPushRow all_row_;
     HdGatedRow all_gate_{all_row_, has_any_};
     HdSeparatorRow separator_;

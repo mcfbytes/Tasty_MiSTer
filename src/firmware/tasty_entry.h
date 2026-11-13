@@ -4,6 +4,8 @@
 #include <optional>
 #include <span>
 
+#include "tasty_runtime.h"
+
 namespace mister::fw {
 
 [[nodiscard]] std::optional<std::span<const char* const>> tasty_invocation(
@@ -18,7 +20,8 @@ struct ArgvArea {
 
 [[nodiscard]] int run_tasty(
     std::span<const char* const> argv,
-    std::optional<ArgvArea> area = std::nullopt
+    std::optional<ArgvArea> area = std::nullopt,
+    const TastyRuntime& rt = {}
 );
 
 }

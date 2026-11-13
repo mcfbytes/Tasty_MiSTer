@@ -21,6 +21,7 @@
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/wake_flag.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/types.h"
@@ -39,25 +40,28 @@ public:
 
     static constexpr std::size_t kMaxPartitionBytes = 0x20000;
 
-    SaveChannelStore(const svc::Vfs& vfs) noexcept;
+    explicit SaveChannelStore(
+        const svc::Vfs& vfs,
+        infra::OptRef<xthread::WakeFlag> activity = {}
+    ) noexcept;
     SaveChannelStore(const SaveChannelStore&) = delete;
     SaveChannelStore& operator=(const SaveChannelStore&) = delete;
 
     [[nodiscard]] Ex<proto::FileSize> open_extent(
         proto::SlotIndex slot,
-        std::span<const std::byte> order
+        const svc::BlockCtl::StorageOrder& order
     ) override;
 
     void release(proto::SlotIndex slot) noexcept override;
 
     void note_tag(proto::ImageTag tag) noexcept override;
 
-    [[nodiscard]] Ex<std::size_t> read_at(
-        std::uint64_t offset,
+    [[nodiscard]] Ex<std::span<std::uint8_t>> read_at(
+        proto::FileSize at,
         std::span<std::uint8_t> dst
     ) override;
-    [[nodiscard]] Ex<std::size_t> write_at(
-        std::uint64_t offset,
+    [[nodiscard]] Ex<std::span<const std::uint8_t>> write_at(
+        proto::FileSize at,
         std::span<const std::uint8_t> src
     ) override;
 
@@ -124,6 +128,7 @@ private:
     [[nodiscard]] bool all_blank_(std::span<const std::uint8_t> image) const noexcept;
 
     const svc::Vfs& vfs_;
+    infra::OptRef<xthread::WakeFlag> activity_{};
 
     SavePlan plan_{};
     SaveLayout layout_{};

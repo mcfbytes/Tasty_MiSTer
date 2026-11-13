@@ -11,7 +11,6 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
     m.count_ = 0;
     m.ram_count_ = 0;
     m.ram_ok_ = false;
-    m.ram_bytes_ = 0;
     m.disk_type_ = area.disk_type;
     const SystemBlockView sys{area.sys};
     const DiskType type = area.disk_type;
@@ -67,7 +66,7 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
                 const TrackBlock track_block{static_cast<std::uint8_t>(starting_block ^ block)};
                 m.steps_[m.count_++] = Step{
                     .where = FlatBlock{DiskTrack{flat_track}, head, track_block},
-                    .lba = static_cast<std::uint16_t>(lba),
+                    .lba = NddLba{static_cast<std::uint16_t>(lba)},
                     .copy_bytes = static_cast<std::uint8_t>(
                         dev_system ? kDevSystemSectorBytes : zone.sector_bytes
                     ),
@@ -86,27 +85,30 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba});
     }
 
+    const NddLba ram_start{infra::at_index(kRamStartLba, type)};
     std::uint64_t ram = 0;
     for (std::size_t i = 0; i < m.count_; ++i) {
         const Step& s = m.steps_[i];
-        if (!s.good || s.lba < infra::at_index(kRamStartLba, type))
+        if (!s.good || !s.lba.at_or_above(ram_start))
             continue;
-        m.ram_step_[m.ram_count_] = static_cast<std::uint16_t>(i);
-        m.ram_base_[m.ram_count_] = static_cast<std::uint32_t>(ram);
+        m.ram_runs_[m.ram_count_] = RamRun{
+            .base = static_cast<std::uint32_t>(ram),
+            .step = static_cast<std::uint16_t>(i)
+        };
         ++m.ram_count_;
         ram += std::uint64_t{s.zone_bytes} * kSectorsPerBlock;
     }
-    m.ram_bytes_ = infra::at_index(kRamBytes, type);
-    m.ram_ok_ = m.ram_bytes_ != 0 && ram == m.ram_bytes_;
+    const std::uint32_t ram_bytes = infra::at_index(kRamBytes, type);
+    m.ram_ok_ = ram_bytes != 0 && ram == ram_bytes;
     return {};
 }
 
 std::size_t DiskMap::ram_index_at_(std::uint64_t ram_off) const noexcept {
 
-    const auto* first = ram_base_.data();
+    const auto* first = ram_runs_.data();
     const auto* last = first + ram_count_;
-    const auto* it = std::upper_bound(first, last, ram_off, [](std::uint64_t v, std::uint32_t b) {
-        return v < b;
+    const auto* it = std::upper_bound(first, last, ram_off, [](std::uint64_t v, const RamRun& r) {
+        return v < r.base;
     });
     return it == first ? 0 : static_cast<std::size_t>(it - first) - 1;
 }

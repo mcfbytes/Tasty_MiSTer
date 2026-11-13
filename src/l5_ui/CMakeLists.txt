@@ -5,6 +5,11 @@ add_library(mister_ui STATIC
   src/cheats_page.cpp
   src/config_slots_page.cpp
   src/confirm_page.cpp
+  src/connect_port.cpp
+  src/entry_buffer.cpp
+  src/key_grid.cpp
+  src/keyboard_text.cpp
+  src/text_entry_page.cpp
   src/core_cell_mirror.cpp
   src/core_options_page.cpp
   src/core_pick_host.cpp
@@ -14,6 +19,8 @@ add_library(mister_ui STATIC
   src/draw_classic.cpp
   src/event_trace.cpp
   src/fb_terminal_host.cpp
+  src/front_end_background.cpp
+  src/front_end_idle_clock.cpp
   src/game_slot.cpp
   src/hd_key_remap.cpp
   src/hd_label.cpp
@@ -23,6 +30,7 @@ add_library(mister_ui STATIC
   src/list_view.cpp
   src/menu_core_binding.cpp
   src/menu_model.cpp
+  src/misc_page.cpp
   src/navigator.cpp
   src/option_items.cpp
   src/options_model.cpp
@@ -31,11 +39,11 @@ add_library(mister_ui STATIC
   src/page_stack.cpp
   src/page_walk.cpp
   src/progress_page.cpp
-  src/script_policy.cpp
   src/script_pick_host.cpp
   src/script_run_page.cpp
   src/script_runner.cpp
   src/sdram_latch.cpp
+  src/select_ini_page.cpp
   src/show_edge_latch.cpp
   src/slot_pick_host.cpp
   src/status_view.cpp
@@ -50,8 +58,22 @@ target_link_libraries(mister_ui
 
 tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/focus_key.h
-  ui/bt_ops.h
-  ui/bt_pair_policy.h
+  ui/connect_demand.h
+  ui/connect_port.h
+  ui/connect_refusals.h
+  ui/connect_views.h
+  ui/pair_start.h
+  ui/entry_buffer.h
+  ui/key_grid.h
+  ui/key_grid_layer.h
+  ui/keyboard_text.h
+  ui/shift_state.h
+  ui/text_entry_host.h
+  ui/text_entry_kind.h
+  ui/text_entry_launch.h
+  ui/text_entry_page.h
+  ui/text_entry_request.h
+  ui/text_entry_result.h
   ui/browse_source.h
   ui/browser_entry.h
   ui/browser_host.h
@@ -59,6 +81,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/browser_page.h
   ui/browser_session.h
   ui/build_env.h
+  ui/config_slots_mode.h
   ui/config_slots_page.h
   ui/confirm_host.h
   ui/confirm_launch.h
@@ -73,6 +96,8 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/draw_classic.h
   ui/event_trace.h
   ui/fb_terminal_host.h
+  ui/front_end_background.h
+  ui/front_end_idle_clock.h
   ui/game_slot.h
   ui/glyph_rom.h
   ui/hd_key_remap.h
@@ -84,6 +109,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/list_view.h
   ui/menu_core_binding.h
   ui/menu_model.h
+  ui/misc_page.h
   ui/navigator.h
   ui/option_host.h
   ui/option_item.h
@@ -111,6 +137,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/osd_style_preference.h
   ui/osd_visible_file.h
   ui/page.h
+  ui/page_arg.h
   ui/page_ask.h
   ui/page_context.h
   ui/page_deadlines.h
@@ -121,16 +148,13 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/page_row.h
   ui/page_stack.h
   ui/page_walk.h
-  ui/script_file_policy.h
-  ui/script_kind.h
   ui/script_launch.h
   ui/script_pick_host.h
-  ui/script_policy.h
   ui/script_run_page.h
   ui/script_runner.h
   ui/sdram_latch.h
+  ui/select_ini_page.h
   ui/show_edge_latch.h
-  ui/shell_bt_ops.h
   ui/slot_pick_host.h
   ui/slot_labels.h
   ui/status_bar_facts.h
@@ -158,6 +182,17 @@ target_sources(mister_ui PRIVATE
   src/hd_media_plan.cpp
   src/hd_page0_walk.cpp
   src/hd_recent_games_plan.cpp
+  src/bt_devices_plan.cpp
+  src/bt_pair_plan.cpp
+  src/bt_prompt_rows.cpp
+  src/bluetooth_plan.cpp
+  src/connect_slot_plan.cpp
+  src/connect_text.cpp
+  src/country_pick_plan.cpp
+  src/network_plan.cpp
+  src/wifi_advanced_plan.cpp
+  src/wifi_networks_plan.cpp
+  src/wifi_saved_plan.cpp
   src/recent_launch.cpp
   src/recent_row.cpp
   src/hd_rows.cpp
@@ -180,6 +215,21 @@ tasty_add_header_checks(tasty_ui_hd_list_header_checks LIB mister_ui HEADERS
   ui/hd_plan.h
   ui/hd_plan_inputs.h
   ui/hd_recent_games_plan.h
+  ui/bt_devices_plan.h
+  ui/bt_pair_plan.h
+  ui/bt_prompt_rows.h
+  ui/bluetooth_plan.h
+  ui/connect_slot_plan.h
+  ui/connect_text.h
+  ui/country_pick_plan.h
+  ui/hd_slots.h
+  ui/slot_id.h
+  ui/slot_range.h
+  ui/hd_rows/hd_slot_row.h
+  ui/network_plan.h
+  ui/wifi_advanced_plan.h
+  ui/wifi_networks_plan.h
+  ui/wifi_saved_plan.h
   ui/recent_launch.h
   ui/recent_row.h
   ui/hd_row.h
@@ -237,7 +287,6 @@ tasty_add_header_checks(tasty_ui_hd_root_header_checks LIB mister_ui HEADERS
   ui/hd_rewalk.h
   ui/hd_root_plan.h
   ui/hd_rows/hd_gated_row.h
-  ui/hd_rows/hd_pair_row.h
   ui/saved_baseline.h
 )
 

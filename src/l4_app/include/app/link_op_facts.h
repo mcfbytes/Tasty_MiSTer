@@ -11,9 +11,9 @@
 
 namespace mister::app {
 
-enum class OpTarget : std::uint8_t { Wire, Session, Transfer, Mount, Options, kCount };
+enum class OpTarget : std::uint8_t { Wire, Session, Transfer, Mount, Options, Frame, kCount };
 
-enum class Window : std::uint8_t { None, Framed, FramedLive };
+enum class Window : std::uint8_t { None, Framed, FramedLive, FramedReady };
 
 enum class RoundCost : std::uint8_t { Free, Payload, kCount };
 
@@ -91,14 +91,10 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::StageCheats, OpTarget::Mount, Window::None, {}},
     {proto::LinkOp::Kind::SetOsdVisible, OpTarget::Wire, Window::Framed, {"req", "req"}},
     {proto::LinkOp::Kind::PulseOption, OpTarget::Wire, Window::FramedLive, {}},
-    {proto::LinkOp::Kind::SetVideoMode, OpTarget::Wire, Window::Framed, {}},
+    {proto::LinkOp::Kind::StagedFrame, OpTarget::Frame, Window::Framed, {}, RoundCost::Payload},
     {proto::LinkOp::Kind::ApplyCheats, OpTarget::Wire, Window::Framed, {}},
     {proto::LinkOp::Kind::SetDip, OpTarget::Wire, Window::Framed, {}},
     {proto::LinkOp::Kind::SetCoreOption, OpTarget::Wire, Window::FramedLive, {}},
-    {proto::LinkOp::Kind::SetMute, OpTarget::Session, Window::None, {}},
-    {proto::LinkOp::Kind::SetAttenuation, OpTarget::Session, Window::None, {}},
-    {proto::LinkOp::Kind::NudgeVolume, OpTarget::Session, Window::None, {}},
-    {proto::LinkOp::Kind::ToggleMute, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::AnnounceMount, OpTarget::Mount, Window::None, {}},
     {proto::LinkOp::Kind::SetWideIndex, OpTarget::Transfer, Window::Framed, {}},
     {proto::LinkOp::Kind::CoreReset, OpTarget::Session, Window::FramedLive, {}},
@@ -106,6 +102,7 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::MailboxWrite, OpTarget::Session, Window::Framed, {"req", ""}},
     {proto::LinkOp::Kind::AttachSave, OpTarget::Mount, Window::None, {}},
     {proto::LinkOp::Kind::DetachSave, OpTarget::Mount, Window::None, {}},
+    {proto::LinkOp::Kind::MenuCtl, OpTarget::Wire, Window::Framed, {"req", "req"}},
 });
 static_assert(
     infra::rows_are_ordinal(kLinkOpFacts),

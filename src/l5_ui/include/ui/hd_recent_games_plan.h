@@ -10,6 +10,7 @@
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
 #include "ui/recent_row.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -26,13 +27,13 @@ public:
     PageId id() const override;
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
 
 private:
     RecentLaunch launch_;
     std::vector<RecentRow> rows_;
     std::vector<std::reference_wrapper<IHdRow>> refs_;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 };
 
 }

@@ -108,21 +108,21 @@ inline constexpr auto kSaturnBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
     {.name = "cd_bios.rom",
      .where = {},
      .optional = true,
      .anchor = AssetAnchor::ImageParentDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
     {.name = "boot.rom",
      .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "Saturn",
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
 });
 
 namespace saturn_blank {
@@ -140,12 +140,12 @@ consteval std::array<std::byte, 128> make_record() {
 inline constexpr std::array<std::byte, 128> kRecord = make_record();
 
 inline constexpr proto::Lba kSecondCopyLba{128};
-inline constexpr std::array<BlankRegion, 1> kSecondCopy{
-    {{.block = kSecondCopyLba, .within = 0, .bytes = kRecord}}
+inline constexpr std::array<svc::BlankRegion, 1> kSecondCopy{
+    {{.block = kSecondCopyLba, .within = {}, .bytes = kRecord}}
 };
 }
 
-inline constexpr BlankSaveSpec kSaturnBlankSave{
+inline constexpr svc::BlankSaveSpec kSaturnBlankSave{
     .fill = std::byte{0x00},
     .header = saturn_blank::kRecord,
     .regions = saturn_blank::kSecondCopy,

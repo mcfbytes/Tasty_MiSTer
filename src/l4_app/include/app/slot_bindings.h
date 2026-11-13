@@ -47,6 +47,7 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/deadline.h"
+#include "proto/block_geometry.h"
 #include "proto/block_slots.h"
 #include "proto/disc_announce.h"
 #include "proto/download_session.h"
@@ -60,6 +61,10 @@
 #include "svc/chd_prefetch.h"
 #include "svc/storage_lifecycle.h"
 #include "svc/vfs.h"
+
+namespace mister::hal {
+class DiskLamp;
+}
 
 namespace mister::app {
 
@@ -98,9 +103,13 @@ public:
 
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
 
+        infra::OptRef<svc::IStorageBackend> disc_backend{};
+
         infra::OptRef<svc::ChdPrefetch> prefetch{};
 
         infra::OptRef<proto::IStorageChannel> storage_channel{};
+
+        infra::OptRef<hal::DiskLamp> lamp{};
     };
 
     explicit SlotBindings(const Wiring& g) noexcept;
@@ -230,6 +239,11 @@ private:
         std::string_view path
     ) noexcept;
 
+    [[nodiscard]] cores::MountState disc_backend_ready_(
+        infra::OptRef<cores::Core> core,
+        proto::SlotIndex disc
+    ) noexcept;
+
     void after_mount_answer_(infra::OptRef<cores::Core> core) noexcept;
 
     hal::ISpiTransport& link_;
@@ -247,6 +261,7 @@ private:
     xthread::LogLane::Producer log_lane_;
     infra::OptRef<const svc::Vfs> vfs_;
     infra::OptRef<svc::IStorageLifecycle> storage_life_;
+    infra::OptRef<svc::IStorageBackend> disc_backend_;
     infra::OptRef<svc::ChdPrefetch> prefetch_;
     MountStatusCell mount_status_cell_{};
     SaveExtentCell save_extent_cell_{};
@@ -258,10 +273,11 @@ private:
 
     proto::BlockSlots slots_;
     [[no_unique_address]] proto::DiscAnnounce announce_{};
+
     static_assert(
-        sizeof(proto::BlockSlots) < 4096,
-        "slots_ is an inline member of a "
-        "T-RT type; it must stay small"
+        sizeof(proto::BlockSlots) < 4096 + proto::kBlockStagingBytes,
+        "slots_ is an inline member of a T-RT type: its table must stay small; "
+        "only the design's kBlockStagingBytes blank page may ride above 4 KiB"
     );
 
     proto::BlockSlotMask channel_slots_{};

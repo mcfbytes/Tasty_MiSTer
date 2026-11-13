@@ -13,7 +13,7 @@ Exit codes: `0` identical, `1` first difference found, `2` usage or input error.
 
 | tool | needs | Debian/Ubuntu | Fedora | Arch |
 |---|---|---|---|---|
-| tasty-compare | Python >= 3.9 | `sudo apt install python3` | `sudo dnf install python3` | `sudo pacman -S python` |
+| tasty-compare | Python >= 3.14 | `sudo apt install python3` | `sudo dnf install python3` | `sudo pacman -S python` |
 | video compare | ffmpeg and ffprobe >= 4.2, with the CamStudio (`cscd`) decoder | `sudo apt install ffmpeg` | `sudo dnf install ffmpeg` | `sudo pacman -S ffmpeg` |
 | faster `--tolerance` | numpy >= 1.20 (optional; a pure-Python path is always there) | `sudo apt install python3-numpy` or `pip install -r requirements.txt` | `sudo dnf install python3-numpy` | `sudo pacman -S python-numpy` |
 | FCEUX dump | FCEUX >= 2.6 with Lua | `sudo apt install fceux` | `sudo dnf install fceux` | `sudo pacman -S fceux` |

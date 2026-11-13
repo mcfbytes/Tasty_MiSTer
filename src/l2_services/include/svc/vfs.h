@@ -20,13 +20,14 @@
 #include "svc/dir_entry.h"
 #include "svc/durable_write.h"
 #include "svc/file.h"
-#include "svc/memory_mounts.h"
 #include "svc/scan_filter.h"
 #include "svc/search_policy.h"
 #include "svc/types.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
+
+class MemoryMounts;
 
 using proto::FileSize;
 
@@ -49,6 +50,12 @@ class Vfs {
     TASTY_SEAT_EXEMPT(const_shared);
 
 public:
+    ~Vfs();
+    Vfs(Vfs&&) noexcept;
+    Vfs& operator=(Vfs&&) noexcept;
+    Vfs(const Vfs&) = delete;
+    Vfs& operator=(const Vfs&) = delete;
+
     [[nodiscard]] static Ex<Vfs> create(RootChoice choice);
 
     [[nodiscard]] static Ex<Vfs> create_at(std::string_view root_path);
@@ -70,14 +77,6 @@ public:
         std::string_view path,
         std::size_t max_entries
     ) const;
-
-    [[nodiscard]] Ex<void> mount_memory(
-        std::string_view path,
-        std::span<const std::byte> blob,
-        Crc32 crc = Crc32::kUndeclared
-    );
-
-    [[nodiscard]] std::uint32_t memory_sequential_hints(std::string_view path) const noexcept;
 
     Ex<std::vector<DirEntry>> scan(std::string_view dir, const ScanFilter& f) const;
 
@@ -109,16 +108,16 @@ public:
     [[nodiscard]] Ex<std::string> find_game_asset(const AssetQuery& q) const;
 
 private:
-    Vfs(StorageRoot root, std::string root_path)
-        : root_(root),
-          root_path_(std::move(root_path)),
-          durable_(root_path_) {}
+    friend struct VfsTestAccess;
+
+    Vfs(StorageRoot root, std::string root_path);
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;
+    [[nodiscard]] std::string composed_(std::string_view path) const;
 
     StorageRoot root_{};
     std::string root_path_;
-    MemoryMounts memory_;
+    std::unique_ptr<MemoryMounts> memory_;
     DurableWrite durable_;
 };
 

@@ -3,8 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app/act_keys.h"
@@ -13,7 +15,9 @@
 #include "app/load_belt.h"
 #include "app/mount_status_cell.h"
 #include "app/owner_tally.h"
+#include "app/path_text.h"
 #include "app/save_extent_cell.h"
+#include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
 #include "cores/ladder_host.h"
 #include "infra/opt_ref.h"
@@ -28,20 +32,10 @@ class LadderHostAdapter final : public cores::ILadderHost {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    class Acts {
-    public:
-        [[nodiscard]] virtual bool order_walk(
-            proto::IoIndex slot,
-            std::string_view path,
-            proto::ActKey gen
-        ) = 0;
-        [[nodiscard]] virtual bool order_savestates(std::string_view image, proto::ActKey gen) = 0;
-
-    protected:
-        Acts() = default;
-        Acts(const Acts&) = default;
-        Acts& operator=(const Acts&) = default;
-        virtual ~Acts() = default;
+    struct WalkAsk {
+        proto::IoIndex slot{};
+        PathText path{};
+        proto::ActKey gen{};
     };
 
     struct Edges {
@@ -53,14 +47,20 @@ public:
         const proto::StatusCell& status_cell;
         const MountStatusCell& mount_status_cell;
         const SaveExtentCell& save_extent_cell;
+        infra::OptRef<SaveStateAttach::AskInbox> save_state_asks;
         infra::OptRef<const SaveStateFactsCell> save_state_facts;
         const LoadBelt& belt;
     };
 
-    LadderHostAdapter(const Edges& edges, Acts& acts) noexcept : edges_(edges), acts_(acts) {}
+    explicit LadderHostAdapter(const Edges& edges) noexcept : edges_(edges) {}
 
     LadderHostAdapter(const LadderHostAdapter&) = delete;
     LadderHostAdapter& operator=(const LadderHostAdapter&) = delete;
+
+    [[nodiscard]] std::optional<WalkAsk> take_walk() noexcept {
+        TASTY_SEAT_BODY(LadderHostAdapter);
+        return std::exchange(walk_, std::nullopt);
+    }
 
     [[nodiscard]] bool order(const proto::LinkOp& op) override;
     using cores::ILadderHost::order;
@@ -102,7 +102,7 @@ public:
 
 private:
     const Edges edges_;
-    Acts& acts_;
+    std::optional<WalkAsk> walk_{};
 };
 
 }

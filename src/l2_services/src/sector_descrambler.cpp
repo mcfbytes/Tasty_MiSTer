@@ -1,45 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 
 #include "svc/msf.h"
 #include "svc/sector_descrambler.h"
 
 namespace mister::svc {
-namespace {
-
-constexpr unsigned kMode2 = 2;
-
-}
 
 void SectorDescrambler::shape(
     proto::Lba lba,
     std::span<std::byte, kFullFrameBytes> frame
 ) const noexcept {
     TASTY_SEAT_BODY(SectorDescrambler);
-    auto at = [&](std::size_t i) {
-        return std::to_integer<unsigned>(frame[i]);
+    const auto names = [lba](std::span<const std::byte, SectorHeader::kBytes> bytes) {
+        const std::optional<SectorHeader> h = SectorHeader::read(bytes);
+        return h && h->mode == SectorHeader::Mode::Mode2 && h->lba() == lba;
     };
-
-    if (at(0) != 0 || at(11) != 0)
+    const std::span<std::byte, SectorHeader::kBytes> head = frame.first<SectorHeader::kBytes>();
+    if (names(head))
         return;
-    for (std::size_t i = 1; i < 11; ++i) {
-        if (at(i) != 0xFF)
-            return;
-    }
-    auto names = [&](std::span<const std::byte, 3> position) {
-        return Msf::lba_from_bcd(position) == lba;
-    };
-    if (names(frame.subspan<12, 3>()) && at(15) == kMode2)
+    std::array<std::byte, SectorHeader::kBytes> plain{};
+    std::ranges::copy(head, plain.begin());
+    for (std::size_t i = SectorHeader::kSync.size(); i < plain.size(); ++i)
+        plain[i] ^= std::byte{kSectorScramble[i - SectorHeader::kSync.size()]};
+    if (!names(plain))
         return;
-    std::array<std::byte, 3> plain{};
-    for (std::size_t i = 0; i < plain.size(); ++i)
-        plain[i] = frame[12 + i] ^ std::byte{kSectorScramble[i]};
-    if (!names(plain) || (at(15) ^ kSectorScramble[3]) != kMode2)
-        return;
-    for (std::size_t i = 12; i < kRawFrameBytes; ++i)
-        frame[i] ^= std::byte{kSectorScramble[i - 12]};
+    for (std::size_t i = SectorHeader::kSync.size(); i < kRawFrameBytes; ++i)
+        frame[i] ^= std::byte{kSectorScramble[i - SectorHeader::kSync.size()]};
 }
 
 consteval unsigned scramble_sum() {

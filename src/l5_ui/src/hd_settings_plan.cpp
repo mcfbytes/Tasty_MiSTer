@@ -21,6 +21,7 @@ HdSettingsPlan::HdSettingsPlan(const HdPlanInputs& in)
       sys_(make_system_page(in.ctx.sys, in.ctx.session)),
       controllers_(HdPushRow::Spec{.label = "Controllers", .page = PageId::HdControllers}),
       display_(HdPushRow::Spec{.label = "Display", .page = PageId::HdDisplay}),
+      network_(HdPushRow::Spec{.label = "Network", .page = PageId::Network}),
       about_(HdPushRow::Spec{.label = "About", .page = PageId::HdAbout}),
       reboot_(
           HdAskRow::Spec{
@@ -35,11 +36,11 @@ HdSettingsPlan::HdSettingsPlan(const HdPlanInputs& in)
 
     if (sys_ != nullptr)
         sys_->on_enter(ctx_);
-    refs_ = {controllers_, display_, scripts_, about_, reboot_, separator_, advanced_};
+    refs_ = {controllers_, display_, network_, scripts_, about_, reboot_, separator_, advanced_};
     if (sys_ == nullptr)
-        ++refusals_;
+        refusals_.add();
     if (!in.ctx.launches.confirm)
-        ++refusals_;
+        refusals_.add();
 }
 
 PageId HdSettingsPlan::id() const {
@@ -68,9 +69,9 @@ RowCount HdSettingsPlan::pinned() const noexcept {
     return RowCount{1};
 }
 
-std::uint32_t HdSettingsPlan::refusals() const noexcept {
+svc::Tally HdSettingsPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdSettingsPlan);
-    return refusals_ + (sys_ != nullptr ? sys_->refusals() : 0u);
+    return refusals_.sum(sys_ != nullptr ? sys_->refusals() : svc::Tally{});
 }
 
 std::uint32_t HdSettingsPlan::commands_published() const noexcept {
@@ -101,11 +102,11 @@ Transition HdSettingsPlan::ScriptsRow::select() {
 Transition HdSettingsPlan::RebootAction::on_yes() {
     TASTY_SEAT_BODY(RebootAction);
     if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::Reboot{})) {
-        ++plan_.refusals_;
+        plan_.refusals_.add();
     } else {
         ++plan_.published_;
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 }

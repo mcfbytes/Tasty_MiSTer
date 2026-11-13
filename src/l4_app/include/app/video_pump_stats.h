@@ -84,7 +84,8 @@ struct VideoPumpStats {
 
     std::uint32_t spd_sends = 0;
     std::uint32_t spd_disables = 0;
-    std::uint32_t spd_skips_dv = 0;
+    std::uint32_t spd_dv1_sends = 0;
+    svc::Tally spd_dv1_nowidth{};
     std::uint32_t spd_noname = 0;
     std::optional<os::I2cReg> spd_fail_reg{};
 

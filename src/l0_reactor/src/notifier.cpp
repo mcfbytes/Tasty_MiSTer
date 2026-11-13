@@ -66,18 +66,6 @@ Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {
     return Notifier{Kind::Ticker, UniqueFd{fd}, Cause::Tick};
 }
 
-Ex<Notifier> Notifier::frame(int eventfd) {
-
-    if (eventfd < 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EBADF)});
-    }
-    const int fd = ::dup(eventfd);
-    if (fd < 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    return Notifier{Kind::Frame, UniqueFd{fd}, Cause::Frame};
-}
-
 Ex<Notifier> Notifier::test(int eventfd, Cause injected) {
 
     if (eventfd < 0) {
@@ -99,14 +87,6 @@ CauseDecode Notifier::drain_checked() {
             if (n != static_cast<ssize_t>(sizeof expirations))
                 return CauseDecode::idle();
             return CauseDecode::of(Cause::Tick);
-        }
-        case Kind::Frame: {
-
-            std::uint64_t edges = 0;
-            const ssize_t n = read_exact(fd_.get(), &edges, sizeof edges);
-            if (n != static_cast<ssize_t>(sizeof edges))
-                return CauseDecode::idle();
-            return CauseDecode::of(Cause::Frame);
         }
         case Kind::Test: {
             std::uint64_t v = 0;

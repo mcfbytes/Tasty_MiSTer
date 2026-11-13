@@ -100,8 +100,6 @@ inline constexpr Deadzone kDeadzoneDualShock{10};
 inline constexpr Deadzone kDeadzoneDefault{2};
 Deadzone deadzone_class(QuirkId quirk);
 
-bool deadzone_uid_matches(std::string_view uid, const DeviceFacts& dev);
-
 Deadzone deadzone_for(const DeviceFacts& dev, std::span<const DeadzoneRule> cfg);
 
 SysWords default_sys_map();

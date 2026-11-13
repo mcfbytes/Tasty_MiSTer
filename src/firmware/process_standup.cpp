@@ -17,6 +17,10 @@
 #include <utility>
 
 #include "assembly.h"
+#include "memory_policy_outcome.h"
+#include "rt_setup.h"
+#include "stack_extent.h"
+#include "topology_outcome.h"
 #include "wedge_record.h"
 #include "board_parts.h"
 #include "census.h"
@@ -40,6 +44,7 @@
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
 #include "hal/program_geometry.h"
+#include "os/epoll_floor.h"
 #include "os/task_sched.h"
 #include "svc/vfs.h"
 
@@ -285,13 +290,17 @@ ProcessStandup::Exit ProcessStandup::prelude() noexcept {
     if (!policy.verdict) {
         return mode_.refused(
             policy.verdict.error(),
-            {"mlockall(MCL_CURRENT|MCL_FUTURE)", " — arch §6"}
+            {"mlockall(MCL_CURRENT|MCL_FUTURE)", " — T-RT must stay resident in RAM"}
         );
+    }
+
+    if (auto f = os::check_epoll_pwait2(); !f) {
+        return mode_.refused(f.error(), {"epoll_pwait2", " — Linux 5.11 or later required"});
     }
 
     fw::warn_vm_compaction(ev_.vm_compaction, mode_.traits().program, stderr);
 
-    const fw::StackPrefault stack = fw::prefault_current_stack(hal::kFifoStackBytes);
+    const fw::StackPrefault stack = fw::prefault_current_stack(hal::kFifoStackBytes.bytes());
     ev_.main_stack_prefault = stack.outcome;
     ev_.main_stack_prefault_bytes = stack.bytes;
     ev_.stack_rlimit_bytes = stack.rlimit;
@@ -321,14 +330,17 @@ ProcessStandup::Exit ProcessStandup::identify_board() {
             topology.verdict.error(),
             {"the board's thread map names a CPU this board does "
              "not have (sysconf(_SC_NPROCESSORS_ONLN))",
-             " — item"}
+             " — fix the thread map in the board row"}
         );
     }
 
     ev_.main_affinity = fw::pin_current_cpu(board.main_cpu);
 
     if (auto c = fw::verify_census(); !c) {
-        return mode_.refused(c.error(), {"LinkDecoderDecl census drift", " (arch §2)"});
+        return mode_.refused(
+            c.error(),
+            {"LinkDecoderDecl census drift", " — the decoder table is out of step with its spec"}
+        );
     }
 
     {
@@ -432,6 +444,7 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
             .doorbell_nodes = hal::doorbell_nodes(board),
             .video = board.video,
             .kernel = board.kernel,
+            .disk_lamp = parts_->disk_lamp(),
             .threads = board.threads,
             .exec = *exec_,
             .stats = stats,

@@ -45,7 +45,7 @@ IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
     file_size_ = size->v;
     scan = {};
     off_ = 0;
-    line_.clear();
+    lines_.reset();
     in_log_ = false;
     log_done_ = false;
     scan.vsync_ok = ctx.w.video.output_locked();
@@ -62,11 +62,13 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
     std::uint32_t spent = 0;
     while (spent < ReplayPlay::kTickBudget) {
         if (off_ >= file_size_) {
-            if (!line_.empty() || line_.clipped()) {
-                if (const auto r = on_line_(ctx, line_.view(), line_.clipped()))
-                    return Step::refuse(r->why, r->detail);
-                line_.clear();
-            }
+            std::optional<PlayRefusal> refused;
+            const bool go = lines_.finish([&](const cores::MovieLines::Line& l) {
+                refused = on_line_(ctx, l);
+                return !refused;
+            });
+            if (!go)
+                return Step::refuse(refused->why, refused->detail);
             return finish_scan_(ctx);
         }
         const auto got = file_->read_at(off_, buf);
@@ -81,16 +83,16 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
             );
         }
         spent += static_cast<std::uint32_t>(*got);
-        for (std::size_t i = 0; i < *got; ++i) {
-            const char c = static_cast<char>(buf[i]);
-            if (c == '\n') {
-                if (const auto r = on_line_(ctx, line_.view(), line_.clipped()))
-                    return Step::refuse(r->why, r->detail);
-                line_.clear();
-                continue;
+        std::optional<PlayRefusal> refused;
+        const bool go = lines_.feed(
+            std::span<const std::byte>(buf.data(), *got),
+            [&](const cores::MovieLines::Line& l) {
+                refused = on_line_(ctx, l);
+                return !refused;
             }
-            (void)line_.append(std::string_view{&c, 1});
-        }
+        );
+        if (!go)
+            return Step::refuse(refused->why, refused->detail);
         off_ += *got;
     }
     return Step::stay();
@@ -98,31 +100,27 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
 
 std::optional<PlayRefusal> ScanStage::on_line_(
     Ctx ctx,
-    std::string_view line,
-    bool clipped
+    const cores::MovieLines::Line& line
 ) noexcept {
-    if (!line.empty() && line.back() == '\r')
-        line.remove_suffix(1);
-    if (line.empty() && !clipped)
+    if (line.text.empty() && !line.clipped)
         return std::nullopt;
-    if (in_log_ && (log_done_ || ctx.request.codec->format().ends_log(line))) {
+    if (in_log_ && (log_done_ || ctx.request.codec->format().ends_log(line.text))) {
         log_done_ = true;
         return std::nullopt;
     }
-    return scan_line_(ctx, line, clipped);
+    return scan_line_(ctx, line);
 }
 
 std::optional<PlayRefusal> ScanStage::scan_line_(
     Ctx ctx,
-    std::string_view line,
-    bool clipped
+    const cores::MovieLines::Line& line
 ) noexcept {
     using CR = cores::MovieRefusal;
     const ReplayPlay::Request& req = ctx.request;
     ReplayPlay::ScannedMovie& scan = ctx.scan;
     if (!in_log_) {
-        if (!req.codec->format().starts_log(line)) {
-            const auto f = req.codec->format().header_line(line, scan.facts);
+        if (!req.codec->format().starts_log(line.text)) {
+            const auto f = req.codec->format().header_line(line.text, scan.facts);
             if (!f)
                 return PlayRefusal{Refusal::Movie, f.error().detail};
             scan.facts = *f;
@@ -132,9 +130,9 @@ std::optional<PlayRefusal> ScanStage::scan_line_(
             return PlayRefusal{Refusal::Movie, e.error().detail};
         in_log_ = true;
     }
-    if (clipped)
+    if (line.clipped)
         return PlayRefusal{Refusal::Movie, static_cast<std::uint32_t>(CR::BadLine)};
-    const auto fr = req.codec->format().frame(line, scan.facts);
+    const auto fr = req.codec->format().frame(line.text, scan.facts);
     if (!fr)
         return PlayRefusal{Refusal::Movie, fr.error().detail};
 

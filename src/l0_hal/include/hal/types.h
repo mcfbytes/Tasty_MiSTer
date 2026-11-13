@@ -5,10 +5,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 #include "infra/decimal_text.h"
 #include "infra/json_out.h"
 #include "os/types.h"
+
+namespace mister::os {
+struct MapLength;
+}
 
 namespace mister::hal {
 
@@ -19,6 +24,10 @@ struct SpiWord {
         return SpiWord{static_cast<std::uint16_t>(
             v | (static_cast<std::uint16_t>(byte) << std::numeric_limits<std::uint8_t>::digits)
         )};
+    }
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
     }
 
     friend constexpr bool operator==(SpiWord, SpiWord) = default;
@@ -119,21 +128,45 @@ private:
 
 static_assert(sizeof(GpiWord) == 4);
 
+struct LwOffset;
+
+struct LwExtent {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] static std::optional<LwExtent> of_length(os::MapLength len) noexcept;
+
+    template <class Layout>
+    [[nodiscard]] static constexpr LwExtent of_layout() noexcept {
+        static_assert(Layout::kSize <= 0xFFFFFFFFull, "a layout larger than the 32-bit LW space");
+        return LwExtent{static_cast<std::uint32_t>(Layout::kSize)};
+    }
+
+    [[nodiscard]] os::MapLength map_length() const noexcept;
+
+    [[nodiscard]] constexpr bool covers(LwExtent want) const noexcept { return v >= want.v; }
+
+    [[nodiscard]] constexpr bool contains(LwOffset rel) const noexcept;
+
+    [[nodiscard]] constexpr LwOffset from_origin() const noexcept;
+    friend constexpr bool operator==(LwExtent, LwExtent) = default;
+    friend constexpr auto operator<=>(LwExtent, LwExtent) = default;
+};
+
 struct LwOffset {
     static constexpr std::uint32_t kDword = 4;
 
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr LwOffset plus(std::uint32_t bytes) const noexcept {
-        return LwOffset{v + bytes};
+    [[nodiscard]] constexpr LwOffset plus(LwOffset rel) const noexcept {
+        return LwOffset{v + rel.v};
     }
 
     [[nodiscard]] constexpr bool dword_aligned() const noexcept {
         return (v & (kDword - 1u)) == 0u;
     }
 
-    [[nodiscard]] constexpr bool fits(std::size_t window_len, std::size_t want) const noexcept {
-        return want != 0 && want <= window_len && static_cast<std::size_t>(v) <= window_len - want;
+    [[nodiscard]] constexpr bool fits(LwExtent window, LwExtent want) const noexcept {
+        return want.v != 0 && want.v <= window.v && v <= window.v - want.v;
     }
 
     [[nodiscard]] constexpr std::size_t dword_index() const noexcept { return v / kDword; }
@@ -142,9 +175,25 @@ struct LwOffset {
         return v - from.v;
     }
 
+    [[nodiscard]] constexpr LwOffset relative_to(LwOffset origin) const noexcept {
+        return LwOffset{v - origin.v};
+    }
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
     friend constexpr bool operator==(LwOffset, LwOffset) = default;
     friend constexpr auto operator<=>(LwOffset, LwOffset) = default;
 };
+
+constexpr bool LwExtent::contains(LwOffset rel) const noexcept {
+    return rel.v < v;
+}
+
+constexpr LwOffset LwExtent::from_origin() const noexcept {
+    return LwOffset{v};
+}
 
 struct FabricAddr {
     std::uint32_t v = 0;
@@ -181,6 +230,11 @@ struct FrameSeq {
     std::uint32_t v = 0;
 
     [[nodiscard]] constexpr FrameSeq next() const noexcept { return FrameSeq{v + 1u}; }
+
+    [[nodiscard]] constexpr std::uint32_t word() const noexcept {
+        const std::uint32_t w = v;
+        return w;
+    }
 
     friend constexpr bool operator==(FrameSeq, FrameSeq) = default;
     friend constexpr auto operator<=>(FrameSeq, FrameSeq) = default;

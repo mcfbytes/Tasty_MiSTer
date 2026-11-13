@@ -31,6 +31,4 @@ inline constexpr std::size_t kDiskMagicProbeBytes = 64;
     std::span<const std::byte> head
 ) noexcept;
 
-[[nodiscard]] std::string_view disk_path_extension(std::string_view path) noexcept;
-
 }

@@ -8,6 +8,7 @@
 #include "app/percent.h"
 #include "app/rec_options.h"
 #include "app/scale_governor.h"
+#include "app/segment_index.h"
 #include "app/step_count.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
@@ -26,7 +27,7 @@ struct EncodeStatus {
         Percent budget_pct{};
         std::uint32_t me_cut = 0;
         std::uint32_t arena_kib = 0;
-        std::uint16_t segment = 0;
+        SegmentIndex segment{};
 
         std::optional<PictureScale> scale{};
         StepCount steps{};

@@ -5,14 +5,16 @@
 #include <span>
 #include <string_view>
 
+#include "app/core_input_facts.h"
 #include "app/device_table_loans.h"
-#include "app/input_wire.h"
 #include "hal/boards_table.h"
 #include "svc/input_enumerator.h"
+#include "svc/types.h"
 #include "svc/vfs.h"
 #include "infra/counter.h"
 #include "infra/polled.h"
 #include "infra/seat.h"
+#include "infra/wake_flag.h"
 
 namespace mister::app {
 
@@ -26,13 +28,17 @@ public:
         std::uint32_t enumerate_failures = 0;
         std::uint32_t devices = 0;
         std::uint32_t rejected = 0;
+        svc::Tally rebuilds_done{};
+        svc::Tally rebuilds_refused{};
     };
 
-    InputBuild(
-        const svc::Vfs& vfs,
-        InputWire& wire,
-        std::string_view input_dir = svc::kDefaultInputDir
-    );
+    struct Ends {
+        const CoreInputCell& facts;
+        const xthread::WakeFlag& hotplug;
+        xthread::WakeFlag::Kicker input_ctrl;
+    };
+
+    InputBuild(const svc::Vfs& vfs, Ends ends, std::string_view input_dir = svc::kDefaultInputDir);
     InputBuild(const InputBuild&) = delete;
     InputBuild& operator=(const InputBuild&) = delete;
 
@@ -51,12 +57,16 @@ public:
 private:
     void hand_over_(DeviceTableLoans::Loan loan);
 
-    InputWire& wire_;
+    Ends ends_;
+    xthread::WakeFlag::Cursor hotplug_seen_{};
     svc::InputEnumerator en_;
     DeviceTableLoans tables_{xthread::Polled{}, xthread::Polled{}};
     DeviceTableLoans::Owner tx_{tables_.owner()};
 
     xthread::Counter n_enum_fail_{};
+
+    svc::Tally rebuilds_done_{};
+    svc::Tally rebuilds_refused_{};
 };
 
 static_assert(
@@ -65,7 +75,7 @@ static_assert(
     }),
     "this lane runs opendir(3) over /dev/input, up to kMaxDevices open(2) "
     "calls, EVIOCG* ioctls and the map-file reads behind load_maps_for: on a "
-    "SCHED_FIFO row that is a directory scan on the RT partition (arch §2), "
+    "SCHED_FIFO row that is a directory scan on the RT partition, "
     "which is why enumeration never moves onto the decode lane."
 );
 static_assert(

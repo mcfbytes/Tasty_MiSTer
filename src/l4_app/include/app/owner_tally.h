@@ -5,6 +5,7 @@
 
 #include "infra/counter.h"
 #include "infra/seat.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -62,6 +63,8 @@ struct OwnerTally {
 
     xthread::Counter ini_write_failures{};
 
+    xthread::Counter ini_switch_absent{};
+
     std::uint32_t memsz_unmeasured = 0;
 
     std::uint32_t sdram_write_failures = 0;
@@ -72,6 +75,8 @@ struct OwnerTally {
     std::uint32_t identity_intern_refusals = 0;
 
     std::uint32_t doorbell_intern_refusals = 0;
+
+    svc::Tally uart_intern_refusals{};
 
     std::uint32_t ladders_run = 0;
     std::uint32_t ladder_failures = 0;

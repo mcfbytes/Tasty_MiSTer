@@ -13,7 +13,7 @@ namespace mister::app {
 struct Mgl final {
     FixedStr<kPathMax, StrFit::Clip> rbf{};
     FixedStr<kPathMax, StrFit::Clip> path{};
-    MglItem::Slot slot = MglItem::Slot::File;
+    proto::FileRowKind slot = proto::FileRowKind::File;
     proto::FileSlotDigit index{};
     DelaySeconds delay_s{};
 

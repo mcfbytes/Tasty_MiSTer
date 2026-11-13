@@ -9,13 +9,12 @@
 #include <cerrno>
 #include <cstring>
 
+#include "infra/path_parts.h"
 #include "infra/persist.h"
 
 #include "app/process_integration.h"
-#include "ui/bt_ops.h"
 #include "ui/script_launch.h"
-#include "ui/script_policy.h"
-#include "ui/shell_bt_ops.h"
+#include "ui/script_request.h"
 
 namespace mister::ui {
 
@@ -41,41 +40,22 @@ ScriptRunner::~ScriptRunner() {
         narrow_affinity();
 }
 
-Ex<bool> ShellBtOps::adapter_up() {
-    TASTY_SEAT_BODY(ShellBtOps);
-    return app::proc::bt_adapter_up();
-}
-
-Ex<void> ShellBtOps::reset_adapter() {
-    TASTY_SEAT_BODY(ShellBtOps);
-    return app::proc::hciconfig_reset();
-}
-
-Ex<void> ShellBtOps::renew_pairings() {
-    TASTY_SEAT_BODY(ShellBtOps);
-
-    return app::proc::bluetoothd_renew();
-}
-
-Ex<void> ScriptRunner::start(const ScriptRequest& req, infra::OptRef<IBtOps> bt) {
+Ex<void> ScriptRunner::start(const ScriptRequest& req) {
     if (child_) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
-    const IScriptPolicy& policy = script_policy_for(req.kind());
     finished_ = false;
     count_ = 0;
     for (auto& s : ring_)
         s.clear();
 
-    auto spawn = policy.resolve(req);
-    if (!spawn)
-        return std::unexpected(spawn.error());
-    const std::string cmd = static_cast<std::string&&>(spawn->cmd);
-    title_ = static_cast<std::string&&>(spawn->title);
+    const std::string_view argv0 = req.argv0();
+    if (argv0.empty())
+        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    const std::string cmd{argv0};
+    title_ = std::string(infra::basename(argv0));
 
     widen_affinity();
-
-    policy.before_spawn(req, bt);
 
     std::FILE* p = ::popen(cmd.c_str(), "r");
     if (p == nullptr) {
@@ -88,7 +68,7 @@ Ex<void> ScriptRunner::start(const ScriptRequest& req, infra::OptRef<IBtOps> bt)
         (void)::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     }
 
-    child_.emplace(Child{&policy, p});
+    child_.emplace(Child{p});
     return {};
 }
 
@@ -118,7 +98,8 @@ Ex<void> ScriptRunner::cancel() {
     if (!child_ || finished_)
         return {};
 
-    child_->policy->stop(title_);
+    if (!title_.empty())
+        (void)app::proc::killall(title_.c_str());
 
     close_detached();
     narrow_affinity();

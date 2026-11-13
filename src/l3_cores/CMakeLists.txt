@@ -18,6 +18,7 @@ set(TASTY_CORES_TASTY
   src/disc_save_migration.cpp
   src/wav_data.cpp
   src/psx_core.cpp
+  src/psx_disc_rules.cpp
   src/psx_sector_map.cpp
   src/psx_sector_program.cpp
   src/addressed_load.cpp
@@ -26,13 +27,18 @@ set(TASTY_CORES_TASTY
   src/mailbox_carriage.cpp
   src/snes_rom.cpp
   src/msu_machine.cpp
+  src/sector_read_ahead.cpp
   src/msu_companion.cpp
   src/msu_data_loader.cpp
   src/servant_id.cpp
   src/disk_servant.cpp
   src/movie_archive.cpp
   src/json_flatten.cpp
+  src/bk2_log.cpp
+  src/bk2_text.cpp
   src/movie_codec.cpp
+  src/movie_lines.cpp
+  src/movie_rom_match.cpp
   src/movie_system.cpp
   src/nes_movie_codec.cpp
   src/nes_bk2_codec.cpp
@@ -43,6 +49,7 @@ set(TASTY_CORES_TASTY
   src/snes_bk2_codec.cpp
   src/megadrive_movie_codec.cpp
   src/psx_movie_codec.cpp
+  src/psx_disc_key.cpp
   src/manifests/megadrive.cpp
   src/manifests/psx.cpp
   src/manifests/snes.cpp
@@ -86,6 +93,9 @@ set(TASTY_CORES_EXTRA
   src/n64_detect.cpp
   src/n64_load_facts.cpp
   src/n64_loader.cpp
+  src/n64_rom_pass.cpp
+  src/n64_ipl_pass.cpp
+  src/n64_disk_pass.cpp
   src/n64_save_store.cpp
   src/n64_saves.cpp
   src/word_reverse.cpp
@@ -102,6 +112,7 @@ set(TASTY_CORES_EXTRA
   src/rom_bytes.cpp
   src/cdi_core.cpp
   src/cdi_block.cpp
+  src/cdi_disc_rules.cpp
   src/romsets.cpp
   src/st_config.cpp
   src/st_core.cpp
@@ -110,6 +121,7 @@ set(TASTY_CORES_EXTRA
   src/threedo_cdd_engine.cpp
   src/saturn_cdd_engine.cpp
   src/uef.cpp
+  src/uef_loader.cpp
   src/manifests/electron.cpp
   src/manifests/megacd.cpp
   src/manifests/n64.cpp
@@ -163,8 +175,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/manifest_doc_role.h
   cores/assembled_rom.h
   cores/fill_run.h
-  cores/blank_region.h
-  cores/blank_save_spec.h
   cores/boot_asset.h
   cores/boot_ladder.h
   cores/button_override.h
@@ -194,6 +204,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/ladder_context.h
   cores/ladder_host.h
   cores/mount_status.h
+  cores/mount_answer.h
   cores/mount_state.h
   cores/save_extent.h
   cores/save_copy_level.h
@@ -309,6 +320,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/neo_quirk.h
   cores/neogeo_alias_source.h
   cores/neogeo_loader.h
+  cores/neogeo_walk_tally.h
   cores/neogeo_core.h
   cores/neo_transform.h
   cores/fix_shape.h
@@ -337,10 +349,12 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/pcm_source.h
   cores/pcm_wire_rows.h
   cores/psx_core.h
+  cores/psx_disc_rules.h
   cores/psx_sector_map.h
   cores/psx_sector_program.h
   cores/cdi_core.h
   cores/cdi_block.h
+  cores/cdi_disc_rules.h
   cores/toc_entry.h
   cores/rom.h
   cores/saturn_cue.h
@@ -385,6 +399,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/snes_rom.h
   cores/msu_wire.h
   cores/msu_machine.h
+  cores/sector_read_ahead.h
   cores/msu_companion.h
   cores/msu_data_loader.h
   cores/mailbox_port.h
@@ -395,6 +410,10 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/companion_ask.h
   cores/companion_plan.h
   cores/companion_load.h
+  cores/bk2_column.h
+  cores/bk2_columns.h
+  cores/bk2_log.h
+  cores/bk2_text.h
   cores/movie_archive.h
   cores/movie_codec.h
   cores/i_movie_format.h
@@ -402,6 +421,9 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/movie_command_mask.h
   cores/movie_facts.h
   cores/movie_frame.h
+  cores/movie_frame_tally.h
+  cores/movie_lines.h
+  cores/movie_rom_match.h
   cores/movie_region.h
   cores/movie_refusal.h
   cores/movie_rerecord_count.h
@@ -420,6 +442,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/megadrive_gmv_format.h
   cores/psx_movie_codec.h
   cores/psx_bk2_format.h
+  cores/psx_disc_key.h
   cores/st_config.h
   cores/st_config_layout.h
   cores/st_core.h
@@ -432,9 +455,12 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/staging_policy.h
   cores/switch_table.h
   cores/threedo_cdd_engine.h
+  cores/poll_ticks.h
   cores/types.h
   cores/progress.h
   cores/uef.h
+  cores/uef_loader.h
+  cores/uef_tape_file.h
   cores/wav_data.h
   cores/manifests/electron.h
   cores/manifests/megacd.h

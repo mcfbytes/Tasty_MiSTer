@@ -8,6 +8,7 @@
 #include "app/tier_set.h"
 #include "infra/seat.h"
 #include "ui/hd_row.h"
+#include "ui/page_arg.h"
 #include "ui/page_id.h"
 #include "ui/types.h"
 
@@ -20,7 +21,7 @@ public:
     struct Spec {
         std::string_view label;
         PageId page = PageId::None;
-        ItemId focus = kNoItem;
+        PageArg arg{};
         app::RowTier tier = app::RowTier::Place;
         app::PageDescription::RowIcon icon = app::PageDescription::RowIcon::None;
     };

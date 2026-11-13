@@ -4,9 +4,11 @@
 #include <cstdint>
 
 #include "app/event.h"
+#include "app/raw_key_edge.h"
 #include "app/uart_mode.h"
 #include "app/uart_performer.h"
 #include "app/verdict_sinks.h"
+#include "ui_link_fan.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
@@ -19,7 +21,6 @@
 #include "hal/thread_map.h"
 
 namespace mister::app {
-class BtPump;
 class CmdFifo;
 class IEventSink;
 class IOwnerTick;
@@ -48,6 +49,16 @@ class UiMain final : public xthread::SeatMain<UiMain> {
 public:
     static constexpr SeatTag kSeat = SeatTag::Ui;
 
+    struct KeyBudget {
+        std::uint16_t v = 0;
+
+        [[nodiscard]] constexpr bool spent(unsigned taken) const noexcept { return taken >= v; }
+
+        friend constexpr bool operator==(KeyBudget, KeyBudget) = default;
+    };
+
+    static constexpr KeyBudget kKeyDrainBudget{16};
+
     struct Wires {
         xthread::WakeFlag& wake;
         infra::OptRef<app::UartModeController::Handoffs> uart_handoffs;
@@ -59,12 +70,13 @@ public:
         app::VideoPump& video;
         app::IEventSink& ui_sink;
         app::EventQueue<SeatTag::Main>& owner_events;
-        infra::OptRef<app::BtPump> bt{};
         app::ScreenshotPump& shots;
         app::ReplayFeeder& replay;
         app::RecorderControl& recorder;
         infra::OptRef<app::LauncherScreen> launcher_screen{};
         infra::OptRef<app::IUiRoundPort> ui_round{};
+
+        infra::OptRef<app::MenuKeyInbox> menu_keys{};
         app::LinkRxChannel<SeatTag::Ui>& link_rx;
 
         infra::OptRef<app::SaveStateAttach> save_states{};
@@ -120,7 +132,7 @@ public:
     [[nodiscard]] std::uint32_t paused_link_drops() const noexcept { return paused_link_drops_; }
 
     [[nodiscard]] std::uint32_t roundless_link_drops() const noexcept {
-        return roundless_link_drops_;
+        return fan_.roundless_drops();
     }
 
 private:
@@ -131,7 +143,6 @@ private:
     const infra::OptRef<app::CmdFifo> fifo_;
     const infra::OptRef<app::MglPump> mgl_;
     app::VideoPump& video_;
-    const infra::OptRef<app::BtPump> bt_;
     app::ScreenshotPump& shots_;
     app::ReplayFeeder& replay_;
     app::RecorderControl& recorder_;
@@ -139,6 +150,8 @@ private:
     app::UartPerformer uart_performer_{};
     app::IEventSink& ui_sink_;
     const infra::OptRef<app::IUiRoundPort> ui_round_;
+    const infra::OptRef<app::MenuKeyInbox> menu_keys_;
+    UiLinkFan fan_;
     infra::OptRef<app::IOwnerTick> owner_tick_{};
     const infra::OptRef<app::LwOsdEndpoint> lw_osd_;
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
@@ -150,7 +163,6 @@ private:
     xthread::PauseLatch pause_;
     xthread::PauseLatch::Observer pause_seen_{};
     std::uint32_t paused_link_drops_ = 0;
-    std::uint32_t roundless_link_drops_ = 0;
 
     const infra::OptRef<app::UartModeController::Handoffs> uart_handoffs_;
     xthread::SeatPark park_;

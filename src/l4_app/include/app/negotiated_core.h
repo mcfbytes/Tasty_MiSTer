@@ -46,8 +46,6 @@ namespace mister::app {
 
 inline constexpr proto::FileSize kManifestDocMax{16u << 20};
 
-inline constexpr std::size_t kCoreCfgBytes = 16;
-
 class NegotiatedCore final {
     TASTY_SEAT_RESIDENT(Main);
 

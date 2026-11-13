@@ -35,7 +35,6 @@ public:
         RecorderControl& rec;
         UiRequestRing& ui_requests;
         xthread::RtStats& stats;
-        LinkTxChannel<SeatTag::Ui>& link_tx;
     };
 
     explicit CmdRouter(Wiring wiring) noexcept
@@ -46,8 +45,7 @@ public:
           replay_(wiring.replay),
           rec_(wiring.rec),
           ui_requests_(wiring.ui_requests),
-          stats_(wiring.stats),
-          link_tx_(wiring.link_tx) {}
+          stats_(wiring.stats) {}
 
     bool on(const CmdVerb::LoadCore& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
@@ -88,22 +86,26 @@ public:
 
     bool on(const CmdVerb::VolumeMute& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return push_volume(proto::LinkOp::SetMute{.on = v.on});
+        video_.audio().set_mute(v.on);
+        return true;
     }
 
     bool on(const CmdVerb::VolumeAttenuation& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return push_volume(proto::LinkOp::SetAttenuation{.attenuation = v.attenuation});
+        video_.audio().set_attenuation(v.attenuation);
+        return true;
     }
 
     bool on(const CmdVerb::VolumeNudge& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return push_volume(proto::LinkOp::NudgeVolume{.step = v.step});
+        video_.audio().nudge(v.step);
+        return true;
     }
 
     bool on(const CmdVerb::VolumeToggle&) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return push_volume(proto::LinkOp::ToggleMute{});
+        video_.audio().toggle_mute();
+        return true;
     }
 
     bool on(const CmdVerb::RtStats&) noexcept override {
@@ -142,19 +144,9 @@ public:
         return rec_.take_disarm();
     }
 
-    [[nodiscard]] std::uint32_t volume_drops() const noexcept { return volume_drops_; }
-
     [[nodiscard]] std::uint32_t load_core_drops() const noexcept { return load_core_drops_; }
 
 private:
-    template <class A>
-        requires infra::AlternativeOf<A, proto::LinkOp>
-    bool push_volume(const A& act) noexcept {
-        if (!link_tx_.push(act))
-            ++volume_drops_;
-        return true;
-    }
-
     infra::OptRef<MglPump> mgl_{};
     VideoPump& video_;
     infra::OptRef<HpsFramebuffer> fb_{};
@@ -163,8 +155,6 @@ private:
     RecorderControl& rec_;
     UiRequestRing& ui_requests_;
     xthread::RtStats& stats_;
-    LinkTxChannel<SeatTag::Ui>& link_tx_;
-    std::uint32_t volume_drops_ = 0;
     std::uint32_t load_core_drops_ = 0;
 };
 

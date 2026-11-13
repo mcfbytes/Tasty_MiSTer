@@ -11,29 +11,29 @@
     "\"ring_drops\":[%u,%u,%u,%u],\"spin_timeouts\":%u,\"spur\":%u," \
     "\"ev_depth\":%u,\"ev_lost\":%u,\"ev_lost_edge\":%u," \
     "\"fifo\":{\"reads\":%u,\"lines\":%u,\"unrouted\":%u,\"unrec\":%u}," \
-    "\"ladder\":{\"live\":%u,\"pc\":%u,\"rungs\":%u,\"bytes\":%s," \
+    "\"ladder\":{\"live\":%u,\"pc\":%s,\"rungs\":%u,\"bytes\":%s," \
     "\"assets\":%u,\"bios\":%u,\"disc\":%u,\"save\":%u}," \
     "\"video\":{\"edges\":%u,\"staged\":%u,\"emitted\":%u,\"arm\":%u," \
     "\"refused\":%u,\"rf_bits\":%u,\"mode\":%u,\"fpix\":%u," \
-    "\"fb\":{\"ack\":%u,\"en\":%u},\"vi\":%u,\"res\":%u," \
+    "\"fb\":{\"ack\":%s,\"en\":%u},\"vi\":%u,\"res\":%u," \
     "\"w\":%u,\"h\":%u," \
     "\"geo\":{\"s\":%u,\"c\":%u,\"r\":%u,\"e\":%u,\"l\":%u," \
     "\"g\":%u,\"t\":%u}," \
     "\"pre\":{\"a\":%u,\"d\":%u,\"ch\":%u,\"cw\":%u,\"pk\":%u," \
-    "\"bt\":%u,\"er\":%u,\"ff\":%u," \
-    "\"hi\":%u,\"gc\":%u,\"af\":%u,\"ak\":%u,\"tf\":%u,\"st\":%u}," \
+    "\"bt\":%u,\"er\":%u,\"ff\":%s," \
+    "\"hi\":%s,\"gc\":%s,\"af\":%s,\"ak\":%u,\"tf\":%s,\"st\":%u}," \
     "\"i2c\":{\"o\":\"%s\",\"bus\":%u,\"w\":%u,\"e\":%u,\"reg\":%u," \
     "\"fo\":%u,\"fr\":%u,\"fe\":%u,\"le\":%u,\"ve\":%u,\"pe\":%u," \
     "\"rp\":%u,\"tr\":%u,\"bk\":%u}," \
     "\"spd\":{\"s\":%u,\"dis\":%u,\"dv\":%u,\"nn\":%u,\"reg\":%u}}," \
-    "\"input\":{\"rounds\":%u,\"evts\":%u,\"keys\":%u,\"kdrop\":%u," \
-    "\"sweep\":%u,\"rel\":%u,\"mouse\":%u,\"kick\":%u," \
-    "\"reb\":%u,\"rref\":%u,\"evict\":%u,\"efail\":%u," \
+    "\"input\":{\"rounds\":%u,\"evts\":%u,\"keys\":%u,\"kdrop\":%s," \
+    "\"sweep\":%s,\"rel\":%s,\"mouse\":%u,\"kick\":%u," \
+    "\"reb\":%s,\"rref\":%s,\"evict\":%u,\"efail\":%u," \
     "\"rterr\":%u,\"dev\":%u,\"fds\":%u,\"map\":%u,\"slot\":%u," \
     "\"gate\":%u,\"mchg\":%u,\"jmax\":%u,\"jp\":%u,\"aedge\":%u," \
-    "\"mrem\":%u,\"kovf\":%u,\"uik\":%u,\"uikd\":%u," \
+    "\"mrem\":%u,\"kovf\":%u,\"uik\":%s,\"uikd\":%s," \
     "\"qdrop\":%u,\"rej\":%u," \
-    "\"btn\":%u,\"btnq\":%u," \
+    "\"btn\":%u,\"btnq\":%s," \
     "\"pl\":{\"live\":%s,\"gh\":%u," \
     "\"k\":[%s,%s,%s,%s,%s,%s]}}," \
     "\"mgl\":{\"fi\":%u,\"ab\":%u,\"arm\":%u,\"pub\":%u,\"r0\":%u}," \
@@ -65,7 +65,7 @@
     "\"sub\":%u,\"ssub\":%u,\"nores\":%u,\"dus\":%u,\"ev\":%u," \
     "\"bsy\":%u,\"eab\":%u}," \
     "\"ui\":{\"depth\":%u,\"top\":%u,\"vis\":%u,\"cellref\":%u," \
-    "\"pageref\":%u,\"bev\":%u,\"bedge\":%u,\"blng\":%u,\"bcls\":%u," \
+    "\"pageref\":%s,\"bev\":%u,\"bedge\":%u,\"blng\":%u,\"bcls\":%u," \
     "\"binj\":%u,\"bcrs\":%u,\"bhold\":%u}," \
     "\"frame\":{\"seq\":%u}," \
     "\"shot\":{\"drops\":%u,\"rdrops\":%u,\"ok\":%u,\"fail\":%u," \
@@ -86,6 +86,10 @@ inline constexpr const char* kRtstatsReasonWorstCase = "alarm";
 
 inline constexpr const char* kFileSizeWorstCase = "18446744073709551615";
 
+inline constexpr const char* kReplyWordWorstCase = "65535";
+
+inline constexpr const char* kTallyWorstCase = "4294967295";
+
 }
 
 #define TASTY_RTSTATS_WORST_ARGS \
@@ -95,48 +99,50 @@ inline constexpr const char* kFileSizeWorstCase = "18446744073709551615";
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, 256u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U8_MAX, "255", TASTY_RTSTATS_U32_MAX, \
         ::mister::fw::kFileSizeWorstCase, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_BOOL_MAX, \
         TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, 511u, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_BOOL_MAX, \
+        ::mister::fw::kReplyWordWorstCase, TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_BOOL_MAX, \
         TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U16_MAX, \
-        TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U16_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U8_MAX, "configured", \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, ::mister::fw::kReplyWordWorstCase, \
+        ::mister::fw::kReplyWordWorstCase, ::mister::fw::kReplyWordWorstCase, \
+        ::mister::fw::kReplyWordWorstCase, TASTY_RTSTATS_U32_MAX, \
+        ::mister::fw::kReplyWordWorstCase, TASTY_RTSTATS_U8_MAX, "configured", \
         TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U8_MAX, \
         TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U16_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U8_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        ::mister::fw::kTallyWorstCase, ::mister::fw::kTallyWorstCase, \
+        ::mister::fw::kTallyWorstCase, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        ::mister::fw::kTallyWorstCase, ::mister::fw::kTallyWorstCase, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U32_MAX, ::mister::fw::kTallyWorstCase, ::mister::fw::kTallyWorstCase, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        ::mister::fw::kTallyWorstCase, "63", 6u, "4294967295", "4294967295", "4294967295", \
+        "4294967295", "4294967295", "4294967295", TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, "63", 6u, \
-        "4294967295", "4294967295", "4294967295", "4294967295", "4294967295", "4294967295", \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        ::mister::fw::kFileSizeWorstCase, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U32_MAX, ::mister::fw::kFileSizeWorstCase, TASTY_RTSTATS_U16_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U16_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_BOOL_MAX, \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_BOOL_MAX, \
         static_cast<unsigned long long>(::mister::fw::kRtEvidenceAllApplied), \
         (1u << ::mister::hal::kThreadSeats) - 1u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
@@ -154,7 +160,7 @@ inline constexpr const char* kFileSizeWorstCase = "18446744073709551615";
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, 41u, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U32_MAX, ::mister::fw::kTallyWorstCase, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \

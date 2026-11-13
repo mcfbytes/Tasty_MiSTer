@@ -40,7 +40,8 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/parse_int.h
   infra/path_parts.h
   infra/path_text.h
-  infra/lease_order.h
+  infra/grant_gen.h
+  infra/grant_lease.h
   infra/pause_latch.h
   infra/persist.h
   infra/pool_slot.h
@@ -50,6 +51,8 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/service_slot.h
   infra/seat.h
   infra/seat_main.h
+  infra/seat_owner_diag.h
+  infra/seat_owner_encode.h
   infra/seat_owner_io.h
   infra/seat_owner_main.h
   infra/seat_owner_ui.h
@@ -63,6 +66,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/telemetry.h
   infra/unique_fd.h
   infra/utf8.h
+  infra/coalesced_kick.h
   infra/kick_policy.h
   infra/wake_flag.h
   infra/wired_end.h

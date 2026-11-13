@@ -32,6 +32,8 @@ struct CoreFactory {
 
     MakeLoader make_loader = nullptr;
 
+    bool derives_content = false;
+
     MakeCompanion make_companion = nullptr;
 
     infra::OptRef<const IManifestDocRole> manifest_doc{};

@@ -2,67 +2,53 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
-#include "proto/status_edit.h"
-#include "proto/status_word.h"
-#include "proto/types.h"
+#include "proto/bit_field.h"
 
 namespace mister::cores::n64 {
 
-struct StatusField {
-    std::uint8_t lo = 0;
-    std::uint8_t width = 1;
+enum class PadPort : std::uint8_t { P1, P2, P3, P4 };
 
-    [[nodiscard]] constexpr std::uint8_t hi() const noexcept {
-        return static_cast<std::uint8_t>(lo + width - 1);
-    }
+[[nodiscard]] constexpr std::size_t port_index(PadPort p) noexcept {
+    return static_cast<std::size_t>(p);
+}
 
-    template <typename Bits>
-    [[nodiscard]] constexpr proto::FieldValue read(const Bits& bits) const noexcept {
-        std::uint32_t v = 0;
-        for (std::uint8_t i = 0; i < width; ++i) {
-            if (bits.get_bit(proto::StatusBit{static_cast<std::uint8_t>(lo + i)}))
-                v |= 1u << i;
-        }
-        return proto::FieldValue{v};
-    }
-
-    [[nodiscard]] constexpr proto::FieldValue all() const noexcept {
-        return proto::FieldValue{(1u << width) - 1u};
-    }
-
-    [[nodiscard]] constexpr proto::StatusWord written(
-        proto::StatusWord w,
-        proto::FieldValue v
-    ) const noexcept {
-        return proto::StatusEdit::field(proto::StatusBit{lo}, width, v).over(w);
-    }
-};
+inline constexpr std::array<PadPort, 4>
+    kPadPorts{PadPort::P1, PadPort::P2, PadPort::P3, PadPort::P4};
 
 namespace opt {
 
-inline constexpr StatusField kReset{0, 1};
-inline constexpr StatusField kReloadSave{40, 1};
-inline constexpr StatusField kSaveBackup{41, 1};
-inline constexpr StatusField kAutosave{42, 1};
-inline constexpr StatusField kAutoDetect{64, 1};
-inline constexpr StatusField kCicType{65, 4};
-inline constexpr StatusField kNoEpak{70, 1};
-inline constexpr StatusField kCpak{71, 1};
-inline constexpr StatusField kRpak{72, 1};
-inline constexpr StatusField kTpak{73, 1};
-inline constexpr StatusField kRtc{74, 1};
-inline constexpr StatusField kSaveType{75, 3};
-inline constexpr StatusField kSysType{79, 2};
-inline constexpr StatusField kAutoPak{81, 1};
-inline constexpr StatusField kPatches{90, 1};
-inline constexpr StatusField kCheats{103, 1};
-inline constexpr StatusField kDdDevelopment{107, 1};
+inline constexpr proto::BitField kReset{proto::StatusBit{0}, 1};
+inline constexpr proto::BitField kReloadSave{proto::StatusBit{40}, 1};
+inline constexpr proto::BitField kSaveBackup{proto::StatusBit{41}, 1};
+inline constexpr proto::BitField kAutosave{proto::StatusBit{42}, 1};
+inline constexpr proto::BitField kAutoDetect{proto::StatusBit{64}, 1};
+inline constexpr proto::BitField kCicType{proto::StatusBit{65}, 4};
+inline constexpr proto::BitField kNoEpak{proto::StatusBit{70}, 1};
+inline constexpr proto::BitField kCpak{proto::StatusBit{71}, 1};
+inline constexpr proto::BitField kRpak{proto::StatusBit{72}, 1};
+inline constexpr proto::BitField kTpak{proto::StatusBit{73}, 1};
+inline constexpr proto::BitField kRtc{proto::StatusBit{74}, 1};
+inline constexpr proto::BitField kSaveType{proto::StatusBit{75}, 3};
+inline constexpr proto::BitField kSysType{proto::StatusBit{79}, 2};
+inline constexpr proto::BitField kAutoPak{proto::StatusBit{81}, 1};
+inline constexpr proto::BitField kPatches{proto::StatusBit{90}, 1};
+inline constexpr proto::BitField kCheats{proto::StatusBit{103}, 1};
+inline constexpr proto::BitField kDdDevelopment{proto::StatusBit{107}, 1};
 
-inline constexpr std::array<StatusField, 4>
-    kControllers{StatusField{49, 3}, StatusField{52, 3}, StatusField{55, 3}, StatusField{58, 3}};
+inline constexpr std::array<proto::BitField, 4> kControllers{
+    proto::BitField{proto::StatusBit{49}, 3},
+    proto::BitField{proto::StatusBit{52}, 3},
+    proto::BitField{proto::StatusBit{55}, 3},
+    proto::BitField{proto::StatusBit{58}, 3}
+};
 
+}
+
+[[nodiscard]] constexpr proto::BitField field_of(PadPort p) noexcept {
+    return opt::kControllers[port_index(p)];
 }
 
 }

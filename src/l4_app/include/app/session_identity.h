@@ -12,6 +12,7 @@
 #include "cores/pause_on_osd.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "proto/rotation_dir.h"
 #include "svc/joy_plan.h"
 
 namespace mister::svc {
@@ -28,6 +29,8 @@ struct SessionIdentity {
     FixedStr<kMax, StrFit::Clip> rbf{};
 
     RememberedStem stem{};
+
+    proto::RotationDir rotation{};
 
     bool setname_same_dir = false;
     svc::JoyPlan joy{};

@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "infra/error.h"
-#include "infra/opt_ref.h"
 #include "reactor/notifier.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "os/types.h"
 #include "proto/conf_str_caps.h"
+#include "proto/file_slots.h"
 #include "proto/irq_binding.h"
 #include "proto/item_table.h"
 #include "proto/save_state_decl.h"
@@ -23,49 +21,6 @@
 #include "infra/seat.h"
 
 namespace mister::proto {
-
-struct ConfStrEntry {
-    TASTY_SEAT_EXEMPT(const_shared);
-
-    enum class SlotLetter : std::uint8_t { Load, Mount };
-    SlotLetter letter = SlotLetter::Load;
-    std::uint8_t selentry = 0;
-
-    std::optional<FileSlotDigit> digit{};
-    bool opensave = false;
-    bool store_name = false;
-    std::string ext;
-
-    IoIndex ioctl_index{};
-
-    std::uint32_t load_addr = 0;
-    std::string addon;
-    bool addon_after = false;
-
-    [[nodiscard]] IoIndex default_index() const noexcept;
-
-    [[nodiscard]] constexpr bool carries_load_addr() const noexcept {
-        return letter == SlotLetter::Load;
-    }
-};
-
-struct ConfStrFileRow {
-    std::string_view ext;
-    IoIndex ioctl_index{};
-    std::uint32_t load_addr = 0;
-    bool opensave = false;
-    std::string_view addon{};
-    bool addon_after = false;
-};
-
-enum class FileSlotMatch : std::uint8_t { Exact, RowZero };
-
-struct FileSlotHit {
-    infra::OptRef<const ConfStrEntry> entry{};
-    FileSlotMatch how = FileSlotMatch::Exact;
-};
-
-[[nodiscard]] std::uint32_t parse_load_addr(std::string_view field) noexcept;
 
 class ConfStr {
     TASTY_SEAT_RESIDENT(Main);
@@ -132,21 +87,7 @@ public:
 
     std::string_view button_list(int type) const noexcept;
 
-    const std::vector<ConfStrEntry>& file_slots() const noexcept { return slots_; }
-
-    [[nodiscard]] FileSlotHit find_file_slot(
-        ConfStrEntry::SlotLetter letter,
-        FileSlotDigit digit
-    ) const noexcept;
-
-    [[nodiscard]] FileSlotHit find_load_slot(FileSlotDigit digit) const noexcept;
-
-    [[nodiscard]] static std::vector<ConfStrEntry> slots_of(const ItemTable& ast);
-    [[nodiscard]] static FileSlotHit find_slot_in(
-        std::span<const ConfStrEntry> slots,
-        ConfStrEntry::SlotLetter letter,
-        FileSlotDigit digit
-    ) noexcept;
+    const FileSlots& file_slots() const noexcept { return slots_; }
 
     std::optional<ConfStrFileRow> menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept;
 
@@ -156,33 +97,6 @@ public:
 
     [[nodiscard]] BlockSlotMask mount_slot_mask() const noexcept;
 
-    static std::uint8_t ext_subindex(std::string_view filename, std::string_view ext_list) noexcept;
-
-    [[nodiscard]] static WideIoIndex wire_index(
-        ConfStrFileRow row,
-        std::string_view filename
-    ) noexcept {
-        return WideIoIndex::of(row.ioctl_index, ext_subindex(filename, row.ext));
-    }
-
-    [[nodiscard]] static WideIoIndex wire_index(
-        const ConfStrEntry& slot,
-        std::string_view filename
-    ) noexcept {
-        return wire_index(row_of(slot), filename);
-    }
-
-    static ConfStrFileRow row_of(const ConfStrEntry& slot) noexcept {
-        return ConfStrFileRow{
-            slot.ext,
-            slot.ioctl_index,
-            slot.load_addr,
-            slot.opensave,
-            slot.addon,
-            slot.addon_after
-        };
-    }
-
 private:
     ConfStr() = default;
 
@@ -191,7 +105,7 @@ private:
     ConfStrCaps caps_;
     std::vector<std::string> items_;
     ItemTable ast_;
-    std::vector<ConfStrEntry> slots_;
+    FileSlots slots_;
 };
 
 }

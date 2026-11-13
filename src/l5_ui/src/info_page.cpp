@@ -109,7 +109,7 @@ public:
 
     Transition handle(const UiEvent& ev) override {
         if (ev.buttons != UiButtonMask{}) {
-            return Transition{Transition::Kind::Pop};
+            return Transition::pop();
         }
         return Transition{};
     }

@@ -5,11 +5,11 @@ namespace mister::proto {
 
 void AxiStatusDecoder::bind(
     infra::OptRef<const StatusSnapshotCell> src,
-    std::uint16_t gen
+    BuildGeneration gen
 ) noexcept {
     TASTY_SEAT_BODY(AxiStatusDecoder);
     src_ = src;
-    gen_ = src ? gen : std::uint16_t{0};
+    gen_ = src ? gen : BuildGeneration{};
 
     reader_.forget();
 }
@@ -21,7 +21,7 @@ void AxiStatusDecoder::service() noexcept {
         ++flush_refusals_;
         return;
     }
-    if (!src_ || gen_ == 0 || !reader_.take_if_changed(*src_, scratch_))
+    if (!src_ || !gen_.built() || !reader_.take_if_changed(*src_, scratch_))
         return;
     if (scratch_.gen != gen_) {
         ++stale_;

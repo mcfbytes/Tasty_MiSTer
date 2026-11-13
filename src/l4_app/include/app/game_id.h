@@ -7,6 +7,7 @@
 
 #include "infra/ascii.h"
 #include "infra/fixed_str.h"
+#include "infra/path_parts.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -25,10 +26,7 @@ struct GameId {
     [[nodiscard]] bool writes() const noexcept {
         if (!enabled || file.empty())
             return false;
-        std::string_view f = file.view();
-        const std::size_t slash = f.rfind('/');
-        if (slash != std::string_view::npos)
-            f = f.substr(slash + 1);
+        std::string_view f = infra::basename(file.view());
         if (infra::istarts_with(f, "boot"))
             return false;
         for (std::size_t i = 0; i + 4 <= f.size(); ++i) {

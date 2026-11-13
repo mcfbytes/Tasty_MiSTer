@@ -16,9 +16,9 @@ public:
 
     [[nodiscard]] virtual Ex<void> activate(VtNumber vt) noexcept = 0;
 
-    virtual void blank(const char* tty) noexcept = 0;
+    virtual void blank(VtNumber vt) noexcept = 0;
 
-    virtual void restore_text(const char* tty) noexcept = 0;
+    virtual void restore_text(VtNumber vt) noexcept = 0;
 
 protected:
     IVtSwitch() = default;

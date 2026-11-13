@@ -233,7 +233,7 @@ std::optional<ManifestAct> MraStager::nvram_(const NvramDecl& d) {
     auto f = vfs_.open(std::string("config/nvram/").append(facts_.nvm_name), svc::OpenMode::Read);
     if (!f)
         return std::nullopt;
-    std::vector<std::uint8_t> buf(d.save->size.length_of(proto::BlockCount{1}), 0);
+    std::vector<std::uint8_t> buf(d.save->size.file_word<std::size_t>(), 0);
     auto read = svc::read_bounded(**f, buf.size());
     if (!read)
         return std::nullopt;

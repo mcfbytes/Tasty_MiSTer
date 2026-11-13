@@ -17,19 +17,18 @@ class NeoGeoCdLadder final : public BootLadder {
 public:
     NeoGeoCdLadder(const CoreProfile& profile, const LadderContext& ctx);
 
-    [[nodiscard]] std::uint8_t pc() const noexcept override {
-        TASTY_SEAT_BODY(NeoGeoCdLadder);
-        return static_cast<std::uint8_t>(rung_);
-    }
-
 private:
+    [[nodiscard]] LadderPc do_pc() const noexcept override {
+        TASTY_SEAT_BODY(NeoGeoCdLadder);
+        return LadderPc::of(rung_);
+    }
     enum class Rung : std::uint8_t {
         Unload = 0,
         Walk = 1,
         MountDisc = 2,
         Reset = 3,
         Release = 4,
-        Done = kDone,
+        Done = LadderPc::kDone,
     };
 
     [[nodiscard]] Ex<bool> on_step() override;

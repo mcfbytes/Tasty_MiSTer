@@ -2,11 +2,13 @@
 #include "svc/alt_ini_index.h"
 
 #include <algorithm>
-#include <string>
 #include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "infra/ascii.h"
-#include "infra/indexed_array.h"
 
 namespace mister::svc {
 
@@ -14,7 +16,7 @@ namespace {
 
 inline constexpr std::string_view kAltStem = "MiSTer_";
 inline constexpr std::string_view kAltSuffix = ".ini";
-inline constexpr std::size_t kAltPathBytes = 63;
+inline constexpr std::string_view kMainIni = "MiSTer.ini";
 inline constexpr std::size_t kAltLabelBytes = 5;
 inline constexpr std::size_t kAltLabelPad = 4;
 
@@ -33,10 +35,8 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
         if (!infra::ieq(std::string_view{d}.substr(d.size() - kAltSuffix.size()), kAltSuffix)) {
             continue;
         }
-        idx.names_[found] = d;
 
-        if (idx.names_[found].size() > kAltPathBytes)
-            idx.names_[found].resize(kAltPathBytes);
+        (void)idx.names_[found].assign(d);
         ++found;
     }
 
@@ -47,26 +47,51 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
             const bool swap_them = (prev_empty && !cur_empty)
                 || (!prev_empty
                     && !cur_empty
-                    && infra::icompare(idx.names_[j - 1], idx.names_[j]) > 0);
+                    && infra::icompare(idx.names_[j - 1].view(), idx.names_[j].view()) > 0);
             if (swap_them)
-                idx.names_[j - 1].swap(idx.names_[j]);
+                std::swap(idx.names_[j - 1], idx.names_[j]);
         }
     }
     return idx;
 }
 
-std::string_view AltIniIndex::name_for(std::uint8_t alt) const {
-    const std::optional<AltIniSlot> slot = AltIniSlot::of(alt);
-    if (!slot)
-        return "MiSTer.ini";
-    return infra::at_index(names_, *slot);
+AltIniIndex AltIniIndex::from_scan(std::span<const DirEntry> entries) {
+    std::vector<std::string> names;
+    names.reserve(entries.size());
+    bool main = false;
+    for (const DirEntry& e : entries) {
+        if (e.is_dir)
+            continue;
+        names.push_back(e.name);
+        if (infra::ieq(e.name, kMainIni))
+            main = true;
+    }
+    AltIniIndex idx = scan(names);
+    idx.main_ = main;
+    return idx;
 }
 
-std::string AltIniIndex::label_for(std::uint8_t alt) const {
+bool AltIniIndex::has(IniChoice c) const noexcept {
+    if (c == IniChoice::Main)
+        return main_;
+    const std::optional<AltIniSlot> slot = AltIniSlot::of(c);
+    return slot && !names_[slot->v].empty();
+}
 
-    if (alt == 0)
+std::string_view AltIniIndex::name_for(IniChoice c) const noexcept {
+    if (c == IniChoice::Main)
+        return kMainIni;
+    const std::optional<AltIniSlot> slot = AltIniSlot::of(c);
+    if (!slot)
+        return {};
+    return names_[slot->v].view();
+}
+
+std::string AltIniIndex::label_for(IniChoice c) const {
+
+    if (c == IniChoice::Main)
         return "Main";
-    const std::string_view name = name_for(alt);
+    const std::string_view name = name_for(c);
     if (name.empty())
         return " -- ";
 

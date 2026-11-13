@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/slot_pick_host.h"
 
-#include <span>
 #include <string>
+#include <utility>
 
 #include "app/event.h"
 #include "app/info_sink.h"
 #include "app/name_config.h"
 #include "app/romset_alias_reader.h"
 #include "infra/ascii.h"
-#include "app/session_identity.h"
 #include "ui/browser_entry.h"
 #include "ui/browser_launch.h"
 #include "ui/build_env.h"
@@ -18,38 +17,6 @@
 #include "ui/page_ask.h"
 
 namespace mister::ui {
-namespace {
-
-std::string with_chd(std::string ext) {
-    constexpr std::size_t kFieldWidth = 3;
-    while (ext.size() % kFieldWidth != 0)
-        ext.push_back(' ');
-    constexpr std::string_view kChd = "CHD";
-    if (!infra::icontains(ext, kChd))
-        ext.append(kChd);
-    return ext;
-}
-
-SlotFocus slot_of(const OptionItem& it) noexcept {
-    return SlotFocus{
-        it.mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        it.ioctl_index
-    };
-}
-
-app::RecentsStore::ListId recents_list_of(SlotFocus slot) noexcept {
-    const app::RecentsStore::ListId::Kind kind = slot.kind == SlotFocus::Kind::Image
-        ? app::RecentsStore::ListId::Kind::Mount
-        : app::RecentsStore::ListId::Kind::File;
-    return app::RecentsStore::ListId{kind, slot.index};
-}
-
-app::NameConfig::Slot remembered_slot_of(SlotFocus slot) noexcept {
-    return slot.kind == SlotFocus::Kind::Image ? app::NameConfig::Slot::Mount
-                                               : app::NameConfig::Slot::File;
-}
-
-}
 
 SlotPickHost::Env::Env(const BuildEnv& env)
     : core_dir(env.core_dir),
@@ -72,14 +39,18 @@ void SlotPickHost::ask_mount(proto::IoIndex slot, std::string_view path) {
         ? push_ask(b_.asks, app::UiRequest::UnmountImage{.index = slot, .scope = scope})
         : push_ask(b_.asks, app::UiRequest::MountImage{.index = slot, .scope = scope}, path);
     if (!landed) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
 }
 
-BrowserSession::Request SlotPickHost::browser_request(const OptionItem& it, bool offer_recent) {
-    arm_(it);
+BrowserSession::Request SlotPickHost::browser_request(
+    const OptionItem& it,
+    proto::FileRowId row,
+    bool offer_recent
+) {
+    arm_(it, row);
     BrowserSession::Request r;
     r.extensions = it.ext_list;
     r.scan.include_dirs = true;
@@ -87,44 +58,16 @@ BrowserSession::Request SlotPickHost::browser_request(const OptionItem& it, bool
     const std::string_view home = browse_home_(it);
     r.games_dir = home;
     r.recents_core = home;
-
-    const std::span<const cores::FileSlot> slots = env_.slots;
-    if (it.opens_browser() && pending_slot_.kind == SlotFocus::Kind::File) {
-        for (const cores::FileSlot& s : slots) {
-            if (s.index != pending_slot_.index)
-                continue;
-            r.scan.no_enter = s.no_enter;
-            if (s.romset_browse.has_value()) {
-                r.scan.archive_browse = *s.romset_browse;
-                if (romsets_) {
-                    romsets_->bind(s);
-                    r.aliases = infra::opt_ref_of<app::IRomsetAliases>(romsets_.get());
-                }
-            }
-            break;
+    r = it.shape_browse(
+        std::move(r),
+        OptionItem::BrowseFacts{
+            .slots = env_.slots,
+            .image_no_zip = env_.image_no_zip,
+            .romsets = infra::opt_ref_of(romsets_.get())
         }
-    }
+    );
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(this));
-    switch (pending_slot_.kind) {
-        case SlotFocus::Kind::Image: {
-
-            const cores::SlotRole role = cores::role_of(slots, pending_slot_.index);
-            r.policy.saves_home = role == cores::SlotRole::Save;
-            if (role == cores::SlotRole::Disc)
-                r.extensions = with_chd(std::move(r.extensions));
-            bool opens_zip = false;
-            for (const cores::FileSlot& s : slots)
-                if (s.index == pending_slot_.index)
-                    opens_zip = s.opens_zip;
-            r.scan.no_zip = env_.image_no_zip && !opens_zip;
-            r.policy.eject_on_backspace = true;
-            break;
-        }
-        case SlotFocus::Kind::File:
-            r.policy.clear_on_backspace = pending_store_;
-            break;
-    }
-    r.recents = recents_list_of(pending_slot_);
+    r.recents = app::RecentsStore::ListId::of(row);
 
     if (offer_recent && b_.recents && !b_.recents->load(r.recents_core, *r.recents).empty()) {
         r.recent_entry = true;
@@ -138,57 +81,62 @@ std::string_view SlotPickHost::browse_home_(const OptionItem& it) const noexcept
     return cue_row ? std::string_view{env_.cue_dir} : std::string_view{env_.core_dir};
 }
 
-void SlotPickHost::arm_(const OptionItem& it) noexcept {
-    pending_slot_ = slot_of(it);
+void SlotPickHost::arm_(const OptionItem& it, proto::FileRowId row) noexcept {
+    pending_row_ = row;
     pending_item_ = it.item;
     pending_gen_ = env_.conf_gen;
     pending_store_ = it.store_name;
 }
 
-SlotPickHost::RecentsRef SlotPickHost::recents_ref(const OptionItem& it) const {
-    return RecentsRef{.id = recents_list_of(slot_of(it)), .core = std::string{browse_home_(it)}};
+std::optional<SlotPickHost::RecentsRef> SlotPickHost::recents_ref(const OptionItem& it) const {
+    const std::optional<proto::FileRowId> row = it.file_row();
+    if (!row)
+        return std::nullopt;
+    return RecentsRef{
+        .id = app::RecentsStore::ListId::of(*row),
+        .core = std::string{browse_home_(it)}
+    };
 }
 
 bool SlotPickHost::has_recents(const OptionItem& it) const {
     if (!b_.recents)
         return false;
-    const RecentsRef ref = recents_ref(it);
-    return !b_.recents->load(ref.core, ref.id).empty();
-}
-
-app::RecentsStore::ListId SlotPickHost::recents_id_for_pending() const noexcept {
-    return recents_list_of(pending_slot_);
+    const std::optional<RecentsRef> ref = recents_ref(it);
+    return ref && !b_.recents->load(ref->core, ref->id).empty();
 }
 
 Transition SlotPickHost::open(const OptionItem& it, bool offer_recent) {
-    if (!b_.browser) {
-        ++refusals_;
+    const std::optional<proto::FileRowId> row = it.file_row();
+    if (!row || !b_.browser) {
+        refusals_.add();
         return Transition{};
     }
-    b_.browser->pending = browser_request(it, offer_recent);
-    return Transition{Transition::Kind::Push, PageId::Browser};
+    b_.browser->pending = browser_request(it, *row, offer_recent);
+    return Transition::push(PageId::Browser);
 }
 
 Transition SlotPickHost::open_recents(const OptionItem& it) {
-    if (!b_.browser || !b_.recents) {
-        ++refusals_;
+    const std::optional<proto::FileRowId> row = it.file_row();
+    if (!row || !b_.browser || !b_.recents) {
+        refusals_.add();
         return Transition{};
     }
-    BrowserSession::Request r = browser_request(it, false);
+    BrowserSession::Request r = browser_request(it, *row, false);
     if (b_.recents->load(r.recents_core, *r.recents).empty())
         return Transition{};
     r.recents_first = true;
     b_.browser->pending = static_cast<BrowserSession::Request&&>(r);
-    return Transition{Transition::Kind::Push, PageId::Browser};
+    return Transition::push(PageId::Browser);
 }
 
 Transition SlotPickHost::pick(const OptionItem& it, std::string_view path) {
     TASTY_SEAT_BODY(SlotPickHost);
-    if (path.empty()) {
-        ++refusals_;
+    const std::optional<proto::FileRowId> row = it.file_row();
+    if (path.empty() || !row) {
+        refusals_.add();
         return Transition{};
     }
-    arm_(it);
+    arm_(it, *row);
     BrowserEntry entry;
     entry.altname = game_title(path);
     return on_picked(entry, path);
@@ -196,100 +144,91 @@ Transition SlotPickHost::pick(const OptionItem& it, std::string_view path) {
 
 Transition SlotPickHost::eject(const OptionItem& it) {
     TASTY_SEAT_BODY(SlotPickHost);
-    if (!b_.asks || slot_of(it).kind != SlotFocus::Kind::Image) {
-        ++refusals_;
+    const std::optional<proto::FileRowId> row = it.file_row();
+    if (!row || row->kind != proto::FileRowKind::Mount || !b_.asks) {
+        refusals_.add();
         return Transition{};
     }
-    arm_(it);
-    unmount_pending_();
-    return Transition{Transition::Kind::Pop};
+    arm_(it, *row);
+    unmount_(*row);
+    return Transition::pop();
 }
 
-void SlotPickHost::unmount_pending_() {
+void SlotPickHost::unmount_(proto::FileRowId row) {
     if (pending_store_
         && b_.names
-        && !b_.names->save_path(
-            env_.file_stem,
-            app::NameConfig::Slot::Mount,
-            pending_slot_.index,
-            {}
-        )) {
-        ++refusals_;
+        && !b_.names->save_path(env_.file_stem, proto::FileRowId::mount(row.index), {})) {
+        refusals_.add();
     }
-    ask_mount(pending_slot_.index, {});
+    ask_mount(row.index, {});
 }
 
 Transition SlotPickHost::on_picked(const BrowserEntry& e, std::string_view path) {
     TASTY_SEAT_BODY(SlotPickHost);
-    if (!b_.asks || path.empty()) {
-        ++refusals_;
-        return Transition{Transition::Kind::CloseAll};
+    if (!b_.asks || path.empty() || !pending_row_) {
+        refusals_.add();
+        return Transition::close_all();
     }
 
-    if (b_.recents
-        && !b_.recents->update(env_.core_dir, recents_id_for_pending(), path, e.altname)) {
-        ++refusals_;
+    if (b_.recents) {
+        const app::RecentsStore::ListId id = app::RecentsStore::ListId::of(*pending_row_);
+        if (!b_.recents->update(env_.core_dir, id, path, e.altname))
+            refusals_.add();
     }
     if (pending_store_ && b_.names) {
-        if (!b_.names->save_path(
-                env_.file_stem,
-                remembered_slot_of(pending_slot_),
-                pending_slot_.index,
-                path
-            ))
-            ++refusals_;
+        if (!b_.names->save_path(env_.file_stem, *pending_row_, path))
+            refusals_.add();
     }
 
-    switch (pending_slot_.kind) {
-        case SlotFocus::Kind::Image:
-            ask_mount(pending_slot_.index, path);
-            return Transition{Transition::Kind::CloseAll};
-        case SlotFocus::Kind::File: {
+    switch (pending_row_->kind) {
+        case proto::FileRowKind::Mount:
+            ask_mount(pending_row_->index, path);
+            return Transition::close_all();
+        case proto::FileRowKind::File: {
 
             const app::UiRequest::LoadFile ask{
-                .index = pending_slot_.index,
+                .index = pending_row_->index,
                 .item = pending_item_,
                 .scope = {pending_gen_}
             };
             if (!push_ask(b_.asks, ask, path)) {
-                ++refusals_;
-                return Transition{Transition::Kind::CloseAll};
+                refusals_.add();
+                return Transition::close_all();
             }
             ++published_;
-            return Transition{Transition::Kind::CloseAll};
+            return Transition::close_all();
         }
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 Transition SlotPickHost::on_cancel() {
     TASTY_SEAT_BODY(SlotPickHost);
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 Transition SlotPickHost::on_eject() {
     TASTY_SEAT_BODY(SlotPickHost);
-    if (pending_slot_.kind != SlotFocus::Kind::Image) {
-        ++refusals_;
+    if (!pending_row_ || pending_row_->kind != proto::FileRowKind::Mount) {
+        refusals_.add();
         return Transition{};
     }
-    unmount_pending_();
-    return Transition{Transition::Kind::CloseAll};
+    unmount_(*pending_row_);
+    return Transition::close_all();
 }
 
 Transition SlotPickHost::on_clear() {
     TASTY_SEAT_BODY(SlotPickHost);
-    if (!pending_store_ || !b_.names) {
-        ++refusals_;
+    if (!pending_store_ || !b_.names || !pending_row_) {
+        refusals_.add();
         return Transition{};
     }
-    if (!b_.names
-             ->save_path(env_.file_stem, app::NameConfig::Slot::File, pending_slot_.index, {})) {
-        ++refusals_;
+    if (!b_.names->save_path(env_.file_stem, proto::FileRowId::file(pending_row_->index), {})) {
+        refusals_.add();
     }
     if (b_.info)
         b_.info->info(app::InfoId::OptionCleared);
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 }

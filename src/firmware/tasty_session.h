@@ -11,6 +11,7 @@
 
 #include "app/owner_tick.h"
 #include "app/encode_status.h"
+#include "app/output_size.h"
 #include "app/path_text.h"
 #include "app/play_refusal.h"
 #include "app/recorder_status.h"
@@ -26,6 +27,7 @@
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/monotonic_clock.h"
+#include "replay_port.h"
 #include "run_exit.h"
 #include "tasty_cli.h"
 #include "tasty_refusal.h"
@@ -46,43 +48,58 @@ class Vfs;
 
 namespace mister::fw {
 
+class TastyStatusFile;
+
 using StatusText = FixedStr<768, StrFit::Reject>;
 
 class TastySession final : public app::IOwnerTick {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    class Replay {
-        TASTY_SEAT_RESIDENT(Ui);
+    class Run {
+        TASTY_SEAT_EXEMPT(boot);
 
     public:
-        virtual ~Replay() = default;
+        virtual ~Run() = default;
 
-        virtual bool take_play(const app::ReplayFeeder::Play& play) noexcept = 0;
-        virtual void take_stop() noexcept = 0;
+        [[nodiscard]] virtual bool loads_core() const noexcept = 0;
 
-        [[nodiscard]] virtual app::FrameCount frames() const noexcept = 0;
-        [[nodiscard]] virtual app::FrameCount movie_frames() const noexcept = 0;
+        [[nodiscard]] virtual bool replays() const noexcept = 0;
 
-        [[nodiscard]] virtual bool refused() const noexcept { return false; }
+        [[nodiscard]] virtual bool ends_with_recording() const noexcept = 0;
 
-        [[nodiscard]] virtual bool active() const noexcept { return true; }
+        [[nodiscard]] virtual bool arms_recording() const noexcept = 0;
+    };
 
-        [[nodiscard]] virtual std::optional<ReplayRefusal> refusal() const noexcept {
-            return std::nullopt;
-        }
+    class PlayRun final : public Run {
+        TASTY_SEAT_EXEMPT(boot);
 
-        [[nodiscard]] virtual std::size_t settings_set() const noexcept { return 0; }
+    public:
+        [[nodiscard]] bool loads_core() const noexcept override { return true; }
 
-        [[nodiscard]] virtual std::string setting_line(std::size_t i) const {
-            (void)i;
-            return {};
-        }
+        [[nodiscard]] bool replays() const noexcept override { return true; }
+
+        [[nodiscard]] bool ends_with_recording() const noexcept override { return false; }
+
+        [[nodiscard]] bool arms_recording() const noexcept override { return true; }
+    };
+
+    class RecordOnlyRun final : public Run {
+        TASTY_SEAT_EXEMPT(boot);
+
+    public:
+        [[nodiscard]] bool loads_core() const noexcept override { return false; }
+
+        [[nodiscard]] bool replays() const noexcept override { return false; }
+
+        [[nodiscard]] bool ends_with_recording() const noexcept override { return true; }
+
+        [[nodiscard]] bool arms_recording() const noexcept override { return false; }
     };
 
     struct Wiring {
         infra::OptRef<app::VideoPump> video{};
-        Replay& replay;
+        IReplayPort& replay;
         app::RecorderControl& rec;
         app::UiRequestRing& asks;
         app::LinkTxChannel<SeatTag::Ui>& link_tx;
@@ -95,12 +112,14 @@ public:
         const std::atomic<int>& stop;
 
         RunExitCell& run_exit;
+
+        TastyStatusFile& status;
         hal::PhysRegion video_fb{};
 
         const xthread::Telemetry<std::uint8_t, SeatTag::Main>& direct_video_ini;
     };
 
-    TastySession(const Wiring& w, const TastyArgs& args) noexcept;
+    TastySession(const Wiring& w, const TastyArgs& args, const Run& run) noexcept;
     void tick() noexcept override;
 
 private:
@@ -122,13 +141,16 @@ private:
     };
 
     void write_status_(bool force = false) noexcept;
+
+    [[nodiscard]] bool replay_refused_() const noexcept { return w_.replay.refusal().has_value(); }
+
     [[nodiscard]] bool scaler_port_stuck_() const noexcept;
     [[nodiscard]] bool rec_only_over_() noexcept;
 
     void sample_rec_failure_() noexcept;
 
     void note_rec_failure_(const app::RecorderStatus& rec) noexcept;
-    void ask_core_(std::string_view path) noexcept;
+    [[nodiscard]] bool ask_core_(const app::PathText& path) noexcept;
     [[nodiscard]] bool core_ready_() const noexcept;
 
     [[nodiscard]] bool video_reloaded_() const noexcept;
@@ -138,7 +160,7 @@ private:
 
     [[nodiscard]] bool run_head_() noexcept;
 
-    void advance_splash_(std::chrono::nanoseconds now) noexcept;
+    [[nodiscard]] app::OutputSize splash_size_() const noexcept;
 
     void on_replay_end_(
         app::ReplayEnd end,
@@ -154,10 +176,13 @@ private:
     void print_settings_() noexcept;
     [[nodiscard]] Stage after_hide_() const noexcept;
 
+    [[nodiscard]] Stage after_splash_() const noexcept;
+
     [[nodiscard]] std::optional<std::uint8_t> direct_video_resolved_() const noexcept;
 
     Wiring w_;
     TastyArgs args_;
+    const Run& run_;
     os::MonotonicClock clock_{};
     TastySplash splash_{};
     Stage stage_ = Stage::HideOsd;
@@ -167,13 +192,12 @@ private:
     app::PathText menu_path_{};
 
     StatusText last_status_{};
-    bool rec_only_ = false;
-    bool splash_ok_ = false;
     bool play_started_ = false;
     bool rec_seen_ = false;
     bool rec_failure_said_ = false;
     bool stop_sent_ = false;
-    std::size_t settings_printed_ = 0;
+    bool ask_owed_ = false;
+    IReplayPort::SettingNo settings_printed_{};
     std::uint8_t direct_video_was_ = 0;
     bool direct_video_line_ = false;
     bool resampled_ = false;

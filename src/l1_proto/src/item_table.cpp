@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/item_table.h"
 #include "proto/item_rule.h"
-#include "proto/status_word.h"
+#include "proto/status_bit.h"
 #include "conf_str_detail.h"
 
 #include <cctype>
@@ -14,7 +14,11 @@ namespace mister::proto {
 
 namespace {
 
-constexpr std::uint32_t kStatusBits = proto::StatusWord::kBits;
+constexpr bool selector_set(OsdMask mask, StatusBit bit) noexcept {
+    return bit.word() == 0 && mask.has(OsdMask{bit.mask()});
+}
+
+static_assert(std::numeric_limits<std::uint16_t>::digits == StatusBit::kWordBits);
 
 constexpr std::uint32_t kMaxFieldSpan = 8;
 
@@ -89,7 +93,7 @@ mister::proto::BitField decode_bits(
             }
         }
         if (ranged) {
-            if (start >= kStatusBits || end >= kStatusBits || end <= start)
+            if (end <= start)
                 return {};
         } else {
 
@@ -97,8 +101,6 @@ mister::proto::BitField decode_bits(
             if (!only)
                 return {};
             start = only->value;
-            if (start >= kStatusBits)
-                return {};
             end = start;
         }
     } else {
@@ -117,16 +119,17 @@ mister::proto::BitField decode_bits(
             start += kUpperBankFirstBit;
             end += kUpperBankFirstBit;
         }
-        if (start >= kStatusBits || end >= kStatusBits || (!sng && end <= start))
+        if (!sng && end <= start)
             return {};
     }
 
+    const auto lo = StatusBit::of(start);
+    const auto hi = StatusBit::of(end);
+    if (!lo || !hi)
+        return {};
     if (end - start > kMaxFieldSpan)
         return {};
-    return BitField{
-        StatusBit{static_cast<std::uint8_t>(start)},
-        static_cast<std::uint8_t>(1 + end - start)
-    };
+    return BitField{*lo, static_cast<std::uint8_t>(1 + end - start)};
 }
 
 bool head_matches(std::string_view field, const mister::proto::ItemRule& r) noexcept {
@@ -274,8 +277,7 @@ Visibility evaluate(const Item& it, OsdMask hdmask) noexcept {
     Visibility v;
     for (std::uint8_t i = 0; i < it.cond_count && i < kMaxConds; ++i) {
         const Cond& c = it.conds[i];
-
-        const bool set = hdmask.has(c.bit);
+        const bool set = selector_set(hdmask, c.bit);
         if (set != c.acts_when_set)
             continue;
         if (c.effect == CondEffect::Hide)

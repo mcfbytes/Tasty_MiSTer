@@ -13,6 +13,7 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/cdwire.h"
+#include "cores/poll_ticks.h"
 #include "cores/sega_cdd_stat.h"
 #include "cores/sega_frame_word.h"
 #include "cores/types.h"
@@ -144,6 +145,8 @@ private:
         std::array<std::uint8_t, 3> digits_{};
     };
 
+    static constexpr PollTicks kLoadSettleTicks{10};
+
     struct Cdd {
         Cdd() noexcept { stat.set_status(SegaCddStatus::NoDisc); }
 
@@ -152,7 +155,7 @@ private:
         bool is_data = true;
         bool loaded = false;
         bool has_command = false;
-        std::uint32_t latency = 10;
+        PollTicks latency = kLoadSettleTicks;
         HeadLba lba{};
         CddaRead cdda{};
         svc::TrackIndex track{};

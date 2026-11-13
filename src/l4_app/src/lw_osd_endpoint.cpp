@@ -7,6 +7,7 @@
 #include <span>
 
 #include "infra/endian.h"
+#include "infra/seat_owner_ui.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -43,7 +44,7 @@ void LwOsdEndpoint::bind_hook_(const OsdGrant&) noexcept {
     for (proto::OsdRow r{}; kRows.covers(r); r += proto::kOneOsdRow)
         (void)store_row_(r);
     const std::uint32_t ctrl = ctrl_();
-    port_().write(hal::OsdBlock::Reg::Ctrl, ctrl);
+    port_().write(hal::OsdBlock::Reg::Ctrl, hal::RegWord{ctrl});
     (void)port_().read(hal::OsdBlock::Reg::Ctrl);
     ctrl_stored_ = ctrl;
     tally_.ctrl = ctrl;
@@ -54,7 +55,7 @@ void LwOsdEndpoint::bound_hook_() noexcept {
     publish_();
 }
 
-void LwOsdEndpoint::answer_hook_(std::uint16_t) noexcept {}
+void LwOsdEndpoint::answer_hook_(proto::BuildGeneration) noexcept {}
 
 void LwOsdEndpoint::unbind_hook_() noexcept {
     block_.reset();
@@ -85,7 +86,7 @@ void LwOsdEndpoint::store_frame_() noexcept {
             (void)store_row_(r);
     }
     if (ctrl != ctrl_stored_) {
-        port_().write(hal::OsdBlock::Reg::Ctrl, ctrl);
+        port_().write(hal::OsdBlock::Reg::Ctrl, hal::RegWord{ctrl});
         ctrl_stored_ = ctrl;
         tally_.ctrl = ctrl;
     }
@@ -112,7 +113,7 @@ bool LwOsdEndpoint::store_row_(proto::OsdRow r) noexcept {
         const auto w = infra::load_le<std::uint32_t>(
             bytes.subspan(kWordBytes * i).first<kWordBytes>()
         );
-        port.write(regs[i], w);
+        port.write(regs[i], hal::RegWord{w});
     }
     proto::row_cell(stored_, r) = g;
     ++tally_.rows;
@@ -136,4 +137,14 @@ LwOsdEndpoint::Port& LwOsdEndpoint::port_() noexcept {
     return *block_;
 }
 
+template class LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+
+}
+
+namespace mister::hal {
+template class WindowPort<OsdBlock, seat_owner::Ui>;
+}
+
+namespace mister::xthread {
+template class GrantLease<app::OsdGrant, seat_owner::Ui>;
 }

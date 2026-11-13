@@ -7,8 +7,8 @@
 #include "app/input_build.h"
 #include "app/input_decode.h"
 #include "app/input_emit.h"
+#include "app/input_key_counts.h"
 #include "app/input_sample.h"
-#include "app/input_wire.h"
 #include "os/clock.h"
 #include "svc/input_service_counts.h"
 #include "svc/input_service.h"
@@ -23,7 +23,6 @@ class InputPipeline {
 public:
     InputPipeline(
         InputDecode::Fds fds,
-        InputWire& wire,
         InputBuild& build,
         InputEmit& emit,
         svc::InputService service,
@@ -33,10 +32,6 @@ public:
 
     InputPipeline(const InputPipeline&) = delete;
     InputPipeline& operator=(const InputPipeline&) = delete;
-
-    InputWire& wire() noexcept { return wire_; }
-
-    const InputWire& wire() const noexcept { return wire_; }
 
     InputBuild& build() noexcept { return build_; }
 
@@ -59,7 +54,6 @@ public:
     const InputSample& sample() const noexcept { return sample_; }
 
 private:
-    InputWire& wire_;
     InputBuild& build_;
     InputEmit& emit_;
     svc::InputService service_;
@@ -82,22 +76,14 @@ struct InputStats {
 
     std::uint32_t devices = 0;
     std::uint32_t registered = 0;
-    InputGateBits gates{};
     svc::JoyMask joy_seen{};
     svc::PlayerMask joy_players{};
     std::uint32_t captures = 0;
 
     svc::InputServiceCounts service{};
     std::uint32_t rejected = 0;
-    std::uint32_t ui_keys = 0;
-    std::uint32_t ui_keys_dropped = 0;
 
-    std::uint32_t keys_dropped = 0;
-    std::uint32_t key_sweeps = 0;
-    std::uint32_t keys_released = 0;
-    std::uint32_t rebuilds_done = 0;
-    std::uint32_t rebuilds_refused = 0;
-    std::uint32_t button_actions = 0;
+    InputKeyCounts keys{};
 };
 
 InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b) noexcept;

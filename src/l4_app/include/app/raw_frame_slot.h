@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "app/frame_stamp.h"
+#include "app/frame_ticks.h"
 #include "app/picture_pixels.h"
 #include "app/rec_control.h"
 #include "app/rgb_rows.h"
@@ -44,7 +45,7 @@ struct RawFrameSlot {
 #endif
         FrameStamp stamp{};
         std::array<FrameStampRun, kMaxRuns> run{};
-        std::uint32_t vtime = 0;
+        FrameTicks rate{};
         PicturePixels width{};
         std::uint8_t runs = 0;
         std::uint8_t depth = 0;

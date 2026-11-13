@@ -12,6 +12,7 @@
 #include "hal/reg_block.h"
 #include "hal/register_window.h"
 #include "hal/types.h"
+#include "os/map_length.h"
 
 namespace mister::hal {
 
@@ -21,9 +22,9 @@ public:
     [[nodiscard]] static Ex<LwSysWindow> discover(
         PhysRegion board_lw,
         LwOffset off,
-        std::uint32_t size
+        LwExtent size
     ) noexcept {
-        if (auto e = bound_(board_lw.len, off, size); e)
+        if (auto e = bound_(os::MapLength{board_lw.len}, off, size); e)
             return std::unexpected(*e);
         return LwSysWindow(board_lw, {}, off, size);
     }
@@ -31,9 +32,9 @@ public:
     [[nodiscard]] static Ex<LwSysWindow> discover_in(
         std::span<std::uint32_t> image,
         LwOffset off,
-        std::uint32_t size
+        LwExtent size
     ) noexcept {
-        if (auto e = bound_(image.size_bytes(), off, size); e)
+        if (auto e = bound_(os::MapLength{image.size_bytes()}, off, size); e)
             return std::unexpected(*e);
         return LwSysWindow({}, image, off, size);
     }
@@ -42,13 +43,12 @@ public:
 
     [[nodiscard]] LwOffset offset() const noexcept { return off_; }
 
-    [[nodiscard]] std::uint32_t size() const noexcept { return size_; }
+    [[nodiscard]] LwExtent size() const noexcept { return size_; }
 
     template <class Layout>
-    [[nodiscard]] Ex<RegisterWindow<Layout>> map(std::uint32_t rel) const {
-        const LwOffset at_rel{rel};
-        if (!at_rel.dword_aligned() || !at_rel.fits(size_, Layout::kSize)) {
-            return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), rel});
+    [[nodiscard]] Ex<RegisterWindow<Layout>> map(LwOffset rel) const {
+        if (!rel.dword_aligned() || !rel.fits(size_, LwExtent::of_layout<Layout>())) {
+            return std::unexpected(rel.refused(Errc::aperture_range, ERR_SITE()));
         }
         const LwOffset at = off_.plus(rel);
         if (image_.empty())
@@ -60,26 +60,24 @@ public:
     }
 
 private:
-    LwSysWindow(
-        PhysRegion lw,
-        std::span<std::uint32_t> image,
-        LwOffset off,
-        std::uint32_t size
-    ) noexcept
+    LwSysWindow(PhysRegion lw, std::span<std::uint32_t> image, LwOffset off, LwExtent size) noexcept
         : lw_(lw),
           image_(image),
           off_(off),
           size_(size) {}
 
+    static constexpr LwExtent kMinExtent{kWordBytes};
+
     [[nodiscard]] static std::optional<Error> bound_(
-        std::size_t board_len,
+        os::MapLength board_len,
         LwOffset off,
-        std::uint32_t size
+        LwExtent size
     ) noexcept {
-        if (board_len == 0)
-            return Error{Errc::dt_missing, ERR_SITE(), off.v};
-        if (size < sizeof(std::uint32_t) || !off.dword_aligned() || !off.fits(board_len, size)) {
-            return Error{Errc::bad_format, ERR_SITE(), off.v};
+        if (board_len.empty())
+            return off.refused(Errc::dt_missing, ERR_SITE());
+        const std::optional<LwExtent> board = LwExtent::of_length(board_len);
+        if (!board || !size.covers(kMinExtent) || !off.dword_aligned() || !off.fits(*board, size)) {
+            return off.refused(Errc::bad_format, ERR_SITE());
         }
         return std::nullopt;
     }
@@ -87,7 +85,7 @@ private:
     PhysRegion lw_{};
     std::span<std::uint32_t> image_{};
     LwOffset off_{};
-    std::uint32_t size_ = 0;
+    LwExtent size_{};
 };
 
 }

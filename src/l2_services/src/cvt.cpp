@@ -135,23 +135,27 @@ Modeline cvt_int(Resolution active, float refresh_rate, bool reduced_blanking) {
     }
 
     Modeline m{};
-    m.hact = static_cast<std::uint32_t>(h_pixels_rnd);
-    m.hfp = static_cast<std::uint32_t>(h_front_porch);
-    m.hs = static_cast<std::uint32_t>(h_sync);
-    m.hbp = static_cast<std::uint32_t>(h_back_porch);
-    m.vact = static_cast<std::uint32_t>(v_lines);
-    m.vfp = static_cast<std::uint32_t>(kCvtVFrontPorch - 1);
-    m.vs = static_cast<std::uint32_t>(v_sync);
-    m.vbp = static_cast<std::uint32_t>(v_back_porch + 1);
+    m.h = AxisTiming{
+        static_cast<std::uint32_t>(h_pixels_rnd),
+        static_cast<std::uint32_t>(h_front_porch),
+        static_cast<std::uint32_t>(h_sync),
+        static_cast<std::uint32_t>(h_back_porch)
+    };
+    m.v = AxisTiming{
+        static_cast<std::uint32_t>(v_lines),
+        static_cast<std::uint32_t>(kCvtVFrontPorch - 1),
+        static_cast<std::uint32_t>(v_sync),
+        static_cast<std::uint32_t>(v_back_porch + 1)
+    };
     m.rb = rb_byte(reduced_blanking ? ReducedBlanking::On : ReducedBlanking::Off);
     m.fpix_mhz = static_cast<double>(pixel_freq);
 
     if (static_cast<std::uint32_t>(h_pixels_rnd) > kCvtPixelRepeatWidth) {
         m.pixel_repeat = true;
-        m.hact /= 2;
-        m.hbp /= 2;
-        m.hfp /= 2;
-        m.hs /= 2;
+        m.h.active /= 2;
+        m.h.back_porch /= 2;
+        m.h.front_porch /= 2;
+        m.h.sync /= 2;
         m.fpix_mhz /= 2.0;
     } else {
         m.pixel_repeat = false;

@@ -154,7 +154,7 @@ Ex<void> BrowserSession::change_dir(std::string_view name) {
     }
 
     if (path_.size() + name.size() > kPathBudget) {
-        ++refusals_;
+        refusals_.add();
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
     if (!path_.empty())
@@ -225,7 +225,7 @@ Ex<void> BrowserSession::scan_list(std::string_view type_filter) {
     view_.set_items({});
     view_.select(RowIndex{0});
     if (!src_) {
-        ++refusals_;
+        refusals_.add();
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
 

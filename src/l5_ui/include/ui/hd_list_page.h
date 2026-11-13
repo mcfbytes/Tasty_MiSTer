@@ -13,7 +13,9 @@
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
 #include "ui/page.h"
+#include "ui/page_arg.h"
 #include "ui/types.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -23,9 +25,11 @@ class HdListPage final : public Page, public IMaskRebuild {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    HdListPage(std::unique_ptr<IHdPlan> plan, ItemId push_focus, HdFocusMemory& memory);
+    HdListPage(std::unique_ptr<IHdPlan> plan, PageArg push_arg, HdFocusMemory& memory);
 
     PageId id() const override;
+
+    PageFacts facts() const override;
 
     bool walk(PageWalk& out) const override;
 
@@ -44,7 +48,10 @@ public:
     std::optional<TierRun> tier_run(RowIndex at) const override;
 
     [[nodiscard]] bool empty() const;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
+    ConnectDemand connect_demand() const override;
+    bool holds_live_script() const override;
+    bool bt_pairing_active() const override;
 
     [[nodiscard]] RowCount rows_dropped() const noexcept;
 
@@ -96,10 +103,10 @@ private:
     void refocus_();
 
     std::unique_ptr<IHdPlan> plan_;
-    ItemId push_focus_;
+    PageArg push_arg_;
     HdFocusMemory& memory_;
     RowIndex sel_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 };
 
 }

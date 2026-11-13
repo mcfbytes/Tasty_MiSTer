@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 
+#include "app/rumble_players_cell.h"
 #include "app/types.h"
 #include "app/delivered.h"
 #include "app/link_encoder.h"
@@ -97,7 +98,6 @@ namespace mister::app {
 class VideoWire;
 class ICheatApply;
 class OsdWire;
-class InputWire;
 class MailboxRelay;
 class DiskRelay;
 class SaveUploadRelay;
@@ -203,6 +203,8 @@ public:
 
     [[nodiscard]] bool wire_held() const noexcept { return wire_hold() != WireHold::None; }
 
+    [[nodiscard]] bool prelude_settled() noexcept;
+
     [[nodiscard]] const FileTxLevelCell& file_tx_level_cell() const noexcept {
         return held_.file_tx_level_cell();
     }
@@ -220,10 +222,6 @@ public:
     Result on(const proto::LinkOp::DropCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::AdoptCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SessionUp& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::SetMute& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::SetAttenuation& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::NudgeVolume& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::ToggleMute& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::CoreReset& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::LoadFacts& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::MailboxWrite& a, const LinkOpCtx& ctx) noexcept;
@@ -465,7 +463,7 @@ private:
     cores::CdFlow cd_flow_{};
 
     VideoWire& video_;
-    InputWire& input_;
+    const RumblePlayersCell& rumble_players_;
     OsdWire& osd_;
 
     proto::SpiOsdMaskDecoder osd_mask_decoder_;
@@ -475,7 +473,7 @@ private:
     void publish_identity();
 
     void reset_video_geometry() override;
-    void arm_video_prelude() override;
+    void bind_video_prelude() override;
     void publish_core_identity() override;
 
     const BoardOps ops_;

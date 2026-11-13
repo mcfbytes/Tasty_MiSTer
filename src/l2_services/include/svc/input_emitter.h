@@ -7,7 +7,7 @@
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "hal/reg_block.h"
-#include "proto/axi_block_decl.h"
+#include "proto/pad_block_decl.h"
 #include "proto/axi_pad_encoder.h"
 #include "proto/frame_pad_encoder.h"
 #include "proto/held_pad_encoder.h"
@@ -19,11 +19,6 @@
 
 namespace mister::svc {
 
-struct PadGates {
-    bool grabbed = false;
-    bool osd_visible = false;
-};
-
 class InputEmitter {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -32,12 +27,6 @@ public:
 
     InputEmitter(const InputEmitter&) = delete;
     InputEmitter& operator=(const InputEmitter&) = delete;
-
-    void set_gates(PadGates gates) noexcept { gates_ = gates; }
-
-    bool grabbed() const noexcept { return gates_.grabbed; }
-
-    bool osd_visible() const noexcept { return gates_.osd_visible; }
 
     void set_joy_mask(PlayerIndex player, JoyMask mask) noexcept;
     JoyMask joy_mask(PlayerIndex player) const noexcept;
@@ -54,7 +43,7 @@ public:
     void bind_pads(
         proto::ILinkFrame& frame,
         hal::reg::Block pad,
-        proto::AxiBlockDecl block
+        proto::PadBlockDecl block
     ) noexcept;
 
     [[nodiscard]] bool pads_on_lw() const noexcept { return lw_.has_value(); }
@@ -116,7 +105,7 @@ private:
 
     proto::FramePadEncoder framed_{joy_};
     std::optional<proto::HeldPadEncoder> held_{};
-    proto::AxiBlockDecl pad_block_{};
+    proto::PadBlockDecl pad_block_{};
     std::optional<proto::AxiPadEncoder> lw_{};
 
     class PlayerMasks {
@@ -139,7 +128,7 @@ private:
             autofire_ = mask;
         }
 
-        [[nodiscard]] JoyMask composed(bool grabbed) const noexcept;
+        [[nodiscard]] JoyMask composed() const noexcept;
 
         [[nodiscard]] bool zero_armed() const noexcept { return zero_armed_; }
 
@@ -152,7 +141,6 @@ private:
     };
 
     infra::IndexedArray<PlayerMasks, kMaxPlayers, PlayerIndex> masks_{};
-    PadGates gates_{};
     unsigned axis_range_zero_ = 0;
 };
 

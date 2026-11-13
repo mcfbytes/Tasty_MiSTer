@@ -130,7 +130,7 @@ public:
     Geometry geometry() const noexcept override {
         return Geometry{
             proto::FileSize{handle_.header->hunkbytes},
-            proto::FileSize{handle_.header->unitbytes},
+            proto::BlockSize{handle_.header->unitbytes},
             HunkCount{handle_.header->totalhunks}
         };
     }

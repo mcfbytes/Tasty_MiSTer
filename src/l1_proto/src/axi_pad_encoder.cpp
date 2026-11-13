@@ -20,7 +20,7 @@ namespace {
 
 Ex<void> AxiPadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(AxiPadEncoder);
-    if (!block_.honours(opcode))
+    if (!block_.ops.honours(opcode))
         return otherwise_.digital(opcode, map);
     const PadLevels::Slot s = PadLevels::level_of(opcode, 0);
     if (PadLevels::is_level(s))
@@ -30,7 +30,7 @@ Ex<void> AxiPadEncoder::digital(UioOp opcode, JoyMask map) {
 
 Ex<void> AxiPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(AxiPadEncoder);
-    if (!block_.honours(opcode))
+    if (!block_.ops.honours(opcode))
         return otherwise_.stick(opcode, index, pos);
     const std::uint32_t word = pos.packed();
     const PadLevels::Slot s = PadLevels::level_of(opcode, index);
@@ -52,9 +52,9 @@ void AxiPadEncoder::trust(bool ready) noexcept {
 std::uint32_t AxiPadEncoder::link_words(UioOp opcode, bool follow_up) const noexcept {
     TASTY_SEAT_BODY(AxiPadEncoder);
     constexpr std::uint32_t kStickWords = 4;
-    if (!block_.honours(opcode))
+    if (!block_.ops.honours(opcode))
         return otherwise_.link_words(opcode, follow_up);
-    return (follow_up && !block_.honours(UioOp::Astick)) ? kStickWords : 0u;
+    return (follow_up && !block_.ops.honours(UioOp::Astick)) ? kStickWords : 0u;
 }
 
 Ex<void> AxiPadEncoder::level_(PadLevels::Slot level, std::uint32_t word) {

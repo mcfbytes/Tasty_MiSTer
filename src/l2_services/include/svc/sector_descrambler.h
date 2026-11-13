@@ -7,11 +7,13 @@
 
 #include "infra/seat.h"
 #include "svc/frame_shaper.h"
+#include "svc/sector_header.h"
 
 namespace mister::svc {
 
-consteval std::array<std::uint8_t, kRawFrameBytes - 12> make_sector_scramble() {
-    std::array<std::uint8_t, kRawFrameBytes - 12> t{};
+consteval std::array<std::uint8_t, kRawFrameBytes - SectorHeader::kSync.size()>
+make_sector_scramble() {
+    std::array<std::uint8_t, kRawFrameBytes - SectorHeader::kSync.size()> t{};
     unsigned reg = 1;
     for (auto& byte : t) {
         unsigned out = 0;

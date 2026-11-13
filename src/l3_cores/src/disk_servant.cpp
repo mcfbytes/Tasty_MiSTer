@@ -15,11 +15,15 @@ constexpr const char* kInquirySerial = TASTY_VDATE "  ";
 
 }
 
-std::unique_ptr<IDiskServant> make_disk_servant(const svc::Vfs& vfs) {
+std::unique_ptr<IDiskServant> make_disk_servant(
+    const svc::Vfs& vfs,
+    infra::OptRef<xthread::WakeFlag> activity
+) {
     return std::make_unique<AcsiServant>(
         infra::OptRef<const svc::Vfs>{vfs},
         manifests::kAtariStDiskFormats,
-        kInquirySerial
+        kInquirySerial,
+        activity
     );
 }
 

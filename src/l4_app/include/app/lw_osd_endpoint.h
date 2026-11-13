@@ -10,39 +10,35 @@
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "hal/osd_block.h"
-#include "hal/reg_block.h"
-#include "hal/register_window.h"
+#include "hal/reg_port.h"
+#include "hal/window_port.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_ui.h"
 #include "proto/osd_surface.h"
 
 namespace mister::app {
 
-class LwOsdEndpoint : public LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui> {
+class LwOsdEndpoint : public LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui> {
     TASTY_SEAT_RESIDENT(Ui);
+    static_assert(
+        seat_owner::Ui::kSeatDecl == kSeatDecl,
+        "the base's owner tag and this endpoint's declaration must agree"
+    );
 
 public:
-    class Port {
-    public:
-        [[nodiscard]] virtual std::uint32_t read(hal::OsdBlock::Reg r) noexcept = 0;
-        virtual void write(hal::OsdBlock::Reg r, std::uint32_t v) noexcept = 0;
-
-    protected:
-        Port() = default;
-        Port(const Port&) = default;
-        Port& operator=(const Port&) = default;
-        ~Port() = default;
-    };
+    using Port = hal::IRegPort<hal::OsdBlock>;
 
     struct Wiring {
         const OsdGrantCell& grant;
         OsdRouteCell& route;
+        OsdLeaseCell& lease;
         const proto::OsdSurface& surface;
         infra::OptRef<Port> port{};
     };
 
     explicit LwOsdEndpoint(const Wiring& w) noexcept
-        : LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui>(w.grant),
+        : LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>(w.grant, w.lease),
           w_(w) {}
 
     [[nodiscard]] const OsdRoute& route() const noexcept { return tally_; }
@@ -55,34 +51,17 @@ private:
         "the shadow holds exactly the surface's page rows"
     );
 
-    class BlockPort final : public Port {
-        TASTY_SEAT_RESIDENT(Ui);
-
-    public:
-        explicit BlockPort(hal::reg::Block lease) noexcept
-            : regs_(hal::RegisterWindow<hal::OsdBlock>::borrow(std::move(lease))) {}
-
-        [[nodiscard]] std::uint32_t read(hal::OsdBlock::Reg r) noexcept override {
-            TASTY_SEAT_BODY(BlockPort);
-            return regs_.read(r);
-        }
-
-        void write(hal::OsdBlock::Reg r, std::uint32_t v) noexcept override {
-            TASTY_SEAT_BODY(BlockPort);
-            regs_.write(r, v);
-        }
-
-    private:
-        hal::RegisterWindow<hal::OsdBlock> regs_;
-    };
-
-    using Base = LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui>;
+    using Base = LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+    static_assert(
+        std::is_same_v<OsdLeaseCell, Base::LeaseCell>,
+        "the route's lease cell is the base's lease cell"
+    );
     void publish_hook_(const OsdRoute& r) noexcept override;
     void prepare_hook_(const OsdGrant& g) noexcept override;
     [[nodiscard]] bool arm_hook_(const OsdGrant& g) noexcept override;
     void bind_hook_(const OsdGrant& g) noexcept override;
     void bound_hook_() noexcept override;
-    void answer_hook_(std::uint16_t) noexcept override;
+    void answer_hook_(proto::BuildGeneration) noexcept override;
     void unbind_hook_() noexcept override;
     void serve_bound_() noexcept override;
     [[nodiscard]] bool idle_bound_hook_() const noexcept override;
@@ -94,10 +73,21 @@ private:
     [[nodiscard]] Port& port_() noexcept;
 
     Wiring w_;
-    std::optional<BlockPort> block_{};
+    std::optional<hal::WindowPort<hal::OsdBlock, seat_owner::Ui>> block_{};
     proto::OsdRowCells<std::uint32_t, kRows.size()> stored_{};
     std::uint32_t ctrl_stored_ = 0;
     proto::OsdSurface::Row row_{};
 };
 
+extern template class LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+
+}
+
+namespace mister::hal {
+
+extern template class WindowPort<OsdBlock, seat_owner::Ui>;
+}
+
+namespace mister::xthread {
+extern template class GrantLease<app::OsdGrant, seat_owner::Ui>;
 }

@@ -4,7 +4,7 @@
 namespace mister::cores {
 namespace {
 
-constexpr std::uint8_t kKanjiGroup = 1;
+constexpr BootGroup kKanjiGroup = BootGroup::Second;
 
 }
 
@@ -33,20 +33,19 @@ Ex<bool> ThreeDoLadder::on_step() {
             if (!hold_reset_())
                 return false;
             rung_ = Rung::Bios;
-            row_i_ = 0;
+            row_.rewind();
             return false;
 
         case Rung::Bios: {
 
-            const auto rows = profile_.boot_assets;
-            while (row_i_ < rows.size() && rows[row_i_].group == 0) {
-                const BootAsset& row = rows[row_i_];
+            while (const auto at = row_.current_in(BootGroup::First)) {
+                const BootAsset& row = *at;
                 auto hit = load_row(row);
                 if (!hit)
                     return std::unexpected(hit.error());
                 if (*hit == AssetWait::Pending)
                     return false;
-                ++row_i_;
+                row_.advance();
                 if (*hit == AssetWait::Ready) {
                     report_.bios_found = true;
                     rung_ = Rung::Kanji;
@@ -56,7 +55,7 @@ Ex<bool> ThreeDoLadder::on_step() {
             }
 
             ++report_.bios_missing;
-            if (group_gates(0)) {
+            if (group_gates(BootGroup::First)) {
                 rung_ = Rung::ResetRelease;
                 return false;
             }
@@ -66,17 +65,15 @@ Ex<bool> ThreeDoLadder::on_step() {
 
         case Rung::Kanji: {
 
-            const auto rows = profile_.boot_assets;
             if (report_.bios_found) {
-                while (row_i_ < rows.size() && rows[row_i_].group != kKanjiGroup)
-                    ++row_i_;
-                if (row_i_ < rows.size()) {
-                    auto hit = load_row(rows[row_i_]);
+                row_.skip_to_group(kKanjiGroup);
+                if (const auto at = row_.current()) {
+                    auto hit = load_row(*at);
                     if (!hit)
                         return std::unexpected(hit.error());
                     if (*hit == AssetWait::Pending)
                         return false;
-                    ++row_i_;
+                    row_.advance();
                     if (*hit == AssetWait::Ready)
                         rung_ = Rung::MountDisc;
                     return false;

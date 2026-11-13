@@ -20,6 +20,7 @@
 #include "ui/slot_focus.h"
 #include "ui/slot_pick_host.h"
 #include "ui/types.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -42,7 +43,7 @@ public:
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
@@ -100,14 +101,14 @@ private:
     const NowPlaying& now_playing_;
     const CoreVerbs& verbs_;
     const bool front_end_;
-    const std::optional<SlotFocus> focus_;
+    const std::optional<proto::FileRowId> focus_;
     SlotPickHost::Env env_;
     HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     infra::OptRef<const OptionItem> slot_{};
     std::string title_;
     bool has_recent_ = false;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 
     ChooseRow choose_{*this};
     RecentFilesRow recent_{*this};

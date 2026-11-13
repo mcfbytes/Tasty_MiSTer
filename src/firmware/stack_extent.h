@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "rt_setup.h"
+
 namespace mister::fw {
 
 inline constexpr std::size_t kStackPageBytes = 4096;
@@ -34,5 +36,13 @@ struct StackExtent {
         return room < requested ? static_cast<std::size_t>(room) : requested;
     }
 };
+
+struct StackPrefault {
+    RtSetup outcome{};
+    std::size_t bytes = 0;
+    std::uint64_t rlimit = 0;
+};
+
+[[nodiscard]] StackPrefault prefault_current_stack(std::size_t requested) noexcept;
 
 }

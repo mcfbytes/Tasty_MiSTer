@@ -93,21 +93,21 @@ inline constexpr auto kThreeDoBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
     {.name = "cd_bios.rom",
      .where = {},
      .optional = true,
      .anchor = AssetAnchor::ImageParentDir,
      .subdir = {},
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
     {.name = "boot.rom",
      .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "3DO",
      .dest = WideIoIndex{0},
-     .group = 0},
+     .group = BootGroup::First},
 
     {.name = "kanji.rom",
      .where = {},
@@ -115,14 +115,14 @@ inline constexpr auto kThreeDoBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .subdir = {},
      .dest = WideIoIndex{3},
-     .group = 1},
+     .group = BootGroup::Second},
     {.name = "kanji.rom",
      .where = {},
      .optional = true,
      .anchor = AssetAnchor::ImageParentDir,
      .subdir = {},
      .dest = WideIoIndex{3},
-     .group = 1},
+     .group = BootGroup::Second},
 });
 
 namespace threedo_blank {
@@ -158,7 +158,7 @@ inline constexpr std::array<B, 256> kSaveBlank{{
 }};
 }
 
-inline constexpr BlankSaveSpec kThreeDoBlankSave{
+inline constexpr svc::BlankSaveSpec kThreeDoBlankSave{
     .fill = std::byte{0x00},
     .header = threedo_blank::kSaveBlank,
     .regions = {},

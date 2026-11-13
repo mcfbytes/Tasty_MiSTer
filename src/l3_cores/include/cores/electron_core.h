@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #include "cores/core_support.h"
-#include "cores/file_tx.h"
-#include "cores/uef.h"
-#include "infra/fixed_str.h"
+#include "cores/stream_load_host.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "proto/image_bracket.h"
-#include "proto/image_sink.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -20,39 +18,28 @@ class ElectronCore final : public Core {
 public:
     ElectronCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
-    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
+    [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return stream_.bytes(); }
 
-    static constexpr std::size_t kMaxImageBytes = 16u * 1024u * 1024u;
+    [[nodiscard]] std::uint32_t transfers() const noexcept { return stream_.transfers(); }
 
-    [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return bytes_sent_; }
-
-    [[nodiscard]] std::uint32_t transfers() const noexcept { return transfers_; }
-
-    [[nodiscard]] std::uint32_t last_numbits() const noexcept { return last_numbits_; }
-
-    [[nodiscard]] proto::IoIndex last_index() const noexcept { return last_index_; }
+    [[nodiscard]] proto::IoIndex last_index() const noexcept { return stream_.last_index(); }
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
-    void on_set_pending_file_ext(std::string_view ext) noexcept override;
 
-    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
+    void on_set_pending_file_ext(std::string_view ext) noexcept override {
+        stream_.set_pending_ext(ext);
+    }
 
-    [[nodiscard]] Ex<void> on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) override;
+    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {
+        return stream_.bytes();
+    }
 
-    [[nodiscard]] Ex<void> tx_uef_(IoIndex index, std::span<const std::uint8_t> bytes);
-    [[nodiscard]] Ex<void> tx_raw_(IoIndex index, std::span<const std::uint8_t> bytes);
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{stream_};
+    }
 
-    [[nodiscard]] Ex<std::span<const std::uint8_t>> materialize_(
-        std::span<const std::uint8_t> bytes
-    );
-
-    FixedStr<8, StrFit::Clip> ext_{};
-    std::uint64_t bytes_sent_ = 0;
-    std::uint32_t transfers_ = 0;
-    std::uint32_t last_numbits_ = 0;
-    proto::IoIndex last_index_{};
-    std::uint8_t buf_[kChunkBytes]{};
+    StreamLoadHost stream_;
 };
 
 }

@@ -43,6 +43,10 @@ public:
         std::uint32_t aux = 0
     );
 
+    void unstage_path(proto::FileId file) noexcept;
+
+    [[nodiscard]] Ex<proto::FileId> intern_empty(FileIntern&& file);
+
     void send_staged(std::uint32_t at) noexcept { slab_.producer().send_staged(at); }
 
     [[nodiscard]] std::size_t retained_bytes() const noexcept;

@@ -30,11 +30,11 @@ RomHasher::Pace RomHasher::step() noexcept {
     std::uint32_t spent = 0;
     while (spent < ReplayPlay::kTickBudget && !remaining_.empty()) {
 
-        const std::size_t remaining_bytes = remaining_.length_of(proto::BlockCount{1});
+        const std::size_t remaining_bytes = remaining_.file_word<std::size_t>();
         const std::size_t want = std::min(buf.size(), remaining_bytes);
         const std::span<std::uint8_t> chunk(buf.data(), want);
         const auto got = file_->read_at(
-            read_at_.length_of(proto::BlockCount{1}),
+            read_at_.file_word<std::size_t>(),
             std::as_writable_bytes(chunk)
         );
         if (!got || *got == 0 || *got > want)

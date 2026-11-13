@@ -20,6 +20,7 @@
 #include "svc/types.h"
 
 namespace mister::proto {
+class StatusBit;
 class CoreSession;
 class IBlockServer;
 }
@@ -81,8 +82,11 @@ public:
 
     [[nodiscard]] svc::Crc32 last_tx_crc() const noexcept { return on_last_tx_crc(); }
 
-    [[nodiscard]] Ex<void> apply_load_facts(std::span<const std::uint8_t> facts) {
-        return on_apply_load_facts(facts);
+    [[nodiscard]] Ex<void> apply_load_facts(
+        std::span<const std::uint8_t> facts,
+        std::string_view image
+    ) {
+        return on_apply_load_facts(facts, image);
     }
 
     [[nodiscard]] infra::OptRef<IStagingCore> staging_core() noexcept { return on_staging_core(); }
@@ -175,7 +179,10 @@ private:
 
     [[nodiscard]] virtual svc::Crc32 on_last_tx_crc() const noexcept { return {}; }
 
-    [[nodiscard]] virtual Ex<void> on_apply_load_facts(std::span<const std::uint8_t>) {
+    [[nodiscard]] virtual Ex<void> on_apply_load_facts(
+        std::span<const std::uint8_t>,
+        std::string_view
+    ) {
         return unimplemented(ERR_SITE());
     }
 

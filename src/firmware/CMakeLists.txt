@@ -1,7 +1,6 @@
 find_package(Threads REQUIRED)
 
 add_library(mister_fw_assembly STATIC
-  assembly.cpp
   board_parts.cpp
   board_reset.cpp
   census.cpp
@@ -10,13 +9,17 @@ add_library(mister_fw_assembly STATIC
   diag_sampler.cpp
   hub.cpp
   ladder_scope.cpp
+  memory_policy_outcome.cpp
   open_verdict.cpp
   process_main.cpp
   process_standup.cpp
   recorder_block.cpp
   replay_block.cpp
   report.cpp
+  rt_setup.cpp
+  stack_extent.cpp
   thread_assembly.cpp
+  topology_outcome.cpp
   ui_main.cpp
 )
 target_include_directories(mister_fw_assembly PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -25,6 +28,7 @@ target_link_libraries(mister_fw_assembly
   PRIVATE tasty_options)
 
 add_library(mister_fw_menu STATIC
+  connect_block.cpp
   hd_osd_block.cpp
   host_facts.cpp
   launcher_block.cpp
@@ -40,13 +44,26 @@ target_compile_definitions(mister_fw_menu PRIVATE TASTY_VDATE="${TASTY_VDATE}")
 
 add_library(mister_fw_tasty STATIC
   tasty_cli.cpp
-  tasty_ctl.cpp
+  tasty_client.cpp
+  tasty_command.cpp
   tasty_entry.cpp
+  tasty_home_lane.cpp
+  tasty_movie.cpp
+  tasty_owner_lock.cpp
+  tasty_paths.cpp
+  tasty_pid_file.cpp
+  tasty_preflight.cpp
+  tasty_record.cpp
   replay_mode.cpp
   tasty_registry.cpp
+  tasty_say.cpp
+  tasty_sentences.cpp
   tasty_session.cpp
   tasty_sink.cpp
   tasty_splash.cpp
+  tasty_status_file.cpp
+  tasty_stock_control.cpp
+  tasty_writeback.cpp
 )
 target_include_directories(mister_fw_tasty PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mister_fw_tasty

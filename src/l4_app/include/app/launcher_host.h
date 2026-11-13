@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "app/launcher_demand.h"
@@ -15,9 +16,9 @@
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
-#include "infra/unique_fd.h"
 #include "os/child_process.h"
 #include "os/clock.h"
+#include "os/epoll_set.h"
 #include "os/vt_console.h"
 
 namespace mister::app {
@@ -32,6 +33,7 @@ public:
         const LauncherFbAckCell& fb_ack;
         ScanoutChannel::Asker scanout;
         os::IVtSwitch& console;
+        std::string_view tty{};
         const os::IClock& clock;
     };
 
@@ -59,27 +61,10 @@ public:
         std::uint32_t stale_swept = 0;
     };
 
-    class Fds {
-
-    public:
-        [[nodiscard]] static Ex<Fds> create() noexcept;
-        Fds(Fds&&) noexcept = default;
-        Fds(const Fds&) = delete;
-        Fds& operator=(const Fds&) = delete;
-        Fds& operator=(Fds&&) = delete;
-
-    private:
-        friend class LauncherHost;
-
-        explicit Fds(UniqueFd epoll) noexcept : epoll_(std::move(epoll)) {}
-
-        UniqueFd epoll_;
-    };
-
-    LauncherHost(Fds fds, Wiring w, const Timing& t) noexcept
+    LauncherHost(os::EpollSet epoll, Wiring w, const Timing& t) noexcept
         : w_(std::move(w)),
           t_(t),
-          epoll_(std::move(fds.epoll_)),
+          epoll_(std::move(epoll)),
           lease_(
               {.state = w_.state,
                .fb_ack = w_.fb_ack,
@@ -87,13 +72,13 @@ public:
                .hold_limit = t_.fb_ack_limit}
           ) {}
 
-    LauncherHost(Fds fds, Wiring w) noexcept
-        : LauncherHost(std::move(fds), std::move(w), Timing{}) {}
+    LauncherHost(os::EpollSet epoll, Wiring w) noexcept
+        : LauncherHost(std::move(epoll), std::move(w), Timing{}) {}
 
     LauncherHost(const LauncherHost&) = delete;
     LauncherHost& operator=(const LauncherHost&) = delete;
 
-    [[nodiscard]] int poll_fd() const noexcept { return epoll_.get(); }
+    [[nodiscard]] int poll_fd() const noexcept { return epoll_.fd(); }
 
     void serve() noexcept;
 
@@ -146,7 +131,7 @@ private:
 
     Wiring w_;
     Timing t_;
-    UniqueFd epoll_;
+    os::EpollSet epoll_;
     LauncherDemandCell::Reader demand_seen_{};
     LauncherDemand demand_{};
     std::optional<os::ChildProcess> child_{};

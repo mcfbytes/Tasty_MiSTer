@@ -15,7 +15,7 @@ namespace {
 
 std::uint32_t msf_word(Lba lba) noexcept {
     constexpr unsigned kMinuteShift = 8;
-    const Msf pos = Msf::of_lba_bcd_masked(lba.v);
+    const Msf pos = Msf::of_lba_bcd_masked(lba);
     return (std::uint32_t{pos.m} << kMinuteShift) | pos.s;
 }
 

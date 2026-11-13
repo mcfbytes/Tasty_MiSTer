@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/rt_main.h"
 
+#include "hal/disk_lamp.h"
+
 #include "app/input_emit.h"
-#include "app/input_wire.h"
 #include "app/osd_wire.h"
 #include "app/delivered.h"
 #include "app/link_session.h"
@@ -39,12 +40,16 @@ static_assert(
     "a save act's words and the frame reader's and scanout relay's fit the round budget"
 );
 
+static_assert(
+    hal::DiskLamp::kTick == std::chrono::nanoseconds{reactor::kTickNs},
+    "DiskLamp::kTick must be the executive's tick"
+);
+
 void RtMain::start() noexcept {
     TASTY_SEAT_BODY(RtMain);
     stopping_ = false;
-    result_ = exec_.enter();
-    if (!result_)
-        return;
+    exec_.enter();
+    result_ = {};
 
     park_.wait(park_ms());
     loop_();
@@ -142,6 +147,9 @@ void RtMain::round(bool tick) {
 
     scanout_step_();
 
+    if (lamp_)
+        lamp_->on_round(tick, *disk_activity_);
+
     if (input_)
         input_->on_rt_round(tick, core_edge_seq_(), session_live_());
 
@@ -167,8 +175,8 @@ void RtMain::drain_ops() noexcept {
         drain_(session_->ui_inbox(), link_ops, closed);
     }
 
-    if (wire_)
-        wire_->consume_kick();
+    if (input_kick_)
+        input_kick_->consume();
     OpRoundBudget input_ops{kInputOpBudget};
     drain_(session_->input_inbox(), input_ops, closed);
 }
@@ -218,7 +226,10 @@ void RtMain::scanout_step_() noexcept {
         scanout_->step(Wire::CoreStarting);
     else if (
         wire_held_()
-        || (session_ && (session_->park().engaged() || !session_->ui_inbox().drained()))
+        || (session_
+            && (session_->park().engaged()
+                || !session_->ui_inbox().drained()
+                || !session_->prelude_settled()))
     )
         scanout_->step(Wire::Held);
     else

@@ -3,7 +3,6 @@
 
 #include <cstdint>
 
-#include "app/input_wire.h"
 #include "app/types.h"
 #include "hal/spi_transport.h"
 #include "hal/boards_table.h"
@@ -13,8 +12,9 @@
 #include "svc/input_emitter.h"
 #include "infra/counter.h"
 #include "infra/error.h"
-#include "infra/telemetry.h"
 #include "infra/seat.h"
+#include "infra/telemetry.h"
+#include "infra/wake_flag.h"
 
 namespace mister::app {
 
@@ -34,8 +34,12 @@ public:
 
     using CountsCell = xthread::Telemetry<Counts, SeatTag::RT>;
 
-    InputEmit(InputWire& wire, hal::ISpiTransport& link, proto::ILinkRouter& router) noexcept
-        : wire_(wire),
+    InputEmit(
+        const xthread::WakeFlag& edge_reset,
+        hal::ISpiTransport& link,
+        proto::ILinkRouter& router
+    ) noexcept
+        : edge_reset_(edge_reset),
           ps2_(link, router) {}
 
     InputEmit(const InputEmit&) = delete;
@@ -56,7 +60,7 @@ public:
 private:
     svc::InputEmitter em_{};
 
-    InputWire& wire_;
+    const xthread::WakeFlag& edge_reset_;
 
     proto::SpiPs2Decoder ps2_;
 
@@ -90,17 +94,16 @@ static_assert(
     "item: this lane DRAINS what the decode lane publishes, on "
     "the round the executive owns. At or below the decode lane's "
     "priority the decode lane could refill what this lane drains "
-    "faster than it is drained (arch §2)."
+    "faster than it is drained."
 );
 static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
         return hal::seat_of(m, InputEmit::kSeat).cpu != hal::seat_of(m, SeatTag::Input).cpu;
     }),
-    "item: the producer and the consumer of InputWire sit on "
+    "item: the producer and the consumer of the input crossings sit on "
     "DIFFERENT cores — that is what makes every cell's wait-free "
     "single-writer discipline worth its cost, and what keeps "
-    "device-rate decode work off the RT core (arch's "
-    "rt_cpu_reserved neighbourhood)."
+    "device-rate decode work off the RT core (see rt_cpu_reserved)."
 );
 
 }

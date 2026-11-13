@@ -18,17 +18,16 @@ class CdiLadder final : public BootLadder {
 public:
     CdiLadder(const CoreProfile& profile, const LadderContext& ctx);
 
-    [[nodiscard]] std::uint8_t pc() const noexcept override {
-        TASTY_SEAT_BODY(CdiLadder);
-        return static_cast<std::uint8_t>(rung_);
-    }
-
-    [[nodiscard]] std::string_view next_last_dir() const noexcept override {
-        TASTY_SEAT_BODY(CdiLadder);
-        return last_dir_;
-    }
-
 private:
+    [[nodiscard]] LadderPc do_pc() const noexcept override {
+        TASTY_SEAT_BODY(CdiLadder);
+        return LadderPc::of(rung_);
+    }
+
+    [[nodiscard]] LadderCarry do_carry() const noexcept override {
+        TASTY_SEAT_BODY(CdiLadder);
+        return LadderCarry{.last_dir = last_dir_};
+    }
     enum class Rung : std::uint8_t {
         MountDisc = 0,
         SaveIndex = 1,
@@ -36,7 +35,7 @@ private:
         DiscIndex = 3,
         Announce = 4,
         Eject = 10,
-        Done = kDone,
+        Done = LadderPc::kDone,
     };
 
     [[nodiscard]] Ex<bool> on_step() override;

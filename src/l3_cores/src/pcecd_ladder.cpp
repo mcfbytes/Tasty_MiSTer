@@ -103,7 +103,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
             break;
     }
 
-    const WideIoIndex dest = row.dest_for(marker_seen_);
+    const WideIoIndex dest = bios_dest_(row);
 
     const proto::RegionCode region{static_cast<std::uint8_t>(swap | us_cart)};
     auto p = PayloadPieces::of_bytes(
@@ -152,18 +152,12 @@ Ex<bool> PceCdLadder::on_step() {
 
         case Rung::SgxProbe: {
 
-            for (const auto& row : profile_.boot_assets) {
-                if (row.marker_sibling.empty())
-                    continue;
-                BootAsset probe = row;
-                probe.name = row.marker_sibling;
-                auto p = resolve_row(probe);
-                if (p && vfs_.open(*p, svc::OpenMode::Read))
-                    marker_seen_ = true;
-                break;
-            }
+            BootAsset probe{.name = kSgxSibling, .where = {}, .anchor = AssetAnchor::ImageDir};
+            auto p = resolve_row(probe);
+            if (p && vfs_.open(*p, svc::OpenMode::Read))
+                sgx_seen_ = true;
             rung_ = Rung::Bios;
-            row_i_ = 0;
+            row_.rewind();
             return false;
         }
 
@@ -175,15 +169,14 @@ Ex<bool> PceCdLadder::on_step() {
             if (!*ready)
                 return false;
 
-            const auto rows = profile_.boot_assets;
-            while (row_i_ < rows.size() && rows[row_i_].group == 0) {
-                const BootAsset& row = rows[row_i_];
-                auto hit = row.loader == AssetLoader::PceBios ? load_pce_bios(row) : load_row(row);
+            while (const auto at = row_.current_in(BootGroup::First)) {
+                const BootAsset& row = *at;
+                auto hit = load_pce_bios(row);
                 if (!hit)
                     return std::unexpected(hit.error());
                 if (*hit == AssetWait::Pending)
                     return false;
-                ++row_i_;
+                row_.advance();
                 if (*hit == AssetWait::Ready) {
 
                     if (!order_mount_save(save_name(), false))
@@ -197,7 +190,7 @@ Ex<bool> PceCdLadder::on_step() {
             }
 
             ++report_.bios_missing;
-            if (group_gates(0)) {
+            if (group_gates(BootGroup::First)) {
                 rung_ = Rung::Done;
                 return true;
             }
@@ -214,14 +207,14 @@ Ex<bool> PceCdLadder::on_step() {
 
         case Rung::Eject:
 
-            if (sub_ == 0) {
+            if (half_ == Half::Fresh) {
                 if (!order_notify_mount(false))
                     return false;
-                sub_ = 1;
+                half_ = Half::FirstOrdered;
             }
             if (!hold_reset_())
                 return false;
-            sub_ = 0;
+            half_ = Half::Fresh;
             rung_ = Rung::PulseRelease;
             return false;
 

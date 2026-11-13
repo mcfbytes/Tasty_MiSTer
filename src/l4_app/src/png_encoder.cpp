@@ -8,6 +8,7 @@
 #include <limits>
 #include <vector>
 
+#include "svc/crc32_accumulator.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -65,7 +66,9 @@ std::vector<std::uint8_t> PngEncoder::encode(
     };
 
     auto be32_crc = [&out](std::span<const std::uint8_t> chunk) {
-        const auto be = svc::crc32_extend({}, chunk).to_be_bytes();
+        svc::Crc32AccumulatorT<seat_owner::Diag> crc;
+        crc.extend(chunk);
+        const auto be = crc.value().to_be_bytes();
         out.insert(out.end(), be.begin(), be.end());
     };
 

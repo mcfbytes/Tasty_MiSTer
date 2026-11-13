@@ -170,13 +170,13 @@ Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept 
         (size.rows - app::PictureRows{1}).wire_word(),
         size.stride_bytes(app::PixelBytes::of(sizeof(std::uint32_t))).wire_word(),
     };
-    return video.wire().publish(proto::UioOp::SetFbuf, words);
+    return video.mode_sink().publish(proto::UioOp::SetFbuf, words);
 }
 
 Ex<void> TastySplash::hide(app::VideoPump& video) noexcept {
     TASTY_SEAT_BODY(TastySplash);
     const std::array<std::uint16_t, 1> words{0};
-    return video.wire().publish(proto::UioOp::SetFbuf, words);
+    return video.mode_sink().publish(proto::UioOp::SetFbuf, words);
 }
 
 }

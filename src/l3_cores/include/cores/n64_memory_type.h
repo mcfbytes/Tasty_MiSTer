@@ -143,6 +143,10 @@ static_assert(
     return save_size(t) != 0 ? t : MemoryType::None;
 }
 
+[[nodiscard]] constexpr proto::FieldValue field_of(MemoryType t) noexcept {
+    return proto::FieldValue{static_cast<std::uint32_t>(t)};
+}
+
 [[nodiscard]] constexpr SavePartition save_partition(std::string_view name, MemoryType t) noexcept {
     return SavePartition{
         .name = name,

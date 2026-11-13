@@ -15,6 +15,8 @@ struct FrameDrops {
 
     constexpr void add() noexcept { ++v; }
 
+    constexpr void add(FrameDrops more) noexcept { v += more.v; }
+
     [[nodiscard]] constexpr FrameDrops since(FrameDrops earlier) const noexcept {
         return FrameDrops{v - earlier.v};
     }

@@ -9,6 +9,7 @@ namespace mister::ui {
 struct BrowserLaunch;
 struct ConfirmLaunch;
 struct ScriptLaunch;
+struct TextEntryLaunch;
 
 struct PageLaunches {
     TASTY_SEAT_RESIDENT(Ui);
@@ -16,6 +17,7 @@ struct PageLaunches {
     infra::OptRef<BrowserLaunch> browser{};
     infra::OptRef<ScriptLaunch> script{};
     infra::OptRef<ConfirmLaunch> confirm{};
+    infra::OptRef<TextEntryLaunch> entry{};
 };
 
 }

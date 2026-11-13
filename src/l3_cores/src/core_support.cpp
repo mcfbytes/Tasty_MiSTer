@@ -2,6 +2,7 @@
 #include "cores/core_support.h"
 #include "cores/core_adopt.h"
 #include "proto/core_session.h"
+#include "proto/status_bit.h"
 
 #include <algorithm>
 

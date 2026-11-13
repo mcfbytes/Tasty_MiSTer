@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "proto/reset_edge.h"
+#include "proto/status_bit.h"
 #include "proto/types.h"
 
 namespace mister::cores {

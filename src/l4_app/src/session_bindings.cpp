@@ -2,21 +2,11 @@
 #include "app/session_bindings.h"
 
 #include <algorithm>
-#include <cstring>
-#include <span>
 
 #include "infra/byte_view.h"
 #include "infra/endian.h"
 
 namespace mister::app {
-
-namespace {
-
-std::uint32_t le32(std::span<const std::uint8_t> b, std::size_t off) noexcept {
-    return infra::load_le<std::uint32_t>(b.subspan(off).first<4>());
-}
-
-}
 
 void SessionBindings::bind_facts(
     const proto::LinkOp::BindFacts& op,
@@ -65,31 +55,11 @@ void SessionBindings::bind_uart(
     const proto::LinkOp::BindUart& op,
     const ILinkTxReader& inbox
 ) noexcept {
-    uart_ = Uart{};
-    if (op.mode != proto::TxSlabId{}) {
-        const auto b = inbox.bytes(op.mode);
-        if (b.size() == Uart::kModeBytes)
-            uart_.mode = le32(b, 0);
-    }
-    if (op.speeds != proto::TxSlabId{}) {
-        const auto b = inbox.bytes(op.speeds);
-        if (b.size() == Uart::kSpeedsBytes)
-            uart_.speeds = std::array<cores::BaudRate, Uart::kSpeedCount>{
-                cores::BaudRate{le32(b, 0)},
-                cores::BaudRate{le32(b, Uart::kModeBytes)},
-                cores::BaudRate{le32(b, 2 * Uart::kModeBytes)}
-            };
-    }
-
-    uart_.capable = op.capable;
-    if (op.tokens != proto::TxSlabId{}) {
-        const auto blob = inbox.bytes(op.tokens);
-        const std::string_view v = infra::as_text(blob);
-        const auto sep = v.find('\0');
-        (void)uart_.uart_token.assign(v.substr(0, sep));
-        if (sep != std::string_view::npos)
-            (void)uart_.midi_token.assign(v.substr(sep + 1));
-    }
+    uart_ = UartBinding{};
+    if (op.binding == proto::TxSlabId{})
+        return;
+    if (const auto b = UartBinding::from_image(inbox.bytes(op.binding)))
+        uart_ = *b;
 }
 
 void SessionBindings::bind_doorbells(

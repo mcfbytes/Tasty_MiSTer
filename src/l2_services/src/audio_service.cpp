@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/audio_service.h"
 
-#include <fcntl.h>
-#include <unistd.h>
-
-#include <cerrno>
+#include <array>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include "infra/ascii.h"
-#include "infra/unique_fd.h"
+#include "svc/afilter_parser.h"
+#include "infra/byte_view.h"
+#include "svc/read_bounded.h"
+#include "svc/vfs.h"
 
 namespace mister::svc {
 
@@ -46,23 +49,6 @@ std::string_view strip_leading(std::string_view s) {
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r'))
         ++i;
     return s.substr(i);
-}
-
-[[nodiscard]] Ex<std::string> read_whole_file(const UniqueFd& fd) {
-    std::string out;
-    char chunk[4096];
-    for (;;) {
-        const ssize_t n = ::read(fd.get(), chunk, sizeof chunk);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-        }
-        if (n == 0)
-            break;
-        out.append(chunk, static_cast<std::size_t>(n));
-    }
-    return out;
 }
 
 FilterWireImage decode_filter_image(std::string_view contents) {
@@ -155,55 +141,69 @@ void AudioService::nudge(proto::VolumeStep step) noexcept {
     vol_ = vol_.valid();
 }
 
-void AudioService::set_core_volume(int cmd) {
-    const VolumeStep step = cmd < 0 ? VolumeStep::Quieter
-        : cmd > 0                   ? VolumeStep::Louder
-                                    : VolumeStep::Hold;
+void AudioService::step_core_volume(VolumeStep step) {
     corevol_ = corevol_.stepped(step, has_boost_);
 }
 
-Ex<bool> AudioService::probe_filter() {
-    return has_filter_;
+AfilterEnable AudioService::filter_enable() const noexcept {
+    if (!has_filter_)
+        return AfilterEnable::Unsupported;
+    return filter_enabled_ ? AfilterEnable::On : AfilterEnable::Off;
 }
 
-void AudioService::accept_probe_reply(std::uint8_t raw_reply, bool front_end) noexcept {
-    has_filter_ = raw_reply != 0;
-    has_boost_ = ((raw_reply & 0x02u) != 0) && !front_end;
+void AudioService::accept_probe_reply(proto::ReplyWord r, bool front_end) noexcept {
+    has_filter_ = r.nonzero();
+    has_boost_ = r.any(proto::user_io::kBoostCapability) && !front_end;
     if (!has_boost_) {
         corevol_ = corevol_.attenuation_only();
     }
 }
 
-void AudioService::frame_filter_image(const AfilterParse& parse) {
-    if (!has_filter_ || !parse)
-        return;
-
-    FilterWireImage framed;
-    append_filter_word(framed, core_volume_byte());
-    for (const std::uint16_t word : parse->words())
-        append_filter_word(framed, word);
-    image_ = framed;
+CoreVolume AudioService::lead_with_boost() const noexcept {
+    return corevol_;
 }
 
-Ex<void> AudioService::flush() {
-    if (has_filter_) {
-        image_ = FilterWireImage{};
-        append_filter_word(image_, core_volume_byte());
+CoreVolume AudioService::lead_without_boost() const noexcept {
+    return corevol_.attenuation_only();
+}
 
-        pending_audvol_ = volume_byte();
-    } else {
+AudvolByte AudioService::audvol_with_filter() const noexcept {
+    return AudvolByte{vol_.kept_bits()};
+}
 
-        vol_ = vol_.capped_under(corevol_);
-        pending_audvol_ = vol_.summed_with(corevol_);
-    }
-    return {};
+AudvolByte AudioService::audvol_without_filter() const noexcept {
+    const VolumeByte capped = vol_.capped_under(corevol_);
+    return AudvolByte{capped.summed_with(corevol_)};
+}
+
+AudvolByte AudioService::settle_after_probe() noexcept {
+    return send_volume();
+}
+
+AudvolByte AudioService::send_volume() noexcept {
+    if (has_filter_)
+        return audvol_with_filter();
+    const AudvolByte out = audvol_without_filter();
+    vol_ = vol_.capped_under(corevol_);
+    return out;
+}
+
+void AudioService::load_core_volume(CoreVolume raw) noexcept {
+    const unsigned field = raw.field_bits();
+    unsigned boost = field & CoreVolume::kBoostMask;
+    if (boost > CoreVolume::kBoostMax)
+        boost = CoreVolume::kBoostMax;
+    unsigned atten = field & CoreVolume::kAttenMask;
+    if (atten > CoreVolume::kAttenMax)
+        atten = CoreVolume::kAttenMax;
+    corevol_ = CoreVolume{static_cast<std::uint8_t>(atten | boost)};
 }
 
 AfilterParser AfilterParser::create() noexcept {
     return AfilterParser();
 }
 
-Ex<AfilterParse> AfilterParser::parse(std::string_view name) const {
+Ex<AfilterRead> AfilterParser::parse(const Vfs& vfs, std::string_view name) const {
     if (name.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -214,28 +214,51 @@ Ex<AfilterParse> AfilterParser::parse(std::string_view name) const {
     path.push_back('/');
     path.append(name);
 
-    const int raw_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (raw_fd < 0) {
+    auto file = vfs.open(path, OpenMode::ReadWhole);
+    if (!file) {
 
-        return AfilterParse{FilterWireImage{}};
+        return AfilterRead{};
     }
-    UniqueFd fd{raw_fd};
+    AfilterRead out;
+    out.opened = true;
+    auto bytes = read_bounded(**file, kFilterFileReadCap.file_word<std::uint64_t>());
+    if (!bytes) {
 
-    auto contents = read_whole_file(fd);
-    if (!contents) {
-
-        return std::unexpected(contents.error());
+        return std::unexpected(bytes.error());
     }
-    if (contents->empty()) {
+    if (bytes->empty()) {
 
-        return AfilterParse{};
+        return out;
     }
-    return AfilterParse{decode_filter_image(*contents)};
+    out.parse = decode_filter_image(infra::as_text(std::span<const std::byte>(*bytes)));
+    return out;
 }
 
-[[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, std::uint8_t vol) {
+[[nodiscard]] Ex<void> emit_afilter_stream(
+    proto::ILinkFrame& frame,
+    CoreVolume lead,
+    std::span<const std::uint16_t> words
+) {
 
-    const std::uint16_t words[1] = {vol};
+    if (words.size() + 1 > kFilterWireWords) {
+        return std::unexpected(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
+        );
+    }
+    std::array<std::uint16_t, kFilterWireWords> window{};
+    window[0] = lead.field_bits();
+    for (std::size_t i = 0; i < words.size(); ++i)
+        window[i + 1] = words[i];
+    return proto::send_frame(
+        frame,
+        proto::UioOp::SetAfilter,
+        std::span<const std::uint16_t>(window.data(), words.size() + 1)
+    );
+}
+
+[[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, CoreVolume vol) {
+
+    const std::uint16_t words[1] = {vol.field_bits()};
     return proto::send_frame(
         frame,
         proto::UioOp::SetAfilter,
@@ -243,9 +266,9 @@ Ex<AfilterParse> AfilterParser::parse(std::string_view name) const {
     );
 }
 
-[[nodiscard]] Ex<void> emit_audvol(proto::ILinkFrame& frame, std::uint8_t vol) {
+[[nodiscard]] Ex<void> emit_audvol(proto::ILinkFrame& frame, AudvolByte vol) {
 
-    const std::uint16_t words[1] = {vol};
+    const std::uint16_t words[1] = {vol.word()};
     return proto::send_frame(frame, proto::UioOp::AudVol, std::span<const std::uint16_t>(words, 1));
 }
 

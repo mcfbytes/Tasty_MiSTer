@@ -44,11 +44,13 @@
 #include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/path_parts.h"
 #include "hal/boot_handoff.h"
 #include "proto/conf_str.h"
 #include "proto/core_session.h"
 #include "proto/link_op.h"
 #include "proto/rtc_image.h"
+#include "svc/alt_ini_index.h"
 #include "svc/file.h"
 #include "svc/search_policy.h"
 #include "svc/vfs.h"
@@ -100,7 +102,7 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
       inbox_(link.inbox),
       rx_(link.rx),
       identity_record_cell_(link.identity_record_cell),
-      ini_(link.config_cell, link.storage, link.ops.sleeper),
+      ini_(link.config_cell, link.ini_cell, link.storage, link.ops.sleeper, link.boot_handoff),
       owner_events_(link.owner_events.producer()),
       cheat_catalog_cell_(link.cheat_catalog_cell),
       ui_requests_(link.main_wake),
@@ -138,7 +140,8 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .vfs = vfs_,
               .status_cell = status_cell_,
               .negotiated = negotiated_,
-              .sleeper = ops_.sleeper
+              .sleeper = ops_.sleeper,
+              .ini = link.ini_cell
           }
       ),
       companion_(vfs_, negotiated_, tally_, aperture_.phys, link.companion_binds),
@@ -176,7 +179,6 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .windows = windows_
           }
       ),
-      save_state_asks_(link.save_state_asks),
       save_state_facts_(link.save_state_facts),
       ladder_host_(
           LadderHostAdapter::Edges{
@@ -188,10 +190,10 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .status_cell = status_cell_,
               .mount_status_cell = mount_status_cell_,
               .save_extent_cell = save_extent_cell_,
+              .save_state_asks = link.save_state_asks,
               .save_state_facts = save_state_facts_,
               .belt = belt_
-          },
-          *this
+          }
       ),
       builder_(builder_over(link)),
       reboot_(clock_, inbox_, tally_, link.boot_handoff, link.ops.reset, link.ops.sleeper),
@@ -532,6 +534,21 @@ void SessionOwner::on(const UiRequest::SetHdLook& req, const UiRequest::Head& he
     saves_.set_ini_key(key, std::to_string(req.value));
 }
 
+void SessionOwner::on(const UiRequest::SwitchIni& req, const UiRequest::Head& head) {
+    if (!admit_(req, head.tag))
+        return;
+    if (!ini_.catalog().has(req.ini)) {
+        tally_.ini_switch_absent.add();
+        publish_refusal(UiRequest::SwitchIni::kKind, Errc::not_found, head.tag);
+        return;
+    }
+    if (!handoff_ || !handoff_->write_altcfg(svc::handoff_byte_of(req.ini))) {
+        publish_refusal(UiRequest::SwitchIni::kKind, Errc::io, head.tag);
+        return;
+    }
+    switch_.on_load_core(launcher_.alias(switch_.pending()), head.tag, *this);
+}
+
 void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
@@ -822,7 +839,7 @@ std::optional<proto::ActKey> SessionOwner::attach_row_savestates(
     if (!opensave || !conf || !conf->savestate().has_value())
         return std::nullopt;
     const proto::ActKey gen = ladder_host_.next_generation();
-    if (!ask_savestates_(rom, gen))
+    if (!ladder_host_.order_savestates(rom, gen))
         return std::nullopt;
     return gen;
 }
@@ -836,35 +853,10 @@ void SessionOwner::hold_for_savestates(
     belt_.hold(LoadBelt::SaveStateHold{.load = load, .gen = gen, .due = due});
 }
 
-bool SessionOwner::ask_savestates_(std::string_view rom, proto::ActKey gen) noexcept {
-    const bool service = save_state_asks_
-        && save_state_facts_
-        && save_state_facts_->generation() != 0;
-    SaveStateAttach::Ask ask{
-        .decl = *negotiated_.conf_str()->savestate(),
-        .core_name = negotiated_.core_name(),
-        .arcade = negotiated_.made_with_manifest(),
-        .generation = gen
-    };
-    if (!service || !ask.rom_path.assign(rom) || !save_state_asks_->push(ask)) {
-        ++tally_.savestate_refusals;
-        return false;
-    }
-    return true;
-}
-
 bool SessionOwner::savestates_answered_(proto::ActKey gen) const noexcept {
     if (!save_state_facts_)
         return true;
     return save_state_facts_->sample().value.answered.at_or_past(gen);
-}
-
-bool SessionOwner::order_savestates(std::string_view image, proto::ActKey gen) {
-    TASTY_SEAT_BODY(SessionOwner);
-    const auto& conf = negotiated_.conf_str();
-    if (!conf || !conf->savestate().has_value())
-        return false;
-    return ask_savestates_(image, gen);
 }
 
 bool SessionOwner::arm_open_save(
@@ -913,10 +905,7 @@ std::optional<PathText> SessionOwner::open_save_path_(
     dir.append(core_name.view());
     if (!vfs_.ensure_dir(dir))
         return std::nullopt;
-    const std::size_t slash = rom.rfind('/');
-    std::string_view name = slash == std::string_view::npos ? rom : rom.substr(slash + 1);
-    if (const std::size_t dot = name.rfind('.'); dot != std::string_view::npos)
-        name = name.substr(0, dot);
+    const std::string_view name = infra::stem(rom);
     std::string path = dir;
     path += '/';
     path.append(name);
@@ -1054,15 +1043,13 @@ void SessionOwner::offer_(BeltOrders&& orders) {
     (void)log_->push(LogRec::Refusal{Errc::busy, ERR_SITE()}, log_now_());
 }
 
-bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, proto::ActKey gen) {
+void SessionOwner::plan_walk_(const LadderHostAdapter::WalkAsk& walk) {
     TASTY_SEAT_BODY(SessionOwner);
-    if (belt_.any_live(kWalkBlockers))
-        return false;
     content_.content_owed() = Owed{};
-    belt_.refuse_walk(gen);
+    belt_.refuse_walk(walk.gen);
     const auto row = cores::find_core(negotiated_.core_name().view());
     if (!row || row->make_loader == nullptr)
-        return true;
+        return;
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = row->make_loader(
         cores::LoaderContext{
@@ -1074,17 +1061,20 @@ bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, proto:
             infra::OptRef<const proto::StatusCell>{status_cell_}
         }
     );
-    const cores::LoadAsk ask{.index = proto::WideIoIndex::of(slot), .path = path, .disc = true};
+    const cores::LoadAsk ask{
+        .index = proto::WideIoIndex::of(walk.slot),
+        .path = walk.path.view(),
+        .disc = true
+    };
     const auto plan = loader->plan(ask, ladder_host_.status_word());
     auto w = plan ? LoadWalk::start(std::move(loader), *plan, row->profile.windows)
                   : Ex<LoadWalk>{std::unexpected(plan.error())};
     if (!w) {
         ++tally_.files_failed;
-        return true;
+        return;
     }
     content_.forget_watch();
-    belt_.offer(std::move(*w), gen);
-    return true;
+    belt_.offer(std::move(*w), walk.gen);
 }
 
 void SessionOwner::begin_companion(std::string_view path) {
@@ -1157,6 +1147,9 @@ void SessionOwner::launch_content(const ContentRequest& cr) {
 void SessionOwner::step_ladder_() {
     (void)belt_.take_walk_answer();
     const OwnerLadder::Step step = ladder_.step();
+
+    if (auto ask = ladder_host_.take_walk())
+        plan_walk_(*ask);
     if (step.bios_missing)
         bios_missing_();
     if (step.ended)
@@ -1265,7 +1258,10 @@ void SessionOwner::order_make_core_(const MakeCoreFacts& facts, const svc::Confi
     }
 
     if (negotiated_.made_with_manifest() && conf && conf->savestate().has_value()) {
-        (void)ask_savestates_(negotiated_.manifest_rel().view(), ladder_host_.next_generation());
+        (void)ladder_host_.order_savestates(
+            negotiated_.manifest_rel().view(),
+            ladder_host_.next_generation()
+        );
     }
 
     phase_.rebound(os::Deadline::in(clock_, start_bound_));
@@ -1509,7 +1505,7 @@ void SessionOwner::order_session_up_() noexcept {
         return f.row.ioctl_index == proto::IoIndex{};
     });
 
-    builder_.raise_osd();
+    builder_.osd().raise(builder_.generation());
 
     proto::LinkOp::SessionUp up{};
     up.rtc = proto::RtcImage::zero_date();
@@ -1529,9 +1525,9 @@ void SessionOwner::order_session_up_() noexcept {
 
     (void)push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(up));
 
-    builder_.raise_sector();
+    builder_.sector().raise(builder_.generation());
 
-    builder_.raise_sys();
+    builder_.sys().raise(builder_.generation());
 
     const bool ladder = ladder_.arm_start(negotiated_.core_name(), index0_taken, ladder_host_);
     const std::string rbf = start_rbf_();
@@ -1564,7 +1560,11 @@ std::vector<SessionOwner::RememberedFile> SessionOwner::read_remembered_files_()
     if (remembered_files_ == RememberedFiles::Ignore)
         return out;
     for (const proto::ConfStrFileRow& row : conf->remembered_rows()) {
-        std::string path = read_remembered_path(vfs_, stem, RememberedSlot::File, row.ioctl_index);
+        std::string path = read_remembered_path(
+            vfs_,
+            stem,
+            proto::FileRowId::file(row.ioctl_index)
+        );
         if (!path.empty())
             out.push_back(RememberedFile{row, std::move(path)});
     }
@@ -1668,9 +1668,7 @@ void SessionOwner::order_rbf_tail_(
         ++tally_.files_failed;
         return;
     }
-    const std::size_t dot = path.rfind('.');
-    const std::string_view ext = dot == std::string_view::npos ? std::string_view{}
-                                                               : path.substr(dot);
+    const std::string_view ext = infra::suffix_from_last_dot(path);
     LoadKey key(buf.size());
     key.feed(buf);
     const auto id = inbox_.intern_file(
@@ -1768,6 +1766,7 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     if (ini.launcher)
         launcher_.latch(*ini.launcher, name, switch_.pending().path.view());
     op.conf = conf_switches(cfg);
+    op.osd_rotation = proto::osd_rotation_of_ini(cfg.osd_rotate);
     ini_.publish(cfg);
     launcher_.publish(
         name,
@@ -1781,6 +1780,8 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     op.cfg = negotiated_.key_names(cs, switch_.pending());
     op.savestate_dir_ready = cs.savestate().has_value();
     (void)push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(op));
+    if (cores::profile_for(name).is_front_end)
+        (void)bind_.front_end_pal(cfg.menu_pal != 0);
     bind_.facts(negotiated_.pending_facts());
     bind_.uart(effective_name(name, negotiated_.pending_facts()), &cs);
 
@@ -1905,19 +1906,19 @@ void SessionOwner::programmed(bool ok) {
 
 void SessionOwner::retire_lw_at_exit() noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    if (builder_.sector_mapped())
-        (void)builder_.retire_sector(readiness_.fabric_configured());
-    if (builder_.osd_mapped())
-        (void)builder_.retire_osd(readiness_.fabric_configured());
-    if (builder_.sys_mapped())
-        (void)builder_.retire_sys();
+    if (builder_.sector().mapped())
+        (void)builder_.sector().retire(readiness_.fabric_configured());
+    if (builder_.osd().mapped())
+        (void)builder_.osd().retire(readiness_.fabric_configured());
+    if (builder_.sys().mapped())
+        (void)builder_.sys().retire();
 }
 
 void SessionOwner::fabric_suspect() noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    builder_.abandon_sector();
-    builder_.abandon_osd();
-    builder_.abandon_sys();
+    builder_.sector().abandon();
+    builder_.osd().abandon();
+    builder_.sys().abandon();
 }
 
 bool SessionOwner::ask_recovery_switch() {

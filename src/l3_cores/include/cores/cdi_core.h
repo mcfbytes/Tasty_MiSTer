@@ -37,12 +37,6 @@ public:
 
     [[nodiscard]] DiscType disc_type() const noexcept { return disc_type_; }
 
-    [[nodiscard]] std::size_t toc_entries() const noexcept { return toc_.size(); }
-
-    [[nodiscard]] std::uint32_t declines() const noexcept { return declines_; }
-
-    [[nodiscard]] std::uint32_t failed_reads() const noexcept { return failed_reads_; }
-
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
 
     void set_region(proto::RegionCode) override { TASTY_SEAT_BODY(CdiCore); }
@@ -58,16 +52,6 @@ public:
     }
 
     proto::SlotAttributes attributes(proto::SlotIndex slot) const override;
-    [[nodiscard]] Ex<std::size_t> read_at(
-        proto::SlotIndex slot,
-        std::uint64_t offset,
-        std::span<std::uint8_t> dst
-    ) override;
-    [[nodiscard]] Ex<std::size_t> write_at(
-        proto::SlotIndex slot,
-        std::uint64_t offset,
-        std::span<const std::uint8_t> src
-    ) override;
 
     proto::BlockGeometry geometry_for(
         proto::SlotIndex slot,
@@ -87,15 +71,10 @@ private:
         return infra::OptRef<proto::IBlockServer>{*this};
     }
 
-    enum class Answer : std::uint8_t { TocArea, Track, LeadOut };
-    [[nodiscard]] Answer classify_(HeadLba lba) const noexcept;
-
-    [[nodiscard]] bool serve_block_(
-        HeadLba lba,
-        std::span<std::uint8_t, cdi::kBlockBytes> out
-    ) noexcept;
-    void warm_(HeadLba first, SectorCount blocks) noexcept;
+    void clear_mount_() noexcept;
     svc::DiscMountState refresh_disc_() noexcept;
+
+    [[nodiscard]] MountState probe_boot_();
 
     [[nodiscard]] MountState finish_mount_();
 
@@ -112,12 +91,7 @@ private:
     bool audio_cd_ = false;
 
     DiscType disc_type_ = DiscType::CdRom;
-
-    std::array<cdi::TocEntry, cdi::kTocEntries> toc_rows_{};
-    std::span<const cdi::TocEntry> toc_{};
     StagePlan plan_{};
-    std::uint32_t declines_ = 0;
-    std::uint32_t failed_reads_ = 0;
 };
 
 }

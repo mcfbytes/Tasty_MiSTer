@@ -25,7 +25,7 @@ public:
 
     svc::DiscMountState refresh(infra::OptRef<CdEngine> engine) noexcept;
 
-    [[nodiscard]] svc::DiscMountState arm_mount(
+    [[nodiscard]] svc::DiscArm arm_mount(
         svc::DiscOp op,
         infra::OptRef<const svc::CuePolicy> policy,
         std::string_view path

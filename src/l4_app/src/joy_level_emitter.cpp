@@ -5,18 +5,18 @@
 
 namespace mister::app {
 
-void JoyLevelEmitter::publish(bool muted) {
+void JoyLevelEmitter::publish(bool muted, svc::InputGates gates) {
 
     svc::JoyMask seen{};
     svc::PlayerMask players{};
 
-    if (reset_seen_.take(wire_.edge_reset())) {
+    if (reset_seen_.take(edge_reset_)) {
         for (PlayerLevel& level : levels_)
             level.posted = {};
     }
-    wm_gates_ = wire_.gates();
-    const bool grabbed = wm_gates_.has(InputWire::kGateGrabbed);
-    const bool osd_visible = wm_gates_.has(InputWire::kGateOsdVisible);
+    wm_gates_ = gates;
+    const bool grabbed = gates.grabbed;
+    const bool osd_visible = gates.osd_visible;
 
     for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
         const svc::PlayerIndex p{i};
@@ -27,9 +27,6 @@ void JoyLevelEmitter::publish(bool muted) {
             players = players.with(p);
         }
 
-        const JoyLevel held = wire_.joy(p);
-        level.autofire = held.autofire;
-        wire_.publish_joy(p, JoyLevel{mask, held.autofire});
         if (mask != level.armed_mask || level.autofire != level.armed_autofire) {
             level.armed_mask = mask;
             level.armed_autofire = level.autofire;
@@ -45,7 +42,7 @@ void JoyLevelEmitter::publish(bool muted) {
                     }
                 )) {
                 level.posted = mask;
-                wire_.note_activity();
+                activity_.add();
             }
         }
     }
@@ -60,7 +57,7 @@ void JoyLevelEmitter::publish(bool muted) {
                 .mask = grabbed ? level.armed_mask.with(level.autofire) : level.armed_mask
             };
             if (!muted && inbox_.push(rel))
-                wire_.note_activity();
+                activity_.add();
 
             level.zero_armed = false;
         }

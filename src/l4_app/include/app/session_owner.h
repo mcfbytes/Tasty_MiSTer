@@ -65,8 +65,7 @@ class SessionOwner : private LoadBelt::Host,
                      private MountQueue::Host,
                      private ContentPick::Host,
                      private CoreSwitch::Host,
-                     private ReadinessWatch::Host,
-                     private LadderHostAdapter::Acts {
+                     private ReadinessWatch::Host {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -74,6 +73,8 @@ public:
         LinkTxChannel<SeatTag::Main>& inbox;
         LinkRxChannel<SeatTag::Main>& rx;
         ConfigCell& config_cell;
+
+        IniCell& ini_cell;
 
         IdentityRecordCell& identity_record_cell;
         EventQueue<SeatTag::Main>& owner_events;
@@ -185,6 +186,7 @@ public:
     void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
     void on(const UiRequest::SdramDetected& req, const UiRequest::Head& head);
     void on(const UiRequest::SetHdLook& req, const UiRequest::Head& head);
+    void on(const UiRequest::SwitchIni& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;
@@ -254,6 +256,8 @@ public:
         return ini_.direct_video_cell();
     }
 
+    [[nodiscard]] const IdleKnobsCell& idle_cell() const noexcept { return ini_.idle_cell(); }
+
     [[nodiscard]] bool switch_standing() const noexcept;
     [[nodiscard]] bool reboot_owed() const noexcept;
     [[nodiscard]] const std::optional<proto::ConfStr>& conf_str() const noexcept;
@@ -269,12 +273,7 @@ private:
     using Owed = ContentPick::Owed;
     using Wait = LoadBelt::Wait;
 
-    [[nodiscard]] bool order_walk(
-        proto::IoIndex slot,
-        std::string_view path,
-        proto::ActKey gen
-    ) override;
-    [[nodiscard]] bool order_savestates(std::string_view image, proto::ActKey gen) override;
+    void plan_walk_(const LadderHostAdapter::WalkAsk& ask);
 
     [[nodiscard]] cores::ILadderHost& ladder_host() noexcept override;
 
@@ -373,7 +372,6 @@ private:
     template <class A>
     [[nodiscard]] bool admit_(const A& req, CorrelationTag tag) noexcept;
     void step_companion_();
-    [[nodiscard]] bool ask_savestates_(std::string_view rom, proto::ActKey gen) noexcept;
     [[nodiscard]] bool savestates_answered_(proto::ActKey gen) const noexcept;
     template <class A>
     void order_(const A& alt) noexcept;
@@ -496,7 +494,6 @@ private:
     WindowTally windows_{};
     LoadBelt belt_;
     ContentPick content_;
-    infra::OptRef<SaveStateAttach::AskInbox> save_state_asks_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
     LadderHostAdapter ladder_host_;
     CoreBuilder builder_;

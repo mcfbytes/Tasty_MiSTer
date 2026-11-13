@@ -4,6 +4,7 @@
 #include <array>
 #include <compare>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 
 #include "app/percent.h"
@@ -54,6 +55,35 @@ struct OutputPixels {
     template <std::integral T>
     [[nodiscard]] constexpr T count() const noexcept {
         return static_cast<T>(v);
+    }
+
+    template <std::integral T, std::integral I>
+    [[nodiscard]] constexpr T centre_sample_q16(I at, OutputPixels dst) const noexcept {
+        constexpr std::uint64_t kHalf = 2;
+        constexpr std::uint64_t kOne = std::uint64_t{1} << 16;
+        const std::uint64_t doubled = (kHalf * static_cast<std::uint64_t>(at)) + 1;
+        return static_cast<T>(doubled * v * kOne / (kHalf * dst.v));
+    }
+
+    template <std::integral T>
+    [[nodiscard]] constexpr T last_cell_q16() const noexcept {
+        constexpr std::uint64_t kOne = std::uint64_t{1} << 16;
+        return static_cast<T>((static_cast<std::uint64_t>(v) - 1) * kOne);
+    }
+
+    template <std::integral I>
+    [[nodiscard]] constexpr bool covers(I index) const noexcept {
+        return static_cast<std::uint64_t>(index) < v;
+    }
+
+    template <std::integral T>
+    [[nodiscard]] constexpr T last_index() const noexcept {
+        return static_cast<T>(v - 1);
+    }
+
+    template <std::integral T>
+    [[nodiscard]] constexpr T row_start_index(T row) const noexcept {
+        return static_cast<T>(row * v);
     }
 
     friend constexpr bool operator==(OutputPixels, OutputPixels) = default;

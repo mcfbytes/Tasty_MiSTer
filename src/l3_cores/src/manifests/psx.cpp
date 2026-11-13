@@ -161,11 +161,6 @@ static_assert(
     "missing BIOS does not end the ladder"
 );
 static_assert(
-    kPsxBootAssets[0].loader == AssetLoader::GenericFileTx
-        && kPsxBootAssets[1].loader == AssetLoader::GenericFileTx,
-    "psx.cpp:681: the generic file-tx arm, not the PCE loader"
-);
-static_assert(
     kPsxBootAssets[0].exact_size == proto::FileSize{512 * 1024}
         && kPsxBootAssets[1].exact_size == proto::FileSize{512 * 1024},
     "psx.cpp:680: `if (sz != 512*1024) return 0` — wrong size means "

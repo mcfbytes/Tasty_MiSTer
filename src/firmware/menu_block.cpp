@@ -4,7 +4,9 @@
 #include "app/hd_look_ini.h"
 #include "hal/axi.h"
 #include "infra/opt_ref.h"
+#include "infra/path_text.h"
 #include "os/process_title.h"
+#include "report.h"
 
 namespace mister::fw {
 
@@ -28,8 +30,8 @@ MenuBlock::MenuBlock(
     LauncherBlock& launcher,
     infra::OptRef<os::ProcessTitle> title
 )
-    : diag_path_{plat.diag_path},
-      bt_{parts.wires.bt},
+    : clock_{parts.wires.clock},
+      diag_path_{plat.diag_path},
       trace_{parts.wires.events, parts.wires.owner_events},
       ui_writes_{plat.vfs, parts.wires.io_wake},
       stores_{plat, parts.cells.cheat_blob, ui_writes_},
@@ -46,11 +48,12 @@ MenuBlock::MenuBlock(
           }
       },
       hps_fb_{
-          parts.wires.video.wire(),
+          parts.wires.video.mode_sink(),
           parts.wires.video,
           hal::declared_region(plat.regions, hal::RegionId::VideoFb).value_or(hal::PhysRegion{})
       },
       browse_source_{plat.vfs},
+      connect_{plat.connect, verdict},
 
       ui_model_{ui::MenuModel::Wiring{
           .conf_str = parts.cells.conf_str,
@@ -72,9 +75,11 @@ MenuBlock::MenuBlock(
           .played = infra::OptRef<app::PlayedHistory>{stores_.played_},
           .cheats = infra::OptRef<app::CheatStore>{stores_.cheats_},
           .ui_requests = infra::OptRef<app::UiRequestRing>{parts.session.owner.ui_requests()},
-          .bt = infra::OptRef<ui::IBtOps>{bt_ops_},
+          .connect = infra::OptRef<ui::ConnectPort>{connect_.port()},
           .files = infra::OptRef<const svc::Vfs>{plat.vfs},
-          .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()}
+          .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()},
+          .disk_activity = parts.cells.disk_activity,
+          .ini = parts.cells.ini
       },
       host_facts_{plat.vfs, parts.wires.clock, ui_model_, plat.kernel_rt},
       ui_sink_{UiSink::Wiring{
@@ -83,7 +88,7 @@ MenuBlock::MenuBlock(
           .trace = trace_,
           .mgl = mgl_pump_,
           .video = parts.wires.video,
-          .input = parts.wires.input,
+          .input = parts.wires.core_input,
           .identity = parts.session.link.identity(),
           .conf_str = parts.cells.conf_str,
           .title = title
@@ -91,7 +96,11 @@ MenuBlock::MenuBlock(
       hd_{plat, parts.wires.clock, hps_fb_, parts.wires.video, verdict},
       ui_round_{
           parts.wires.osd,
-          parts.wires.input,
+          ui::UiRound::InputEnds{
+              .key_focus = parts.wires.key_focus,
+              .binding = parts.wires.core_input,
+              .joymap = infra::OptRef<const app::JoyMapEnds>{parts.wires.joymap}
+          },
           parts.wires.clock,
           ui_model_,
           ui_context_,
@@ -101,6 +110,8 @@ MenuBlock::MenuBlock(
               .sampler = host_facts_,
               .osd_file = ui_sink_,
               .conf_str = parts.cells.conf_str,
+              .idle = parts.session.owner.idle_cell(),
+              .ini = parts.cells.ini,
               .hd = hd_.screen(),
               .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
               .video = infra::OptRef<const app::VideoPump>{parts.wires.video},
@@ -139,7 +150,6 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .shot_sink = infra::OptRef<app::IEventSink>{ui_sink_},
         .mgl = infra::OptRef<app::MglPump>{mgl_pump_},
         .fb = infra::OptRef<app::HpsFramebuffer>{hps_fb_},
-        .bt = bt_,
         .launcher_screen = infra::OptRef{launcher_screen_},
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
@@ -155,7 +165,14 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
 }
 
 void MenuBlock::open() noexcept {
-    (void)trace_.open(diag_path_);
+    const Ex<void> opened = trace_.open(diag_path_);
+    if (opened)
+        return;
+    infra::PathText what;
+    (void)what.assign("event trace sink ");
+    (void)what.append(diag_path_);
+    (void)what.append(" (optional; the session continues)");
+    report(what.c_str(), opened.error());
 }
 
 void MenuBlock::route_pages_to(app::ICmdVerbSink& route) noexcept {
@@ -170,6 +187,7 @@ void MenuBlock::latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& m
     ui_model_.set_osd_style(c.osd_style == 1);
     ui_model_.set_hd_look(app::hd_look_from_ini(c));
     (void)hd_.open_seat(c, mains);
+    connect_.open_seat(clock_, mains);
 }
 
 }

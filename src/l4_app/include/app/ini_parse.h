@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "app/idle_knobs.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
 #include "infra/telemetry.h"
@@ -15,13 +16,14 @@
 namespace mister::svc {
 class Vfs;
 class IFile;
+struct IniCatalog;
 }
 
 namespace mister::app {
 
 inline constexpr std::uint64_t kIniCap = 1u << 20;
 
-[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(const svc::Vfs& vfs);
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(const svc::Vfs& vfs, std::string_view name);
 [[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(svc::IFile& file);
 
 using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>;
@@ -30,11 +32,14 @@ using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>;
     const svc::Vfs* vfs,
     const svc::ConfigSnapshot& defaults,
     std::string_view conf_str_name,
-    const MraFacts& facts
+    const MraFacts& facts,
+    const svc::IniCatalog& ini
 );
 
 [[nodiscard]] proto::ConfSwitches conf_switches(const svc::ConfigSnapshot& cfg) noexcept;
 
 [[nodiscard]] proto::ConfSwitches default_conf_switches() noexcept;
+
+[[nodiscard]] IdleKnobs idle_knobs_of(const svc::ConfigSnapshot& cfg) noexcept;
 
 }

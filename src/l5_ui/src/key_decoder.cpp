@@ -6,6 +6,7 @@
 #include <linux/input-event-codes.h>
 
 #include "os/clock.h"
+#include "svc/evdev_range.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -76,14 +77,16 @@ bool ascii_printable(proto::KeyCode code) noexcept {
         return false;
     const svc::EvdevCode k = svc::EvdevCode::of(code);
     using E = svc::EvdevCode;
-    if (k.between(E{KEY_1}, E{KEY_0}))
-        return true;
-    if (k.between(E{KEY_Q}, E{KEY_P}))
-        return true;
-    if (k.between(E{KEY_A}, E{KEY_L}))
-        return true;
-    if (k.between(E{KEY_Z}, E{KEY_M}))
-        return true;
+    constexpr svc::EvdevRange kAsciiRows[] = {
+        {E{KEY_1}, E{KEY_0}},
+        {E{KEY_Q}, E{KEY_P}},
+        {E{KEY_A}, E{KEY_L}},
+        {E{KEY_Z}, E{KEY_M}},
+    };
+    for (const svc::EvdevRange& row : kAsciiRows) {
+        if (row.contains(k))
+            return true;
+    }
     return k == E{KEY_MINUS} || k == E{KEY_EQUAL} || k == E{KEY_SPACE};
 }
 

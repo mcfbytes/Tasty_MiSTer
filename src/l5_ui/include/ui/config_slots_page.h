@@ -11,7 +11,9 @@
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "app/ui_request_ring.h"
+#include "ui/config_slots_mode.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -27,7 +29,7 @@ class ConfigSlotsPage final : public Page {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    enum class Mode : std::uint8_t { Load, Save };
+    using Mode = ConfigSlotsMode;
 
     ConfigSlotsPage(
         const app::ConfigSlotTable& table,
@@ -68,7 +70,7 @@ public:
         return sel_;
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(ConfigSlotsPage);
         return refusals_;
     }
@@ -90,17 +92,8 @@ private:
     infra::OptRef<app::UiRequestRing> asks_{};
     MenuMask mask_{};
     RowIndex sel_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
-
-[[nodiscard]] constexpr ItemId config_slots_item(ConfigSlotsPage::Mode mode) noexcept {
-    return ItemId{static_cast<std::uint16_t>(mode)};
-}
-
-[[nodiscard]] constexpr ConfigSlotsPage::Mode mode_of(ItemId item) noexcept {
-    return item == config_slots_item(ConfigSlotsPage::Mode::Load) ? ConfigSlotsPage::Mode::Load
-                                                                  : ConfigSlotsPage::Mode::Save;
-}
 
 }

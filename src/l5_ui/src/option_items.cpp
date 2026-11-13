@@ -4,9 +4,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app/page_description.h"
+#include "app/romset_alias_reader.h"
+#include "app/session_identity.h"
+#include "infra/ascii.h"
 #include "infra/opt_ref.h"
 #include "ui/arc_label.h"
 #include "ui/cycle_value.h"
@@ -58,6 +62,16 @@ const proto::Item& source_item(const OptionItem::Source& in) {
 
 std::string_view field(const OptionItem::Source& in, unsigned n) {
     return in.table->subfield(source_item(in), n);
+}
+
+std::string with_chd(std::string ext) {
+    constexpr std::size_t kFieldWidth = 3;
+    while (ext.size() % kFieldWidth != 0)
+        ext.push_back(' ');
+    constexpr std::string_view kChd = "CHD";
+    if (!infra::icontains(ext, kChd))
+        ext.append(kChd);
+    return ext;
 }
 
 std::string ext_display(std::string_view ext) {
@@ -262,11 +276,49 @@ Transition PageItem::on_select(IOptionHost& host) const {
     if (target_page == proto::kRootSubmenu)
         return refused(host);
 
-    return Transition{Transition::Kind::Push, host.subpage_page(), item_submenu(target_page)};
+    return Transition::push(host.subpage_page(), PageArg{target_page});
 }
 
 Transition PageItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
     return Transition{};
+}
+
+BrowserSession::Request FileItem::on_shape_browse(
+    BrowserSession::Request req,
+    const BrowseFacts& f
+) const {
+    for (const cores::FileSlot& s : f.slots) {
+        if (s.index != ioctl_index)
+            continue;
+        req.scan.no_enter = s.no_enter;
+        if (s.romset_browse.has_value()) {
+            req.scan.archive_browse = *s.romset_browse;
+            if (f.romsets) {
+                f.romsets->bind(s);
+                req.aliases = infra::opt_ref_of<app::IRomsetAliases>(&*f.romsets);
+            }
+        }
+        break;
+    }
+    req.policy.clear_on_backspace = store_name;
+    return req;
+}
+
+BrowserSession::Request ImageItem::on_shape_browse(
+    BrowserSession::Request req,
+    const BrowseFacts& f
+) const {
+    const cores::SlotRole role = cores::role_of(f.slots, ioctl_index);
+    req.policy.saves_home = role == cores::SlotRole::Save;
+    if (role == cores::SlotRole::Disc)
+        req.extensions = with_chd(std::move(req.extensions));
+    bool opens_zip = false;
+    for (const cores::FileSlot& s : f.slots)
+        if (s.index == ioctl_index)
+            opens_zip = s.opens_zip;
+    req.scan.no_zip = f.image_no_zip && !opens_zip;
+    req.policy.eject_on_backspace = true;
+    return req;
 }
 
 OptionItem::Carry FileItem::on_build(const Source& in, const BuildEnv&) {
@@ -325,7 +377,7 @@ std::optional<app::PageDescription::Row> CheatsItem::on_describe(const Look&) co
 }
 
 Transition CheatsItem::on_select(IOptionHost&) const {
-    return Transition{Transition::Kind::Push, PageId::Cheats};
+    return Transition::push(PageId::Cheats);
 }
 
 Transition CheatsItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
@@ -367,7 +419,7 @@ std::optional<app::PageDescription::Row> DipItem::on_describe(const Look&) const
 }
 
 Transition DipItem::on_select(IOptionHost&) const {
-    return Transition{Transition::Kind::Push, PageId::ArcadeDip};
+    return Transition::push(PageId::ArcadeDip);
 }
 
 Transition DipItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
@@ -410,7 +462,7 @@ std::optional<app::PageDescription::Row> ToggleCloseItem::on_describe(const Look
 Transition ToggleCloseItem::on_select(IOptionHost& host) const {
     if (!pulse_one_bit(*this, host))
         return Transition{};
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 Transition ToggleCloseItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
@@ -664,13 +716,11 @@ std::optional<app::PageDescription::Row> ExitItem::on_describe(const Look&) cons
 }
 
 Transition ExitItem::on_select(IOptionHost&) const {
-    return page == proto::kRootSubmenu ? Transition{Transition::Kind::Leave}
-                                       : Transition{Transition::Kind::Pop};
+    return page == proto::kRootSubmenu ? Transition::leave() : Transition::pop();
 }
 
 Transition ExitItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
-    return page == proto::kRootSubmenu ? Transition{Transition::Kind::Leave}
-                                       : Transition{Transition::Kind::Pop};
+    return page == proto::kRootSubmenu ? Transition::leave() : Transition::pop();
 }
 
 }

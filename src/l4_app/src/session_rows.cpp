@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/session_rows.h"
 
-#include "app/input_wire.h"
+#include "app/rumble_players_cell.h"
 #include "app/link_binder.h"
 #include "app/osd_wire.h"
 #include "app/session_bindings.h"
@@ -15,7 +15,7 @@ SessionRows::SessionRows(const Wiring& w) noexcept
       bindings_(w.bindings),
       binder_(w.binder),
       osd_(w.osd),
-      input_(w.input),
+      rumble_players_(w.rumble_players),
       identify_decoder_(w.signals, session_, w.router, bindings_.generation()),
       status_decoder_(w.link, session_, status_cell_, w.live),
       axi_status_decoder_(session_, status_cell_, w.live),
@@ -71,7 +71,7 @@ proto::ParamSet SessionRows::issued_params(proto::user_io::PollShape s) noexcept
     if (s != proto::user_io::PollShape::RumblePoll)
         return proto::ParamSet{};
 
-    if (const auto m = rumble_pads_reader_.take_if_changed(input_.rumble_pads_cell()))
+    if (const auto m = rumble_pads_reader_.take_if_changed(rumble_players_))
         rumble_pads_ = *m;
     return rumble_pads_.as_param_set();
 }
@@ -146,7 +146,7 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
     return std::span<const reactor::LinkDecoderDecl>(out.data(), n);
 }
 
-void SessionRows::bind_status_route(StatusRoute route, std::uint16_t gen) noexcept {
+void SessionRows::bind_status_route(StatusRoute route, proto::BuildGeneration gen) noexcept {
     TASTY_SEAT_BODY(SessionRows);
     status_route_ = status_lw_ ? route : StatusRoute::Link;
     axi_status_decoder_.bind(

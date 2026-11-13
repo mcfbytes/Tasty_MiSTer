@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <compare>
-#include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <ranges>
-#include <span>
 #include <type_traits>
 #include <utility>
 
+#include "cores/bk2_columns.h"
 #include "cores/digest_value.h"
 #include "cores/movie_region.h"
 #include "cores/movie_rerecord_count.h"
@@ -19,8 +16,6 @@
 #include "svc/types.h"
 
 namespace mister::cores {
-
-inline constexpr std::size_t kMovieColumnsMax = 48;
 
 struct MovieRevision {
     std::uint16_t v = 0;
@@ -98,46 +93,6 @@ private:
     }
 };
 
-struct ColumnCount {
-    std::uint8_t v = 0;
-
-    struct Indices {
-        std::size_t v = 0;
-
-        [[nodiscard]] constexpr auto begin() const noexcept {
-            return std::views::iota(std::size_t{0}, v).begin();
-        }
-
-        [[nodiscard]] constexpr auto end() const noexcept {
-            return std::views::iota(std::size_t{0}, v).end();
-        }
-    };
-
-    [[nodiscard]] static constexpr ColumnCount of(std::size_t n) noexcept {
-        return ColumnCount{static_cast<std::uint8_t>(n)};
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
-
-    [[nodiscard]] constexpr Indices indices() const noexcept { return Indices{v}; }
-
-    template <std::size_t N>
-    [[nodiscard]] constexpr std::span<std::uint8_t> slots_from(
-        std::array<std::uint8_t, N>& columns
-    ) const noexcept {
-        return std::span<std::uint8_t>(columns).subspan(v);
-    }
-
-    [[nodiscard]] constexpr bool within(ColumnCount limit) const noexcept { return v < limit.v; }
-
-    [[nodiscard]] constexpr ColumnCount next() const noexcept {
-        return ColumnCount{static_cast<std::uint8_t>(v + 1)};
-    }
-
-    friend constexpr bool operator==(ColumnCount, ColumnCount) = default;
-    friend constexpr auto operator<=>(ColumnCount, ColumnCount) = default;
-};
-
 struct MovieFacts {
     MovieRevision version{};
     MovieRegion region = MovieRegion::Ntsc;
@@ -145,8 +100,7 @@ struct MovieFacts {
     svc::PlayerMask ports{};
 
     FormatLayout layout{};
-    ColumnCount columns_n{};
-    std::array<std::uint8_t, kMovieColumnsMax> columns{};
+    Bk2Columns columns{};
 
     std::optional<DigestValue> digest{};
 

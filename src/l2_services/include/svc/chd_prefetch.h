@@ -10,13 +10,10 @@
 
 #include "infra/counter.h"
 #include "infra/error.h"
-#include "infra/inbox.h"
-#include "infra/indexed_array.h"
 #include "infra/park_timeout.h"
 #include "infra/polled.h"
 #include "infra/pool_slot.h"
 #include "infra/rt_stats.h"
-#include "infra/slot_pool.h"
 #include "infra/loan_channel.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"
@@ -74,7 +71,7 @@ constexpr std::optional<HunkCount> derive_depth(
 ) noexcept {
     if (hunk_bytes.empty())
         return std::nullopt;
-    const HunkCount derived = HunkCount::of_slots(hunk_bytes.blocks_in(budget));
+    const HunkCount derived = HunkCount::of_slots(hunk_bytes.slots_in(budget));
     if (derived < kPrefetchRingFloorHunks)
         return std::nullopt;
     return derived < kPrefetchMaxHunks ? derived : kPrefetchMaxHunks;
@@ -94,24 +91,15 @@ static_assert(
 );
 
 inline constexpr std::size_t kChdMediaLeases = 2;
-inline constexpr std::size_t kChdAttachDepth = 4;
-static_assert(kChdMediaLeases < kChdAttachDepth);
-static_assert(
-    (kChdAttachDepth & (kChdAttachDepth - 1)) == 0,
-    "xthread::SpscRing requires a power-of-two capacity"
-);
 
 struct ChdMedia {
     TASTY_SEAT_MEDIATOR(Any, Any);
+
+    static constexpr bool kResetOnReap = true;
     std::unique_ptr<IChdSource> src{};
 
     ChdGeometry geo{};
     HunkCount forward_span{};
-};
-
-struct ChdAttach {
-    TASTY_SEAT_EXEMPT(component);
-    xthread::PoolSlot lease{};
 };
 
 enum class PrefetchState : std::uint32_t {
@@ -134,26 +122,10 @@ struct PrefetchCounters {
 };
 
 class ChdPrefetch {
-
-    struct HandoverSeq {
-        std::uint32_t v = 0;
-
-        [[nodiscard]] constexpr HandoverSeq next() const noexcept { return HandoverSeq{v + 1}; }
-
-        [[nodiscard]] constexpr bool reached(HandoverSeq target) const noexcept {
-            return static_cast<std::int32_t>(v - target.v) >= 0;
-        }
-
-        friend constexpr bool operator==(HandoverSeq, HandoverSeq) = default;
-    };
-
-    static_assert(
-        std::atomic<HandoverSeq>::is_always_lock_free,
-        "the handover count crosses T-IO and T-PREFETCH: its atomic never takes a lock"
-    );
-
     using Chan = xthread::
         LoanChannel<PrefetchSlot, kPrefetchMaxDepth, SeatTag::Io, SeatTag::Prefetch>;
+
+    using Media = xthread::LoanChannel<ChdMedia, kChdMediaLeases, SeatTag::Io, SeatTag::Prefetch>;
 
     TASTY_SEAT_MEDIATOR(Prefetch, Io);
 
@@ -214,6 +186,8 @@ public:
         return chan_.census().total();
     }
 
+    [[nodiscard]] Media::Census media_census_for_test() const noexcept { return media_.census(); }
+
 private:
     [[nodiscard]] bool sprinting_() const noexcept {
         return (next_ - tracking_) < kPrefetchMinHunks;
@@ -226,8 +200,6 @@ private:
 
     void take_attaches_() noexcept;
 
-    [[nodiscard]] bool reap_leases_() noexcept;
-
     [[nodiscard]] Ex<void> hand_over_(ChdMedia&& media) noexcept;
     void kick_worker_() noexcept;
     std::size_t evict_(HunkIndex current) noexcept;
@@ -237,43 +209,17 @@ private:
     xthread::WakeFlag wake_{};
 
     Chan chan_{wake_, xthread::Polled{}};
+
+    Media media_{wake_, xthread::Polled{}};
     std::atomic<HunkIndex> want_hunk_{HunkIndex::none()};
     std::atomic<bool> park_req_{false};
     std::atomic<bool> parked_{true};
 
-    xthread::Inbox<ChdAttach, kChdAttachDepth> attaches_{wake_};
-
-    std::atomic<HandoverSeq> attaches_taken_{HandoverSeq{}};
-    xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB> media_{};
-
     xthread::Counter hits_, misses_, decodes_, decode_us_, evictions_, seeks_, errors_;
-
-    using Lease = xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB>::Lease;
-
-    struct HeldLease {
-        TASTY_SEAT_RESIDENT(Io);
-        Lease lease{};
-        HandoverSeq seq{};
-
-        ~HeldLease() { (void)lease.release(); }
-    };
-
-    struct Commander {
-        TASTY_SEAT_RESIDENT(Io);
-        infra::IndexedArray<HeldLease, kChdMediaLeases, xthread::PoolSlot> leases{};
-        HandoverSeq sent{};
-    };
-
-    static_assert(
-        decltype(media_)::owner_seat() == Commander::kSeatDecl,
-        "the seat that holds the leases is the seat the pool checks"
-    );
-    Commander cmd_{};
 
     std::unique_ptr<IChdSource> src_{};
     ChdGeometry geo_{};
     HunkCount forward_span_{};
-    HandoverSeq taken_{};
     HunkIndex next_{};
     HunkIndex tracking_{HunkIndex::none()};
     bool disabled_ = false;

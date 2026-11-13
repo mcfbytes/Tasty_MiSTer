@@ -48,7 +48,7 @@ public:
     app::HdOsdStatusCell hd_status_{};
     xthread::WakeFlag hd_wake_{};
     std::optional<xthread::ParkFds> hd_fds_{};
-    app::HdFlipChannel hd_flips_{xthread::Polled{}, xthread::Polled{}};
+    app::HdFlipChannel hd_flips_{xthread::Polled{}, hd_wake_};
 
     bool hd_raster_ = false;
     app::HdRenderer hd_renderer_;

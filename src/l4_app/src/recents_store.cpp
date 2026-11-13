@@ -9,6 +9,7 @@
 #include "app/ui_write_lane.h"
 #include "infra/ascii.h"
 #include "infra/parse_int.h"
+#include "infra/path_parts.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -92,11 +93,11 @@ private:
 }
 
 std::string RecentsStore::ListId::file_name(std::string_view core) const {
-    if (kind == Kind::Cores)
+    if (!row_)
         return "cores_recent.cfg";
 
-    const proto::ListIndex index = slot.index_above(
-        kind == Kind::Mount ? kMountIndexBase : proto::ListIndex{}
+    const proto::ListIndex index = row_->index.index_above(
+        row_->kind == proto::FileRowKind::Mount ? kMountIndexBase : proto::ListIndex{}
     );
     std::string n{core};
     n += "_recent_";
@@ -105,7 +106,7 @@ std::string RecentsStore::ListId::file_name(std::string_view core) const {
     return n;
 }
 
-std::optional<std::pair<std::string, RecentsStore::ListId>> RecentsStore::ListId::from_file_name(
+std::optional<std::pair<std::string, proto::FileRowId>> RecentsStore::ListId::from_file_name(
     std::string_view name
 ) {
     constexpr std::string_view kRecentTag = "_recent_";
@@ -130,9 +131,10 @@ std::optional<std::pair<std::string, RecentsStore::ListId>> RecentsStore::ListId
     const proto::ListIndex slot = mount ? index.since(kMountIndexBase) : index;
     if (!slot.names_slot())
         return std::nullopt;
+    const proto::IoIndex io = slot.as_slot();
     return std::pair{
         std::string{stem.substr(0, at)},
-        ListId{mount ? Kind::Mount : Kind::File, slot.as_slot()}
+        mount ? proto::FileRowId::mount(io) : proto::FileRowId::file(io)
     };
 }
 
@@ -211,11 +213,8 @@ Ex<void> RecentsStore::update(
     if (!enabled_ || full_path.empty())
         return {};
 
-    const std::size_t slash = full_path.rfind('/');
-    const std::string_view dir = (slash == std::string_view::npos) ? std::string_view{}
-                                                                   : full_path.substr(0, slash);
-    const std::string_view name = (slash == std::string_view::npos) ? full_path
-                                                                    : full_path.substr(slash + 1);
+    const std::string_view dir = infra::dir_or_empty(full_path);
+    const std::string_view name = infra::basename(full_path);
     if (label.empty())
         label = name;
 

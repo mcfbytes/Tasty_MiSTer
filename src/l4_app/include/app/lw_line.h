@@ -3,13 +3,14 @@
 
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/epoll.h>
 
 #include <cstdint>
 #include <utility>
 
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
+#include "infra/opt_ref.h"
+#include "os/epoll_set.h"
 #include "os/uio_handle.h"
 #include "os/uio_line_ref.h"
 
@@ -33,18 +34,18 @@ private:
     friend class LwSectorEndpoint;
     friend class LwSysEndpoint;
 
-    [[nodiscard]] bool open(os::UioLineRef from, int doorbells) noexcept {
+    [[nodiscard]] bool open(
+        os::UioLineRef from,
+        infra::OptRef<const os::EpollSet> doorbells
+    ) noexcept {
         TASTY_SEAT_BODY(LwLine);
-        if (doorbells < 0)
+        if (!doorbells)
             return false;
         const int fd = ::fcntl(from.fd(), F_DUPFD_CLOEXEC, 0);
         auto line = os::UioHandle::adopt(from.line(), UniqueFd{fd});
         if (!line)
             return false;
-        epoll_event ev{};
-        ev.events = EPOLLIN;
-        ev.data.fd = line->fd();
-        if (::epoll_ctl(doorbells, EPOLL_CTL_ADD, line->fd(), &ev) != 0)
+        if (!doorbells->add(line->fd()))
             return false;
         line_ = std::move(*line);
         doorbells_ = doorbells;
@@ -54,11 +55,10 @@ private:
     }
 
     void close() noexcept {
-        if (line_.fd() >= 0 && doorbells_ >= 0) {
-            (void)::epoll_ctl(doorbells_, EPOLL_CTL_DEL, line_.fd(), nullptr);
-        }
+        if (line_.fd() >= 0 && doorbells_)
+            doorbells_->remove(line_.fd());
         line_ = os::UioHandle{};
-        doorbells_ = -1;
+        doorbells_ = {};
     }
 
     [[nodiscard]] bool rang() const noexcept {
@@ -74,14 +74,14 @@ private:
         TASTY_SEAT_BODY(LwLine);
         if (rang)
             (void)line_.borrow().consume();
-        const std::uint32_t w = port.read(cause);
+        const std::uint32_t w = port.read(cause).bits();
         if (rang)
             (void)line_.borrow().rearm();
         return w;
     }
 
     os::UioHandle line_{};
-    int doorbells_ = -1;
+    infra::OptRef<const os::EpollSet> doorbells_{};
 };
 
 }

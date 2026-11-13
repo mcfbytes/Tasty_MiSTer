@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/menu_model.h"
 
+#include "ui/connect_port.h"
+#include "ui/misc_page.h"
+#include "ui/select_ini_page.h"
 #include <linux/input-event-codes.h>
 
 #include <algorithm>
@@ -24,9 +27,18 @@
 #include "proto/status_word.h"
 #include "ui/browser_launch.h"
 #include "ui/browser_page.h"
-#include "ui/bt_ops.h"
 #include "ui/build_env.h"
 #include "ui/confirm_launch.h"
+#include "ui/bluetooth_plan.h"
+#include "ui/bt_devices_plan.h"
+#include "ui/bt_pair_plan.h"
+#include "ui/country_pick_plan.h"
+#include "ui/network_plan.h"
+#include "ui/text_entry_launch.h"
+#include "ui/wifi_advanced_plan.h"
+#include "ui/wifi_networks_plan.h"
+#include "ui/wifi_saved_plan.h"
+#include "ui/text_entry_page.h"
 #include "ui/confirm_page.h"
 #include "ui/core_options_page.h"
 #include "ui/cheats_page.h"
@@ -51,7 +63,6 @@
 #include "ui/option_item.h"
 #include "ui/osd_renderer.h"
 #include "ui/script_launch.h"
-#include "ui/script_policy.h"
 #include "ui/script_run_page.h"
 #include "ui/slot_pick_host.h"
 #include "ui/progress_page.h"
@@ -59,6 +70,7 @@
 #include "ui/system_page.h"
 #include "ui/key_decoder.h"
 #include "ui/page_context.h"
+#include "ui/page_home.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -86,14 +98,6 @@ bool MenuModel::allow_cfg_switch() const {
 }
 
 namespace {
-
-[[nodiscard]] constexpr char persisted_letter(
-    const std::optional<app::RememberedSlot>& slot
-) noexcept {
-    if (!slot)
-        return '\0';
-    return *slot == app::RememberedSlot::Mount ? 'S' : 'F';
-}
 
 std::optional<std::string_view> declared_title(
     const proto::ItemTable& items,
@@ -124,7 +128,11 @@ void MenuModel::arm_auto_pop(const PageContext& ctx) noexcept {
     deadlines_.arm(pages.top(), ctx.clock);
 }
 
-std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext& ctx) {
+std::unique_ptr<Page> MenuModel::make_page(PageId id, const PageArg& arg, PageContext& ctx) {
+    if (!arg.fits(page_takes(id))) {
+        ++root_refusals_;
+        return nullptr;
+    }
     switch (id) {
         case PageId::System: {
 
@@ -133,7 +141,12 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             return make_system_page(ctx.sys, session);
         }
         case PageId::CoreOptions:
-            return make_core_options_page_(focus.submenu());
+            return make_core_options_page_(*arg.submenu_or_root());
+
+        case PageId::SelectIni:
+            return std::make_unique<SelectIniPage>(ctx.ini);
+        case PageId::Misc:
+            return std::make_unique<MiscPage>(ctx.ini);
         case PageId::Browser: {
 
             if (!ctx.launches.browser || !ctx.storage) {
@@ -164,19 +177,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
                 ++root_refusals_;
                 return nullptr;
             }
-            ScriptLaunch::Request req = static_cast<ScriptLaunch::Request&&>(*armed);
-
-            const IScriptPolicy& policy = script_policy_for(req.kind());
-            switch (policy.gate_open(ctx.bt)) {
-                case IScriptPolicy::OpenGate::Refuse:
-                    ++bt_refusals_;
-                    return nullptr;
-                case IScriptPolicy::OpenGate::NoAdapter:
-                    return make_info_page(app::InfoId::BluetoothUnavailable);
-                case IScriptPolicy::OpenGate::Proceed:
-                    break;
-            }
-            return std::make_unique<ScriptRunPage>(static_cast<ScriptLaunch::Request&&>(req));
+            return std::make_unique<ScriptRunPage>(static_cast<ScriptLaunch::Request&&>(*armed));
         }
         case PageId::Cheats: {
 
@@ -187,7 +188,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             return std::make_unique<CheatsPage>(cheats_);
         }
         case PageId::CoreSettings:
-            return make_core_settings_page_(focus.submenu());
+            return make_core_settings_page_(*arg.submenu_or_root());
         case PageId::ConfigSlots: {
             if (mirror_.config_slot_table().count == 0) {
                 ++root_refusals_;
@@ -195,7 +196,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             }
             return std::make_unique<ConfigSlotsPage>(
                 mirror_.config_slot_table(),
-                mode_of(focus),
+                *arg.slots_mode(),
                 mirror_.conf_gen()
             );
         }
@@ -209,12 +210,12 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         }
         case PageId::JoyMap: {
 
-            if (!ctx.input || !ctx.files) {
+            if (!ctx.joymap || !ctx.files) {
                 ++root_refusals_;
                 return nullptr;
             }
             JoyMapPage::Spec spec{};
-            spec.wire = ctx.input;
+            spec.ends = ctx.joymap;
             spec.files = ctx.files;
             spec.front_end = binding_.front_end();
             if (ctx.identity) {
@@ -239,16 +240,26 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             }
             return std::make_unique<ConfirmPage>(*spec);
         }
+        case PageId::TextEntry: {
+            std::optional<TextEntryRequest> request;
+            if (ctx.launches.entry)
+                request = ctx.launches.entry->take();
+            if (!request) {
+                ++root_refusals_;
+                return nullptr;
+            }
+            return std::make_unique<TextEntryPage>(*request);
+        }
 
         case PageId::HdMenu:
             refresh_recent_(ctx);
             if (binding_.front_end()) {
-                return make_hd_list_(std::make_unique<HdHomePlan>(plan_inputs_(ctx, focus)), focus);
+                return make_hd_list_(std::make_unique<HdHomePlan>(plan_inputs_(ctx, arg)), arg);
             }
-            return make_hd_list_(std::make_unique<HdRootPlan>(plan_inputs_(ctx, focus)), focus);
+            return make_hd_list_(std::make_unique<HdRootPlan>(plan_inputs_(ctx, arg)), arg);
 
         case PageId::HdCoreSettings: {
-            const proto::SubmenuNo page = focus.submenu();
+            const proto::SubmenuNo page = *arg.submenu_or_root();
             std::string title{"Core settings"};
             if (page != proto::kRootSubmenu) {
                 const std::optional<std::string_view> declared = declared_title(items_, page);
@@ -279,43 +290,46 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         }
 
         case PageId::HdCoreAbout:
-            return make_hd_list_(
-                std::make_unique<HdCoreAboutPlan>(plan_inputs_(ctx, focus)),
-                focus
-            );
+            return make_hd_list_(std::make_unique<HdCoreAboutPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdSettings:
-            return make_hd_list_(std::make_unique<HdSettingsPlan>(plan_inputs_(ctx, focus)), focus);
+            return make_hd_list_(std::make_unique<HdSettingsPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdControllers:
-            return make_hd_list_(
-                std::make_unique<HdControllersPlan>(plan_inputs_(ctx, focus)),
-                focus
-            );
+            return make_hd_list_(std::make_unique<HdControllersPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdDisplay:
-            return make_hd_list_(std::make_unique<HdDisplayPlan>(plan_inputs_(ctx, focus)), focus);
+            return make_hd_list_(std::make_unique<HdDisplayPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdAbout:
-            return make_hd_list_(std::make_unique<HdAboutPlan>(plan_inputs_(ctx, focus)), focus);
+            return make_hd_list_(std::make_unique<HdAboutPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdMedia:
-            return make_hd_list_(std::make_unique<HdMediaPlan>(plan_inputs_(ctx, focus)), focus);
+            return make_hd_list_(std::make_unique<HdMediaPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdSlotSheet:
-            return make_hd_list_(
-                std::make_unique<HdSlotSheetPlan>(plan_inputs_(ctx, focus)),
-                focus
-            );
+            return make_hd_list_(std::make_unique<HdSlotSheetPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::HdRecentGames:
             refresh_recent_(ctx);
-            return make_hd_list_(
-                std::make_unique<HdRecentGamesPlan>(plan_inputs_(ctx, focus)),
-                focus
-            );
+            return make_hd_list_(std::make_unique<HdRecentGamesPlan>(plan_inputs_(ctx, arg)), arg);
+
+        case PageId::Network:
+            return make_hd_list_(std::make_unique<NetworkPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::WifiNetworks:
+            return make_hd_list_(std::make_unique<WifiNetworksPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::WifiSaved:
+            return make_hd_list_(std::make_unique<WifiSavedPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::WifiAdvanced:
+            return make_hd_list_(std::make_unique<WifiAdvancedPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::CountryPick:
+            return make_hd_list_(std::make_unique<CountryPickPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::Bluetooth:
+            return make_hd_list_(std::make_unique<BluetoothPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::BtPair:
+            return make_hd_list_(std::make_unique<BtPairPlan>(plan_inputs_(ctx, arg)), arg);
+        case PageId::BtDevices:
+            return make_hd_list_(std::make_unique<BtDevicesPlan>(plan_inputs_(ctx, arg)), arg);
         case PageId::None:
         case PageId::Info:
         case PageId::Progress:
         case PageId::Unlock:
-        case PageId::SelectIni:
         case PageId::Recents:
         case PageId::About:
         case PageId::Common:
-        case PageId::Misc:
         case PageId::VideoProc:
         case PageId::Uart:
         case PageId::UartMode:
@@ -382,7 +396,7 @@ std::unique_ptr<Page> MenuModel::make_core_settings_page_(proto::SubmenuNo page)
     return p;
 }
 
-HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, ItemId focus) {
+HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, const PageArg& arg) {
     return HdPlanInputs{
         .ctx = ctx,
         .style = style_,
@@ -392,7 +406,7 @@ HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, ItemId focus) {
         .now_playing = now_playing_,
         .recent_games = recent_games_,
         .env = build_env(proto::kRootSubmenu),
-        .focus = focus,
+        .arg = arg,
         .classic = hd_classic_,
         .front_end = binding_.front_end(),
     };
@@ -406,8 +420,7 @@ app::RecentGames::Played MenuModel::played_record_() const noexcept {
         .core_image = p.core_image.view(),
         .path = p.path.view(),
         .title = p.title.view(),
-        .ioctl_index = p.ioctl_index,
-        .slot = persisted_letter(p.slot)
+        .row = p.row
     };
 }
 
@@ -425,8 +438,8 @@ std::span<const app::PlayedHistory::Record> MenuModel::played_records_(PageConte
     return ctx.played->records();
 }
 
-std::unique_ptr<Page> MenuModel::make_hd_list_(std::unique_ptr<IHdPlan> plan, ItemId focus) {
-    auto p = std::make_unique<HdListPage>(std::move(plan), focus, hd_focus_);
+std::unique_ptr<Page> MenuModel::make_hd_list_(std::unique_ptr<IHdPlan> plan, const PageArg& arg) {
+    auto p = std::make_unique<HdListPage>(std::move(plan), arg, hd_focus_);
 
     if (p->empty()) {
         ++root_refusals_;
@@ -436,12 +449,13 @@ std::unique_ptr<Page> MenuModel::make_hd_list_(std::unique_ptr<IHdPlan> plan, It
 }
 
 void MenuModel::apply(const Transition& t, PageContext& ctx) {
-    switch (t.kind) {
+    switch (t.kind()) {
         case Transition::Kind::Stay:
             return;
         case Transition::Kind::Push: {
-            const bool from_hd = stack_.top_id() == PageId::HdSettings && t.page == PageId::System;
-            auto p = make_page(t.page, t.focus, ctx);
+            const Transition::Push& a = *t.as_push();
+            const bool from_hd = stack_.top_id() == PageId::HdSettings && a.page == PageId::System;
+            auto p = make_page(a.page, a.arg, ctx);
             if (p == nullptr)
                 return;
             if (from_hd)
@@ -465,14 +479,8 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
             break;
         }
         case Transition::Kind::Replace: {
-
-            if (t.page == PageId::HdMenu) {
-                style_.choose_hd();
-                stack_.clear();
-                open_root_(ctx, true);
-                break;
-            }
-            auto p = make_page(t.page, t.focus, ctx);
+            const Transition::Replace& a = *t.as_replace();
+            auto p = make_page(a.page, a.arg, ctx);
             if (p == nullptr)
                 return;
             stack_.replace(static_cast<std::unique_ptr<Page>&&>(p));
@@ -485,10 +493,15 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
 
             stack_.clear();
             break;
-        case Transition::Kind::Reopen:
+        case Transition::Kind::ChooseHdStyle:
 
-            stack_.clear();
-            open_root_(ctx, true);
+            style_.choose_hd();
+            reopen_root_(ctx);
+            break;
+        case Transition::Kind::ChooseClassicStyle:
+
+            style_.choose_classic();
+            reopen_root_(ctx);
             break;
         case Transition::Kind::Leave:
 
@@ -498,10 +511,17 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
                 stack_.clear();
             }
             break;
+        case Transition::Kind::kCount:
+            return;
     }
     seed_navigator();
     arm_auto_pop(ctx);
     repaint_ = true;
+}
+
+void MenuModel::reopen_root_(PageContext& ctx) {
+    stack_.clear();
+    open_root_(ctx, true);
 }
 
 bool MenuModel::hd_tree() const noexcept {
@@ -556,9 +576,9 @@ void MenuModel::on_request_done(
                               .on_done(asks ? asks->pending(tag) : std::nullopt, slots, unix_time);
     if (asks)
         asks->forget(tag);
+    const app::RecentGames::Played p = played_record_();
 
-    if (recorded && ctx.played) {
-        const app::RecentGames::Played p = played_record_();
+    if (recorded && ctx.played && p.row) {
         std::string image{p.core_image};
 
         if (image.empty() && ctx.files.has_value())
@@ -569,8 +589,7 @@ void MenuModel::on_request_done(
                 .core_name = std::string{p.core_name},
                 .path = std::string{p.path},
                 .title = std::string{p.title},
-                .ioctl_index = p.ioctl_index,
-                .slot = p.slot,
+                .row = *p.row,
                 .unix_time = unix_time,
             }
         );
@@ -780,6 +799,12 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     sync_cells();
     stamp_session(ctx);
 
+    if (ctx.connect) {
+        const ConnectDemand wanted = stack_.connect_demand();
+        if (ctx.connect->pump(wanted) && wanted != ConnectDemand{})
+            repaint_ = true;
+    }
+
     bool cleared_this_round = false;
     if (invalidate_) {
         invalidate_ = false;
@@ -810,7 +835,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
 
     if (auto top = stack_.top()) {
         const Transition t = top->on_tick(ctx);
-        if (t.kind != Transition::Kind::Stay) {
+        if (t.kind() != Transition::Kind::Stay) {
             apply(t, ctx);
             did = true;
         } else if (top->facts().wake_every_round) {
@@ -1021,6 +1046,10 @@ bool MenuModel::cells_pending() const noexcept {
     return mirror_.pending();
 }
 
+bool MenuModel::connect_pending(const PageContext& ctx) const noexcept {
+    return ctx.connect && ctx.connect->pending(stack_.connect_demand());
+}
+
 void MenuModel::sync_cells() {
     CoreCellMirror::Changed c = mirror_.sync();
     if (c.table)
@@ -1043,6 +1072,8 @@ void MenuModel::disarm_launches_(PageContext& ctx) noexcept {
         ctx.launches.script->disarm();
     if (ctx.launches.confirm)
         ctx.launches.confirm->disarm();
+    if (ctx.launches.entry)
+        ctx.launches.entry->disarm();
 }
 
 void MenuModel::close_osd() noexcept {
@@ -1150,7 +1181,7 @@ void MenuModel::open_root_(PageContext& ctx, bool hd_allowed) {
             continue;
         }
 
-        auto p = make_page(row.page, kNoItem, ctx);
+        auto p = make_page(row.page, PageArg{}, ctx);
         if (p == nullptr)
             continue;
         if (row.arm == RootArm::System) {
@@ -1181,14 +1212,32 @@ bool MenuModel::open_classic_root(PageContext& ctx) {
 }
 
 void MenuModel::open_bt_pairing(PageContext& ctx) {
-    if (!ctx.launches.script) {
+
+    if (stack_.any_bt_pairing()) {
         ++bt_refusals_;
         return;
     }
-    ScriptLaunch::Request req = ScriptLaunch::Request::bt_pair(ctx.bt_reset_before_pair);
-    (void)ctx.launches.script->arm(static_cast<ScriptLaunch::Request&&>(req));
-    const auto kind = osd_open() ? Transition::Kind::Replace : Transition::Kind::Push;
-    apply(Transition{kind, PageId::ScriptRun}, ctx);
+    const PageArg arg{PairStart::AutoFirst};
+    apply(
+        osd_open() ? Transition::replace(PageId::BtPair, arg)
+                   : Transition::push(PageId::BtPair, arg),
+        ctx
+    );
+}
+
+bool MenuModel::open_select_ini(PageContext& ctx) {
+    auto p = make_page(PageId::SelectIni, PageArg{}, ctx);
+    if (p == nullptr)
+        return false;
+    stack_.clear();
+    stack_.push(std::move(p));
+    if (auto page = stack_.top())
+        page->on_enter(ctx);
+    seed_navigator();
+    arm_auto_pop(ctx);
+    invalidate_surface();
+    repaint_ = true;
+    return true;
 }
 
 }

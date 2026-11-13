@@ -7,6 +7,7 @@
 #include "ui/page_id.h"
 #include "ui/transition.h"
 #include "ui/types.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -33,7 +34,7 @@ public:
 
     [[nodiscard]] virtual bool empty() const = 0;
 
-    [[nodiscard]] virtual std::uint32_t refusals() const noexcept { return 0; }
+    [[nodiscard]] virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
 
 protected:
     IOptionsView() = default;

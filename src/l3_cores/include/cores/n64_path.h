@@ -9,11 +9,6 @@
 
 namespace mister::cores::n64 {
 
-[[nodiscard]] constexpr std::string_view path_leaf(std::string_view path) noexcept {
-    const auto cut = path.find_last_of("/\\");
-    return cut == std::string_view::npos ? path : path.substr(cut + 1);
-}
-
 [[nodiscard]] constexpr bool same_file(std::string_view a, std::string_view b) noexcept {
     if (a.empty() || b.empty())
         return false;

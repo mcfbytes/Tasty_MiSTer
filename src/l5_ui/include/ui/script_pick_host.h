@@ -6,6 +6,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "svc/types.h"
 #include "ui/browser_host.h"
 #include "ui/page.h"
 
@@ -30,11 +31,11 @@ public:
     Transition on_picked(const BrowserEntry& e, std::string_view path) override;
     Transition on_cancel() override;
 
-    std::uint32_t refusals() const noexcept { return refusals_; }
+    svc::Tally refusals() const noexcept { return refusals_; }
 
 private:
     Borrows b_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 };
 
 }

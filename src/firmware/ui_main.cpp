@@ -2,7 +2,6 @@
 #include "ui_main.h"
 
 #include "infra/wired_end.h"
-#include "app/bt_pump.h"
 #include "app/cmd_fifo.h"
 #include "app/event.h"
 #include "app/event_sink.h"
@@ -42,13 +41,14 @@ UiMain::UiMain(
       fifo_(wiring.fifo),
       mgl_(wiring.mgl),
       video_(wiring.video),
-      bt_(wiring.bt),
       shots_(wiring.shots),
       replay_(wiring.replay),
       recorder_(wiring.recorder),
       launcher_screen_(wiring.launcher_screen),
       ui_sink_(wiring.ui_sink),
       ui_round_(wiring.ui_round),
+      menu_keys_(wiring.menu_keys),
+      fan_(video_, wiring.ui_round),
       owner_tick_(wiring.owner_tick),
       lw_osd_(wiring.lw_osd),
       ui_rx_(wiring.link_rx),
@@ -78,12 +78,8 @@ void UiMain::drain_events_() noexcept {
 void UiMain::serve() noexcept {
     bool link_work = false;
 
-    while (const auto ev = ui_rx_.pop()) {
-        if (ui_round_)
-            link_work |= ui_round_->take_link(*ev);
-        else
-            ++roundless_link_drops_;
-    }
+    while (const auto ev = ui_rx_.pop())
+        link_work |= fan_.take(*ev);
     if (fifo_ && park_.extra_ready())
         (void)fifo_->service();
     if (mgl_)
@@ -91,8 +87,6 @@ void UiMain::serve() noexcept {
     video_.tick();
     if (launcher_screen_)
         launcher_screen_->tick();
-    if (bt_)
-        bt_->tick();
     shots_.tick();
     replay_.tick();
     recorder_.tick();
@@ -106,14 +100,27 @@ void UiMain::serve() noexcept {
         while (const auto h = uart_handoffs_->pop())
             infra::dispatch<app::UartHandoffRoutes>(*h, uart_performer_);
     }
+
+    unsigned popped = 0;
+    if (ui_round_ && menu_keys_) {
+        while (!kKeyDrainBudget.spent(popped)) {
+            const auto e = menu_keys_->pop();
+            if (!e)
+                break;
+            ui_round_->on(*e);
+            ++popped;
+        }
+    }
     const std::optional<app::UiRoundEdge> edge = ui_round_
-        ? std::optional{ui_round_->round(link_work)}
+        ? std::optional{ui_round_->round(app::UiPassWork{link_work, popped > 0})}
         : std::nullopt;
 
     if (lw_osd_)
         lw_osd_->serve();
     if (edge)
         ui_round_->publish_edges(*edge);
+    if (edge)
+        video_.note_menu_present(edge->menu_present);
     drain_events_();
 }
 

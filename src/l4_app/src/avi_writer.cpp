@@ -6,8 +6,8 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <limits>
 
+#include "app/chunk_dispatch.h"
 #include "app/log_clock.h"
 #include "infra/errno.h"
 #include "os/write_all.h"
@@ -28,27 +28,7 @@ void AviWriter::serve() noexcept {
         auto job = w_.in.take();
         if (!job)
             break;
-        switch (job->kind) {
-            case ChunkKind::Open:
-                open_(*job);
-                break;
-            case ChunkKind::Data:
-                data_(*job);
-                break;
-            case ChunkKind::Refuse:
-                refuse_(*job);
-                break;
-            case ChunkKind::Close:
-                if (job->gen == st_.gen && fd_.valid())
-                    finalize_();
-                if (job->gen == st_.gen)
-                    drop_unrated_();
-                if (job->gen == st_.gen && st_.state == RecWriteState::Open)
-                    st_.state = RecWriteState::Closed;
-                index_.release();
-                dirty_ = true;
-                break;
-        }
+        infra::dispatch<ChunkRoutes>(*job, *this);
         job.complete();
     }
     if (dirty_)
@@ -67,13 +47,9 @@ void AviWriter::release() noexcept {
     w_.status.publish(st_);
 }
 
-void AviWriter::open_(const ChunkSlot& s) noexcept {
-    if (s.gen != st_.gen) {
-        if (fd_.valid())
-            finalize_();
-        drop_unrated_();
-        st_ = AviWriteStatus{};
-        st_.gen = s.gen;
+void AviWriter::on(const ChunkSlot::Open& s, ControlGeneration gen) noexcept {
+    if (gen != st_.gen) {
+        adopt_(gen);
     } else if (st_.state == RecWriteState::Failed) {
         return;
     } else if (fd_.valid()) {
@@ -85,7 +61,7 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     st_.segment = s.segment;
 
     if (index_.bytes() == 0) {
-        if (auto r = index_.reserve(1, kMaxEntries * avi::kIndexEntry); !r)
+        if (auto r = index_.reserve(1, kMaxEntries.scaled_by(avi::kIndexEntry)); !r)
             return fail_(infra::Errno{ENOMEM});
     }
 
@@ -93,17 +69,17 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     if (fd < 0)
         return fail_(infra::Errno{errno});
     fd_.reset(fd);
-    entries_ = 0;
+    entries_ = AviFrameCount{};
     f_ = avi::Fields{};
     f_.width = s.size.width;
     f_.rows = s.size.rows;
     f_.codec = s.codec;
-    f_.rate = avi::kTickHz;
-    frame_mul_ = s.frame_mul == 0 ? 1 : s.frame_mul;
-    f_.scale = scaled_vtime_(avi::kDefaultVtime);
+    f_.rate = FrameTicks::kTickHz;
+    frame_mul_ = s.frame_mul;
+    f_.scale = FrameTicks::k60Hz().dw_scale(frame_mul_);
     rate_known_ = false;
-    if (avi::plausible_vtime(s.vtime))
-        learn_rate_(s.vtime);
+    if (s.rate.known())
+        learn_rate_(s.rate);
     const auto h = avi::header(f_);
     if (!write_all_(h))
         return;
@@ -111,19 +87,14 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     st_.state = RecWriteState::Open;
 }
 
-void AviWriter::refuse_(const ChunkSlot& s) noexcept {
-    if (s.gen != st_.gen) {
-        if (fd_.valid())
-            finalize_();
-        drop_unrated_();
-        st_ = AviWriteStatus{};
-        st_.gen = s.gen;
-    }
+void AviWriter::on(const ChunkSlot::Refuse&, ControlGeneration gen) noexcept {
+    if (gen != st_.gen)
+        adopt_(gen);
     fail_(infra::Errno{ENOMEM});
 }
 
-void AviWriter::data_(const ChunkSlot& s) noexcept {
-    if (s.gen != st_.gen || st_.state != RecWriteState::Open || !fd_.valid()) {
+void AviWriter::on(const ChunkSlot::Data& s, ControlGeneration gen) noexcept {
+    if (gen != st_.gen || st_.state != RecWriteState::Open || !fd_.valid()) {
         st_.dropped += s.chunks;
         dirty_ = true;
         return;
@@ -143,18 +114,18 @@ void AviWriter::data_(const ChunkSlot& s) noexcept {
                 static_cast<std::uint32_t>(at - avi::kMoviFourcc),
                 len,
                 std::span<std::byte, avi::kIndexEntry>(
-                    idx + std::size_t{entries_} * avi::kIndexEntry,
+                    idx + entries_.scaled_by(avi::kIndexEntry),
                     avi::kIndexEntry
                 )
             );
-            ++entries_;
+            entries_ += AviFrameCount{1};
         }
         f_.max_chunk = std::max(f_.max_chunk, len);
         at += avi::chunk_bytes(len);
     }
 
-    if (!rate_known_ && avi::plausible_vtime(s.vtime))
-        learn_rate_(s.vtime);
+    if (!rate_known_ && s.rate.known())
+        learn_rate_(s.rate);
     pos_ += s.used;
     f_.frames += s.chunks;
     f_.movi_bytes += s.used;
@@ -163,10 +134,34 @@ void AviWriter::data_(const ChunkSlot& s) noexcept {
     dirty_ = true;
 }
 
+void AviWriter::on(const ChunkSlot::Close&, ControlGeneration gen) noexcept {
+    if (gen == st_.gen && fd_.valid())
+        finalize_();
+    if (gen == st_.gen)
+        drop_unrated_();
+    if (gen == st_.gen && st_.state == RecWriteState::Open)
+        st_.state = RecWriteState::Closed;
+    if (gen == st_.gen)
+        index_.release();
+    dirty_ = true;
+}
+
+void AviWriter::misrouted(const ChunkSlot&) noexcept {
+    TASTY_SEAT_BODY(AviWriter);
+}
+
+void AviWriter::adopt_(ControlGeneration gen) noexcept {
+    if (fd_.valid())
+        finalize_();
+    drop_unrated_();
+    st_ = AviWriteStatus{};
+    st_.gen = gen;
+}
+
 void AviWriter::finalize_() noexcept {
     std::array<std::byte, avi::kChunkHead> head{};
     avi::index_head(entries_, head);
-    const std::size_t body = std::size_t{entries_} * avi::kIndexEntry;
+    const std::size_t body = entries_.scaled_by(avi::kIndexEntry);
     if (write_all_(head) && write_all_(index_.stripe(0).first(body))) {
         f_.index_bytes = avi::kChunkHead + body;
         write_header_();
@@ -183,22 +178,12 @@ void AviWriter::finalize_() noexcept {
         unrated_[nunrated_++] = Unrated{.fd = std::move(fd_), .f = f_};
     }
     fd_.reset();
-    entries_ = 0;
+    entries_ = AviFrameCount{};
     dirty_ = true;
 }
 
-static_assert(
-    std::uint64_t{avi::kVtimeMax} * kRecEveryMax <= std::numeric_limits<std::uint32_t>::max()
-);
-
-std::uint32_t AviWriter::scaled_vtime_(std::uint32_t vtime) const noexcept {
-    const std::uint32_t mul = frame_mul_ == 0 ? 1u : frame_mul_;
-    const std::uint64_t product = std::uint64_t{vtime} * mul;
-    return sat_u32(product);
-}
-
-void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {
-    f_.scale = scaled_vtime_(vtime);
+void AviWriter::learn_rate_(FrameTicks rate) noexcept {
+    f_.scale = rate.dw_scale(frame_mul_);
     rate_known_ = true;
     for (std::size_t i = 0; i < nunrated_; ++i) {
         Unrated& u = unrated_[i];
@@ -251,7 +236,7 @@ void AviWriter::fail_(infra::Errno err) noexcept {
         st_.err = err;
     st_.state = RecWriteState::Failed;
     fd_.reset();
-    entries_ = 0;
+    entries_ = AviFrameCount{};
     dirty_ = true;
 }
 

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
-#include <span>
-#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "hal/video_out_decl.h"
@@ -14,6 +12,7 @@
 #include "os/types.h"
 #include "svc/adv7513_probe_report.h"
 #include "svc/adv7513_reg_write.h"
+#include "svc/adv7513_spd_packet.h"
 
 namespace mister::svc {
 struct Modeline;
@@ -30,12 +29,6 @@ inline constexpr bool kAdvModeWrite = true;
 inline constexpr os::I2cReg kRegPacketEnable{0x40};
 inline constexpr std::uint8_t kPacketMaskSpd = 0x40;
 inline constexpr os::I2cReg kPacketOffsetSpd{0x00};
-inline constexpr std::size_t kSpdPacketBytes = 31;
-
-struct SpdPacket {
-    std::array<std::uint8_t, kSpdPacketBytes> b{};
-    friend bool operator==(const SpdPacket&, const SpdPacket&) = default;
-};
 
 SpdPacket build_standard_spd(std::string_view core_name);
 

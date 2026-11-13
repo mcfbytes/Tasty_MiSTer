@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "cores/transfer_row.h"
+#include "infra/seat.h"
 
 namespace mister::cores {
 
@@ -19,9 +20,22 @@ struct PlanFrame {
 };
 
 struct LoadPlan {
+    TASTY_SEAT_EXEMPT(component);
+
+    struct RowIx {
+        std::size_t v = 0;
+        friend constexpr bool operator==(RowIx, RowIx) = default;
+    };
+
     std::array<TransferRow, kMaxTransferRows> rows{};
     std::size_t count = 0;
     PlanFrame frame{};
+
+    [[nodiscard]] constexpr TransferRow& operator[](RowIx ix) noexcept { return rows[ix.v]; }
+
+    [[nodiscard]] constexpr const TransferRow& operator[](RowIx ix) const noexcept {
+        return rows[ix.v];
+    }
 };
 
 }

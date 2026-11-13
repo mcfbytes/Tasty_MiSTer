@@ -10,6 +10,7 @@
 #include "hal/irq_pin.h"
 #include "hal/phys_region.h"
 #include "infra/opt_ref.h"
+#include "infra/wake_flag.h"
 #include "infra/seat.h"
 #include "os/types.h"
 #include "os/uio_line_space.h"
@@ -38,6 +39,10 @@ class IDiskPort;
 class IMailboxPort;
 }
 
+namespace mister::hal {
+class DiskLamp;
+}
+
 namespace mister::app {
 
 class PcmRingFeeder;
@@ -54,6 +59,9 @@ struct CoreTerms {
     infra::OptRef<svc::ChdPrefetch> prefetch{};
     infra::OptRef<cores::IMailboxPort> mailbox{};
     infra::OptRef<cores::IDiskPort> disk{};
+
+    infra::OptRef<hal::DiskLamp> lamp{};
+    infra::OptRef<xthread::WakeFlag> disk_activity{};
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
     infra::OptRef<PcmRingFeeder> feeder{};
     hal::FpgaAperture aperture{};

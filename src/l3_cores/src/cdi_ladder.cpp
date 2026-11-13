@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/cdi_ladder.h"
 
+#include "infra/path_parts.h"
 #include "proto/types.h"
 
 namespace mister::cores {
@@ -35,7 +36,7 @@ Ex<bool> CdiLadder::on_step() {
             }
             report_.disc_mounted = true;
 
-            const std::string_view cur = dir_or_empty(image_path());
+            const std::string_view cur = infra::dir_or_empty(image_path());
             report_.same_game = !last_dir_.empty() && cur == last_dir_;
             if (!report_.same_game)
                 last_dir_.assign(cur);

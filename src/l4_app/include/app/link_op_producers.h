@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "infra/message_sum.h"
+#include "infra/seat.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -23,12 +24,15 @@ class FileTxPieces;
 class InputDecode;
 class JoyLevelEmitter;
 class LadderHostAdapter;
+template <SeatTag Producer>
+class LinkTxChannel;
 class LinkSession;
 class LoadLadder;
 class LoadWalk;
 class ManifestLadder;
 class MglPlayer;
 class MountQueue;
+class Ps2Egress;
 class SessionOwner;
 class SettleStage;
 class VideoWire;
@@ -45,6 +49,7 @@ class CheatsPage;
 class CoreOptionsPage;
 class CoreSettingsPage;
 class DipsPage;
+class FrontEndBackground;
 class UiRound;
 }
 
@@ -82,7 +87,8 @@ using LinkOpProducers = std::tuple<
         LoadWalk,
         SettleStage,
         cores::BootLadder,
-        ui::CoreOptionsPage>,
+        ui::CoreOptionsPage,
+        ui::FrontEndBackground>,
     OpUnproduced<proto::LinkOp::Kind::OsdFlush, kOwedOsdFlush>,
     OpProducer<proto::LinkOp::Kind::JoyEmit, JoyLevelEmitter>,
     OpUnproduced<proto::LinkOp::Kind::SendRtc, kOwedSendRtc>,
@@ -109,7 +115,7 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::JoyRelease, JoyLevelEmitter>,
     OpProducer<proto::LinkOp::Kind::SaveUpload, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::SaveAsk, ConfigSaves>,
-    OpProducer<proto::LinkOp::Kind::Ps2Frame, InputDecode>,
+    OpProducer<proto::LinkOp::Kind::Ps2Frame, Ps2Egress>,
     OpProducer<proto::LinkOp::Kind::DropCore, CoreSwitch>,
     OpProducer<proto::LinkOp::Kind::AdoptCore, CoreBuilder>,
     OpProducer<proto::LinkOp::Kind::SessionUp, SessionOwner>,
@@ -126,21 +132,18 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::StageCheats, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::SetOsdVisible, fw::TastySession, ui::UiRound>,
     OpProducer<proto::LinkOp::Kind::PulseOption, LinkSession, MglPlayer, ui::DipsPage>,
-    OpProducer<proto::LinkOp::Kind::SetVideoMode, VideoWire>,
+    OpProducer<proto::LinkOp::Kind::StagedFrame, VideoWire>,
     OpProducer<proto::LinkOp::Kind::ApplyCheats, ui::CheatsPage>,
     OpProducer<proto::LinkOp::Kind::SetDip, ui::DipsPage>,
     OpProducer<proto::LinkOp::Kind::SetCoreOption, ui::CoreSettingsPage>,
-    OpProducer<proto::LinkOp::Kind::SetMute, CmdRouter>,
-    OpProducer<proto::LinkOp::Kind::SetAttenuation, CmdRouter>,
-    OpProducer<proto::LinkOp::Kind::NudgeVolume, CmdRouter>,
-    OpProducer<proto::LinkOp::Kind::ToggleMute, CmdRouter>,
     OpProducer<proto::LinkOp::Kind::AnnounceMount, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::SetWideIndex, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::CoreReset, SessionOwner>,
-    OpProducer<proto::LinkOp::Kind::LoadFacts, FileTxPieces, LadderHostAdapter, LoadLadder>,
+    OpProducer<proto::LinkOp::Kind::LoadFacts, LinkTxChannel<SeatTag::Main>>,
     OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk>,
     OpProducer<proto::LinkOp::Kind::AttachSave, LoadWalk, MountQueue, cores::BootLadder>,
-    OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>>;
+    OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>,
+    OpProducer<proto::LinkOp::Kind::MenuCtl, ui::UiRound>>;
 
 namespace detail {
 template <class T>

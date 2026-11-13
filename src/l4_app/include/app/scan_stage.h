@@ -8,7 +8,7 @@
 
 #include "app/replay_stage.h"
 #include "cores/movie_codec.h"
-#include "infra/fixed_str.h"
+#include "cores/movie_lines.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -30,13 +30,11 @@ private:
     [[nodiscard]] Step read_lines_(Ctx ctx) noexcept;
     [[nodiscard]] std::optional<PlayRefusal> on_line_(
         Ctx ctx,
-        std::string_view line,
-        bool clipped
+        const cores::MovieLines::Line& line
     ) noexcept;
     [[nodiscard]] std::optional<PlayRefusal> scan_line_(
         Ctx ctx,
-        std::string_view line,
-        bool clipped
+        const cores::MovieLines::Line& line
     ) noexcept;
     static void note_frame_(
         ReplayPlay::ScannedMovie& scan,
@@ -51,7 +49,7 @@ private:
     bool in_log_ = false;
     bool log_done_ = false;
 
-    FixedStr<cores::kMovieLineMax + 2, StrFit::Clip> line_{};
+    cores::MovieLines lines_{};
 };
 
 }

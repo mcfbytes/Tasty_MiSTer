@@ -30,7 +30,9 @@ public:
     ) = 0;
 
     template <class Off>
-        requires std::same_as<Off, FileSize>
+        requires requires(Off o) {
+            { o.template file_word<std::uint64_t>() } -> std::same_as<std::uint64_t>;
+        }
     [[nodiscard]] auto read_at(Off off, std::span<std::byte> dst) {
         return read_at(off.template file_word<std::uint64_t>(), dst);
     }

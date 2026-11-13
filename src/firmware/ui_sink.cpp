@@ -8,9 +8,11 @@
 #include "app/event.h"
 #include "app/event_dispatch.h"
 #include "app/identity_latch.h"
-#include "app/input_wire.h"
+#include "app/core_input_binding.h"
+#include "app/core_input_facts.h"
 #include "app/mgl_pump.h"
 #include "app/process_integration.h"
+#include "app/session_identity.h"
 #include "app/video_pump.h"
 #include "infra/fixed_str.h"
 #include "infra/path_text.h"
@@ -62,9 +64,11 @@ void UiSink::stamp_core_identity(bool front_end) {
     if (!id) {
         ++corename_failures_;
         w_.video.set_core_name(std::string_view{});
+        w_.video.set_spd_identity(std::string_view{}, proto::RotationDir::None);
         return;
     }
     w_.video.set_core_name(id->core.view());
+    w_.video.set_spd_identity(app::home_name(*id), id->rotation);
     if (w_.title.has_value()) {
 
         FixedStr<kTitleCap, StrFit::Clip> title;
@@ -123,7 +127,14 @@ void UiSink::on(const app::Event::CoreLoaded& a, const app::Event::Head& h) {
     {
 
         const app::SessionIdentity cid = w_.identity.copy().value_or(app::SessionIdentity{});
-        w_.input.on_core_loaded(cid.core.view(), cid.front_end, cid.joy, cid.analog_reshape);
+
+        app::CoreInputFacts f{};
+        (void)f.core.assign(cid.core.view());
+        f.front_end = cid.front_end;
+        f.plan = cid.joy;
+        f.reshape = cid.analog_reshape;
+
+        w_.input.on_core_loaded(f);
     }
     w_.menu.on_core_loaded(a.type, a.front_end, w_.ctx);
     w_.menu.on_core_load_done(h.tag, w_.ctx);

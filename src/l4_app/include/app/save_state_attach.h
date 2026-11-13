@@ -10,6 +10,7 @@
 #include "app/load_window_map.h"
 #include "app/path_text.h"
 #include "app/save_state_facts.h"
+#include "cores/registry.h"
 #include "cores/save_copy_level.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
@@ -50,7 +51,7 @@ public:
         proto::SaveStateDecl decl{};
         FixedStr<64, StrFit::Clip> core_name{};
         PathText rom_path{};
-        bool arcade = false;
+        cores::LoadHint load_hint = cores::LoadHint::None;
         proto::ActKey generation{};
     };
 
@@ -61,7 +62,7 @@ public:
         proto::SaveStateDecl decl{};
         FixedStr<64, StrFit::Clip> core_name{};
         PathText rom_path{};
-        bool arcade = false;
+        cores::LoadHint load_hint = cores::LoadHint::None;
         bool ok = false;
         bool aborted = false;
         PrimeAbortLevel abort_at{};

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 
 #include "infra/seat.h"
@@ -42,7 +43,7 @@ struct DiscReadSlot {
     std::uint16_t got = 0;
     DiscForm form = DiscForm::RawFrame;
 
-    SectorHeader header{};
+    std::optional<SectorHeader> header{};
     bool ok = false;
     std::byte data[kDiscSlotBytes]{};
 

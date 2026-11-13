@@ -17,12 +17,12 @@
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
-#include "infra/indexed_array.h"
+#include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
+#include "infra/polled.h"
 #include "infra/pool_slot.h"
 #include "infra/seat.h"
-#include "infra/slot_pool.h"
 #include "infra/telemetry.h"
 #include "app/path_text.h"
 #include "app/pcm_command.h"
@@ -64,6 +64,8 @@ static_assert(kPcmMediaLeases < kPcmCommandDepth);
 
 struct PcmMedia {
     TASTY_SEAT_MEDIATOR(Any, Any);
+
+    static constexpr bool kResetOnReap = true;
     std::optional<hal::FpgaMemory> ring{};
 
     PathText sheet{};
@@ -71,6 +73,8 @@ struct PcmMedia {
 
 class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
     TASTY_SEAT_MEDIATOR(Pcm, RT);
+
+    using Media = xthread::LoanChannel<PcmMedia, kPcmMediaLeases, SeatTag::RT, SeatTag::Pcm>;
 
 public:
     using Commands = xthread::Inbox<PcmCommand, kPcmCommandDepth>;
@@ -153,16 +157,21 @@ public:
 
     [[nodiscard]] std::uint32_t command_misrouted() const noexcept { return misrouted_.get(); }
 
+    [[nodiscard]] Media::Census media_census_for_test() const noexcept { return media_.census(); }
+
+    [[nodiscard]] bool returned_media_hold_no_ring_for_test() noexcept;
+
 private:
     void wake_main_() noexcept;
     [[nodiscard]] Ex<void> submit_(const PcmCommand& c) noexcept;
     void request_swap_() noexcept;
 
-    [[nodiscard]] bool reap_leases_() noexcept;
+    [[nodiscard]] bool reap_media_() noexcept;
 
     template <class Alt>
     [[nodiscard]] Ex<void> hand_over_(PcmMedia& media) noexcept;
 
+    [[nodiscard]] std::optional<PcmMedia> take_media_(xthread::PoolSlot announced) noexcept;
     void refresh_read_point_() noexcept;
     void apply_play_(std::uint8_t track, bool loop) noexcept;
     void fill_() noexcept;
@@ -193,38 +202,14 @@ private:
     std::atomic<Park> park_{Park::Idle};
     std::atomic<bool> parked_{true};
 
-    xthread::Counter wakes_{}, drops_{}, discards_{}, passes_{}, misrouted_{};
+    xthread::Counter wakes_{}, drops_{}, discards_{}, passes_{}, misrouted_{}, refused_markers_{};
 
     std::atomic<std::uint32_t> visible_len_{0};
 
-    xthread::SlotPool<PcmMedia, kPcmMediaLeases, kSeatMediatorB> media_{};
+    Media media_{xthread::Polled{}};
 
     std::uint32_t last_observed_ = 0;
     bool ever_observed_ = false;
-
-    using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases, kSeatMediatorB>::Lease;
-
-    struct HeldLease {
-        Lease lease{};
-        std::uint32_t home_at = 0;
-    };
-
-    struct Commander {
-        TASTY_SEAT_RESIDENT(RT);
-        infra::IndexedArray<HeldLease, kPcmMediaLeases, xthread::PoolSlot> held{};
-        std::uint32_t sent = 0;
-
-        ~Commander() {
-            for (auto& h : held)
-                (void)h.lease.release();
-        }
-    };
-
-    static_assert(
-        decltype(media_)::owner_seat() == Commander::kSeatDecl,
-        "the seat that holds the leases is the seat the pool checks"
-    );
-    Commander cmd_{};
 
     std::optional<hal::FpgaMemory> ring_{};
     std::unique_ptr<cores::IPcmSource> src_{};
@@ -242,7 +227,6 @@ private:
 
     struct Worker {
         TASTY_SEAT_RESIDENT(Pcm);
-        std::uint32_t attaches = 0;
         bool swap_taken = false;
     };
 
@@ -269,7 +253,7 @@ static_assert(
         return hal::seat_of(m, SeatTag::Pcm).policy == hal::SchedPolicy::Fifo
             && hal::seat_of(m, SeatTag::Pcm).prio < hal::seat_of(m, SeatTag::RT).prio;
     }),
-    "arch RULE 2: this seat blocks on poll(2) and on file reads, "
+    "This seat blocks on poll(2) and on file reads, "
     "and it must never be able to preempt the sole GPO owner."
 );
 static_assert(

@@ -29,7 +29,7 @@ constexpr std::array<std::string_view, 2> kMainMenuBody{
 };
 
 bool offered(const OptionItem& it) noexcept {
-    return it.screen_row.has_value() && it.selectable_index.has_value() && !it.disabled;
+    return it.drawn_row.has_value() && it.selectable_index.has_value() && !it.disabled;
 }
 
 }
@@ -82,9 +82,9 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
         refs_.push_back(row_for_(spec.row));
 
     if (has_reset_ && (!ctx_.ui_requests || !ctx_.launches.confirm))
-        ++refusals_;
+        refusals_.add();
     if (!ctx_.route || !ctx_.launches.confirm)
-        ++refusals_;
+        refusals_.add();
 }
 
 IHdRow& HdRootPlan::row_for_(RootRow row) noexcept {
@@ -120,7 +120,7 @@ void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
     primary_ = std::nullopt;
     has_reset_ = has_cheats_ = has_settings_ = has_media_ = false;
     if (!walked)
-        ++refusals_;
+        refusals_.add();
     if (walked) {
         const Placer& placer = page0_.placer();
 
@@ -144,8 +144,11 @@ void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
     }
     if (primary_) {
         load_label_ = hd_label(primary_->label);
-        if (load_label_.empty())
-            load_label_ = primary_->mounts_image() ? "Load disc" : "Load game";
+        if (load_label_.empty()) {
+            const std::optional<proto::FileRowId> row = primary_->file_row();
+            load_label_ = (row && row->kind == proto::FileRowKind::Mount) ? "Load disc"
+                                                                          : "Load game";
+        }
         if (!picks_) {
             picks_.emplace(
                 env_,
@@ -219,9 +222,9 @@ void HdRootPlan::rewalk(const proto::ItemTable& table, const BuildEnv& env) {
     walk_(table, env);
 }
 
-std::uint32_t HdRootPlan::refusals() const noexcept {
+svc::Tally HdRootPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdRootPlan);
-    return refusals_ + (picks_ ? picks_->refusals() : 0u);
+    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
 }
 
 std::uint32_t HdRootPlan::commands_published() const noexcept {
@@ -264,21 +267,21 @@ Transition HdRootPlan::reset_yes_() {
     const proto::ResetEdge edge = proto::ResetEdge::osd_toggle(proto::kResetBit, false);
     const app::UiRequest::ResetCore ask{.edge = edge, .scope = app::CoreScope{env_.conf_gen}};
     if (!has_reset_ || !push_ask(ctx_.ui_requests, ask)) {
-        ++refusals_;
+        refusals_.add();
     } else {
         ++published_;
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 Transition HdRootPlan::main_menu_yes_() {
     const app::CmdVerb::LoadCore menu{app::kFrontEndImage, app::CmdVerb::RbfOrMra::Rbf};
     if (!ctx_.route || !ctx_.route->on(menu)) {
-        ++refusals_;
+        refusals_.add();
     } else {
         ++published_;
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 }

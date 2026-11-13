@@ -28,14 +28,19 @@ std::string define_label_of(const HdPlanInputs& in) {
 }
 
 HdControllersPlan::HdControllersPlan(const HdPlanInputs& in)
-    : pair_(in.ctx),
+    : pair_(
+          HdPushRow::Spec{
+              .label = "Pair Bluetooth controller",
+              .page = PageId::BtPair,
+              .arg = PageArg{PairStart::AutoFirst},
+              .icon = app::PageDescription::RowIcon::Bluetooth
+          }
+      ),
+      bluetooth_(HdPushRow::Spec{.label = "Bluetooth", .page = PageId::Bluetooth}),
       define_label_(define_label_of(in)),
       define_(HdPushRow::Spec{.label = define_label_, .page = PageId::JoyMap}) {
     TASTY_SEAT_BODY(HdControllersPlan);
-    refs_ = {pair_, define_};
-
-    if (!in.ctx.launches.script)
-        ++refusals_;
+    refs_ = {pair_, bluetooth_, define_};
 }
 
 PageId HdControllersPlan::id() const {
@@ -53,7 +58,7 @@ std::span<const std::reference_wrapper<IHdRow>> HdControllersPlan::rows() const 
     return refs_;
 }
 
-std::uint32_t HdControllersPlan::refusals() const noexcept {
+svc::Tally HdControllersPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdControllersPlan);
     return refusals_;
 }

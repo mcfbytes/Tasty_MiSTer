@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <optional>
 #include <span>
 
 #include "app/text_field.h"
@@ -19,6 +20,30 @@ constexpr std::string_view kRel = "config/played.dat";
 
 [[nodiscard]] bool no_file_yet(const Error& e) noexcept {
     return e.code == Errc::not_found || (e.code == Errc::os && e.detail == ENOENT);
+}
+
+constexpr char kFileLetter = 'F';
+constexpr char kMountLetter = 'S';
+
+[[nodiscard]] constexpr char letter_of(proto::FileRowKind kind) noexcept {
+    switch (kind) {
+        case proto::FileRowKind::File:
+            return kFileLetter;
+        case proto::FileRowKind::Mount:
+            return kMountLetter;
+    }
+    return kFileLetter;
+}
+
+[[nodiscard]] constexpr std::optional<proto::FileRowKind> kind_of_letter(char letter) noexcept {
+    switch (letter) {
+        case kFileLetter:
+            return proto::FileRowKind::File;
+        case kMountLetter:
+            return proto::FileRowKind::Mount;
+        default:
+            return std::nullopt;
+    }
 }
 
 }
@@ -80,13 +105,22 @@ Ex<void> PlayedHistory::load() {
         const auto s = infra::load_native<Stored>(std::span<const std::byte>(buf)
                                                       .subspan(kHeaderBytes + i * sizeof(Stored))
                                                       .first<sizeof(Stored)>());
-        Record r;
+        const std::optional<proto::FileRowKind> kind = kind_of_letter(s.slot);
+        if (!kind) {
+            ++refusals_;
+            continue;
+        }
+        Record r{
+            .core_image = {},
+            .core_name = {},
+            .path = {},
+            .title = {},
+            .row = proto::FileRowId::of(*kind, proto::IoIndex{s.ioctl_index})
+        };
         r.core_image.assign(TextField{std::span{s.core_image}}.text());
         r.core_name.assign(TextField{std::span{s.core_name}}.text());
         r.path.assign(TextField{std::span{s.path}}.text());
         r.title.assign(TextField{std::span{s.title}}.text());
-        r.ioctl_index = proto::IoIndex{s.ioctl_index};
-        r.slot = s.slot;
         r.unix_time = s.unix_time;
         if (!names_a_game(r) || !fields_fit(r)) {
             ++refusals_;
@@ -115,8 +149,8 @@ Ex<void> PlayedHistory::record(const Record& r) {
     if (at != records_.end())
         records_.erase(at);
     records_.insert(records_.begin(), r);
-    if (records_.size() > kMax)
-        records_.resize(kMax);
+    while (records_.size() > kMax)
+        records_.pop_back();
     return save_();
 }
 
@@ -140,8 +174,8 @@ Ex<void> PlayedHistory::save_() {
         TextField{record.subspan<offsetof(Stored, core_name), kCoreNameCap>()}.assign(r.core_name);
         TextField{record.subspan<offsetof(Stored, path), kPathCap>()}.assign(r.path);
         TextField{record.subspan<offsetof(Stored, title), kTitleCap>()}.assign(r.title);
-        rec[offsetof(Stored, ioctl_index)] = r.ioctl_index.record_byte();
-        rec[offsetof(Stored, slot)] = r.slot;
+        rec[offsetof(Stored, ioctl_index)] = r.row.index.record_byte();
+        rec[offsetof(Stored, slot)] = letter_of(r.row.kind);
     }
     const auto r = writes_.arm(kRel, buf, VerdictSink::Played);
     if (!r)

@@ -11,6 +11,7 @@
 #include "hal/spi_transport.h"
 #include "proto/reset_fence.h"
 #include "proto/rtc_image.h"
+#include "proto/status_bit.h"
 #include "proto/status_edit.h"
 #include "proto/status_register.h"
 #include "proto/status_word.h"

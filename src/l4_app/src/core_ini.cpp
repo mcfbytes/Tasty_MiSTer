@@ -13,6 +13,9 @@
 #include "app/board_ops.h"
 #include "app/config_apply.h"
 #include "cores/registry.h"
+#include "hal/boot_handoff.h"
+#include "svc/scan_filter.h"
+#include "svc/vfs.h"
 
 namespace mister::app {
 namespace detail {
@@ -38,7 +41,22 @@ void CoreIni::arm_replay(bool strict) noexcept {
 CoreIni::Resolved CoreIni::resolve(std::string_view conf_name, const MraFacts& facts) {
     TASTY_SEAT_BODY(CoreIni);
     Resolved out;
-    out.cfg = parse_ini_for_core(&vfs_, svc::ConfigSnapshot{}, conf_name, facts);
+
+    svc::IniCatalog cat;
+    if (auto entries = vfs_.scan(
+            "",
+            svc::ScanFilter{.extensions = "INI", .directories = false, .files = true}
+        )) {
+        cat.index = svc::AltIniIndex::from_scan(*entries);
+    }
+    std::uint8_t alt = 0;
+    if (handoff_) {
+        if (const auto page = handoff_->handoff())
+            alt = page->altcfg.value_or(0);
+    }
+    cat.active = svc::ini_choice_of_handoff(alt);
+    ini_cell_.publish(cat);
+    out.cfg = parse_ini_for_core(&vfs_, svc::ConfigSnapshot{}, conf_name, facts, cat);
     svc::ConfigSnapshot& cfg = out.cfg;
     if (replay_) {
 
@@ -69,6 +87,7 @@ CoreIni::Resolved CoreIni::resolve(std::string_view conf_name, const MraFacts& f
 void CoreIni::publish(const svc::ConfigSnapshot& cfg) {
     TASTY_SEAT_BODY(CoreIni);
     cell_.publish(cfg);
+    idle_cell_.publish(idle_knobs_of(cfg));
     boot_pending_ = false;
 }
 

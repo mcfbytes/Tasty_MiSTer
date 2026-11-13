@@ -31,7 +31,7 @@ public:
         Crc32 crc
     ) const;
 
-    [[nodiscard]] std::uint32_t sequential_hints(std::string_view key) const noexcept;
+    [[nodiscard]] Tally sequential_hints(std::string_view key) const noexcept;
 
 private:
     struct Blob {

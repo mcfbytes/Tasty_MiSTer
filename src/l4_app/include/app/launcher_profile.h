@@ -19,7 +19,6 @@ struct LauncherProfile {
     std::string_view program;
     std::string_view front_end_image;
     std::string_view scanout_device;
-    std::string_view tty;
     os::VtNumber vt{};
 };
 
@@ -28,7 +27,6 @@ inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
      .program = "zaparoo/frontend",
      .front_end_image = "zaparoo/menu_zaparoo.rbf",
      .scanout_device = "/dev/zaparoo-scanout",
-     .tty = "/dev/tty7",
      .vt = os::VtNumber{7}},
 }};
 

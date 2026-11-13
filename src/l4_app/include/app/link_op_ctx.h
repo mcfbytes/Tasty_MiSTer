@@ -27,6 +27,8 @@ struct LinkOpCtx {
 
     bool starting = false;
 
+    bool core_ready = false;
+
     proto::IResetFence& fence;
 
     infra::OptRef<const EncoderRoles> roles{};

@@ -9,6 +9,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -56,9 +57,11 @@ public:
     void replace(std::unique_ptr<Page> p);
     void clear() noexcept;
 
-    std::uint32_t page_refusals() const noexcept;
+    svc::Tally page_refusals() const noexcept;
 
     bool any_bt_pairing() const noexcept;
+
+    ConnectDemand connect_demand() const noexcept;
 
     bool any_runs_a_process() const noexcept;
 
@@ -86,7 +89,7 @@ private:
     }
 
     std::vector<std::unique_ptr<Page>> pages_;
-    std::uint32_t retired_refusals_ = 0;
+    svc::Tally retired_refusals_{};
 };
 
 }

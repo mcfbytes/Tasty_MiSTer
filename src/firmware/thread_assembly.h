@@ -8,11 +8,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 
 #include "app/event.h"
 #include "rt_evidence.h"
+#include "rt_setup.h"
 #include "seat_set.h"
 #include "hal/thread_map.h"
 #include "infra/error.h"
@@ -34,12 +34,9 @@ namespace mister::app {
 class CmdFifo;
 class MglPump;
 class VideoPump;
-class BtPump;
 }
 
 namespace mister::fw {
-
-enum class RtMode : std::uint8_t;
 
 struct SeatBirth {
     RtSetup name{};
@@ -70,7 +67,8 @@ public:
         const UiMain::Wires& ui_wires,
         const UiMain::Wiring& ui,
         const DiagSampler::Sources& diag_sources,
-        const DiagSampler::Services& diag_services
+        const DiagSampler::Services& diag_services,
+        SeatContract contract = SeatContract::Declared
     ) noexcept;
 
     ThreadAssembly(
@@ -83,16 +81,9 @@ public:
         const UiMain::Wires&,
         const UiMain::Wiring&,
         const DiagSampler::Sources&,
-        const DiagSampler::Services&
+        const DiagSampler::Services&,
+        SeatContract = SeatContract::Declared
     ) = delete;
-
-    ThreadAssembly(
-        xthread::RtStats& stats,
-        app::EventQueue<SeatTag::RT>& events,
-        const UiMain::Wiring& ui,
-        const DiagSampler::Sources& diag,
-        const DiagSampler::Services& services = {}
-    ) noexcept;
     ~ThreadAssembly();
 
     ThreadAssembly(const ThreadAssembly&) = delete;
@@ -110,11 +101,7 @@ public:
         return ui_main_ ? infra::OptRef<UiMain>{*ui_main_} : infra::OptRef<UiMain>{};
     }
 
-    struct SeatMains {
-        MainSlots mains{};
-    };
-
-    void set_seat_contract(SeatContract contract) noexcept { contract_ = contract; }
+    using SeatMains = MainSlots;
 
     [[nodiscard]] Ex<void> spawn(RtMode mode, const SeatMains& mains);
 
@@ -194,11 +181,10 @@ private:
 
     MainSlots mains_{};
 
-    SeatContract contract_ = SeatContract::Any;
+    SeatContract contract_ = SeatContract::Declared;
 
     [[nodiscard]] Ex<void> check_presence_() const noexcept;
 
-    RtEvidence own_ev_{};
     RtEvidence& ev_;
     const hal::ThreadMap& threads_;
 
@@ -216,18 +202,7 @@ private:
     bool io_poisoned_ = false;
 
     xthread::Telemetry<RtOutcome, SeatTag::RT> rt_outcome_{};
-    xthread::WakeFlag own_main_wake_{};
     xthread::WakeFlag& main_wake_;
-
-    struct OwnWires {
-        xthread::DiagLog log;
-        xthread::LogLane rt_lane;
-        xthread::Telemetry<bool, SeatTag::RT> transitioning{};
-        xthread::WakeFlag ui_wake;
-        app::UartModeController::Handoffs uart_handoffs{ui_wake};
-    };
-
-    std::unique_ptr<OwnWires> own_wires_;
 
     xthread::DiagLog& diag_log_;
 

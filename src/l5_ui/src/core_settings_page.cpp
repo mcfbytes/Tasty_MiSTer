@@ -55,33 +55,28 @@ struct LinkTarget {
     cores::OptionRow::Link kind;
     PageId page;
 
-    bool takes_row_argument;
-    ItemId item;
+    std::optional<PageArg> fixed_arg;
     std::string_view evidence;
 };
 
 constexpr auto kLinkTargets = std::to_array<LinkTarget>({
     {cores::OptionRow::Link::None,
      PageId::None,
-     false,
-     kNoItem,
+     PageArg{},
      "no factory in this tree: refused and counted"},
     {cores::OptionRow::Link::SubPage,
      PageId::CoreSettings,
-     true,
-     kNoItem,
+     std::nullopt,
      "menu.cpp:4970-4985 — another page of this same table"},
     {cores::OptionRow::Link::LoadConfig,
      PageId::ConfigSlots,
-     false,
-     config_slots_item(ConfigSlotsPage::Mode::Load),
+     PageArg{ConfigSlotsMode::Load},
      "menu.cpp:4987-4999"},
     {cores::OptionRow::Link::SaveConfig,
      PageId::ConfigSlots,
-     false,
-     config_slots_item(ConfigSlotsPage::Mode::Save),
+     PageArg{ConfigSlotsMode::Save},
      "menu.cpp:5001-5013"},
-    {cores::OptionRow::Link::Mt32Pi, PageId::Mt32Pi, false, kNoItem, "menu.cpp:5015-5030"},
+    {cores::OptionRow::Link::Mt32Pi, PageId::Mt32Pi, PageArg{}, "menu.cpp:5015-5030"},
 });
 
 static_assert(
@@ -212,7 +207,7 @@ void CoreSettingsPage::ask_mount(proto::IoIndex index, std::string_view path) {
         ? push_ask(asks_, app::UiRequest::UnmountImage{.index = index, .scope = scope})
         : push_ask(asks_, app::UiRequest::MountImage{.index = index, .scope = scope}, path);
     if (!landed) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -222,7 +217,7 @@ template <class A>
 void CoreSettingsPage::push_op(const A& op) {
     TASTY_SEAT_BODY(CoreSettingsPage);
     if (!link_tx_ || !link_tx_->push(op)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -474,13 +469,13 @@ Transition CoreSettingsPage::leave() {
         ask_reset(proto::ResetEdge::option_settle());
         armed_ = false;
     }
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 void CoreSettingsPage::ask_reset(proto::ResetEdge edge) {
     const app::UiRequest::ResetCore req{.edge = edge, .scope = app::CoreScope{conf_gen_}};
     if (!push_ask(asks_, req)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -495,7 +490,7 @@ BrowserSession::Request CoreSettingsPage::browser_request(const app::OptionTable
     req.policy.eject_on_backspace = file != nullptr && file->browse_unmount;
     req.games_dir = core_dir_;
     req.recents_core = core_dir_;
-    req.recents = app::RecentsStore::ListId{app::RecentsStore::ListId::Kind::Mount, slot};
+    req.recents = app::RecentsStore::ListId::of(proto::FileRowId::mount(slot));
     req.host = infra::opt_ref_of(static_cast<IBrowserHost*>(this));
     pending_slot_ = slot;
     return req;
@@ -504,14 +499,14 @@ BrowserSession::Request CoreSettingsPage::browser_request(const app::OptionTable
 Transition CoreSettingsPage::open_browser(const app::OptionTable::Row& r, bool recents_first) {
     TASTY_SEAT_BODY(CoreSettingsPage);
     if (!browser_) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     BrowserSession::Request req = browser_request(r);
     if (recents_first) {
 
         if (!recents_) {
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         }
         if (recents_->load(req.recents_core, *req.recents).empty())
@@ -519,7 +514,7 @@ Transition CoreSettingsPage::open_browser(const app::OptionTable::Row& r, bool r
         req.recents_first = true;
     }
     browser_->pending = std::move(req);
-    return Transition{Transition::Kind::Push, PageId::Browser};
+    return Transition::push(PageId::Browser);
 }
 
 Transition CoreSettingsPage::handle(const UiEvent& ev) {
@@ -528,7 +523,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
     const OptionsKeys keys = OptionsKeys::of(ev);
 
     if (keys.menu)
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
 
     if (!at_root && (keys.back || keys.left))
         return leave();
@@ -547,11 +542,11 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
     if (sel_ == exit_ordinal()) {
         if (!select)
             return Transition{};
-        return at_root ? Transition{Transition::Kind::Leave} : leave();
+        return at_root ? Transition::leave() : leave();
     }
     const infra::OptRef<const Line> l = line_for_ordinal(sel_);
     if (!l || !table_.rows[l->index].decl) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     const app::OptionTable::Row& tr = table_.rows[l->index];
@@ -561,12 +556,12 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
         case cores::OptionRow::Kind::File: {
 
             if (!select && !recent) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
 
             if (tr.dimmed) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
             const cores::OptionRow::FileArm* file = d.file_arm();
@@ -582,7 +577,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 break;
             const proto::FieldCount choices = cycle->choice_count();
             if (choices == proto::FieldCount{}) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
 
@@ -614,7 +609,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 return Transition{};
             const cores::OptionRow::ActionArm* action = d.action_arm();
             if (action == nullptr || action->reset_act == cores::OptionRow::ResetAct::None) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
 
@@ -623,7 +618,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                     action->reset_act == cores::OptionRow::ResetAct::Cold
                 )
             );
-            return Transition{Transition::Kind::CloseAll};
+            return Transition::close_all();
         }
         case cores::OptionRow::Kind::Link: {
             if (!select)
@@ -634,45 +629,46 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 ? link_target_of(link->link)
                 : infra::OptRef<const LinkTarget>{};
             if (!found || found->page == PageId::None || link == nullptr) {
-                ++refusals_;
+                refusals_.add();
                 return Transition{};
             }
             const LinkTarget& target = *found;
-            const ItemId focus = target.takes_row_argument ? item_submenu(link->link_page)
-                                                           : target.item;
-            return Transition{Transition::Kind::Push, target.page, focus};
+            const PageArg arg = target.fixed_arg.value_or(PageArg{link->link_page});
+            return Transition::push(target.page, arg);
         }
         case cores::OptionRow::Kind::Host:
         case cores::OptionRow::Kind::Separator:
         case cores::OptionRow::Kind::kCount:
             break;
     }
-    ++refusals_;
+    refusals_.add();
     return Transition{};
 }
 
 Transition CoreSettingsPage::on_picked(const BrowserEntry& e, std::string_view path) {
     TASTY_SEAT_BODY(CoreSettingsPage);
     if (path.empty()) {
-        ++refusals_;
-        return Transition{Transition::Kind::Pop};
+        refusals_.add();
+        return Transition::pop();
     }
-    const app::RecentsStore::ListId id{app::RecentsStore::ListId::Kind::Mount, pending_slot_};
+    const app::RecentsStore::ListId id = app::RecentsStore::ListId::of(
+        proto::FileRowId::mount(pending_slot_)
+    );
     if (recents_ && !recents_->update(core_dir_, id, path, e.altname))
-        ++refusals_;
+        refusals_.add();
     ask_mount(pending_slot_, path);
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 Transition CoreSettingsPage::on_cancel() {
     TASTY_SEAT_BODY(CoreSettingsPage);
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 Transition CoreSettingsPage::on_eject() {
     TASTY_SEAT_BODY(CoreSettingsPage);
     ask_mount(pending_slot_, {});
-    return Transition{Transition::Kind::Pop};
+    return Transition::pop();
 }
 
 }

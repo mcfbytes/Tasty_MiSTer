@@ -4,18 +4,29 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 
 #include "app/conf_str_cell.h"
+#include "app/idle_knobs.h"
+#include "app/ini_cell.h"
 #include "app/info_decoder.h"
-#include "app/input_wire.h"
+#include "app/core_input_binding.h"
+#include "app/joymap_ends.h"
+#include "app/key_focus.h"
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
+#include "app/raw_key_edge.h"
 #include "app/ui_page_record.h"
+#include "app/ui_pass_work.h"
 #include "app/ui_round_port.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
 #include "ui/browser_launch.h"
 #include "ui/confirm_launch.h"
+#include "ui/text_entry_launch.h"
+#include "ui/front_end_background.h"
+#include "ui/front_end_idle_clock.h"
 #include "ui/key_decoder.h"
 #include "ui/menu_model.h"
 #include "ui/navigator.h"
@@ -41,14 +52,16 @@ class UiRound : public app::IUiRoundPort {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    static constexpr unsigned kKeyDrainBudget = 16;
-
     struct Wiring {
         const IBrowseSource& browse;
         app::LinkTxChannel<SeatTag::Ui>& link_tx;
         IHostSampler& sampler;
         IOsdVisibleFile& osd_file;
         const app::ConfStrCell& conf_str;
+
+        const app::IdleKnobsCell& idle;
+
+        const app::IniCell& ini;
 
         infra::OptRef<app::HdOsdScreen> hd{};
 
@@ -58,9 +71,15 @@ public:
         infra::OptRef<const app::HpsFramebuffer> fb{};
     };
 
+    struct InputEnds {
+        app::KeyFocusCell& key_focus;
+        const app::CoreInputBinding& binding;
+        infra::OptRef<const app::JoyMapEnds> joymap{};
+    };
+
     UiRound(
         app::OsdWire& osd,
-        app::InputWire& input,
+        InputEnds ends,
         const os::IClock& clock,
         MenuModel& model,
         PageContext& ctx,
@@ -70,7 +89,8 @@ public:
           renderer_(osd.surface()),
           decoder_(clock),
           ctx_(ctx),
-          input_(input),
+          key_focus_(ends.key_focus),
+          binding_(ends.binding),
           hd_(w.hd),
           video_(w.video),
           fb_(w.fb),
@@ -79,13 +99,17 @@ public:
           sampler_(w.sampler),
           osd_file_(w.osd_file),
           info_(w.conf_str),
-          writes_(w.writes) {
+          writes_(w.writes),
+          idle_(w.idle),
+          ini_(w.ini),
+          front_end_(w.idle) {
         ctx_.keys = infra::OptRef<KeyDecoder>{decoder_};
         ctx_.clock = infra::OptRef<const os::IClock>{clock};
         ctx_.launches.browser = infra::OptRef<BrowserLaunch>{launch_};
         ctx_.launches.script = infra::OptRef<ScriptLaunch>{script_launch_};
         ctx_.launches.confirm = infra::OptRef<ConfirmLaunch>{confirm_launch_};
-        ctx_.input = infra::OptRef<app::InputWire>{input};
+        ctx_.launches.entry = infra::OptRef<TextEntryLaunch>{entry_launch_};
+        ctx_.joymap = ends.joymap;
         ctx_.storage = infra::OptRef<const IBrowseSource>{w.browse};
         ctx_.link_tx = infra::OptRef<app::LinkTxChannel<SeatTag::Ui>>{ui_tx_};
     }
@@ -93,9 +117,9 @@ public:
     UiRound(const UiRound&) = delete;
     UiRound& operator=(const UiRound&) = delete;
 
-    [[nodiscard]] app::UiRoundEdge round(bool link_work) override {
+    [[nodiscard]] app::UiRoundEdge round(app::UiPassWork work) override {
         TASTY_SEAT_BODY(UiRound);
-        return compose_(link_work);
+        return compose_(work);
     }
 
     void publish_edges(const app::UiRoundEdge& edge) override {
@@ -103,7 +127,7 @@ public:
         publish_edges_(edge);
     }
 
-    void tick(bool link_work = false) { publish_edges_(compose_(link_work)); }
+    void tick(app::UiPassWork work = {}) { publish_edges_(compose_(work)); }
 
     MenuModel& model() noexcept { return model_; }
 
@@ -119,6 +143,8 @@ public:
     bool on(const proto::LinkEvent::ButtonLevel& b) noexcept;
     bool on(const proto::LinkEvent::OsdMask& m) noexcept;
     bool on(const proto::LinkEvent::PolledWord& w);
+
+    void on(const app::RawKeyEdge& edge) noexcept override;
     bool misrouted(const proto::LinkEvent& m) noexcept;
 
     std::uint32_t link_event_misrouted() const noexcept { return link_event_misrouted_; }
@@ -176,9 +202,11 @@ public:
     std::uint32_t user_reset_refusals() const noexcept { return user_reset_refusals_; }
 
 private:
-    [[nodiscard]] app::UiRoundEdge compose_(bool link_work);
+    [[nodiscard]] app::UiRoundEdge compose_(app::UiPassWork work);
     void publish_edges_(const app::UiRoundEdge& edge);
     [[nodiscard]] bool publish_visibility(proto::LinkOp::OsdShow show, proto::OsdTarget target);
+
+    void publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show);
     void publish_page_record();
 
     struct PublishOnExit {
@@ -241,8 +269,7 @@ private:
 
     ButtonMachine osd_btn_{};
     ButtonMachine user_btn_{};
-    std::uint32_t core_edges_seen_ = 0;
-    bool settling_ = false;
+    app::CoreEdgeSeq core_edges_seen_{};
     std::uint32_t button_core_resets_ = 0;
     std::uint32_t button_edges_ = 0;
     std::uint32_t button_longs_ = 0;
@@ -250,6 +277,8 @@ private:
     std::chrono::milliseconds last_hold_{0};
     std::uint32_t button_classic_opens_ = 0;
     std::uint32_t button_injects_ = 0;
+
+    svc::Tally button_actions_{};
     std::uint32_t bt_route_refusals_ = 0;
     std::uint32_t user_resets_asked_ = 0;
     std::uint32_t user_reset_refusals_ = 0;
@@ -261,8 +290,10 @@ private:
     BrowserLaunch launch_{};
     ScriptLaunch script_launch_{};
     ConfirmLaunch confirm_launch_{};
+    TextEntryLaunch entry_launch_{};
     PageContext& ctx_;
-    app::InputWire& input_;
+    app::KeyFocusCell& key_focus_;
+    const app::CoreInputBinding& binding_;
 
     infra::OptRef<app::HdOsdScreen> hd_{};
 
@@ -273,20 +304,35 @@ private:
     std::uint32_t link_event_misrouted_ = 0;
     bool osd_held_ = false;
     bool user_held_ = false;
+
+    bool boot_core_seen_ = false;
+    bool boot_select_ini_ = false;
     const os::IClock& clock_;
     IHostSampler& sampler_;
     IOsdVisibleFile& osd_file_;
     app::InfoDecoder info_;
     infra::OptRef<app::UiWriteLane> writes_;
+
+    const app::IdleKnobsCell& idle_;
+    const app::IniCell& ini_;
+
+    std::string ini_label_{};
+    std::uint32_t ini_label_gen_ = 0;
     std::uint32_t samples_ = 0;
     proto::LinkOp::OsdShow last_show_ = proto::LinkOp::OsdShow::Off;
     proto::OsdTarget last_target_ = proto::OsdTarget::All;
+
+    app::KeyFocus last_focus_ = app::KeyFocus::Core;
     bool vis_unlatched_ = false;
     std::uint32_t ticks_ = 0;
     std::uint32_t pumps_ = 0;
     std::uint32_t keys_drained_ = 0;
     std::uint32_t vis_pubs_ = 0;
     app::UiPageCell page_cell_{};
+
+    FrontEndBackground front_end_;
+
+    FrontEndIdleClock idle_clock_{};
 };
 
 }

@@ -58,22 +58,30 @@ enum class PageId : std::uint8_t {
     HdSlotSheet,
     HdRecentGames,
 
+    TextEntry,
+    Network,
+    WifiNetworks,
+    WifiSaved,
+    WifiAdvanced,
+    CountryPick,
+    Bluetooth,
+    BtPair,
+    BtDevices,
+
     kCount,
 };
 
-[[nodiscard]] constexpr ItemId item_pushing(PageId page, ItemId focus) noexcept {
+[[nodiscard]] constexpr RowKey push_row_key(PageId page) noexcept {
     constexpr unsigned kPageShift = 8;
-    constexpr unsigned kFocusMask = 0xFFu;
-    return ItemId{static_cast<std::uint16_t>(
-        (static_cast<unsigned>(page) << kPageShift) | (focus.v & kFocusMask)
-    )};
+    return RowKey::in_space(
+        RowKeySpace::Push,
+        RowKey::Ordinal{static_cast<std::uint16_t>(static_cast<unsigned>(page) << kPageShift)}
+    );
 }
 
-inline constexpr ItemId kMiscStorageRow = item_row(RowIndex{3});
-
 static_assert(
-    static_cast<unsigned>(PageId::kCount) == 41,
-    "30 stock pages, ten pages with no stock state, and the closed sentinel. "
+    static_cast<unsigned>(PageId::kCount) == 50,
+    "30 stock pages, nineteen pages with no stock state, and the closed sentinel. "
     "This pins the CARDINALITY only; the map itself — every ordinal, "
     "every New home — is joined by a check."
 );

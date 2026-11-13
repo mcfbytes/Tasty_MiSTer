@@ -18,8 +18,6 @@ struct MovieCodecRow {
     MovieCodec codec;
 };
 
-[[nodiscard]] std::string_view movie_path_extension(std::string_view movie_path) noexcept;
-
 [[nodiscard]] std::span<const MovieCodecRow> movie_codec_rows() noexcept;
 
 [[nodiscard]] const MovieCodecRow* unique_row_for_ext(std::string_view movie_path) noexcept;

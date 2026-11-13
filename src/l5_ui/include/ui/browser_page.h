@@ -12,6 +12,7 @@
 #include "ui/browse_source.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -66,6 +67,8 @@ public:
         PageFacts f{};
         f.osd_rows = height_;
 
+        f.allows_cfg_switch = req_.scan.cores_only;
+
         f.repeat_all_keys = true;
         return f;
     }
@@ -76,9 +79,9 @@ public:
 
     const BrowserSession& session() const noexcept { return session_; }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(BrowserPage);
-        return refusals_ + session_.refusals();
+        return refusals_.sum(session_.refusals());
     }
 
 private:
@@ -101,7 +104,7 @@ private:
     infra::OptRef<const os::IClock> clock_;
 
     infra::OptRef<app::RecentsStore> recents_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
 };
 
 }

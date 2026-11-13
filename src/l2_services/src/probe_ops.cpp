@@ -25,7 +25,11 @@ Ex<std::uint16_t> ProbeOps::emit_filter_mode(ScalerSlotMode mode) {
     return *op;
 }
 
-Ex<std::uint16_t> ProbeOps::emit_shadow_mask(std::uint16_t flag_word) {
+Ex<void> ShadowMaskWord::write_to(proto::Link& link) const {
+    return link.word(static_cast<std::uint16_t>(v));
+}
+
+Ex<std::uint16_t> ProbeOps::emit_shadow_mask(ShadowMaskWord flag) {
     auto op = link_.command(proto::UioOp::ShadowMask);
     if (!op)
         return std::unexpected(op.error());
@@ -34,7 +38,7 @@ Ex<std::uint16_t> ProbeOps::emit_shadow_mask(std::uint16_t flag_word) {
         link_.close();
         return std::uint16_t{0};
     }
-    if (auto r = link_.word(flag_word); !r) {
+    if (auto r = flag.write_to(link_); !r) {
         return std::unexpected(r.error());
     }
 

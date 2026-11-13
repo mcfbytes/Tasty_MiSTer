@@ -17,6 +17,7 @@ SlotBindings::SlotBindings(const Wiring& g) noexcept
       log_lane_(g.log_lane.producer()),
       vfs_(g.vfs),
       storage_life_(g.storage_life),
+      disc_backend_(g.disc_backend),
       prefetch_(g.prefetch),
       owed_mount_(mount_status_cell_, g.link_rx),
       owed_save_(make_owed_saves<SaveImageSource::kSlots + 1>(save_extent_cell_, g.link_rx)),
@@ -27,7 +28,8 @@ SlotBindings::SlotBindings(const Wiring& g) noexcept
               .source = save_src_ ? infra::OptRef<proto::IImageSource>{*save_src_}
                                   : infra::OptRef<proto::IImageSource>{},
               .clock = infra::OptRef<const os::IClock>{clock_},
-              .channel = g.storage_channel
+              .channel = g.storage_channel,
+              .lamp = g.lamp
           }
       ) {
     slots_.set_storage_live(g.storage_life.has_value());
@@ -284,8 +286,8 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
             break;
     }
 
-    const cores::BlankSaveSpec blank = core.has_value() ? core->profile().blank_save
-                                                        : cores::BlankSaveSpec{};
+    const svc::BlankSaveSpec blank = core.has_value() ? core->profile().blank_save
+                                                      : svc::BlankSaveSpec{};
     if (!save_src_->bind(si, path, manual, blank)) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), si.detail()});
     }
@@ -298,7 +300,10 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     if (!backend)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), si.detail()});
 
-    if (!storage_life_->stage_backend(si, *backend, save_src_->order(si)))
+    const infra::OptRef<const svc::BlankSaveSpec> blank_spec = core.has_value()
+        ? infra::OptRef<const svc::BlankSaveSpec>{core->profile().blank_save}
+        : infra::OptRef<const svc::BlankSaveSpec>{};
+    if (!storage_life_->stage_backend(si, *backend, save_src_->order(si), blank_spec))
         return SaveBind::Declined;
 
     proto::NoBlockRoles none;
@@ -497,6 +502,39 @@ void SlotBindings::settle_stage_mount_(infra::OptRef<cores::Core> core) noexcept
     );
 }
 
+cores::MountState SlotBindings::disc_backend_ready_(
+    infra::OptRef<cores::Core> core,
+    proto::SlotIndex disc
+) noexcept {
+    TASTY_SEAT_BODY(SlotBindings);
+    if (!core.has_value())
+        return cores::MountState::Failed;
+    if (channel_borrows_.has(disc))
+        return cores::MountState::Done;
+
+    if (!storage_life_)
+        return cores::MountState::Done;
+    if (!disc_backend_) {
+        ++tally_.stage_refusals;
+        session_tally_.last_error = Error{Errc::core_load, ERR_SITE(), disc.detail()};
+        return cores::MountState::Failed;
+    }
+    if (!storage_life_->stage_backend(disc, *disc_backend_, {}, {}))
+        return cores::MountState::Pending;
+    CoreBlockRoles roles{*core};
+    if (!slots_.submit_attach(disc, roles)) {
+        if (!storage_life_->release_slot(disc)) {
+            ++tally_.stage_refusals;
+            session_tally_.last_error = Error{Errc::core_load, ERR_SITE(), disc.detail()};
+            return cores::MountState::Failed;
+        }
+        ++tally_.stage_refusals;
+        return cores::MountState::Pending;
+    }
+    channel_borrows_ = channel_borrows_.with(disc);
+    return cores::MountState::Done;
+}
+
 cores::MountState SlotBindings::present_mount_(
     infra::OptRef<cores::Core> core,
     proto::SlotIndex slot,
@@ -507,7 +545,17 @@ cores::MountState SlotBindings::present_mount_(
     if (const auto sm = core->slot_mount())
         return sm->mount_slot(slot, path);
     const auto cd = core->staging_core();
-    return !cd ? cores::MountState::Failed : cd->mount_disc(path);
+    if (!cd)
+        return cores::MountState::Failed;
+
+    if (core->block_server()) {
+        const proto::SlotIndex disc = core->profile().staging.disc_slot.block_slot();
+        slots_.change_disc(disc);
+        const cores::MountState ready = disc_backend_ready_(core, disc);
+        if (ready != cores::MountState::Done)
+            return ready;
+    }
+    return cd->mount_disc(path);
 }
 
 void SlotBindings::after_mount_answer_(infra::OptRef<cores::Core> core) noexcept {
@@ -602,7 +650,8 @@ void SlotBindings::mount_save_channel(
             const bool staged = storage_life_->stage_backend(
                 si,
                 channel.backend(),
-                channel.compose_order(m->row, part)
+                channel.compose_order(m->row, part),
+                {}
             );
             if (staged)
                 channel_borrows_ = channel_borrows_.with(si);

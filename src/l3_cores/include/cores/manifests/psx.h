@@ -13,7 +13,7 @@
 #include "cores/cd_census_rows.h"
 #include "cores/cd_core.h"
 #include "cores/core_profile.h"
-#include "cores/psx_disc_identity.h"
+#include "cores/psx_disc_rules.h"
 #include "cores/psx_sector_program.h"
 #include "svc/cue_policy.h"
 #include "svc/track.h"
@@ -80,7 +80,7 @@ consteval std::array<std::byte, kMcdImageBytes> psx_mcd_header_image() {
 
 inline constexpr std::array<std::byte, kMcdImageBytes> kPsxMcdHeader = psx_mcd_header_image();
 
-inline constexpr BlankSaveSpec kPsxBlankSave{
+inline constexpr svc::BlankSaveSpec kPsxBlankSave{
     .fill = std::byte{0x00},
     .header = kPsxMcdHeader,
     .regions = {},
@@ -100,14 +100,14 @@ inline constexpr auto kPsxBootAssets = std::to_array<BootAsset>({
      .optional = true,
      .anchor = AssetAnchor::ImageDir,
      .dest = WideIoIndex{0xC0},
-     .group = 1,
+     .group = BootGroup::Second,
      .exact_size = proto::FileSize{512 * 1024}},
     {.name = "cd_bios.rom",
      .where = {},
      .optional = true,
      .anchor = AssetAnchor::ImageParentDir,
      .dest = WideIoIndex{0xC0},
-     .group = 1,
+     .group = BootGroup::Second,
      .exact_size = proto::FileSize{512 * 1024}},
 });
 
@@ -175,7 +175,7 @@ inline constexpr CoreProfile kPsx{
     .cheats = {.reset_on_remount = true},
     .file_tx_whole = true,
     .sector_program = infra::OptRef<const svc::ISectorProgram>{kPsxSectorProgram},
-    .disc_identity = infra::OptRef<const svc::IDiscIdentity>{kPsxDiscIdentity},
+    .disc_rules = infra::OptRef<const svc::IDiscRules>{kPsxDiscRules},
 };
 
 std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);

@@ -4,12 +4,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "app/avi_format.h"
 #include "app/avi_write_status.h"
 #include "app/chunk_slot.h"
 #include "app/frame_arena.h"
+#include "app/frame_ticks.h"
+#include "app/rec_every.h"
 #include "infra/errno.h"
 #include "infra/error.h"
 #include "infra/park_timeout.h"
@@ -30,7 +33,12 @@ public:
 
     static constexpr unsigned kJobsPerPass = 4;
 
-    static constexpr std::size_t kMaxEntries = kChunksPerSegment;
+    static constexpr AviFrameCount kMaxEntries = AviFrameCount{kChunksPerSegment};
+
+    static_assert(
+        std::uint64_t{kChunksPerSegment} + 1
+        <= std::numeric_limits<std::size_t>::max() / avi::kIndexEntry
+    );
 
     explicit AviWriter(const Wiring& w) noexcept : w_(w) {}
 
@@ -45,15 +53,18 @@ public:
 
     [[nodiscard]] const AviWriteStatus& status() const noexcept { return st_; }
 
-private:
-    void open_(const ChunkSlot& s) noexcept;
-    void data_(const ChunkSlot& s) noexcept;
+    void on(const ChunkSlot::Open& s, ControlGeneration gen) noexcept;
+    void on(const ChunkSlot::Data& s, ControlGeneration gen) noexcept;
+    void on(const ChunkSlot::Close& s, ControlGeneration gen) noexcept;
 
-    void refuse_(const ChunkSlot& s) noexcept;
+    void on(const ChunkSlot::Refuse& s, ControlGeneration gen) noexcept;
+    void misrouted(const ChunkSlot& m) noexcept;
+
+private:
+    void adopt_(ControlGeneration gen) noexcept;
     void finalize_() noexcept;
 
-    void learn_rate_(std::uint32_t vtime) noexcept;
-    [[nodiscard]] std::uint32_t scaled_vtime_(std::uint32_t vtime) const noexcept;
+    void learn_rate_(FrameTicks rate) noexcept;
     void write_header_() noexcept;
     void sync_() noexcept;
     void fail_(infra::Errno err) noexcept;
@@ -62,11 +73,11 @@ private:
     Wiring w_;
     UniqueFd fd_{};
     FrameArena index_{};
-    std::uint32_t entries_ = 0;
+    AviFrameCount entries_{};
     avi::Fields f_{};
     std::uint64_t pos_ = 0;
     bool rate_known_ = false;
-    std::uint16_t frame_mul_ = 1;
+    RecEvery frame_mul_{};
 
     struct Unrated {
         UniqueFd fd{};

@@ -8,6 +8,7 @@
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "os/uio_line_ref.h"
+#include "proto/build_generation.h"
 
 namespace mister::app {
 
@@ -16,7 +17,7 @@ enum class StatusRoute : std::uint8_t { Link, Lw };
 struct SysGrant {
     hal::reg::Lend block{};
     os::UioLineRef line{};
-    std::uint16_t gen = 0;
+    proto::BuildGeneration gen{};
 
     [[nodiscard]] bool live() const noexcept { return block.lent() && line.fd() >= 0; }
 };

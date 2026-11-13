@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/reg_word.h"
 #include "hal/types.h"
 
 namespace mister::hal {
@@ -64,6 +65,10 @@ struct SectorBlock {
 
     static constexpr Reg data(std::uint32_t i) noexcept {
         return static_cast<Reg>(kDataBase + kWordBytes * i);
+    }
+
+    [[nodiscard]] static constexpr bool pending(RegWord w) noexcept {
+        return w.any_of(RegWord{kReqPending});
     }
 
     struct Accept {

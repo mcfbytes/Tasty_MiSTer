@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "app/ini_cell.h"
 #include "app/link_tx_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/wake_flag.h"
 #include "ui/page_launches.h"
 #include "ui/status_bar_facts.h"
 #include "ui/system_facts.h"
@@ -12,7 +14,7 @@ namespace mister::app {
 class ICmdVerbSink;
 class IdentityLatch;
 class InfoSink;
-class InputWire;
+struct JoyMapEnds;
 class CheatStore;
 class NameConfig;
 class PlayedHistory;
@@ -31,7 +33,7 @@ class Vfs;
 namespace mister::ui {
 
 class IBrowseSource;
-class IBtOps;
+class ConnectPort;
 class KeyDecoder;
 
 struct PageContext {
@@ -57,9 +59,9 @@ struct PageContext {
 
     infra::OptRef<app::UiRequestRing> ui_requests{};
 
-    infra::OptRef<IBtOps> bt{};
+    infra::OptRef<ConnectPort> connect{};
 
-    infra::OptRef<app::InputWire> input{};
+    infra::OptRef<const app::JoyMapEnds> joymap{};
     infra::OptRef<const svc::Vfs> files{};
     infra::OptRef<const app::IdentityLatch> identity{};
 
@@ -69,6 +71,9 @@ struct PageContext {
     StatusBarFacts status{};
 
     SessionFacts session{};
+
+    xthread::WakeFlag& disk_activity;
+    const app::IniCell& ini;
 };
 
 }

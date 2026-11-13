@@ -20,6 +20,10 @@
 #include "proto/reset_edge.h"
 #include "proto/types.h"
 
+namespace mister::svc {
+enum class IniChoice : std::uint8_t;
+}
+
 namespace mister::app {
 
 enum class OsdStyle : std::uint8_t { Classic = 0, Hd = 1 };
@@ -42,6 +46,7 @@ struct UiRequest {
         SetOsdStyle,
         SdramDetected,
         SetHdLook,
+        SwitchIni,
         kCount,
     };
 
@@ -146,6 +151,11 @@ struct UiRequest {
         std::uint8_t value = 0;
     };
 
+    struct SwitchIni {
+        static constexpr Kind kKind = Kind::SwitchIni;
+        svc::IniChoice ini{};
+    };
+
     using Alternatives = std::tuple<
         LoadCore,
         SaveConfig,
@@ -161,7 +171,8 @@ struct UiRequest {
         LoadRamImage,
         SetOsdStyle,
         SdramDetected,
-        SetHdLook>;
+        SetHdLook,
+        SwitchIni>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

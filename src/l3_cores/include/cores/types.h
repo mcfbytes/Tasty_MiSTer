@@ -141,6 +141,10 @@ struct JoyBit {
 
     [[nodiscard]] constexpr proto::JoyMask mask() const noexcept { return proto::JoyMask{1u << v}; }
 
+    [[nodiscard]] constexpr bool fits() const noexcept {
+        return v < std::numeric_limits<decltype(proto::JoyMask::v)>::digits;
+    }
+
     friend constexpr bool operator==(JoyBit, JoyBit) = default;
 };
 

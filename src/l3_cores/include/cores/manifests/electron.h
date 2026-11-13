@@ -6,7 +6,8 @@
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
-#include "cores/electron_core.h"
+#include "cores/loader.h"
+#include "cores/loader_context.h"
 
 namespace mister::cores::manifests {
 
@@ -18,10 +19,9 @@ inline constexpr CoreProfile kElectron{
     .slots = {},
     .boot_assets = {},
     .signatures = {},
-    .file_tx_whole = true,
-
-    .gzip_content = {.ext = ".UEF", .cap = proto::FileSize{ElectronCore::kMaxImageBytes}},
 };
+
+std::unique_ptr<ILoader> make_uef_loader(const LoaderContext& ctx);
 
 std::unique_ptr<Core> make_electron(const CoreProfile& p, const CoreGrant& g);
 

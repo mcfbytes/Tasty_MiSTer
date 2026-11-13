@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "app/rec_write_status.h"
+#include "app/segment_index.h"
 #include "app/types.h"
 #include "infra/errno.h"
 #include "infra/error.h"
@@ -18,7 +19,7 @@ struct AviWriteStatus {
     RecWriteState state = RecWriteState::Idle;
     std::uint8_t pad_ = 0;
     infra::Errno err{};
-    std::uint16_t segment = 0;
+    SegmentIndex segment{};
     std::uint16_t segments = 0;
     std::uint32_t frames = 0;
     std::uint32_t dropped = 0;

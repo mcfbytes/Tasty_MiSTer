@@ -2,19 +2,10 @@
 #include "cores/nvram_store.h"
 
 #include "cores/fnv1a64.h"
+#include "infra/path_parts.h"
 
 namespace mister::cores {
 namespace {
-
-std::string_view base_of(std::string_view path) {
-    const auto slash = path.find_last_of('/');
-    return slash == std::string_view::npos ? path : path.substr(slash + 1);
-}
-
-std::string_view stem_of(std::string_view name) {
-    const auto dot = name.rfind('.');
-    return dot == std::string_view::npos ? name : name.substr(0, dot);
-}
 
 [[nodiscard]] Ex<SavePath> built(bool ok, const SavePath& out) {
     if (!ok) {
@@ -46,7 +37,7 @@ Ex<NvramStore> NvramStore::load(
     }
     NvramStore s;
     s.policy_ = policy;
-    if (!s.image_.assign(base_of(image_basename))) {
+    if (!s.image_.assign(infra::basename(image_basename))) {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(image_basename.size())}
         );
@@ -176,7 +167,7 @@ Ex<SavePath> NvramStore::per_image_path(const SavePartition& p) const {
     bool ok = out.assign("saves/");
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
-    ok = ok && out.append(stem_of(image_.view()));
+    ok = ok && out.append(infra::stem(image_.view()));
     if (p.digit) {
         ok = ok && out.append("_");
         ok = ok && out.append(p.digit->text().view());

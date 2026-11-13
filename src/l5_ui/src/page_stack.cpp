@@ -12,13 +12,13 @@ void PageStack::push(std::unique_ptr<Page> p) {
 void PageStack::pop() {
     if (pages_.empty())
         return;
-    retired_refusals_ += pages_.back()->refusals();
+    retired_refusals_.add(pages_.back()->refusals());
     pages_.pop_back();
 }
 
 void PageStack::replace(std::unique_ptr<Page> p) {
     if (!pages_.empty()) {
-        retired_refusals_ += pages_.back()->refusals();
+        retired_refusals_.add(pages_.back()->refusals());
         pages_.pop_back();
     }
     push(static_cast<std::unique_ptr<Page>&&>(p));
@@ -26,14 +26,14 @@ void PageStack::replace(std::unique_ptr<Page> p) {
 
 void PageStack::clear() noexcept {
     for (const std::unique_ptr<Page>& p : pages_)
-        retired_refusals_ += p->refusals();
+        retired_refusals_.add(p->refusals());
     pages_.clear();
 }
 
-std::uint32_t PageStack::page_refusals() const noexcept {
-    std::uint32_t n = retired_refusals_;
+svc::Tally PageStack::page_refusals() const noexcept {
+    svc::Tally n = retired_refusals_;
     for (const std::unique_ptr<Page>& p : pages_)
-        n += p->refusals();
+        n.add(p->refusals());
     return n;
 }
 
@@ -43,6 +43,13 @@ bool PageStack::any_bt_pairing() const noexcept {
             return true;
     }
     return false;
+}
+
+ConnectDemand PageStack::connect_demand() const noexcept {
+    ConnectDemand demand{};
+    for (const std::unique_ptr<Page>& p : pages_)
+        demand = demand.merged_with(p->connect_demand());
+    return demand;
 }
 
 bool PageStack::any_runs_a_process() const noexcept {

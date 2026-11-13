@@ -3,6 +3,7 @@
 
 #include <array>
 #include <bit>
+#include <charconv>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -10,6 +11,8 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <system_error>
 #include <type_traits>
 
 #include "infra/affine.h"
@@ -25,6 +28,10 @@
 namespace mister::xthread {
 struct ByteOffset;
 struct SlotStride;
+}
+
+namespace mister::proto {
+class Link;
 }
 
 namespace mister::svc {
@@ -120,6 +127,8 @@ struct Tally {
     constexpr void set(Tally n) noexcept { v = n.v; }
 
     [[nodiscard]] constexpr Tally sum(Tally by) const noexcept { return Tally{v + by.v}; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr void json_field(infra::JsonOut& o, infra::JsonName key, Tally t) noexcept {
         o.field(key, t.v);
@@ -333,10 +342,6 @@ struct EvdevCode {
         return EvdevCode{static_cast<std::uint16_t>(v | other.v)};
     }
 
-    [[nodiscard]] constexpr bool between(EvdevCode lo, EvdevCode hi) const noexcept {
-        return lo.v <= v && v <= hi.v;
-    }
-
     [[nodiscard]] infra::HexText text() const noexcept {
         return infra::HexText{v, infra::HexCase::Upper};
     }
@@ -470,6 +475,21 @@ struct Vid {
 
     [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
 
+    [[nodiscard]] static std::optional<Vid> parse_hex(std::string_view text) noexcept {
+        constexpr std::size_t kDigits = 4;
+        constexpr std::size_t kPrefix = 2;
+        constexpr int kRadix = 16;
+        if (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            text.remove_prefix(kPrefix);
+        if (text.empty() || text.size() > kDigits)
+            return std::nullopt;
+        std::uint16_t value = 0;
+        const auto r = std::from_chars(text.data(), text.data() + text.size(), value, kRadix);
+        if (r.ec != std::errc{} || r.ptr != text.data() + text.size())
+            return std::nullopt;
+        return Vid{value};
+    }
+
     friend constexpr bool operator==(Vid, Vid) = default;
 };
 
@@ -477,6 +497,21 @@ struct Pid {
     std::uint16_t v = 0;
 
     [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
+
+    [[nodiscard]] static std::optional<Pid> parse_hex(std::string_view text) noexcept {
+        constexpr std::size_t kDigits = 4;
+        constexpr std::size_t kPrefix = 2;
+        constexpr int kRadix = 16;
+        if (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            text.remove_prefix(kPrefix);
+        if (text.empty() || text.size() > kDigits)
+            return std::nullopt;
+        std::uint16_t value = 0;
+        const auto r = std::from_chars(text.data(), text.data() + text.size(), value, kRadix);
+        if (r.ec != std::errc{} || r.ptr != text.data() + text.size())
+            return std::nullopt;
+        return Pid{value};
+    }
 
     friend constexpr bool operator==(Pid, Pid) = default;
 };
@@ -516,6 +551,118 @@ struct FltFlags {
     [[nodiscard]] constexpr FilterFormat format() const noexcept;
     friend constexpr bool operator==(FltFlags, FltFlags) = default;
 };
+
+enum class VolumeStep : std::uint8_t { Quieter, Hold, Louder };
+
+struct CoreVolume {
+    std::uint8_t v = 0;
+    static constexpr std::uint8_t kAttenMask = proto::Attenuation::kMax;
+    static constexpr std::uint8_t kBoostMask = 0x60;
+    static constexpr std::uint8_t kBoostStep = 0x20;
+    static constexpr std::uint8_t kBoostMax = 0x40;
+    static constexpr std::uint8_t kAttenMax = 6;
+
+    [[nodiscard]] constexpr std::uint8_t field_bits() const noexcept {
+        return v & (kAttenMask | kBoostMask);
+    }
+
+    [[nodiscard]] constexpr CoreVolume attenuation_only() const noexcept {
+        return CoreVolume{static_cast<std::uint8_t>(v & kAttenMask)};
+    }
+
+    [[nodiscard]] constexpr CoreVolume stepped(
+        VolumeStep step,
+        bool boost_available
+    ) const noexcept {
+        std::uint8_t out = v & kAttenMask;
+        if (boost_available) {
+            unsigned boost = v & kBoostMask;
+            if (step == VolumeStep::Quieter) {
+                if (boost != 0) {
+                    out = 0;
+                    boost -= kBoostStep;
+                } else if (out < kAttenMax) {
+                    ++out;
+                }
+            }
+            if (step == VolumeStep::Louder) {
+                if (boost != 0 || out == 0) {
+                    boost += kBoostStep;
+                    if (boost > kBoostMax)
+                        boost = kBoostMax;
+                } else if (out > 0) {
+                    --out;
+                }
+            }
+            out = static_cast<std::uint8_t>(out | boost);
+        } else {
+            if (step == VolumeStep::Quieter && out < kAttenMax)
+                ++out;
+            if (step == VolumeStep::Louder && out > 0)
+                --out;
+        }
+        return CoreVolume{out};
+    }
+
+    friend constexpr bool operator==(CoreVolume, CoreVolume) = default;
+};
+
+static_assert(sizeof(CoreVolume) == 1, "the core volume is one byte");
+
+struct AudvolByte {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr std::uint16_t word() const noexcept {
+        const std::uint16_t w = v;
+        return w;
+    }
+
+    friend constexpr bool operator==(AudvolByte, AudvolByte) = default;
+};
+
+static_assert(sizeof(AudvolByte) == 1);
+
+enum class AfilterEnable : std::uint8_t { Unsupported, Off, On };
+
+inline constexpr std::size_t kFilterWireWords = 15;
+
+struct FilterWordIndex {
+    std::uint8_t v = 0;
+    friend constexpr bool operator==(FilterWordIndex, FilterWordIndex) = default;
+};
+
+struct FilterWordCount {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr std::span<const std::uint16_t> prefix_of(
+        std::span<const std::uint16_t> all
+    ) const noexcept {
+        return all.first(v);
+    }
+
+    [[nodiscard]] constexpr FilterWordIndex next_index() const noexcept {
+        return FilterWordIndex{v};
+    }
+
+    [[nodiscard]] constexpr FilterWordCount with_one_more() const noexcept {
+        FilterWordCount out = *this;
+        ++out.v;
+        return out;
+    }
+
+    friend constexpr bool operator==(FilterWordCount, FilterWordCount) = default;
+};
+
+struct ShadowMaskWord {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] Ex<void> write_to(proto::Link& link) const;
+    friend constexpr bool operator==(ShadowMaskWord, ShadowMaskWord) = default;
+};
+
+static_assert(sizeof(ShadowMaskWord) == 4);
 
 struct FilterTapCount {
     std::size_t v = 0;

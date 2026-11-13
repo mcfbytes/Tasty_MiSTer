@@ -12,7 +12,9 @@
 #include <string_view>
 #include <utility>
 
+#include "app/input_gates_cell.h"
 #include "app/png_encoder.h"
+#include "app/prelude_stats.h"
 
 #include "app/cmd_fifo.h"
 #include "reactor/frame_clock.h"
@@ -52,6 +54,7 @@
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "proto/types.h"
+#include "svc/input_gates.h"
 
 namespace mister::app {
 class IFrameSource;
@@ -108,6 +111,9 @@ public:
         infra::OptRef<const app::SectorRouteCell> sector_route{};
         infra::OptRef<const app::OsdRouteCell> osd_route{};
         infra::OptRef<const app::SysRouteCell> sys_route{};
+        infra::OptRef<const app::SectorLeaseCell> sector_lease{};
+        infra::OptRef<const app::OsdLeaseCell> osd_lease{};
+        infra::OptRef<const app::SysLeaseCell> sys_lease{};
         infra::OptRef<xthread::MainLogLane> main_log{};
     };
 
@@ -118,6 +124,7 @@ public:
         const app::VideoStatsCell& video_stats;
         const app::VideoGeometryCell& video_geometry;
         const app::VideoWire& video_wire;
+        const xthread::Telemetry<app::PreludeStats, SeatTag::Ui>& prelude_stats;
         infra::OptRef<const app::UiPageCell> ui_pages{};
         infra::OptRef<const app::HdOsdStatusCell> hd{};
         const app::ReplayStatusCell& replay;
@@ -149,7 +156,7 @@ public:
     DiagSampler(const DiagSampler&) = delete;
     DiagSampler& operator=(const DiagSampler&) = delete;
 
-    bool open_diag(const char* path) noexcept { return diag_.open(path); }
+    [[nodiscard]] Ex<void> open_diag(const char* path) noexcept { return diag_.open(path); }
 
     const xthread::DiagLog& diag() const noexcept { return diag_; }
 
@@ -169,7 +176,7 @@ public:
 
     const DiagStats& stats() const noexcept { return diag_stats_; }
 
-    static constexpr std::size_t kRtstatsWorstCase = 4047;
+    static constexpr std::size_t kRtstatsWorstCase = 4048;
 
     static constexpr std::size_t kSessWorstCase = infra::json_record_worst(
         SessRecord::kKey,
@@ -369,8 +376,12 @@ private:
     const xthread::Telemetry<bool, SeatTag::RT>& transitioning_;
 
     const app::VideoWire& video_wire_;
+    const xthread::Telemetry<app::PreludeStats, SeatTag::Ui>& prelude_stats_;
     infra::OptRef<app::InputBuild> input_build_{};
     infra::OptRef<const app::InputSample> input_{};
+
+    app::InputGatesCell::Reader gates_reader_{};
+    svc::InputGates gates_seen_{};
     infra::OptRef<const svc::ChdPrefetch> prefetch_{};
 
     infra::OptRef<const reactor::FrameCell> frames_{};

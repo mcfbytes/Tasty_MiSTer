@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <tuple>
+#include <type_traits>
 
+#include "app/frame_ticks.h"
 #include "app/picture_size.h"
-#include "app/rec_control.h"
+#include "app/rec_every.h"
+#include "app/rec_options.h"
+#include "app/recording_name.h"
+#include "app/segment_index.h"
 #include "app/types.h"
 #include "infra/endian.h"
 #include "infra/loan_channel.h"
+#include "infra/message_sum.h"
 #include "infra/seat.h"
 
 namespace mister::app {
-
-enum class ChunkKind : std::uint8_t { Open, Data, Close, Refuse };
 
 struct ChunkDesc {
     std::uint32_t v = 0;
@@ -46,6 +52,9 @@ private:
 struct ChunkSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
+    enum class Kind : std::uint8_t { Open, Data, Close, Refuse, kCount };
+
+    using Head = ControlGeneration;
     static constexpr std::size_t kMaxChunks = 4096;
 
     [[nodiscard]] static ChunkDesc desc_word(
@@ -61,22 +70,61 @@ struct ChunkSlot {
         w.store(table.subspan(i * kWordBytes).first<kWordBytes>());
     }
 
-    ChunkKind kind = ChunkKind::Data;
+    struct Open {
+        static constexpr Kind kKind = Kind::Open;
+        FrameTicks rate{};
+        PictureSize size{};
+        SegmentIndex segment{};
+        RecEvery frame_mul{};
+        PictureScale scale = PictureScale::Native;
+        RecCodec codec = RecCodec::Cscd;
+        std::array<std::byte, 2> pad_{};
+        RecPath path{};
 
-    PictureScale scale = PictureScale::Native;
-    RecCodec codec = RecCodec::Cscd;
-    std::uint8_t pad_ = 0;
-    ControlGeneration gen{};
-    std::uint16_t segment = 0;
-    PictureSize size{};
-    std::uint16_t frame_mul = 1;
-    std::uint32_t vtime = 0;
-    std::uint32_t used = 0;
-    std::uint32_t chunks = 0;
-    std::span<const std::byte> bytes{};
-    std::span<const std::byte> desc{};
-    RecPath path{};
+        std::array<std::byte, 4> pad_tail_{};
+    };
+
+    struct Data {
+        TASTY_SEAT_EXEMPT(component);
+        static constexpr Kind kKind = Kind::Data;
+        std::span<const std::byte> bytes{};
+        std::span<const std::byte> desc{};
+        FrameTicks rate{};
+        std::uint32_t used = 0;
+        std::uint32_t chunks = 0;
+#if __SIZEOF_POINTER__ == 8
+        std::array<std::byte, 4> pad_lp64_{};
+#endif
+    };
+
+    struct Close {
+        static constexpr Kind kKind = Kind::Close;
+    };
+
+    struct Refuse {
+        static constexpr Kind kKind = Kind::Refuse;
+    };
+
+    using Alternatives = std::tuple<Open, Data, Close, Refuse>;
+
+    Kind kind = Kind::Open;
+    std::array<std::byte, 1> pad_{};
+    Head head{};
+    std::array<std::byte, 4> pad2_{};
+
+    enum Extent : std::size_t { kStore = sizeof(Open) };
+
+    alignas(std::uint64_t) std::array<std::byte, kStore> store{};
 };
+
+static_assert(
+    infra::MessageSum<ChunkSlot>
+    && infra::HasHead<ChunkSlot>
+    && infra::alternatives_are_total<ChunkSlot>()
+);
+static_assert(sizeof(ChunkSlot::Open) == 280);
+static_assert(sizeof(ChunkSlot) == 288);
+static_assert(std::is_trivially_copyable_v<ChunkSlot>);
 
 inline constexpr std::size_t kChunkSlots = 32;
 

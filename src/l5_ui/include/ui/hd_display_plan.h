@@ -12,6 +12,7 @@
 #include "ui/hd_plan.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -30,7 +31,7 @@ public:
     PageId id() const override;
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
@@ -67,7 +68,7 @@ private:
 
     PageContext& ctx_;
     OsdStylePreference& style_;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
     ClassicAction classic_{*this};
     HdAskRow style_row_;

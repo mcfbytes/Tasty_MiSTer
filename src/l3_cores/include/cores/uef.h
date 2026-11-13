@@ -3,8 +3,14 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <span>
+#include <vector>
+
+#include "proto/types.h"
+#include "svc/file.h"
 
 namespace mister::cores::uef {
 
@@ -119,6 +125,11 @@ struct ChunkBit {
     [[nodiscard]] bool tape_level_high(std::span<const std::uint8_t> tape) const noexcept;
 
     [[nodiscard]] bool carrier_level_high(ChunkBit carrier) const noexcept;
+
+private:
+    [[nodiscard]] std::uint32_t frame_slot() const noexcept;
+
+    [[nodiscard]] std::size_t data_byte() const noexcept;
 };
 
 constexpr void ChunkInfo::record(TapeBit start, TapeBitCount count) noexcept {
@@ -139,18 +150,21 @@ struct Located {
     ChunkBit offset_in_chunk{};
 };
 
-[[nodiscard]] std::optional<Located> locate_chunk(
-    std::span<const std::uint8_t> image,
-    ChunkInfo& cache,
-    TapeBit bit_pos
-) noexcept;
+struct TapeBits {
+    std::uint32_t v = 0;
 
-[[nodiscard]] std::uint8_t bit_at(
-    std::span<const std::uint8_t> image,
-    ChunkInfo& cache,
-    TapeBit bit_pos
-) noexcept;
+    [[nodiscard]] constexpr proto::FileSize bytes() const noexcept {
+        constexpr std::uint32_t kByteBits = std::numeric_limits<std::uint8_t>::digits;
+        return proto::FileSize{(v + kByteBits - 1u) / kByteBits};
+    }
+};
 
-[[nodiscard]] std::uint32_t total_bits(std::span<const std::uint8_t> image) noexcept;
+inline constexpr proto::FileSize kMinImageBytes{2};
+
+inline constexpr proto::FileSize kMaxImageBytes{16u * 1024u * 1024u};
+
+[[nodiscard]] TapeBits sized(std::span<const std::uint8_t> image) noexcept;
+
+[[nodiscard]] std::unique_ptr<svc::IFile> make_tape_file(std::vector<std::uint8_t>&& image);
 
 }

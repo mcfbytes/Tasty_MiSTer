@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <span>
+#include <utility>
 
 #include "cores/neo_header.h"
 #include "cores/neo_quirk.h"
@@ -14,6 +16,7 @@
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
 #include "infra/endian.h"
+#include "infra/path_parts.h"
 #include "svc/read_bounded.h"
 #include "svc/search_policy.h"
 
@@ -25,9 +28,7 @@ std::string make_path(std::string_view root, std::string_view name) {
     std::string path(root);
     while (name.starts_with("../")) {
         name.remove_prefix(3);
-        const std::size_t p = path.rfind('/');
-        if (p != std::string::npos)
-            path.resize(p);
+        path.resize(infra::dir_or_self(path).size());
     }
     path += '/';
     path.append(name);
@@ -38,12 +39,7 @@ std::string save_path(std::string_view core, std::string_view pick) {
     std::string out = "saves/";
     out.append(core);
     out += '/';
-    const std::size_t slash = pick.rfind('/');
-    std::string name(slash == std::string_view::npos ? pick : pick.substr(slash + 1));
-    const std::size_t dot = name.rfind('.');
-    if (dot != std::string::npos)
-        name.resize(dot);
-    out += name;
+    out += infra::stem(pick);
     out += ".sav";
     return out;
 }
@@ -52,16 +48,11 @@ std::string save_path(std::string_view core, std::string_view pick) {
 
 namespace {
 
-[[nodiscard]] std::string_view last_component(std::string_view path) noexcept {
-    const std::size_t slash = path.rfind('/');
-    return slash == std::string_view::npos ? path : path.substr(slash + 1);
-}
-
 [[nodiscard]] bool is_prom_name(std::string_view path) noexcept {
-    return infra::ieq(last_component(path), "prom");
+    return infra::ieq(infra::basename(path), "prom");
 }
 
-[[nodiscard]] neogeo::Shape shape_of(const neogeo::RomsetFile& e) noexcept {
+[[nodiscard]] neogeo::Shape entry_shape(const neogeo::RomsetFile& e) noexcept {
     using neogeo::FileClass;
     switch (e.index.class_of()) {
         case FileClass::Fix:
@@ -78,110 +69,147 @@ constexpr std::uint64_t kMaxXmlBytes = 16u * 1024u * 1024u;
 
 }
 
-Ex<LoadPlan> NeoGeoLoader::plan(const LoadAsk& ask, const proto::StatusWord& status) {
-    TASTY_SEAT_BODY(NeoGeoLoader);
-    if (ask.disc)
-        return plan_cd_(ask.path, status);
-    if (walks_romset(profile_.slots, ask.index.io()))
-        return plan_cart_(ask.path, status);
-    LoadPlan p{};
-    p.count = 1;
-    p.rows[0].index = ask.index;
-    return p;
-}
+namespace neogeo {
 
-void NeoGeoLoader::reset_walk_() noexcept {
-    skipped_ = 0;
-    crom_sz_ = 0;
-    last_crom_ = kMaxTransferRows;
-    config_ = 0;
-}
+using SaveBuf = FixedStr<NeoGeoLoader::kPathChars, StrFit::Reject>;
+using PathBufs = std::array<SaveBuf, kMaxTransferRows>;
+using RowIx = LoadPlan::RowIx;
 
-Ex<LoadPlan> NeoGeoLoader::plan_romset(std::span<const neogeo::RomsetFile> entries) {
-    LoadPlan p{};
-    reset_walk_();
-    for (const neogeo::RomsetFile& e : entries) {
-        if (auto r = add_entry_(p, e); !r)
-            return std::unexpected(r.error());
-    }
-    if (auto r = flush_crom_(p); !r)
-        return std::unexpected(r.error());
-    return p;
-}
+class PlanWalk final {
+public:
+    PlanWalk(
+        const svc::Vfs& vfs,
+        const CoreProfile& profile,
+        PathBufs& paths,
+        SaveBuf& save
+    ) noexcept
+        : vfs_(&vfs),
+          profile_(&profile),
+          paths_(&paths),
+          save_(&save) {}
 
-Ex<LoadPlan> NeoGeoLoader::plan_cart_(std::string_view pick, const proto::StatusWord& status) {
-    const std::size_t slash = pick.rfind('/');
-    if (slash == std::string_view::npos)
+    [[nodiscard]] Ex<void> cart(std::string_view pick, const proto::StatusWord& status);
+
+    [[nodiscard]] Ex<void> cd(std::string_view pick, const proto::StatusWord& status);
+
+    [[nodiscard]] Ex<std::uint32_t> add_entry(const RomsetFile& e);
+
+    [[nodiscard]] Ex<void> flush_crom();
+
+    struct Result {
+        LoadPlan plan;
+        WalkTally tally;
+    };
+
+    [[nodiscard]] Result take() noexcept { return std::move(result_); }
+
+private:
+    struct Span {
+        std::uint32_t size = 0;
+        std::uint64_t rest = 0;
+    };
+
+    [[nodiscard]] std::optional<Span> entry_span(
+        std::string_view path,
+        std::uint32_t offset,
+        std::uint32_t size
+    ) const;
+    [[nodiscard]] bool exists(std::string_view path) const;
+    [[nodiscard]] std::string home_dir(std::string_view dir) const;
+    [[nodiscard]] Ex<void> frame_save(std::string_view pick);
+
+    [[nodiscard]] Ex<RowIx> add_row(std::string_view path, RowDest dest);
+    [[nodiscard]] Ex<std::uint32_t> add_crom(const RomsetFile& e);
+    [[nodiscard]] Ex<std::uint32_t> add_rom(
+        std::string_view path,
+        const RomsetFile& e,
+        std::uint32_t concat
+    );
+    [[nodiscard]] Ex<void> add_notify(const PostNotify& n);
+    [[nodiscard]] Ex<bool> add_lo_rom(std::string_view home);
+    [[nodiscard]] Ex<void> add_fill();
+    [[nodiscard]] Ex<std::optional<std::uint32_t>> add_neo(std::string_view pick);
+    [[nodiscard]] Ex<std::optional<std::uint32_t>> add_xml(
+        std::string_view pick,
+        std::string_view home
+    );
+
+    Result result_{};
+    const svc::Vfs* vfs_;
+    const CoreProfile* profile_;
+    PathBufs* paths_;
+    SaveBuf* save_;
+    std::uint32_t crom_sz_ = 0;
+    std::optional<RowIx> last_crom_;
+};
+
+Ex<void> PlanWalk::cart(std::string_view pick, const proto::StatusWord& status) {
+    const auto romset = infra::leaf_in_dir(pick);
+    if (!romset)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    const std::string_view romset = pick.substr(slash + 1);
-    LoadPlan p{};
-    reset_walk_();
-    p.frame.hold_reset = true;
-    const std::string home = home_({});
-    if (auto r = add_notify_(p, neogeo::make_conf_notify(0)); !r)
+    result_.plan.frame.hold_reset = true;
+    const std::string home = home_dir({});
+    if (auto r = add_notify(neogeo::make_conf_notify(0)); !r)
         return std::unexpected(r.error());
 
     std::optional<std::uint32_t> applied;
     if (infra::iends_with(pick, ".neo")) {
-        auto r = add_neo_(p, pick);
+        auto r = add_neo(pick);
         if (!r)
             return std::unexpected(r.error());
         applied = *r;
     } else {
-        auto r = add_xml_(p, pick, home);
+        auto r = add_xml(pick, home);
         if (!r)
             return std::unexpected(r.error());
-        if (p.frame.refused)
-            return p;
+        if (result_.plan.frame.refused)
+            return {};
         applied = *r;
     }
 
-    if (romset != "debug") {
+    if (*romset != "debug") {
         const std::string uni = neogeo::make_path(home, "uni-bios.rom");
         std::string_view bios = status.get_bit(neogeo::kMvsBit) ? "sp-s2.sp1" : "neo-epo.sp1";
-        if (!status.get_bit(neogeo::kOriginalBiosBit) && exists_(uni))
+        if (!status.get_bit(neogeo::kOriginalBiosBit) && exists(uni))
             bios = "uni-bios.rom";
         const std::string path = neogeo::make_path(home, bios);
         const neogeo::RomsetFile
             e{.path = path, .index = neogeo::FileIndex::Bios, .offset = 0, .size = 0x20000};
-        if (auto r = add_entry_(p, e); !r)
+        if (auto r = add_entry(e); !r)
             return std::unexpected(r.error());
     }
-    if (auto r = flush_crom_(p); !r)
+    if (auto r = flush_crom(); !r)
         return std::unexpected(r.error());
     const std::string sfix = neogeo::make_path(home, "sfix.sfix");
     const neogeo::FileIndex sfix_index = neogeo::FileIndex::Sfix;
     const neogeo::RomsetFile fix{.path = sfix, .index = sfix_index};
-    if (auto r = add_entry_(p, fix); !r)
+    if (auto r = add_entry(fix); !r)
         return std::unexpected(r.error());
-    if (auto r = add_lo_rom_(p, home); !r)
+    if (auto r = add_lo_rom(home); !r)
         return std::unexpected(r.error());
 
-    config_ = applied.value_or(0u);
-    if (auto r = add_notify_(p, neogeo::make_conf_notify(config_)); !r)
+    result_.tally.config = applied.value_or(0u);
+    if (auto r = add_notify(neogeo::make_conf_notify(result_.tally.config)); !r)
         return std::unexpected(r.error());
-    if (auto r = frame_save_(p, pick); !r)
+    if (auto r = frame_save(pick); !r)
         return std::unexpected(r.error());
-    return p;
+    return {};
 }
 
-Ex<LoadPlan> NeoGeoLoader::plan_cd_(std::string_view pick, const proto::StatusWord& status) {
-    const std::size_t slash = pick.rfind('/');
-    if (slash == std::string_view::npos)
+Ex<void> PlanWalk::cd(std::string_view pick, const proto::StatusWord& status) {
+    const auto romset = infra::leaf_in_dir(pick);
+    if (!romset)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 3});
-    const std::string_view romset = pick.substr(slash + 1);
-    LoadPlan p{};
-    reset_walk_();
-    p.frame.hold_reset = true;
-    const std::string home = home_(profile_.cue_browse_dir);
-    if (auto r = add_notify_(p, neogeo::make_conf_notify(neogeo::kCdEnBit)); !r)
+    result_.plan.frame.hold_reset = true;
+    const std::string home = home_dir(profile_->cue_browse_dir);
+    if (auto r = add_notify(neogeo::make_conf_notify(neogeo::kCdEnBit)); !r)
         return std::unexpected(r.error());
-    if (romset != "debug") {
-        if (auto r = add_fill_(p); !r)
+    if (*romset != "debug") {
+        if (auto r = add_fill(); !r)
             return std::unexpected(r.error());
         const std::string uni = neogeo::make_path(home, "uni-bioscd.rom");
         std::string_view bios = status.get_bit(neogeo::kCdzBit) ? "neocd.bin" : "top-sp1.bin";
-        if (!status.get_bit(neogeo::kOriginalBiosBit) && exists_(uni))
+        if (!status.get_bit(neogeo::kOriginalBiosBit) && exists(uni))
             bios = "uni-bioscd.rom";
         const std::string path = neogeo::make_path(home, bios);
         const neogeo::RomsetFile e{
@@ -190,41 +218,41 @@ Ex<LoadPlan> NeoGeoLoader::plan_cd_(std::string_view pick, const proto::StatusWo
             .offset = 0,
             .size = neogeo::kCdBiosBytes
         };
-        if (auto r = add_entry_(p, e); !r)
+        if (auto r = add_entry(e); !r)
             return std::unexpected(r.error());
     }
-    if (auto r = flush_crom_(p); !r)
+    if (auto r = flush_crom(); !r)
         return std::unexpected(r.error());
-    auto lo = add_lo_rom_(p, home);
+    auto lo = add_lo_rom(home);
     if (!lo)
         return std::unexpected(lo.error());
     if (!*lo) {
-        if (auto r = add_lo_rom_(p, home_({})); !r)
+        if (auto r = add_lo_rom(home_dir({})); !r)
             return std::unexpected(r.error());
     }
-    config_ = neogeo::kCdEnBit;
-    if (auto r = add_notify_(p, neogeo::make_conf_notify(config_)); !r)
+    result_.tally.config = neogeo::kCdEnBit;
+    if (auto r = add_notify(neogeo::make_conf_notify(result_.tally.config)); !r)
         return std::unexpected(r.error());
-    if (auto r = frame_save_(p, pick); !r)
+    if (auto r = frame_save(pick); !r)
         return std::unexpected(r.error());
-    p.frame.release_reset = false;
-    return p;
+    result_.plan.frame.release_reset = false;
+    return {};
 }
 
-Ex<void> NeoGeoLoader::frame_save_(LoadPlan& p, std::string_view pick) {
-    const std::string_view core = profile_.name;
+Ex<void> PlanWalk::frame_save(std::string_view pick) {
+    const std::string_view core = profile_->name;
     const std::string save = neogeo::save_path(core, pick);
     std::string dir = "saves/";
     dir.append(core);
     (void)vfs_->ensure_dir(dir);
-    if (!save_.assign(save))
+    if (!save_->assign(save))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 2});
-    p.frame.save = save_.view();
-    p.frame.release_reset = true;
+    result_.plan.frame.save = save_->view();
+    result_.plan.frame.release_reset = true;
     return {};
 }
 
-Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string_view pick) {
+Ex<std::optional<std::uint32_t>> PlanWalk::add_neo(std::string_view pick) {
     std::optional<neogeo::NeoHeader> hdr;
     if (auto f = vfs_->open(pick, svc::OpenMode::Read)) {
         auto read = svc::read_bounded(**f, neogeo::kNeoHeaderBytes);
@@ -244,7 +272,7 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
         off += size;
         if (size == 0)
             return {};
-        auto r = add_entry_(p, e);
+        auto r = add_entry(e);
         if (!r)
             return std::unexpected(r.error());
         return {};
@@ -271,19 +299,14 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
     return neogeo::config_word(cfg, false);
 }
 
-Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
-    LoadPlan& p,
-    std::string_view pick,
-    std::string_view home
-) {
+Ex<std::optional<std::uint32_t>> PlanWalk::add_xml(std::string_view pick, std::string_view home) {
     const std::string root(pick);
-    const bool dspack = exists_(neogeo::make_path(root, "crom0"))
-        && exists_(neogeo::make_path(root, "prom"));
+    const bool dspack = exists(neogeo::make_path(root, "crom0"))
+        && exists(neogeo::make_path(root, "prom"));
     std::string xml = neogeo::make_path(root, "romset.xml");
-    if (!exists_(xml)) {
-        const std::size_t slash = root.rfind('/');
-        xml = neogeo::make_path(root.substr(0, slash), "romsets.xml");
-        if (!exists_(xml))
+    if (!exists(xml)) {
+        xml = neogeo::make_path(infra::dir_or_self(root), "romsets.xml");
+        if (!exists(xml))
             xml = neogeo::make_path(home, "romsets.xml");
     }
     std::string doc;
@@ -305,11 +328,11 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
         for (const neogeo::RomsetFile& f : plan.files) {
             if (!ok)
                 break;
-            if (!f.name.empty() && !exists_(neogeo::make_path(root, f.name)))
+            if (!f.name.empty() && !exists(neogeo::make_path(root, f.name)))
                 ok = false;
         }
         if (!ok) {
-            p.frame.refused = true;
+            result_.plan.frame.refused = true;
             return std::nullopt;
         }
     }
@@ -318,7 +341,7 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
 
     const auto load = [&](neogeo::RomsetFile& f) -> Ex<std::uint32_t> {
         f.path = neogeo::make_path(root, f.name);
-        return add_entry_(p, f);
+        return add_entry(f);
     };
     int loaded = 0;
     for (neogeo::RomsetFile& f : plan.files) {
@@ -345,7 +368,7 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
     return neogeo::config_word(cfg, false);
 }
 
-std::optional<NeoGeoLoader::Span> NeoGeoLoader::entry_span_(
+std::optional<PlanWalk::Span> PlanWalk::entry_span(
     std::string_view path,
     std::uint32_t offset,
     std::uint32_t size
@@ -364,14 +387,14 @@ std::optional<NeoGeoLoader::Span> NeoGeoLoader::entry_span_(
     return Span{.size = size, .rest = rest};
 }
 
-bool NeoGeoLoader::exists_(std::string_view path) const {
+bool PlanWalk::exists(std::string_view path) const {
     if (vfs_->dir_exists(path))
         return false;
     return vfs_->open(path, svc::OpenMode::Read).has_value();
 }
 
-std::string NeoGeoLoader::home_(std::string_view dir) const {
-    const std::string_view name = !dir.empty() ? dir : profile_.name;
+std::string PlanWalk::home_dir(std::string_view dir) const {
+    const std::string_view name = !dir.empty() ? dir : profile_->name;
     static constexpr svc::SearchDir kHome[] = {svc::SearchDir::CoreDir};
     if (auto r = vfs_->resolve(name, svc::SearchPolicy{kHome, true})) {
         const std::string& root = vfs_->root_path();
@@ -384,91 +407,90 @@ std::string NeoGeoLoader::home_(std::string_view dir) const {
     return home;
 }
 
-Ex<TransferRow*> NeoGeoLoader::add_row_(LoadPlan& p, std::string_view path, RowDest dest) {
-    if (p.count >= p.rows.size())
+Ex<RowIx> PlanWalk::add_row(std::string_view path, RowDest dest) {
+    if (result_.plan.count >= result_.plan.rows.size())
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(p.count)}
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(result_.plan.count)}
         );
-    if (!paths_[p.count].assign(path))
+    if (!(*paths_)[result_.plan.count].assign(path))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    TransferRow& r = p.rows[p.count];
+    const RowIx ix{result_.plan.count};
+    TransferRow& r = result_.plan[ix];
     r = TransferRow{};
     r.dest = dest;
     r.window = WindowRef::at(neogeo::kMemWindowSlot);
     r.bracket = RowBracket::None;
-    r.source = paths_[p.count].view();
-    ++p.count;
-    return &r;
+    r.source = (*paths_)[result_.plan.count].view();
+    ++result_.plan.count;
+    return ix;
 }
 
-Ex<void> NeoGeoLoader::add_notify_(LoadPlan& p, const PostNotify& n) {
-    auto r = add_row_(p, {}, RowDest::Notify);
-    if (!r)
-        return std::unexpected(r.error());
-    (*r)->index = proto::WideIoIndex{PostNotify::kIndex};
-    (*r)->notify = n;
+Ex<void> PlanWalk::add_notify(const PostNotify& n) {
+    auto i = add_row({}, RowDest::Notify);
+    if (!i)
+        return std::unexpected(i.error());
+    TransferRow& row = result_.plan[*i];
+    row.index = proto::WideIoIndex{PostNotify::kIndex};
+    row.notify = n;
     return {};
 }
 
-Ex<std::uint32_t> NeoGeoLoader::add_entry_(LoadPlan& p, const neogeo::RomsetFile& e) {
+Ex<std::uint32_t> PlanWalk::add_entry(const neogeo::RomsetFile& e) {
     if (e.index.is_crom())
-        return add_crom_(p, e);
-    if (auto r = flush_crom_(p); !r)
+        return add_crom(e);
+    if (auto r = flush_crom(); !r)
         return std::unexpected(r.error());
-    auto first = add_rom_(p, e.path, e, 0);
+    auto first = add_rom(e.path, e, 0);
     if (!first)
         return std::unexpected(first.error());
     if (*first == 0) {
-        ++skipped_;
+        ++result_.tally.skipped;
         return 0u;
     }
     std::uint32_t sz = *first;
     if (e.index == neogeo::FileIndex::Prom && is_prom_name(e.path)) {
-        const std::size_t slash = e.path.rfind('/');
-        const std::string sibling = slash == std::string_view::npos
-            ? std::string("prom1")
-            : std::string(e.path.substr(0, slash + 1)) + "prom1";
-        auto second = add_rom_(p, sibling, e, sz);
+        const std::string sibling = std::string(infra::dir_prefix(e.path)) + "prom1";
+        auto second = add_rom(sibling, e, sz);
         if (!second)
             return std::unexpected(second.error());
         sz += *second;
     }
-    p.rows[p.count - 1].notify = neogeo::make_notify(e.index, sz);
+    result_.plan[RowIx{result_.plan.count - 1}].notify = neogeo::make_notify(e.index, sz);
     return sz;
 }
 
-Ex<void> NeoGeoLoader::flush_crom_(LoadPlan& p) {
+Ex<void> PlanWalk::flush_crom() {
     if (crom_sz_ == 0)
         return {};
     const PostNotify n = neogeo::make_notify(neogeo::FileIndex::Sprite, crom_sz_);
     crom_sz_ = 0;
-    if (last_crom_ < p.count) {
-        p.rows[last_crom_].notify = n;
-        last_crom_ = kMaxTransferRows;
+    if (last_crom_) {
+        result_.plan[*last_crom_].notify = n;
+        last_crom_.reset();
         return {};
     }
-    return add_notify_(p, n);
+    return add_notify(n);
 }
 
-Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomsetFile& e) {
-    const auto s = entry_span_(e.path, e.offset, e.size);
+Ex<std::uint32_t> PlanWalk::add_crom(const neogeo::RomsetFile& e) {
+    const auto s = entry_span(e.path, e.offset, e.size);
     if (!s || s->size == 0) {
-        ++skipped_;
+        ++result_.tally.skipped;
         return 0u;
     }
     const std::uint32_t end = e.index.crom_offset() + 2u * s->size;
     crom_sz_ = std::max(crom_sz_, end);
     const auto readable = static_cast<std::uint32_t>(std::min<std::uint64_t>(s->size, s->rest));
     if (readable == 0) {
-        ++skipped_;
+        ++result_.tally.skipped;
         return end;
     }
-    auto r = add_row_(p, e.path, RowDest::Window);
-    if (!r)
-        return std::unexpected(r.error());
-    TransferRow& row = **r;
+    auto i = add_row(e.path, RowDest::Window);
+    if (!i)
+        return std::unexpected(i.error());
+    TransferRow& row = result_.plan[*i];
     row.shaped = true;
-    row.shape = static_cast<std::uint8_t>(neogeo::Shape::Crom);
+    row.shape = neogeo::shape_key_of(neogeo::Shape::Crom);
     row.index = e.index.wide();
     row.addr = e.index.crom_offset();
     row.stride = 2;
@@ -476,28 +498,27 @@ Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomsetFile&
     row.file_offset = e.offset;
     row.file_len = proto::FileSize{readable};
     row.extent = proto::FileSize{2u * readable};
-    last_crom_ = p.count - 1;
+    last_crom_ = *i;
     return end;
 }
 
-Ex<std::uint32_t> NeoGeoLoader::add_rom_(
-    LoadPlan& p,
+Ex<std::uint32_t> PlanWalk::add_rom(
     std::string_view path,
     const neogeo::RomsetFile& e,
     std::uint32_t concat
 ) {
-    const auto s = entry_span_(path, e.offset, e.size);
+    const auto s = entry_span(path, e.offset, e.size);
     if (!s || s->size == 0)
         return 0u;
     const std::uint32_t extent = e.expand != 0 ? e.expand : s->size;
-    auto r = add_row_(p, path, RowDest::Window);
-    if (!r)
-        return std::unexpected(r.error());
-    TransferRow& row = **r;
-    const neogeo::Shape shape = shape_of(e);
+    auto i = add_row(path, RowDest::Window);
+    if (!i)
+        return std::unexpected(i.error());
+    TransferRow& row = result_.plan[*i];
+    const neogeo::Shape shape = entry_shape(e);
     const neogeo::RomPlace place = neogeo::rom_place(e.index, concat);
     row.shaped = shape != neogeo::Shape::None;
-    row.shape = static_cast<std::uint8_t>(shape);
+    row.shape = neogeo::shape_key_of(shape);
     row.index = e.index.wide();
     row.window = place.window;
     row.addr = place.offset;
@@ -508,11 +529,11 @@ Ex<std::uint32_t> NeoGeoLoader::add_rom_(
     return extent;
 }
 
-Ex<void> NeoGeoLoader::add_fill_(LoadPlan& p) {
-    auto r = add_row_(p, {}, RowDest::Window);
-    if (!r)
-        return std::unexpected(r.error());
-    TransferRow& row = **r;
+Ex<void> PlanWalk::add_fill() {
+    auto i = add_row({}, RowDest::Window);
+    if (!i)
+        return std::unexpected(i.error());
+    TransferRow& row = result_.plan[*i];
     const neogeo::FileIndex fill_index = neogeo::FileIndex::Fill;
     row.index = fill_index.wide();
     row.fill = neogeo::kFillPattern;
@@ -521,21 +542,56 @@ Ex<void> NeoGeoLoader::add_fill_(LoadPlan& p) {
     return {};
 }
 
-Ex<bool> NeoGeoLoader::add_lo_rom_(LoadPlan& p, std::string_view home) {
+Ex<bool> PlanWalk::add_lo_rom(std::string_view home) {
     const std::string path = neogeo::make_path(home, "000-lo.lo");
-    const auto s = entry_span_(path, 0, neogeo::kLoRomBytes);
+    const auto s = entry_span(path, 0, neogeo::kLoRomBytes);
     if (!s)
         return false;
-    auto r = add_row_(p, path, RowDest::Payload);
-    if (!r)
-        return std::unexpected(r.error());
-    TransferRow& row = **r;
+    auto i = add_row(path, RowDest::Payload);
+    if (!i)
+        return std::unexpected(i.error());
+    TransferRow& row = result_.plan[*i];
     const neogeo::FileIndex lo_index = neogeo::FileIndex::LoRom;
     row.index = lo_index.wide();
     row.byte_words = true;
     row.file_len = proto::FileSize{std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)};
     row.extent = proto::FileSize{neogeo::kLoRomBytes};
     return true;
+}
+
+}
+
+Ex<LoadPlan> NeoGeoLoader::plan(const LoadAsk& ask, const proto::StatusWord& status) {
+    TASTY_SEAT_BODY(NeoGeoLoader);
+    if (!ask.disc && !walks_romset(profile_.slots, ask.index.io())) {
+        LoadPlan p{};
+        p.count = 1;
+        p.rows[0].index = ask.index;
+        return p;
+    }
+    neogeo::PlanWalk walk(*vfs_, profile_, paths_, save_);
+    const Ex<void> r = ask.disc ? walk.cd(ask.path, status) : walk.cart(ask.path, status);
+    neogeo::PlanWalk::Result took = walk.take();
+    walked_ = took.tally;
+    if (!r)
+        return std::unexpected(r.error());
+    return std::move(took.plan);
+}
+
+Ex<LoadPlan> NeoGeoLoader::plan_romset(std::span<const neogeo::RomsetFile> entries) {
+    neogeo::PlanWalk walk(*vfs_, profile_, paths_, save_);
+    const Ex<void> walked = [&]() -> Ex<void> {
+        for (const neogeo::RomsetFile& e : entries) {
+            if (auto r = walk.add_entry(e); !r)
+                return std::unexpected(r.error());
+        }
+        return walk.flush_crom();
+    }();
+    neogeo::PlanWalk::Result took = walk.take();
+    walked_ = took.tally;
+    if (!walked)
+        return std::unexpected(walked.error());
+    return std::move(took.plan);
 }
 
 neogeo::IRomShape* NeoGeoLoader::shaper_(neogeo::Shape kind) noexcept {
@@ -556,7 +612,10 @@ neogeo::IRomShape* NeoGeoLoader::shaper_(neogeo::Shape kind) noexcept {
 
 void NeoGeoLoader::shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t) {
     TASTY_SEAT_BODY(NeoGeoLoader);
-    neogeo::IRomShape* const shaper = shaper_(static_cast<neogeo::Shape>(row.shape));
+    const std::optional<neogeo::Shape> kind = neogeo::shape_of(row.shape);
+    if (!kind)
+        return;
+    neogeo::IRomShape* const shaper = shaper_(*kind);
     if (shaper == nullptr)
         return;
     shaper->transform(piece);

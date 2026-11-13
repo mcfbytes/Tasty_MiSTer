@@ -7,6 +7,7 @@
 #include "hal/reg_lend.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/build_generation.h"
 
 namespace mister::app {
 
@@ -14,7 +15,7 @@ enum class OsdPageRoute : std::uint8_t { Link, Lw };
 
 struct OsdGrant {
     hal::reg::Lend block{};
-    std::uint16_t gen = 0;
+    proto::BuildGeneration gen{};
 
     [[nodiscard]] bool live() const noexcept { return block.lent(); }
 };

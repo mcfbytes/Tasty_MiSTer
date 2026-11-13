@@ -26,6 +26,7 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
         .video_stats = p.wires.video.stats_cell(),
         .video_geometry = p.wires.video.geometry_cell(),
         .video_wire = p.wires.video.wire(),
+        .prelude_stats = p.wires.video.prelude().stats_cell(),
         .ui_pages = f.ui_pages,
         .hd = f.hd,
         .replay = replay_.replay_status_,
@@ -66,8 +67,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
           .replay = replay_.replay_feeder_,
           .rec = rec_.recorder_,
           .ui_requests = device_.owner_.ui_requests(),
-          .stats = plat.stats,
-          .link_tx = device_.ui_inbox_
+          .stats = plat.stats
       }},
       fifo_(device_.open_cmd_fifo(plat, router_)),
       rt_main_{
@@ -78,11 +78,14 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .input = infra::OptRef<app::InputEmit>{device_.input_emit_},
               .osd = infra::OptRef<app::OsdWire>{device_.osd_wire_},
               .timer = infra::OptRef<reactor::RoundTimer>{plat.round_timer},
-              .wire = infra::OptRef<app::InputWire>{device_.input_wire_},
+              .input_kick = infra::OptRef<
+                  xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>>{device_.rt_input_kick_},
               .frames = infra::OptRef<app::CoreFrameCounter>{device_.frame_counter_},
               .scanout = front_->scanout(),
               .replay = infra::OptRef<app::ReplayGate>{replay_.replay_gate_},
               .replay_ring = wired_end(replay_.replay_ring_.receiver(), "ReplayRing receiver"),
+              .lamp = plat.disk_lamp,
+              .disk_activity = infra::OptRef<const xthread::WakeFlag>{device_.disk_activity_},
           }
       },
       assembly_{
@@ -104,12 +107,12 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .video = device_.video_pump_,
               .ui_sink = face_parts_.ui_sink,
               .owner_events = device_.owner_events_,
-              .bt = face_parts_.bt,
               .shots = shot_pump_,
               .replay = replay_.replay_feeder_,
               .recorder = rec_.recorder_,
               .launcher_screen = face_parts_.launcher_screen,
               .ui_round = face_parts_.ui_round,
+              .menu_keys = infra::OptRef<app::MenuKeyInbox>{device_.menu_keys_},
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
               .ui_writes = face_parts_.ui_writes,

@@ -9,13 +9,11 @@
 #include "ui/confirm_page.h"
 #include "ui/hd_label.h"
 #include "ui/page_context.h"
-#include "ui/script_launch.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_close_row.h"
 #include "ui/hd_rows/hd_gated_row.h"
 #include "ui/hd_rows/hd_option_row.h"
-#include "ui/hd_rows/hd_pair_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_save_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
@@ -56,12 +54,12 @@ Row HdPushRow::describe() const {
 
 std::optional<RowKey> HdPushRow::key() const {
     TASTY_SEAT_BODY(HdPushRow);
-    return RowKey::in_space(RowKeySpace::Push, item_pushing(spec_.page, spec_.focus));
+    return push_row_key(spec_.page);
 }
 
 Transition HdPushRow::select() {
     TASTY_SEAT_BODY(HdPushRow);
-    return Transition{Transition::Kind::Push, spec_.page, spec_.focus};
+    return Transition::push(spec_.page, spec_.arg);
 }
 
 Row HdCloseRow::describe() const {
@@ -71,7 +69,7 @@ Row HdCloseRow::describe() const {
 
 Transition HdCloseRow::select() {
     TASTY_SEAT_BODY(HdCloseRow);
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 Row HdValueRow::describe() const {
@@ -119,12 +117,12 @@ Transition HdAskRow::select() {
     ask.host = infra::opt_ref_of(static_cast<IConfirmHost*>(this));
     ask.initial = spec_.initial;
     spec_.confirm->pending = ask;
-    return Transition{Transition::Kind::Push, PageId::Confirm};
+    return Transition::push(PageId::Confirm);
 }
 
 Transition HdAskRow::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(HdAskRow);
-    return choice == RowIndex{0} ? spec_.action.on_yes() : Transition{Transition::Kind::Pop};
+    return choice == RowIndex{0} ? spec_.action.on_yes() : Transition::pop();
 }
 
 bool HdGatedRow::shown() const {
@@ -150,29 +148,6 @@ Transition HdGatedRow::select() {
 Transition HdGatedRow::step(CycleDir dir) {
     TASTY_SEAT_BODY(HdGatedRow);
     return row_.step(dir);
-}
-
-bool HdPairRow::shown() const {
-    TASTY_SEAT_BODY(HdPairRow);
-    return ctx_.launches.script.has_value();
-}
-
-Row HdPairRow::describe() const {
-    TASTY_SEAT_BODY(HdPairRow);
-    return row_of(
-        RowKind::Action,
-        "Pair Bluetooth controller",
-        tier_,
-        app::PageDescription::RowIcon::Bluetooth
-    );
-}
-
-Transition HdPairRow::select() {
-    TASTY_SEAT_BODY(HdPairRow);
-    if (!ctx_.launches.script)
-        return Transition{};
-    ctx_.launches.script->pending = ScriptLaunch::Request::bt_pair(ctx_.bt_reset_before_pair);
-    return Transition{Transition::Kind::Push, PageId::ScriptRun};
 }
 
 std::optional<RowKey> HdOptionRow::key() const {

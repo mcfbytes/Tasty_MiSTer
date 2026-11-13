@@ -17,6 +17,10 @@ struct MapLength {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
+    [[nodiscard]] constexpr bool holds_whole(MapLength unit) const noexcept {
+        return !unit.empty() && v >= unit.v && v % unit.v == 0;
+    }
+
     void release(const volatile void* base) const noexcept;
 
     [[nodiscard]] std::span<std::byte> plain_bytes(void* base) const noexcept;

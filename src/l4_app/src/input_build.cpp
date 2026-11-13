@@ -5,12 +5,10 @@
 #include <string_view>
 #include <utility>
 
-#include "svc/input_service.h"
-
 namespace mister::app {
 
-InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir)
-    : wire_(wire),
+InputBuild::InputBuild(const svc::Vfs& vfs, Ends ends, std::string_view input_dir)
+    : ends_(ends),
       en_(svc::InputEnumerator::create(vfs, input_dir)) {
 
     if (auto e = en_.enumerate(); !e) {
@@ -24,9 +22,6 @@ InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view in
         if (auto loan = tx_.acquire())
             hand_over_(std::move(loan));
     }
-
-    wire_.set_gate(InputWire::kGateGrabbed, svc::InputService::kBornGrabbed);
-    wire_.set_gate(InputWire::kGateOsdVisible, false);
 }
 
 void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
@@ -45,30 +40,28 @@ bool InputBuild::rebind_round() {
 
     while (tx_.reap()) {
     }
-    if (!wire_.requested(InputWire::kReqHotplug))
+    if (!hotplug_seen_.peek(ends_.hotplug))
         return false;
 
     auto loan = tx_.acquire();
     if (!loan) {
-        wire_.note_rebuild_refused();
+        rebuilds_refused_.add();
         return false;
     }
 
-    wire_.clear_request(InputWire::kReqHotplug);
+    (void)hotplug_seen_.take(ends_.hotplug);
 
     if (auto e = en_.enumerate(); !e) {
         n_enum_fail_.add(1);
     }
     {
 
-        const InputWire::CoreNameCell core = wire_.core_name();
-
-        const auto reshape = wire_.analog_reshape();
-        (void)en_.load_maps_for(core.view(), core.front_end, reshape, wire_.joy_plan());
+        const CoreInputFacts facts = ends_.facts.sample().value;
+        (void)en_.load_maps_for(facts.core.view(), facts.front_end, facts.reshape, facts.plan);
     }
     hand_over_(std::move(loan));
-    wire_.note_rebuild_done();
-    wire_.wake();
+    rebuilds_done_.add();
+    ends_.input_ctrl.kick();
     return true;
 }
 
@@ -77,6 +70,8 @@ InputBuild::Counts InputBuild::counts() const noexcept {
     c.enumerate_failures = n_enum_fail_.get();
     c.devices = en_.stats().devices;
     c.rejected = en_.rejected_nodes();
+    c.rebuilds_done = rebuilds_done_;
+    c.rebuilds_refused = rebuilds_refused_;
     return c;
 }
 

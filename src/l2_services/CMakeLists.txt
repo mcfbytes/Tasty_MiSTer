@@ -4,8 +4,10 @@ add_library(mister_services STATIC
   src/adv7513_bus.cpp
   src/adv7513_reg_write.cpp
   src/alt_ini_index.cpp
+  src/dv1_spd.cpp
   src/asset_name.cpp
   src/browse_rules.cpp
+  src/crc32_accumulator.cpp
   src/crc32_extend.cpp
   src/audio_service.cpp
   src/cec_state_machine.cpp
@@ -73,6 +75,9 @@ add_library(mister_services STATIC
   src/video_wire_emit.cpp
   src/xml_scan.cpp
   src/xml_scanner.cpp
+  src/wpa_conf_file.cpp
+  src/wpa_conf_store.cpp
+  src/ifup_starter.cpp
 )
 target_include_directories(mister_services PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_services
@@ -121,18 +126,25 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/adv7513_probe_report.h
   svc/adv7513_reg_map.h
   svc/adv7513_reg_write.h
+  svc/adv7513_spd_packet.h
   svc/adv7513_sub_map.h
   svc/alt_ini_index.h
+  svc/dv1_spd.h
+  svc/ini_catalog.h
   svc/analog_reshape.h
   svc/analog_xy.h
   svc/archive.h
   svc/asset_name.h
   svc/asset_query.h
+  svc/afilter_parser.h
   svc/audio_service.h
+  svc/filter_wire_image.h
   svc/probe_ops.h
   svc/axis_cal.h
+  svc/blank_region.h
+  svc/blank_save.h
   svc/block_ctl.h
-  svc/block_half.h
+  svc/slot_arena.h
   svc/button_map.h
   svc/joy_bit.h
   svc/sys_button.h
@@ -146,6 +158,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/config_field.h
   svc/config_parser.h
   svc/config_snapshot.h
+  svc/crc32_accumulator.h
   svc/cue_mount.h
   svc/cue_policy.h
   svc/cue_program.h
@@ -162,7 +175,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/disc_engine.h
   svc/disc_file_access.h
   svc/disc_geometry.h
-  svc/disc_identity_role.h
+  svc/disc_rules.h
   svc/disc_mount_slot.h
   svc/disc_mounter.h
   svc/disc_read_service.h
@@ -184,6 +197,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/filter_send_plan.h
   svc/filter_set.h
   svc/filter_store.h
+  svc/scaler_slot_mode.h
   svc/frame_shaper.h
   svc/game_asset_finder.h
   svc/geometry_gate.h
@@ -199,6 +213,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/input_counters.h
   svc/input_device.h
   svc/input_emitter.h
+  svc/input_gates.h
   svc/input_enumerator.h
   svc/input_service.h
   svc/input_service_counts.h
@@ -209,6 +224,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/key_edge.h
   svc/map_store.h
   svc/mapping_wizard.h
+  svc/axis_timing.h
   svc/modeline.h
   svc/mouse_fixup_rule.h
   svc/no_merge_rule.h
@@ -249,6 +265,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/track_row.h
   svc/track.h
   svc/types.h
+  svc/evdev_range.h
   svc/unbound_disc.h
   svc/memory_mounts.h
   svc/vfs.h
@@ -257,7 +274,9 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/fb_par_crc.h
   svc/video_service.h
   svc/video_timing.h
+  svc/parsed_kind.h
   svc/parsed_mode.h
+  svc/preset_pick.h
   svc/stored_mode.h
   svc/xml_attr.h
   svc/xml_scan.h
@@ -267,5 +286,31 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/filter_kernel.h
   svc/video_wire_emit.h
   svc/yc_table.h
+  svc/bt_page_mode.h
+  svc/bt_activity.h
+  svc/bt_device_view.h
+  svc/bt_failure.h
+  svc/bt_presence.h
+  svc/bt_prompt.h
+  svc/bt_prompt_view.h
+  svc/bt_radio_binding.h
+  svc/bt_service.h
+  svc/bt_view.h
+  svc/connect_fd_delta.h
+  svc/connect_request.h
+  svc/conf_stamp.h
+  svc/ifup_starter.h
+  svc/prompt_answer.h
+  svc/prompt_gen.h
+  svc/view_gen.h
+  svc/wifi_failure.h
+  svc/wifi_link.h
+  svc/wifi_presence.h
+  svc/wifi_saved_view.h
+  svc/wifi_scan_view.h
+  svc/wifi_service.h
+  svc/wifi_view.h
+  svc/wpa_conf_file.h
+  svc/wpa_conf_store.h
 )
 

@@ -53,24 +53,12 @@ public:
 
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return arena_.bytes(); }
 
-    void restart(const RecOptions&) noexcept override { TASTY_SEAT_BODY(CscdCodec); }
-
-    void arm(infra::OptRef<const os::IClock>, std::int64_t) noexcept override {
-        TASTY_SEAT_BODY(CscdCodec);
-    }
-
-    [[nodiscard]] Search search() const noexcept override {
+    [[nodiscard]] Search restart(const RecOptions&) noexcept override {
         TASTY_SEAT_BODY(CscdCodec);
         return {};
     }
 
-    [[nodiscard]] Ex<void> begin(PictureSize size) noexcept override;
     void end() noexcept override;
-
-    [[nodiscard]] bool open() const noexcept override {
-        TASTY_SEAT_BODY(CscdCodec);
-        return !size_.empty();
-    }
 
     [[nodiscard]] PictureSize size() const noexcept override {
         TASTY_SEAT_BODY(CscdCodec);
@@ -82,10 +70,11 @@ public:
         return payload_bound(size_);
     }
 
-    [[nodiscard]] std::span<const std::byte> encode(
+    [[nodiscard]] Encoded encode(
         RgbRows rgb,
         bool key,
-        std::span<std::byte> out
+        std::span<std::byte> out,
+        const FrameBudget& budget
     ) noexcept override;
 
     [[nodiscard]] std::span<const std::byte> rekey(std::span<std::byte> out) noexcept override;
@@ -93,6 +82,8 @@ public:
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
 private:
+    [[nodiscard]] Ex<void> begin_(PictureSize size) noexcept override;
+
     [[nodiscard]] std::span<const std::byte> pack_(
         std::span<const std::byte> src,
         bool key,

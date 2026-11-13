@@ -13,6 +13,7 @@
 #include "ui/confirm_host.h"
 #include "ui/hd_page0_walk.h"
 #include "ui/slot_pick_host.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -50,7 +51,7 @@ public:
         std::span<const std::string_view> body
     );
 
-    [[nodiscard]] std::uint32_t refusals() const noexcept;
+    [[nodiscard]] svc::Tally refusals() const noexcept;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
@@ -64,7 +65,7 @@ private:
     HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     bool front_end_ = false;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

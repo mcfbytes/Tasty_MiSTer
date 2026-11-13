@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/pce_scsi_engine.h"
 
+#include "hal/disk_lamp.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <type_traits>
 
 #include "cd_core_detail.h"
 #include "cores/cd_engine.h"
@@ -28,14 +31,6 @@ namespace mister::cores {
 
 namespace {
 
-constexpr std::uint8_t kPceStateIdle = 0;
-constexpr std::uint8_t kPceStateNoDisc = 1;
-constexpr std::uint8_t kPceStateRead = 2;
-constexpr std::uint8_t kPceStatePlay = 3;
-constexpr std::uint8_t kPceStatePause = 4;
-constexpr std::uint16_t kPceStatusGood = 0;
-constexpr std::uint16_t kPceStatusCheckCond = 1;
-
 constexpr std::size_t kPceCddaFrame = svc::kRawFrameBytes + 2;
 constexpr std::size_t kPceSubFrame = svc::kSubcodeBytes + 4;
 constexpr std::size_t kStatusCommandWords = 1 + CdEngine::kMaxStatusWords;
@@ -45,6 +40,12 @@ static_assert(
     "the doubled CD-DA pass and its follow-ups fit the slab"
 );
 static_assert(kStatusCommandWords <= proto::SpiFioQueue::kMaxCommandWords);
+
+constexpr PollTicks::TickLength kPceTick{13.33F};
+constexpr PollTicks kLoadSettleTicks{10};
+constexpr PollTicks kSpinUpTicks = PollTicks::spanning(svc::SeekTime{220}, kPceTick);
+static_assert(kSpinUpTicks == PollTicks{16});
+static_assert(std::is_same_v<PollTicks::Span, svc::SeekTime>);
 
 constexpr std::size_t pce_widest_windows(std::size_t piece_bytes) {
     using Q = proto::SpiFioQueue;
@@ -65,34 +66,34 @@ static_assert(
 void PceScsiEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) noexcept {
 
     st_.loaded = loaded;
-    st_.state = loaded ? kPceStateIdle : kPceStateNoDisc;
+    st_.state = loaded ? State::Idle : State::NoDisc;
     if (loaded)
-        st_.latency = 10;
+        st_.latency = kLoadSettleTicks;
 }
 
 bool PceScsiEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 
-    return st_.latency == 0 && st_.state == kPceStateRead;
+    return !st_.latency.owed() && st_.state == State::Read;
 }
 
 CdDriveState PceScsiEngine::drive_state_() const noexcept {
     switch (st_.state) {
-        case kPceStateNoDisc:
+        case State::NoDisc:
             return CdDriveState::NoDisc;
-        case kPceStateIdle:
+        case State::Idle:
             return CdDriveState::Stopped;
-        case kPceStateRead:
+        case State::Read:
             return CdDriveState::Reading;
-        case kPceStatePlay:
+        case State::Play:
             return CdDriveState::Playing;
-        case kPceStatePause:
+        case State::Pause:
             return CdDriveState::Paused;
     }
     return CdDriveState::Stopped;
 }
 
 Ex<void> PceScsiEngine::do_push_sector(CdDialectPorts& p) {
-    if (st_.state != kPceStateRead || st_.latency != 0 || !p.geom.toc.last.contains(st_.track)) {
+    if (st_.state != State::Read || st_.latency.owed() || !p.geom.toc.last.contains(st_.track)) {
         return {};
     }
     return read_send_(p);
@@ -117,7 +118,7 @@ Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPor
         }
         case 1:
 
-            return send_status_(0, p.link);
+            return send_status_(Status::Good, p.link);
         case 2:
             st_.can_read_next = true;
             break;
@@ -128,38 +129,37 @@ Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPor
     return {};
 }
 
-Ex<void> PceScsiEngine::send_status_(std::uint16_t status, ICdLink& link) {
-    return send_status_words_(cdwire::pce_set_words(status, st_.region, false), link);
+Ex<void> PceScsiEngine::send_status_(Status status, ICdLink& link) {
+    return send_status_words_(cdwire::pce_set_words(word_of(status), st_.region, false), link);
 }
 
 Ex<void> PceScsiEngine::send_data_request_(ICdLink& link) {
-    return send_status_words_(cdwire::pce_set_words(0, st_.region, true), link);
+    return send_status_words_(cdwire::pce_set_words(word_of(Status::Good), st_.region, true), link);
 }
 
 svc::TrackIndex PceScsiEngine::track_by_lba_(HeadLba lba, const svc::DiscGeometry& geom) const {
     return track_scan(geom.toc, lba);
 }
 
-std::uint32_t PceScsiEngine::seek_ticks_(HeadMove move, const svc::DiscGeometry& geom) const {
+PollTicks PceScsiEngine::seek_ticks_(HeadMove move, const svc::DiscGeometry& geom) const {
 
     const std::optional<Lba> a = move.from.readable();
     const std::optional<Lba> b = move.to.readable();
     if (!a || !b)
-        return 0;
-    const std::uint32_t ms = geom.seek_time(*a, *b).count();
-    return static_cast<std::uint32_t>(static_cast<float>(ms) / 13.33f);
+        return PollTicks{};
+    return PollTicks::spanning(geom.seek_time(*a, *b), kPceTick);
 }
 
 Ex<bool> PceScsiEngine::drain_pending(ICdLink& link) {
 
     auto& m = st_;
-    if (m.has_status && m.latency == 0) {
-        if (auto r = send_status_(m.stat, link); !r)
+    if (m.has_status && !m.latency.owed()) {
+        if (auto r = send_status_(Status::Good, link); !r)
             return std::unexpected(r.error());
         m.has_status = false;
         return true;
     }
-    if (m.data_req && m.latency == 0) {
+    if (m.data_req && !m.latency.owed()) {
         if (auto r = send_data_request_(link); !r)
             return std::unexpected(r.error());
         m.data_req = false;
@@ -195,7 +195,7 @@ void PceScsiEngine::hint_at_(HeadLba lba, bool doubled, const svc::DiscGeometry&
 void PceScsiEngine::build_subcode_frame_(HeadLba lba, const svc::DiscGeometry& geom) {
 
     auto& m = st_;
-    if (lba != m.subc_lba && m.latency == 0) {
+    if (lba != m.subc_lba && !m.latency.owed()) {
         bool have = false;
         const std::optional<Lba> at = lba.readable();
         if (at) {
@@ -248,6 +248,8 @@ Ex<void> PceScsiEngine::read_send_(CdDialectPorts& p) {
         return {};
     }
     m.can_read_next = false;
+    if (p.lamp)
+        p.lamp->note();
 
     const svc::Track& tk = toc.at(m.track);
     if (tk.type != TrackType::Cdda) {
@@ -276,15 +278,47 @@ Ex<void> PceScsiEngine::read_send_(CdDialectPorts& p) {
 
     m.cnt -= SectorCount{1};
     if (m.cnt == SectorCount{}) {
-        m.stat = kPceStatusGood;
         m.has_status = true;
-        m.state = kPceStateIdle;
+        m.state = State::Idle;
     }
     m.lba += SectorCount{1};
     if (toc.last.contains(m.track) && m.lba >= head_of(toc.at(m.track).end)) {
         m.track += svc::TrackCount{1};
         m.is_data = true;
     }
+    return {};
+}
+
+Ex<void> PceScsiEngine::deliver_cdda_pass_(CdDialectPorts& p) {
+    auto& m = st_;
+    const svc::Toc& toc = p.geom.toc;
+
+    if (toc.at(m.track).type == TrackType::Cdda) {
+        sec_buf_[0] = 0x30;
+        sec_buf_[1] = 0x09;
+        if (const std::optional<Lba> at = m.lba.readable()) {
+            const svc::DiscTake got = facts_.disc.take(
+                svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *at},
+                std::as_writable_bytes(std::span(sec_buf_ + 2, svc::kRawFrameBytes))
+            );
+            if (!got.is_bytes()) {
+                ++stats_.substitutes;
+            }
+            if (const std::optional<Lba> next = (m.lba + SectorCount{1}).readable()) {
+                facts_.disc.hint(svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *next});
+            }
+        }
+        if (auto r = send_frame(p.link, io_.cdda, std::span(sec_buf_, svc::kRawFrameBytes + 2));
+            !r) {
+            return r;
+        }
+        ++stats_.cdda_sectors;
+        build_subcode_frame_(m.lba, p.geom);
+        if (auto r = send_frame(p.link, io_.subcode, std::span(sub_buf_, 100)); !r) {
+            return r;
+        }
+    }
+    m.lba += SectorCount{1};
     return {};
 }
 
@@ -312,9 +346,9 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
 
     PceSubqReply subq;
     subq.set_play_state(
-        m.state == kPceStatePause ? PceSubqReply::PlayState::Paused
-                                  : (m.state == kPceStatePlay ? PceSubqReply::PlayState::Playing
-                                                              : PceSubqReply::PlayState::Stopped)
+        m.state == State::Pause ? PceSubqReply::PlayState::Paused
+                                : (m.state == State::Play ? PceSubqReply::PlayState::Playing
+                                                          : PceSubqReply::PlayState::Stopped)
     );
     subq.set_track(m.track.number());
     {
@@ -327,25 +361,25 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
 
     bool subq_send = false;
 
-    if (m.state == kPceStateRead) {
+    if (m.state == State::Read) {
 
-        if (m.latency > 0) {
-            --m.latency;
+        if (m.latency.owed()) {
+            m.latency.spend();
             return {};
         }
         if (!toc.last.contains(m.track)) {
-            m.state = kPceStateIdle;
+            m.state = State::Idle;
             return {};
         }
         return read_send_(p);
     }
-    if (m.state == kPceStatePlay) {
+    if (m.state == State::Play) {
         bool skip = false;
-        if (m.latency > 0) {
-            --m.latency;
+        if (m.latency.owed()) {
+            m.latency.spend();
             skip = true;
-        } else if (m.audio_delay > 0) {
-            --m.audio_delay;
+        } else if (m.audio_delay.owed()) {
+            m.audio_delay.spend();
             skip = true;
         } else if (p.egress_busy()) {
             ++stats_.busy_ticks;
@@ -353,44 +387,16 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
         }
         if (!skip) {
             m.track = track_by_lba_(m.lba, p.geom);
+            if (p.lamp)
+                p.lamp->note();
 
-            const std::uint8_t rounds = m.cdda_first;
-            for (std::uint8_t i = 0; i <= rounds; ++i) {
-
-                if (toc.at(m.track).type == TrackType::Cdda) {
-                    sec_buf_[0] = 0x30;
-                    sec_buf_[1] = 0x09;
-                    if (const std::optional<Lba> at = m.lba.readable()) {
-                        const svc::DiscTake got = facts_.disc.take(
-                            svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *at},
-                            std::as_writable_bytes(std::span(sec_buf_ + 2, svc::kRawFrameBytes))
-                        );
-                        if (!got.is_bytes()) {
-                            ++stats_.substitutes;
-                        }
-                        if (const std::optional<Lba> next = (m.lba + SectorCount{1}).readable()) {
-                            facts_.disc.hint(
-                                svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *next}
-                            );
-                        }
-                    }
-                    if (auto r = send_frame(
-                            p.link,
-                            io_.cdda,
-                            std::span(sec_buf_, svc::kRawFrameBytes + 2)
-                        );
-                        !r) {
-                        return r;
-                    }
-                    ++stats_.cdda_sectors;
-                    build_subcode_frame_(m.lba, p.geom);
-                    if (auto r = send_frame(p.link, io_.subcode, std::span(sub_buf_, 100)); !r) {
-                        return r;
-                    }
-                }
-                m.lba += SectorCount{1};
+            if (auto r = deliver_cdda_pass_(p); !r)
+                return r;
+            if (st_.cdda_first) {
+                if (auto r = deliver_cdda_pass_(p); !r)
+                    return r;
             }
-            m.cdda_first = 0;
+            st_.cdda_first = false;
 
             const bool past_end = m.cdda.past_end(m.lba);
             const bool data_hit = toc.at(m.track).type != TrackType::Cdda;
@@ -399,10 +405,10 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
                     m.lba = m.cdda.start();
                     hint_at_(m.lba, false, p.geom);
                 } else {
-                    m.state = kPceStateIdle;
+                    m.state = State::Idle;
                 }
                 if (m.int_pend) {
-                    if (auto r = send_status_(kPceStatusGood, p.link); !r)
+                    if (auto r = send_status_(Status::Good, p.link); !r)
                         return r;
                 }
                 m.int_pend = false;
@@ -412,7 +418,7 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
             m.subq_pend = false;
             subq_send = true;
         }
-    } else if (m.state == kPceStatePause) {
+    } else if (m.state == State::Pause) {
         subq_send = m.subq_pend;
         m.subq_pend = false;
 
@@ -420,8 +426,8 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
         if (auto r = send_frame(p.link, io_.subcode, std::span(sub_buf_, 100)); !r) {
             return r;
         }
-        if (m.latency > 0)
-            --m.latency;
+        if (m.latency.owed())
+            m.latency.spend();
     } else {
         subq_send = m.subq_pend;
         m.subq_pend = false;
@@ -432,7 +438,7 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
         if (auto r = send_frame(p.link, io_.data, subq.bytes()); !r) {
             return r;
         }
-        return send_status_(kPceStatusGood, p.link);
+        return send_status_(Status::Good, p.link);
     }
     return {};
 }
@@ -440,12 +446,12 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
 void PceScsiEngine::do_reset_machine() noexcept {
 
     auto& m = st_;
-    m.latency = 0;
-    m.audio_delay = 0;
+    m.latency = PollTicks{};
+    m.audio_delay = PollTicks{};
     m.track = svc::TrackIndex{};
     m.lba = HeadLba{};
     m.is_data = true;
-    m.state = m.loaded ? kPceStateIdle : kPceStateNoDisc;
+    m.state = m.loaded ? State::Idle : State::NoDisc;
     m.has_status = false;
     m.data_req = false;
     m.can_read_next = false;
@@ -453,7 +459,6 @@ void PceScsiEngine::do_reset_machine() noexcept {
     m.cdda_mode = PceCommand::CddaMode::Silent;
     m.int_pend = false;
     m.subq_pend = false;
-    m.stat = 0;
 }
 
 Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts& p) {
@@ -466,16 +471,16 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
     if (!op) {
         m.sense.raise(SenseKey::IllegalRequest, Asc::InvalidCommand);
         m.has_status = false;
-        return send_status_(kPceStatusCheckCond, p.link);
+        return send_status_(Status::CheckCondition, p.link);
     }
 
     switch (*op) {
         case PceCommand::TestUnit:
-            if (m.state == kPceStateNoDisc) {
+            if (m.state == State::NoDisc) {
                 m.sense.raise(SenseKey::NotReady, Asc::NoDisc);
-                return send_status_(kPceStatusCheckCond, p.link);
+                return send_status_(Status::CheckCondition, p.link);
             }
-            return send_status_(kPceStatusGood, p.link);
+            return send_status_(Status::Good, p.link);
 
         case PceCommand::RequestSense: {
 
@@ -486,7 +491,7 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             if (auto r = send_frame(p.link, io_.data, reply.bytes()); !r) {
                 return r;
             }
-            return send_status_(kPceStatusGood, p.link);
+            return send_status_(Status::Good, p.link);
         }
 
         case PceCommand::GetDirInfo: {
@@ -509,7 +514,7 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             if (auto r = send_frame(p.link, io_.data, reply.bytes()); !r) {
                 return r;
             }
-            return send_status_(kPceStatusGood, p.link);
+            return send_status_(Status::Good, p.link);
         }
 
         case PceCommand::Read6: {
@@ -526,17 +531,17 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             }
             if (!matched) {
                 if (command.fast_seek()) {
-                    m.latency = 0;
+                    m.latency = PollTicks{};
                 } else {
                     m.latency = seek_ticks_(HeadMove{m.lba, operands.head}, p.geom);
-                    m.audio_delay = 0;
+                    m.audio_delay = PollTicks{};
                 }
             }
             m.lba = operands.head;
             hint_at_(m.lba, false, p.geom);
             m.cnt = operands.count;
             m.can_read_next = true;
-            m.state = kPceStateRead;
+            m.state = State::Read;
             break;
         }
 
@@ -544,24 +549,24 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             if (command.requests_data()) {
                 m.data_req = true;
             } else {
-                return send_status_(kPceStatusGood, p.link);
+                return send_status_(Status::Good, p.link);
             }
             break;
 
         case PceCommand::Sapsp: {
             const HeadLba new_lba = command.target(true, toc);
             if (command.fast_seek()) {
-                m.latency = 0;
-                m.audio_delay = 0;
+                m.latency = PollTicks{};
+                m.audio_delay = PollTicks{};
             } else {
 
-                const std::uint32_t seek = seek_ticks_(HeadMove{m.lba, new_lba}, p.geom);
-                m.audio_delay = static_cast<std::uint32_t>(220.0f / 13.33f);
+                const PollTicks seek = seek_ticks_(HeadMove{m.lba, new_lba}, p.geom);
+                m.audio_delay = kSpinUpTicks;
                 if (seek > m.audio_delay) {
                     m.latency = seek - m.audio_delay;
                 } else {
                     m.latency = seek;
-                    m.audio_delay = 0;
+                    m.audio_delay = PollTicks{};
                 }
             }
             m.lba = new_lba;
@@ -569,10 +574,8 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             m.track = track_by_lba_(new_lba, p.geom);
             m.cdda.play(new_lba, head_of(toc.end));
             m.cdda_mode = command.cdda_mode();
-            m.cdda_first = 1;
-            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? kPceStatePause
-                                                                    : kPceStatePlay;
-            m.stat = kPceStatusGood;
+            m.cdda_first = true;
+            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? State::Pause : State::Play;
             m.has_status = true;
             break;
         }
@@ -581,18 +584,18 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             const HeadLba new_lba = command.target(false, toc);
             m.cdda_mode = command.cdda_mode();
             m.cdda.set_end(new_lba);
-            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? kPceStateIdle : kPceStatePlay;
+            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? State::Idle : State::Play;
             if (m.cdda_mode == PceCommand::CddaMode::Interrupt) {
                 m.int_pend = true;
             } else {
-                return send_status_(kPceStatusGood, p.link);
+                return send_status_(Status::Good, p.link);
             }
             break;
         }
 
         case PceCommand::Pause:
-            m.state = kPceStatePause;
-            return send_status_(kPceStatusGood, p.link);
+            m.state = State::Pause;
+            return send_status_(Status::Good, p.link);
 
         case PceCommand::ReadSubq:
             m.subq_pend = true;

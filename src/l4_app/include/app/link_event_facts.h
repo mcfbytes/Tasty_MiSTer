@@ -35,6 +35,7 @@ inline constexpr auto kLinkEventFacts = std::to_array<LinkEventFacts>({
     {proto::LinkEvent::Kind::StartRefused, EventSink::Main},
     {proto::LinkEvent::Kind::RebootQuiesced, EventSink::Main},
     {proto::LinkEvent::Kind::PolledWord, EventSink::Ui},
+    {proto::LinkEvent::Kind::FrameReply, EventSink::Ui},
 });
 static_assert(
     infra::rows_are_ordinal(kLinkEventFacts),

@@ -12,8 +12,10 @@
 #include "infra/seat.h"
 
 #include "cores/n64_memory_type.h"
+#include "cores/n64_option_view.h"
 #include "cores/n64_options.h"
 #include "cores/n64_system_type.h"
+#include "proto/status_edit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
 #include "svc/types.h"
@@ -24,8 +26,7 @@ enum class FactsKind : std::uint8_t { Rom, IplBoot, IplPreload, Disk };
 
 struct LoadFacts {
     TASTY_SEAT_EXEMPT(component);
-    proto::StatusWord mask{};
-    proto::StatusWord bits{};
+    proto::StatusEdit edit{};
     svc::Crc32 crc32{};
     proto::FileSize bytes{};
     hal::FabricAddr load_addr{};
@@ -43,21 +44,14 @@ struct LoadFacts {
         return f;
     }
 
-    [[nodiscard]] bool flag(StatusField f) const noexcept;
-    void set_flag(StatusField f, bool on) noexcept;
+    [[nodiscard]] Options options() const noexcept { return Options{edit.bits}; }
 
-    [[nodiscard]] SystemType system() const noexcept;
+    void set_flag(proto::BitField f, bool on) noexcept;
+
     void set_system(SystemType t) noexcept;
-    [[nodiscard]] Cic cic() const noexcept;
     void set_cic(Cic c) noexcept;
 
-    [[nodiscard]] PadType controller(StatusField f) const noexcept;
-    void set_controller(StatusField f, PadType p) noexcept;
-
-    [[nodiscard]] bool auto_detect() const noexcept;
-    [[nodiscard]] bool auto_pak() const noexcept;
-
-    [[nodiscard]] MemoryType cart_save_type() const noexcept;
+    void set_controller(PadPort port, PadType p) noexcept;
     void set_cart_save_type(MemoryType t) noexcept;
 
     [[nodiscard]] SaveRows save_plan(proto::StatusWord fresh) const noexcept;
@@ -65,8 +59,7 @@ struct LoadFacts {
 private:
     [[nodiscard]] proto::StatusWord merged(proto::StatusWord fresh) const noexcept;
 
-    [[nodiscard]] proto::FieldValue field_(StatusField f) const noexcept;
-    void set_field_(StatusField f, std::uint32_t v) noexcept;
+    void set_field_(proto::BitField f, proto::FieldValue v) noexcept;
 };
 
 static_assert(std::is_trivially_copyable_v<LoadFacts> && sizeof(LoadFacts) == 72);

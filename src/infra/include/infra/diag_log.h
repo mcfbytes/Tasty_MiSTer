@@ -6,12 +6,14 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
 
+#include "infra/error.h"
 #include "infra/json_out.h"
 #include "infra/unique_fd.h"
 #include "infra/seat.h"
@@ -36,9 +38,13 @@ public:
 
     DiagLog() = default;
 
-    bool open(const char* path) noexcept {
-        fd_ = UniqueFd(::open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, kLogFileMode));
-        return fd_.valid();
+    [[nodiscard]] Ex<void> open(const char* path) noexcept {
+        UniqueFd fresh{::open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, kLogFileMode)};
+        const int err = errno;
+        fd_ = std::move(fresh);
+        if (!fd_.valid())
+            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), err));
+        return {};
     }
 
     bool is_open() const noexcept { return fd_.valid(); }

@@ -11,6 +11,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/page.h"
+#include "svc/types.h"
 
 namespace mister::ui {
 
@@ -48,7 +49,7 @@ public:
         return sel_;
     }
 
-    std::uint32_t refusals() const noexcept override {
+    svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(DipsPage);
         return refusals_;
     }
@@ -68,7 +69,7 @@ private:
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
     RowIndex sel_{};
     RowIndex first_row_{};
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

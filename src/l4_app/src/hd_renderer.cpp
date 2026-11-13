@@ -6,7 +6,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <utility>
 
@@ -34,7 +33,7 @@ HdRenderer::HdRenderer(const Wiring& w, std::optional<Frame> frame, std::uint8_t
       pacer_(fps) {
     if (!frame)
         return;
-    flips_ = infra::OptRef<HdFlipChannel>{frame->flips};
+    holds_.emplace(frame->flips);
     slots_ = std::move(frame->mem);
     rasters_ = std::move(frame->rasters);
 }
@@ -83,10 +82,10 @@ void HdRenderer::serve() noexcept {
     if (!up_ || st_.state == HdOsdStatus::State::Failed)
         return;
 
-    const bool pixels = flips_ && slots_ && raster_open_;
+    const bool pixels = holds_ && slots_ && raster_open_;
     const std::uint64_t now = now_ns_();
     if (pixels)
-        reap_(true, now);
+        holds_->collect(w_.clock.now());
 
     bool sampled = false;
     HdOsdAsk got{};
@@ -153,7 +152,7 @@ void HdRenderer::serve() noexcept {
         publish_();
         return;
     }
-    draw_(now);
+    draw_();
 }
 
 bool HdRenderer::idle() const noexcept {
@@ -165,10 +164,12 @@ bool HdRenderer::idle() const noexcept {
     const std::uint64_t now = now_ns_();
     if (sampler_ && sampler_->poll_due(static_cast<std::int64_t>(now)))
         return false;
-    const bool pixels = flips_ && slots_ && raster_open_;
+    const bool pixels = holds_ && slots_ && raster_open_;
+    if (pixels && holds_->returning())
+        return false;
     if (!pixels || !epoch_valid_)
         return !pacer_.due(now);
-    if (panel_owed_())
+    if (card_() && panel_owed_())
         return false;
     return !can_progress_(now);
 }
@@ -178,15 +179,12 @@ infra::ParkTimeout HdRenderer::park_ms() const noexcept {
     if (!up_ || !ask_.open || st_.state == HdOsdStatus::State::Failed)
         return kIdlePoll;
     const std::uint64_t now = now_ns_();
-    const bool pixels = flips_ && slots_ && raster_open_;
+    const bool pixels = holds_ && slots_ && raster_open_;
     infra::ParkTimeout ms = pixels && job_.busy() ? kIdlePoll : pacer_.park_ms(now);
     if (pixels && epoch_valid_) {
-        const std::uint64_t wait = wait_ns_(now);
-        if (wait != std::numeric_limits<std::uint64_t>::max()) {
+        if (const auto wait = wait_ns_(w_.clock.now())) {
             using Ms = std::chrono::duration<std::uint64_t, std::milli>;
-            const Ms wait_ms = std::chrono::ceil<Ms>(
-                std::chrono::duration<std::uint64_t, std::nano>{wait}
-            );
+            const Ms wait_ms = std::chrono::ceil<Ms>(*wait);
             if (wait_ms < ms)
                 ms = std::chrono::duration_cast<infra::ParkTimeout>(wait_ms);
         }
@@ -201,7 +199,8 @@ infra::ParkTimeout HdRenderer::park_ms() const noexcept {
 
 void HdRenderer::release() noexcept {
     TASTY_SEAT_BODY(HdRenderer);
-    reap_(false, 0);
+    if (holds_)
+        holds_->release_all();
 
     for (std::unique_ptr<HdRaster>& raster : rasters_) {
         if (raster)
@@ -243,44 +242,6 @@ bool HdRenderer::canvas_fresh_() const noexcept {
     return !drawn_ || drawn_->fill != fill_gen_;
 }
 
-void HdRenderer::reap_(bool hold, std::uint64_t now) noexcept {
-    if (!hold) {
-        for (FlipHold& h : holds_)
-            h.loan = {};
-        last_sent_.reset();
-    }
-    if (!flips_)
-        return;
-    for (;;) {
-        HdFlipChannel::Loan loan = flips_->reap();
-        if (!loan)
-            break;
-        if (!hold)
-            continue;
-        const auto back = holds_.find(xthread::index_as<FlipBuffer>(*flips_->index_of(loan)));
-        if (!back)
-            continue;
-        back->loan = std::move(loan);
-        back->free_at = now + kFlipLatchNs;
-    }
-    if (!hold)
-        return;
-    for (;;) {
-        HdFlipChannel::Loan loan = flips_->acquire();
-        if (!loan)
-            break;
-        const auto back = holds_.find(xthread::index_as<FlipBuffer>(*flips_->index_of(loan)));
-        if (!back)
-            continue;
-        back->loan = std::move(loan);
-        back->free_at = 0;
-    }
-}
-
-bool HdRenderer::owned_(FlipBuffer buffer, std::uint64_t now) const noexcept {
-    return holds_[buffer].loan && now >= holds_[buffer].free_at;
-}
-
 bool HdRenderer::stale_(FlipBuffer buffer) const noexcept {
     const HdRect g = ledger_.peek(buffer, HdDirtyLedger::Region::Game);
     return !g.is_empty() || cards_stale_(buffer);
@@ -296,19 +257,22 @@ bool HdRenderer::cards_stale_(FlipBuffer buffer) const noexcept {
 }
 
 bool HdRenderer::flip_wanted_() const noexcept {
-    return !last_sent_ || stale_(*last_sent_);
+    if (!holds_)
+        return false;
+    const auto sent = holds_->last_sent();
+    return !sent || stale_(*sent);
 }
 
-std::optional<FlipBuffer> HdRenderer::flip_target_(std::uint64_t now) const noexcept {
-    if (last_sent_)
-        return last_sent_->other();
+std::optional<FlipBuffer> HdRenderer::flip_target_(HdFlipHolds::Instant now) const noexcept {
+    if (const auto sent = holds_->last_sent())
+        return sent->other();
     for (const FlipBuffer b : kFlipBuffers)
-        if (owned_(b, now) && !stale_(b))
+        if (holds_->owned(b, now) && !stale_(b))
             return b;
     if (job_.step() == BackdropJob::Step::Copy)
         return job_.target();
     for (const FlipBuffer b : kFlipBuffers)
-        if (owned_(b, now))
+        if (holds_->owned(b, now))
             return b;
     return std::nullopt;
 }
@@ -318,7 +282,7 @@ bool HdRenderer::can_progress_(std::uint64_t now) const noexcept {
         case BackdropJob::Step::Scale:
             return true;
         case BackdropJob::Step::Copy:
-            return owned_(job_.target(), now);
+            return holds_->owned(job_.target(), w_.clock.now());
         case BackdropJob::Step::Idle:
             break;
     }
@@ -326,30 +290,26 @@ bool HdRenderer::can_progress_(std::uint64_t now) const noexcept {
         return true;
     if (!flip_wanted_())
         return false;
-    const auto o = flip_target_(now);
-    if (!o || !owned_(*o, now))
+    const auto at = w_.clock.now();
+    const auto o = flip_target_(at);
+    if (!o || !holds_->owned(*o, at))
         return false;
     const HdRect g = ledger_.peek(*o, HdDirtyLedger::Region::Game);
     return g.is_empty() || job_.committed();
 }
 
-std::uint64_t HdRenderer::wait_ns_(std::uint64_t now) const noexcept {
-    constexpr std::uint64_t kLentPollNs = 5'000'000;
-    std::uint64_t best = std::numeric_limits<std::uint64_t>::max();
+std::optional<HdFlipHolds::Span> HdRenderer::wait_ns_(HdFlipHolds::Instant now) const noexcept {
+    std::optional<HdFlipHolds::Span> best{};
     const auto consider = [&](FlipBuffer b) noexcept {
-        const FlipHold& h = holds_[b];
-        if (!h.loan) {
-            if (kLentPollNs < best)
-                best = kLentPollNs;
-        } else if (now < h.free_at && h.free_at - now < best) {
-            best = h.free_at - now;
-        }
+        const auto until = holds_->latched_until(b, now);
+        if (until && (!best || *until - now < *best))
+            best = *until - now;
     };
     if (job_.step() == BackdropJob::Step::Copy)
         consider(job_.target());
     if (job_.step() == BackdropJob::Step::Idle && flip_wanted_()) {
-        if (last_sent_) {
-            consider(last_sent_->other());
+        if (const auto sent = holds_->last_sent()) {
+            consider(sent->other());
         } else {
             for (const FlipBuffer b : kFlipBuffers)
                 consider(b);
@@ -407,21 +367,76 @@ bool HdRenderer::retheme_(HdLook look) noexcept {
     return false;
 }
 
+void HdRenderer::paint_canvas_() noexcept {
+    bg_seen_ = ask_.bg;
+    idle_seen_ = ask_.idle;
+    shows_seen_ = ask_.shows;
+    PxPlane canvas = frame_plane_();
+    const FrontEndPattern* pattern = pattern_for_(ask_.bg);
+    if (!pattern) {
+        const std::uint16_t fill = hd_pack565(theme_.primary);
+        std::fill(frame_.begin(), frame_.end(), fill);
+        return;
+    }
+    const HdRect box = ask_.surface.bounds();
+    black_.paint(canvas, canvas.bounds());
+    const bool dark = ask_.idle == FrontEndIdle::Dark || ask_.idle == FrontEndIdle::DarkLogo;
+    if (!dark)
+        pattern->paint(canvas, box);
+    logo_.paint(canvas, box, ask_.idle, logo_knobs_, std::chrono::nanoseconds{now_ns_()});
+    curtain(canvas, box, ask_.idle);
+}
+
+void HdRenderer::load_wallpaper_() noexcept {
+    wallpaper_label_ = ask_.ini_label;
+    if (!w_.vfs)
+        return;
+    wallpaper_.load(*w_.vfs, ask_.ini_label.view());
+}
+
+const FrontEndPattern* HdRenderer::pattern_for_(FrontEndBg bg) const noexcept {
+    switch (bg) {
+        case FrontEndBg::None:
+            return nullptr;
+        case FrontEndBg::Wallpaper:
+            return &wallpaper_;
+        case FrontEndBg::HBars1:
+            return &hbars1_;
+        case FrontEndBg::HBars2:
+            return &hbars2_;
+        case FrontEndBg::VBars1:
+            return &vbars1_;
+        case FrontEndBg::VBars2:
+            return &vbars2_;
+        case FrontEndBg::Spectrum:
+            return &spectrum_;
+        case FrontEndBg::Black:
+            return &black_;
+    }
+    return nullptr;
+}
+
+bool HdRenderer::card_() const noexcept {
+    return ask_.idle == FrontEndIdle::Awake && ask_.shows == HdOsdShows::Menu;
+}
+
+bool HdRenderer::samples_() const noexcept {
+    return card_() && !paints_pattern(ask_.bg);
+}
+
 void HdRenderer::start_epoch_(const HdLayout& layout) noexcept {
     epoch_seen_ = ask_.epoch;
     epoch_valid_ = true;
     layout_ = layout;
     glass_.relayout(theme_, layout);
     ledger_.reset(layout.panel, layout.band, hd_beside_panel(layout));
-    const std::uint16_t fill = hd_pack565(theme_.primary);
-    std::fill(frame_.begin(), frame_.end(), fill);
+    paint_canvas_();
     job_.reset_canvas();
     seq_ = {};
-    last_sent_.reset();
+    if (holds_)
+        holds_->new_epoch();
     canvas_gen_ = canvas_gen_.next();
     fill_gen_ = canvas_gen_;
-    for (FlipHold& h : holds_)
-        h.gen = {};
     shown_gen_ = {};
     drawn_.reset();
     pacer_.resync();
@@ -429,7 +444,7 @@ void HdRenderer::start_epoch_(const HdLayout& layout) noexcept {
         raster_()->relayout(layout);
 }
 
-void HdRenderer::draw_(std::uint64_t now) noexcept {
+void HdRenderer::draw_() noexcept {
     if (!ensure_frame_())
         return;
     const HdSurface& s = ask_.surface;
@@ -446,16 +461,54 @@ void HdRenderer::draw_(std::uint64_t now) noexcept {
         publish_();
         return;
     }
-    if (!epoch_valid_ || ask_.epoch != epoch_seen_ || layout != layout_)
+
+    const bool wallpaper_edge = ask_.bg == FrontEndBg::Wallpaper
+        && (ask_.bg != bg_seen_ || ask_.ini_label != wallpaper_label_);
+    if (wallpaper_edge)
+        load_wallpaper_();
+    if (!epoch_valid_
+        || ask_.epoch != epoch_seen_
+        || layout != layout_
+        || ask_.bg != bg_seen_
+        || ask_.idle != idle_seen_
+        || ask_.shows != shows_seen_
+        || wallpaper_edge
+        || logo_.move_due(ask_.idle, std::chrono::nanoseconds{now_ns_()}))
         start_epoch_(layout);
     deadline_ = false;
     st_.fps = pacer_.fps();
 
+    const bool card = card_();
     const bool asked = panel_asked_();
-    if (panel_owed_()) {
+    if (panel_owed_() && card) {
         panel_step_(layout, *window, asked);
+    } else if (!card) {
+
+        bool ready = !canvas_fresh_();
+        if (canvas_fresh_()) {
+            const auto at = w_.clock.now();
+            for (const FlipBuffer b : kFlipBuffers) {
+                if (!holds_->owned(b, at))
+                    continue;
+                copy_rect_(b, s.bounds(), false);
+                for (const HdDirtyLedger::Region r :
+                     {HdDirtyLedger::Region::Panel,
+                      HdDirtyLedger::Region::Band,
+                      HdDirtyLedger::Region::Game})
+                    (void)ledger_.take(b, r);
+                ready = true;
+            }
+            if (ready)
+                slots_->handoff();
+        }
+        if (ready)
+            drawn_ = PanelDrawn{
+                AskGen{reader_.seen()},
+                HdBadgeView{st_.badge, ask_.slots},
+                fill_gen_
+            };
     } else {
-        place_(now);
+        place_(w_.clock.now());
     }
 
     const std::uint64_t t0 = now_ns_();
@@ -463,7 +516,7 @@ void HdRenderer::draw_(std::uint64_t now) noexcept {
         const bool sliced = slice_(now_ns_());
         if (st_.state == HdOsdStatus::State::Failed)
             return;
-        const bool flipped = flip_(now_ns_());
+        const bool flipped = flip_(w_.clock.now());
         if (!sliced && !flipped)
             break;
         if (panel_owed_() || ask_moved_() || now_ns_() - t0 >= kSliceNs)
@@ -526,12 +579,13 @@ void HdRenderer::panel_step_(const HdLayout& layout, PxPlane panel, bool asked) 
         pending_stamp_ = ask_.stamp_ns;
     }
     bool wrote = false;
+    const auto at = w_.clock.now();
     for (std::uint8_t i = 0; i < n; ++i) {
         ledger_.mark(boxes[i].region, boxes[i].r);
         if (each_fits)
-            wrote = copy_stale_(tr1) || wrote;
+            wrote = copy_stale_(at) || wrote;
     }
-    place_(tr1, wrote);
+    place_(at, wrote);
     const std::uint64_t t1 = now_ns_();
     st_.panel_us.note(span_us(t0, t1));
     if (t1 >= t0 && t1 - t0 >= kDeadlineNs)
@@ -543,7 +597,7 @@ PixelCount HdRenderer::in_place_px_() const noexcept {
     return ask_.surface.size().area().quarter();
 }
 
-bool HdRenderer::copy_stale_(std::uint64_t now) noexcept {
+bool HdRenderer::copy_stale_(HdFlipHolds::Instant at) noexcept {
     const PixelCount max_px = in_place_px_();
     bool wrote = false;
     for (const FlipBuffer b : kFlipBuffers) {
@@ -551,7 +605,7 @@ bool HdRenderer::copy_stale_(std::uint64_t now) noexcept {
             const HdRect box = ledger_.peek(b, r);
             if (box.is_empty())
                 continue;
-            if (!owned_(b, now) && pixels_of(box) > max_px)
+            if (!holds_->owned(b, at) && pixels_of(box) > max_px)
                 continue;
             copy_rect_(b, ledger_.take(b, r));
             wrote = true;
@@ -573,21 +627,21 @@ bool HdRenderer::spills_(const HdDirty& dirty, const HdLayout& layout) const noe
     return false;
 }
 
-void HdRenderer::place_(std::uint64_t now, bool wrote) noexcept {
-    if (copy_stale_(now) || wrote)
+void HdRenderer::place_(HdFlipHolds::Instant at, bool wrote) noexcept {
+    if (copy_stale_(at) || wrote)
         slots_->handoff();
-    if (pending_ && last_sent_ && !cards_stale_(*last_sent_))
+    if (const auto sent = holds_->last_sent(); pending_ && sent && !cards_stale_(*sent))
         visible_(now_ns_(), false);
 }
 
-bool HdRenderer::flip_(std::uint64_t now) noexcept {
+bool HdRenderer::flip_(HdFlipHolds::Instant at) noexcept {
     if (!flip_wanted_())
         return false;
-    const auto target = flip_target_(now);
-    if (!target || !owned_(*target, now))
+    const auto target = flip_target_(at);
+    if (!target || !holds_->owned(*target, at))
         return false;
     const FlipBuffer o = *target;
-    place_(now);
+    place_(at);
     const HdRect game = ledger_.peek(o, HdDirtyLedger::Region::Game);
     if (!game.is_empty()) {
         if (job_.busy())
@@ -599,21 +653,23 @@ bool HdRenderer::flip_(std::uint64_t now) noexcept {
         return false;
 
     const HdSurface& s = ask_.surface;
-    HdFlipChannel::Loan loan = std::move(holds_[o].loan);
-    loan->epoch = ask_.epoch;
-    seq_ = seq_.next();
-    loan->seq = seq_;
-    loan->view = FbView{
-        .offset = o.in(s.slot),
-        .size = PictureSize{PicturePixels::of(s.w), PictureRows::of(s.h)},
-        .stride = s.stride,
-        .format = FbView::FbFormat::Rgb565
+    const FlipSeq next = seq_.next();
+    const HdFlipSlot slot{
+        .epoch = ask_.epoch,
+        .seq = next,
+        .view = FbView{
+            .offset = o.in(s.slot),
+            .size = PictureSize{PicturePixels::of(s.w), PictureRows::of(s.h)},
+            .stride = s.stride,
+            .format = FbView::FbFormat::Rgb565
+        }
     };
-    flips_->send(std::move(loan));
-    last_sent_ = o;
+    if (!holds_->lend(o, at, slot))
+        return false;
+    seq_ = next;
     st_.state = HdOsdStatus::State::Showing;
     const std::uint64_t sent = now_ns_();
-    const CanvasGen gen = holds_[o].gen;
+    const CanvasGen gen = holds_->gen(o);
     if (gen != shown_gen_ && gen != fill_gen_ && gen != CanvasGen{}) {
         vis_.backdrop();
         st_.bd_us.note(span_us(gen_started_, sent));
@@ -643,7 +699,7 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
         }
         case BackdropJob::Step::Copy: {
             const FlipBuffer t = job_.target();
-            if (!owned_(t, now))
+            if (!holds_->owned(t, w_.clock.now()))
                 return false;
             const std::uint64_t t0 = now_ns_();
             copy_rect_(t, job_.copy_band());
@@ -651,7 +707,7 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
             if (job_.busy())
                 return true;
             (void)ledger_.take(t, HdDirtyLedger::Region::Game);
-            holds_[t].gen = canvas_gen_;
+            holds_->set_gen(t, canvas_gen_);
             slots_->handoff();
             st_.copy_us.note(span_us(0, copy_ns_));
             copy_ns_ = 0;
@@ -666,7 +722,7 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
     ++ticks_;
     st_.skipped = static_cast<std::uint32_t>(pacer_.missed());
 
-    if (!sampler_ || layout_.game.is_empty())
+    if (!sampler_ || layout_.game.is_empty() || !samples_())
         return false;
     return read_(now);
 }
@@ -723,7 +779,7 @@ BackdropJob::Canvas HdRenderer::canvas_() noexcept {
     };
 }
 
-void HdRenderer::copy_rect_(FlipBuffer buffer, HdRect rect) noexcept {
+void HdRenderer::copy_rect_(FlipBuffer buffer, HdRect rect, bool compose) noexcept {
     const HdSurface& s = ask_.surface;
     if (!s.bounds().contains(rect))
         return;
@@ -739,10 +795,12 @@ void HdRenderer::copy_rect_(FlipBuffer buffer, HdRect rect) noexcept {
         );
         hal::copy_wide(dst.subspan(at), std::as_bytes(px));
     };
+
+    const bool glass = compose && card_();
     for (std::int32_t y = 0; y < rect.h; ++y) {
         const auto row = box->row(PlaneRow{y}).first(static_cast<std::size_t>(rect.w));
         const std::int32_t at_y = rect.y + y;
-        const HdRect g = glass_.span_at(at_y, rect.x, rect.x + rect.w);
+        const HdRect g = glass ? glass_.span_at(at_y, rect.x, rect.x + rect.w) : HdRect{};
         if (g.is_empty()) {
             put(rect.x, at_y, row);
             continue;

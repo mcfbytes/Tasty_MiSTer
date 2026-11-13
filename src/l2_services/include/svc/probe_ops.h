@@ -13,6 +13,7 @@ namespace mister::svc {
 
 class IFilterResend;
 struct ScalerSlotMode;
+struct ShadowMaskWord;
 
 struct GeometryPass {
     VideoSample sample{};
@@ -34,7 +35,7 @@ public:
 
     [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(ScalerSlotMode mode);
 
-    [[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(std::uint16_t flag_word);
+    [[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(ShadowMaskWord flag);
 
     [[nodiscard]] Ex<std::uint16_t> emit_hdmi_int_probe();
 

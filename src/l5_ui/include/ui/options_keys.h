@@ -42,9 +42,9 @@ struct OptionsKeys {
     if (!at_root)
         return std::nullopt;
     if (keys.right)
-        return Transition{Transition::Kind::Replace, PageId::System};
+        return Transition::replace(PageId::System);
     if (keys.left)
-        return Transition{Transition::Kind::Replace, PageId::Misc, kMiscStorageRow};
+        return Transition::replace(PageId::Misc);
     return std::nullopt;
 }
 

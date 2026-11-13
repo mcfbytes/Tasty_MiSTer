@@ -32,5 +32,7 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/round_timing.h
   reactor/round_trace.h
   reactor/tick.h
+  reactor/tick_deadline.h
+  reactor/tick_no.h
 )
 

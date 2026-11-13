@@ -53,6 +53,8 @@ public:
     void uart(std::string_view core_name, const proto::ConfStr* conf);
     [[nodiscard]] bool reset_level(bool asserted);
 
+    [[nodiscard]] bool front_end_pal(bool pal);
+
 private:
     LinkTxChannel<SeatTag::Main>& inbox_;
     OwnerTally& tally_;

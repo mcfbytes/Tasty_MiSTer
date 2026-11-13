@@ -5,6 +5,7 @@
 
 #include "app/video_wire.h"
 #include "svc/hdmi_link.h"
+#include "svc/video_sample.h"
 
 namespace mister::app {
 
@@ -42,7 +43,7 @@ svc::adv7513::Io Adv7513Seat::io() noexcept {
 void Adv7513Seat::on_core_loaded(Host h) {
     init_pending_ = true;
     ints_armed_ = false;
-    prelude_done_seen_ = h.wire.prelude_stats().completions;
+    prelude_done_seen_ = h.answers.completions;
     h.hdmi.set_hdmi_capable(false);
     hpd_gen_seen_ = h.hdmi.hotplug_generation();
     audio_gen_seen_ = h.hdmi.audio_generation();
@@ -53,11 +54,10 @@ Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& 
         return Edge::None;
 
     if (!ints_armed_) {
-        const auto ps = h.wire.prelude_stats();
-        if (ps.completions == prelude_done_seen_)
+        if (h.answers.completions == prelude_done_seen_)
             return Edge::None;
         ints_armed_ = true;
-        const bool has_int = ps.hdmi_int != 0;
+        const bool has_int = h.answers.hdmi_int.nonzero();
         h.hdmi.set_hdmi_capable(has_int);
         if (has_int) {
             if (auto r = adv_->arm_interrupts(true); !r)
@@ -94,7 +94,8 @@ Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& 
 Adv7513Seat::Edge Adv7513Seat::configure(
     Host h,
     const svc::adv7513::InitOptions& init,
-    const Spd& spd
+    const Spd& spd,
+    const svc::VideoSample& sample
 ) {
     if (!probed_) {
         probed_ = true;
@@ -125,7 +126,7 @@ Adv7513Seat::Edge Adv7513Seat::configure(
     init_ok_ = true;
     h.stats.i2c = VideoI2cOutcome::Configured;
 
-    send_spd(h, spd);
+    send_spd(h, spd, sample);
     return Edge::None;
 }
 
@@ -225,15 +226,14 @@ void Adv7513Seat::apply(const BusReport& r, VideoPumpStats& stats) noexcept {
     stats.i2c_breaker_open = r.breaker_open;
 }
 
-void Adv7513Seat::send_spd(Host h, const Spd& spd) {
+void Adv7513Seat::update_spd(Host h, const Spd& spd, const svc::VideoSample& sample) {
+    send_spd(h, spd, sample);
+}
+
+void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::VideoSample& sample) {
     if (!adv_)
         return;
-
-    if (spd.direct_video) {
-        ++h.stats.spd_skips_dv;
-        return;
-    }
-    if (spd.quirk != 0)
+    if (spd.form == svc::SpdForm::None)
         return;
 
     Ex<void> r{};
@@ -241,13 +241,28 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd) {
         r = adv_->spd_disable();
         if (r)
             ++h.stats.spd_disables;
-    } else {
-        const auto p = svc::adv7513::build_standard_spd(spd.core_name);
-        if (spd.core_name.empty())
+    } else if (spd.form == svc::SpdForm::Standard) {
+        if (spd.name.empty())
             ++h.stats.spd_noname;
-        r = adv_->spd_config(p);
+        r = adv_->spd_config(svc::adv7513::build_standard_spd(spd.name));
         if (r)
             ++h.stats.spd_sends;
+    } else {
+
+        if (sample.active.width == 0) {
+            h.stats.spd_dv1_nowidth.add();
+            return;
+        }
+        if (spd.name.empty())
+            ++h.stats.spd_noname;
+        const svc::Dv1Facts facts{
+            .sample = sample,
+            .menu = spd.form == svc::SpdForm::Dv1Menu && spd.menu_present,
+            .dir = spd.dir
+        };
+        r = adv_->spd_config(svc::build_dv1_spd(facts, spd.name));
+        if (r)
+            ++h.stats.spd_dv1_sends;
     }
 
     if (!r) {

@@ -19,6 +19,7 @@ class EncodeMain;
 class RecWriteMain;
 class LauncherMain;
 class HdOsdMain;
+class ConnectMain;
 }
 
 namespace mister::svc {
@@ -48,7 +49,8 @@ using SeatMainList = SeatList<
     SeatRow<SeatTag::Encode, app::EncodeMain, Presence::ConfigDependent>,
     SeatRow<SeatTag::RecWrite, app::RecWriteMain, Presence::ConfigDependent>,
     SeatRow<SeatTag::Launcher, app::LauncherMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::HdOsd, app::HdOsdMain, Presence::ConfigDependent>>;
+    SeatRow<SeatTag::HdOsd, app::HdOsdMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Connect, app::ConnectMain, Presence::ConfigDependent>>;
 
 constexpr std::size_t seat_index(SeatTag s) noexcept {
     return hal::row_index(s);
@@ -159,6 +161,7 @@ struct DrainEdge {
 inline constexpr std::array kSpawnOrder{
     SeatTag::Diag,
     SeatTag::Ui,
+    SeatTag::Connect,
     SeatTag::Prefetch,
     SeatTag::Pcm,
     SeatTag::Frame,
@@ -174,6 +177,7 @@ inline constexpr std::array kSpawnOrder{
 inline constexpr std::array kStopOrder{
     SeatTag::RT,
     SeatTag::Diag,
+    SeatTag::Connect,
     SeatTag::Ui,
     SeatTag::Frame,
     SeatTag::Input,
@@ -200,6 +204,7 @@ inline constexpr std::array kJoinOrder{
     SeatTag::Prefetch,
     SeatTag::Frame,
     SeatTag::Input,
+    SeatTag::Connect,
     SeatTag::Ui,
     SeatTag::Diag,
 };

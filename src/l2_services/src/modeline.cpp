@@ -25,14 +25,14 @@ std::array<std::uint32_t, 26> Modeline::to_words(const PllBlock& pll) const {
 
     std::array<std::uint32_t, kModelineItems> w{};
     w[item(ModelineItem::Mode)] = 0;
-    w[item(ModelineItem::Hact)] = hact;
-    w[item(ModelineItem::Hfp)] = hfp;
-    w[item(ModelineItem::Hs)] = hs;
-    w[item(ModelineItem::Hbp)] = hbp;
-    w[item(ModelineItem::Vact)] = vact;
-    w[item(ModelineItem::Vfp)] = vfp;
-    w[item(ModelineItem::Vs)] = vs;
-    w[item(ModelineItem::Vbp)] = vbp;
+    w[item(ModelineItem::Hact)] = h.active;
+    w[item(ModelineItem::Hfp)] = h.front_porch;
+    w[item(ModelineItem::Hs)] = h.sync;
+    w[item(ModelineItem::Hbp)] = h.back_porch;
+    w[item(ModelineItem::Vact)] = v.active;
+    w[item(ModelineItem::Vfp)] = v.front_porch;
+    w[item(ModelineItem::Vs)] = v.sync;
+    w[item(ModelineItem::Vbp)] = v.back_porch;
     for (std::size_t n = 0; n < PllBlock::kWrites; ++n) {
         const std::size_t at = item(ModelineItem::PllFirst) + n * PllBlock::kWordsPerWrite;
         w[at] = pll_reg_word(pll.writes[n].selector);
@@ -49,12 +49,12 @@ std::array<std::uint32_t, 26> Modeline::to_words(const PllBlock& pll) const {
 Modeline Modeline::direct_video_fix() const {
 
     Modeline f = *this;
-    f.hfp = kFbDvRbrd;
-    f.hbp = kFbDvLbrd;
-    f.hact = hact + (hfp - f.hfp) + (hbp - f.hbp);
-    f.vfp = kFbDvBbrd;
-    f.vbp = kFbDvUbrd;
-    f.vact = vact + (vfp - f.vfp) + (vbp - f.vbp);
+    f.h.front_porch = kFbDvRbrd;
+    f.h.back_porch = kFbDvLbrd;
+    f.h.active = h.active + (h.front_porch - f.h.front_porch) + (h.back_porch - f.h.back_porch);
+    f.v.front_porch = kFbDvBbrd;
+    f.v.back_porch = kFbDvUbrd;
+    f.v.active = v.active + (v.front_porch - f.v.front_porch) + (v.back_porch - f.v.back_porch);
     return f;
 }
 
@@ -66,21 +66,21 @@ std::array<std::uint16_t, 26> Modeline::to_wire(const PllBlock& pll, const WireO
     std::array<std::uint16_t, 26> out{};
     std::size_t n = 0;
     for (std::size_t i = item(ModelineItem::Hact); i <= item(ModelineItem::Vbp); ++i) {
-        std::uint32_t v = fix[i];
+        std::uint32_t word = fix[i];
         if (i == item(ModelineItem::Hact)) {
 
             if (pixel_repeat)
-                v |= kTimingFlagBit;
+                word |= kTimingFlagBit;
             if (opt.use_vrr)
-                v |= kWireVrrBit;
+                word |= kWireVrrBit;
         } else if (i == item(ModelineItem::Hs)) {
             if (hpol)
-                v |= kTimingFlagBit;
+                word |= kTimingFlagBit;
         } else if (i == item(ModelineItem::Vs)) {
             if (vpol)
-                v |= kTimingFlagBit;
+                word |= kTimingFlagBit;
         }
-        out[n++] = static_cast<std::uint16_t>(v);
+        out[n++] = static_cast<std::uint16_t>(word);
     }
     for (std::size_t i = 0; i < PllBlock::kWrites; ++i) {
         const PllWrite& pw = pll.writes[i];

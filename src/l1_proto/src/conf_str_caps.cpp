@@ -228,7 +228,7 @@ Ex<std::string_view> ConfStrCaps::try_axi(std::string_view rest) {
     } else {
         switch (axi_kind_of(parts[kAxiKindIndex])) {
             case AxiKind::Lw:
-                axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, *size});
+                axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, hal::LwExtent{*size}});
                 break;
             case AxiKind::Ddr:
                 axi_ddr_.push_back(AxiDdrDecl{hal::FabricAddr{*addr}, *size});

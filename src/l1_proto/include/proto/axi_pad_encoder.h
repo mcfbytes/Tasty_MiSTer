@@ -6,8 +6,8 @@
 
 #include "hal/reg_block.h"
 #include "infra/seat.h"
-#include "proto/axi_block_decl.h"
 #include "proto/link_pad_encoder.h"
+#include "proto/pad_block_decl.h"
 #include "proto/pad_levels.h"
 
 namespace mister::proto {
@@ -18,7 +18,7 @@ class AxiPadEncoder final : public ILinkPadEncoder {
 public:
     AxiPadEncoder(
         hal::reg::Block pad,
-        const AxiBlockDecl& block,
+        const PadBlockDecl& block,
         ILinkPadEncoder& otherwise
     ) noexcept
         : pad_(std::move(pad)),
@@ -42,7 +42,7 @@ private:
     [[nodiscard]] Ex<void> store_(UioOp opcode, std::uint8_t index, std::uint32_t word);
 
     hal::reg::Block pad_;
-    const AxiBlockDecl& block_;
+    const PadBlockDecl& block_;
     ILinkPadEncoder& otherwise_;
     PadLevels want_{};
     PadLevels stored_{};

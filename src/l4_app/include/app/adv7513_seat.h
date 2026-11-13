@@ -6,6 +6,7 @@
 #include <optional>
 #include <string_view>
 
+#include "app/prelude_composer.h"
 #include "app/video_pump_stats.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -22,17 +23,17 @@
 #include "svc/adv7513_linux_adapter.h"
 #include "svc/adv7513_probe_report.h"
 #include "svc/adv7513_sub_map.h"
+#include "svc/dv1_spd.h"
 #include "svc/i2c_adapter.h"
 #include "svc/modeline.h"
 #include "svc/types.h"
 
 namespace mister::svc {
 class HdmiLink;
+struct VideoSample;
 }
 
 namespace mister::app {
-
-class VideoWire;
 
 class Adv7513Seat final : public hal::IHdmiInterrupt {
     TASTY_SEAT_RESIDENT(Ui);
@@ -40,7 +41,7 @@ class Adv7513Seat final : public hal::IHdmiInterrupt {
 public:
     struct Host {
         svc::HdmiLink& hdmi;
-        const VideoWire& wire;
+        PreludeComposer::Answers answers;
         VideoPumpStats& stats;
         std::optional<Error>& last_error;
     };
@@ -48,9 +49,10 @@ public:
     enum class Edge : std::uint8_t { None, Lost, Owed };
 
     struct Spd {
-        std::string_view core_name;
-        bool direct_video = false;
-        std::uint8_t quirk = 0;
+        std::string_view name;
+        svc::SpdForm form = svc::SpdForm::None;
+        proto::RotationDir dir{};
+        bool menu_present = false;
     };
 
     static constexpr std::chrono::milliseconds kReprobeFirstMs{1'000};
@@ -72,11 +74,18 @@ public:
 
     void on_core_loaded(Host h);
 
-    [[nodiscard]] Edge configure(Host h, const svc::adv7513::InitOptions& init, const Spd& spd);
+    [[nodiscard]] Edge configure(
+        Host h,
+        const svc::adv7513::InitOptions& init,
+        const Spd& spd,
+        const svc::VideoSample& sample
+    );
 
     [[nodiscard]] Edge recover(Host h);
 
     [[nodiscard]] Edge hotplug(Host h, const svc::adv7513::InitOptions& init);
+
+    void update_spd(Host h, const Spd& spd, const svc::VideoSample& sample);
 
     [[nodiscard]] std::optional<VideoI2cOutcome> program_mode(Host h, const svc::Modeline& m);
 
@@ -112,7 +121,7 @@ private:
     void schedule_reprobe() noexcept;
     void observe_bus() noexcept;
     [[nodiscard]] BusReport fold_bus() const noexcept;
-    void send_spd(Host h, const Spd& spd);
+    void send_spd(Host h, const Spd& spd, const svc::VideoSample& sample);
 
     const os::IClock& clock_;
     hal::VideoOutDecl board_;
@@ -144,7 +153,7 @@ private:
     bool init_ok_ = false;
 
     bool ints_armed_ = false;
-    std::uint32_t prelude_done_seen_ = 0;
+    PreludeCompletions prelude_done_seen_{};
     svc::Generation hpd_gen_seen_{};
     svc::Generation audio_gen_seen_{};
     std::int64_t next_hpd_ns_ = 0;

@@ -46,8 +46,12 @@ public:
 
     static constexpr std::uint64_t kRomMin = 128 * 1024;
 
+    [[nodiscard]] static constexpr JoyBit joy_bit(Button b) noexcept {
+        return JoyBit{static_cast<std::uint8_t>(b)};
+    }
+
     [[nodiscard]] static constexpr proto::JoyMask bit(Button b) noexcept {
-        return JoyBit{static_cast<std::uint8_t>(b)}.mask();
+        return joy_bit(b).mask();
     }
 
     [[nodiscard]] SettingNeeds setting_needs(const MovieFacts& f) const noexcept override;

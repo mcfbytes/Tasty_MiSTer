@@ -10,6 +10,7 @@
 
 #include "app/board_ops.h"
 #include "app/config_slot_cell.h"
+#include "app/ini_cell.h"
 #include "app/event.h"
 #include "app/link_rx_channel.h"
 #include "app/link_tx_channel.h"
@@ -47,6 +48,7 @@ public:
         const proto::StatusCell& status_cell;
         const NegotiatedCore& negotiated;
         infra::OptRef<ISleeper> sleeper;
+        const IniCell& ini;
     };
 
     explicit ConfigSaves(const Wiring& w) noexcept;
@@ -106,6 +108,7 @@ private:
     const proto::StatusCell& status_cell_;
     const NegotiatedCore& negotiated_;
     infra::OptRef<ISleeper> sleeper_;
+    const IniCell& ini_;
     cores::ConfigSlot slot_save_slot_{};
     ConfigSlotTable preview_scratch_{};
     ConfigSlotCell config_slot_cell_{};

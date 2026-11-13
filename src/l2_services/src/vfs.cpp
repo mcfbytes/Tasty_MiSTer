@@ -21,6 +21,7 @@
 #include "os/block_device.h"
 #include "posix_file.h"
 #include "svc/game_asset_finder.h"
+#include "svc/memory_mounts.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"
 #include "vfs_zip.h"
@@ -257,11 +258,11 @@ Ex<std::unique_ptr<IFile>> Vfs::open(std::string_view path, OpenMode mode) const
 Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mode) const {
     const std::string full = compose(root_path_, path);
 
-    if (memory_.mounted(full)) {
+    if (memory_ != nullptr && memory_->mounted(full)) {
         if (!opens_read_only(mode)) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
         }
-        return memory_.open(full);
+        return memory_->open(full);
     }
 
     const asset_name::ZipSplit zs = asset_name::zip_split(full);
@@ -314,18 +315,6 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
     );
 }
 
-Ex<void> Vfs::mount_memory(std::string_view path, std::span<const std::byte> blob, Crc32 crc) {
-    if (path.empty()) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EINVAL)});
-    }
-    memory_.mount(compose(root_path_, path), blob, crc);
-    return {};
-}
-
-std::uint32_t Vfs::memory_sequential_hints(std::string_view path) const noexcept {
-    return memory_.sequential_hints(compose(root_path_, path));
-}
-
 Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc) const {
     if (crc.declared()) {
         const std::string full = compose(root_path_, path);
@@ -333,8 +322,10 @@ Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc
         if (zs.zipped && !zs.member.empty() && !detail::has_nested_zip(full)) {
 
             const std::string prefix = std::string(zs.archive) + "/";
-            if (auto hit = memory_.open_by_crc_under(prefix, crc))
-                return hit;
+            if (memory_ != nullptr) {
+                if (auto hit = memory_->open_by_crc_under(prefix, crc))
+                    return hit;
+            }
             if (auto hit = zip_open_member_by_crc(std::string(zs.archive), crc)) {
                 return hit;
             }
@@ -491,6 +482,19 @@ Vfs::DurabilityLog Vfs::durability_log() noexcept {
 
 Ex<std::string> Vfs::find_game_asset(const AssetQuery& q) const {
     return GameAssetFinder{root_path_}.find(q);
+}
+
+Vfs::~Vfs() = default;
+Vfs::Vfs(Vfs&&) noexcept = default;
+Vfs& Vfs::operator=(Vfs&&) noexcept = default;
+
+Vfs::Vfs(StorageRoot root, std::string root_path)
+    : root_(root),
+      root_path_(std::move(root_path)),
+      durable_(root_path_) {}
+
+std::string Vfs::composed_(std::string_view path) const {
+    return compose(root_path_, path);
 }
 
 }

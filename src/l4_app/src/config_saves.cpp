@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/config_rel.h"
 #include "app/durable_write.h"
 #include "app/ini_key_edit.h"
 #include "app/owner_push.h"
@@ -23,18 +24,12 @@
 #include "cores/config_slot_count.h"
 #include "cores/registry.h"
 #include "infra/byte_view.h"
-#include "infra/endian.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
-
-static_assert(
-    proto::StatusRegister::kWords * sizeof(std::uint16_t) == kCoreCfgBytes,
-    "the .CFG image is the status word's words, and nothing else"
-);
 
 ConfigSaves::ConfigSaves(const Wiring& w) noexcept
     : inbox_(w.inbox),
@@ -44,7 +39,8 @@ ConfigSaves::ConfigSaves(const Wiring& w) noexcept
       vfs_(w.vfs),
       status_cell_(w.status_cell),
       negotiated_(w.negotiated),
-      sleeper_(w.sleeper) {}
+      sleeper_(w.sleeper),
+      ini_(w.ini) {}
 
 infra::OptRef<const cores::IConfigCodec> ConfigSaves::codec_() const noexcept {
     const auto row = cores::find_core(negotiated_.core_name().view());
@@ -101,7 +97,13 @@ void ConfigSaves::save_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept
 
 void ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
     TASTY_SEAT_BODY(ConfigSaves);
-    constexpr std::string_view kIni = "MiSTer.ini";
+    const svc::IniCatalog cat = ini_.sample().value;
+    const std::string_view kIni = cat.active_name();
+
+    if (kIni.empty()) {
+        tally_.ini_write_failures.add();
+        return;
+    }
     std::string text;
     auto buf = read_file(vfs_, kIni);
     if (!buf) {
@@ -216,8 +218,8 @@ bool ConfigSaves::write_durably_(std::string_view rel, std::span<const std::byte
 
 void ConfigSaves::save_config(CorrelationTag tag) {
     TASTY_SEAT_BODY(ConfigSaves);
-    const PathText& stem = negotiated_.saved_cfg_stem();
-    if (stem.empty()) {
+    const auto rel = core_cfg_rel(negotiated_.saved_cfg_stem().view());
+    if (!rel) {
         publish_save_verdict_(false, tag);
         return;
     }
@@ -228,15 +230,8 @@ void ConfigSaves::save_config(CorrelationTag tag) {
         return;
     }
 
-    std::array<std::byte, kCoreCfgBytes> bytes{};
-    infra::store_le_run(
-        std::span<const std::uint16_t>(sample.value.words),
-        std::span<std::byte>(bytes)
-    );
-    std::string rel = "config/";
-    rel.append(stem.view());
-    rel.append(".CFG");
-    const bool ok = write_durably_(rel, std::span<const std::byte>(bytes));
+    const proto::StatusWord::Bytes bytes = sample.value.to_le_bytes();
+    const bool ok = write_durably_(rel->view(), std::as_bytes(std::span{bytes}));
 
     order_save_upload_();
     publish_save_verdict_(ok, tag);

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -12,10 +13,10 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 #include "ui/browser_host.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
-#include "ui/slot_focus.h"
 
 namespace mister::app {
 class InfoSink;
@@ -82,38 +83,41 @@ public:
 
     Transition eject(const OptionItem& it);
 
-    [[nodiscard]] RecentsRef recents_ref(const OptionItem& it) const;
+    [[nodiscard]] std::optional<RecentsRef> recents_ref(const OptionItem& it) const;
     [[nodiscard]] bool has_recents(const OptionItem& it) const;
 
-    std::uint32_t refusals() const noexcept { return refusals_; }
+    svc::Tally refusals() const noexcept { return refusals_; }
 
     std::uint32_t commands_published() const noexcept { return published_; }
 
-private:
     Transition on_picked(const BrowserEntry& e, std::string_view path) override;
     Transition on_cancel() override;
     Transition on_eject() override;
     Transition on_clear() override;
 
-    BrowserSession::Request browser_request(const OptionItem& it, bool offer_recent);
+private:
+    BrowserSession::Request browser_request(
+        const OptionItem& it,
+        proto::FileRowId row,
+        bool offer_recent
+    );
 
     [[nodiscard]] std::string_view browse_home_(const OptionItem& it) const noexcept;
 
-    void arm_(const OptionItem& it) noexcept;
+    void arm_(const OptionItem& it, proto::FileRowId row) noexcept;
 
-    void unmount_pending_();
-    app::RecentsStore::ListId recents_id_for_pending() const noexcept;
+    void unmount_(proto::FileRowId row);
     void ask_mount(proto::IoIndex slot, std::string_view path);
 
     const Env& env_;
     const Borrows b_;
     std::unique_ptr<app::RomsetAliasReader> romsets_;
 
-    SlotFocus pending_slot_{};
+    std::optional<proto::FileRowId> pending_row_{};
     proto::ItemOrdinal pending_item_{};
     proto::BindGeneration pending_gen_{};
     bool pending_store_ = false;
-    std::uint32_t refusals_ = 0;
+    svc::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

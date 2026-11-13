@@ -6,8 +6,10 @@
 #include <optional>
 #include <utility>
 
+#include "proto/save_slot_rule.h"
 #include "proto/storage_completion_dispatch.h"
 #include "proto/storage_request_dispatch.h"
+#include "svc/blank_save.h"
 
 namespace mister::svc {
 
@@ -73,7 +75,6 @@ enum class Stamp : std::uint8_t {
 
 struct Admit {
     Req::Head head{};
-    proto::ArenaHalf half{};
     bool known = false;
     bool data = false;
     Stamp stamp = Stamp::Bound;
@@ -82,28 +83,32 @@ struct Admit {
 struct AdmitReader {
     using Result = Admit;
 
-    Admit on(const Req::Read& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true, Stamp::Bound};
+    Admit on(const Req::Fetch&, const Req::Head& h) const noexcept {
+        return {h, true, true, Stamp::Bound};
     }
 
-    Admit on(const Req::Write& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true, Stamp::Bound};
+    Admit on(const Req::ReadAhead&, const Req::Head& h) const noexcept {
+        return {h, true, true, Stamp::Bound};
     }
 
-    Admit on(const Req::Create& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true, Stamp::Bound};
+    Admit on(const Req::Write&, const Req::Head& h) const noexcept {
+        return {h, true, true, Stamp::Bound};
+    }
+
+    Admit on(const Req::Create&, const Req::Head& h) const noexcept {
+        return {h, true, true, Stamp::Bound};
     }
 
     Admit on(const Req::Flush&, const Req::Head& h) const noexcept {
-        return {h, {}, true, false, Stamp::Bound};
+        return {h, true, false, Stamp::Bound};
     }
 
     Admit on(const Req::Attach&, const Req::Head& h) const noexcept {
-        return {h, {}, true, false, Stamp::Staged};
+        return {h, true, false, Stamp::Staged};
     }
 
     Admit on(const Req::Detach&, const Req::Head& h) const noexcept {
-        return {h, {}, true, false, Stamp::Unbind};
+        return {h, true, false, Stamp::Unbind};
     }
 
     Admit misrouted(const Req&) const noexcept { return {}; }
@@ -133,66 +138,123 @@ infra::OptRef<IStorageBackend> StorageService::live_(
     return w.backend;
 }
 
-void StorageService::on(const Req::Read& a, const Req::Head& h, Work& w) noexcept {
-    Cmp::Read c{.offset = a.offset, .half = a.half};
+void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexcept {
+    Cmp::Fetch c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (const auto live = live_(h.slot, w); !live) {
+    if (!w.arena) {
+        st = proto::StorageStatus::Refused;
+    } else if (const auto live = live_(h.slot, w); !live) {
+
+        w.arena->window = proto::ResidentWindow::substitute();
         st = proto::StorageStatus::Refused;
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
+        const std::span<std::uint8_t> whole = w.arena->bytes;
+        auto n = b.read_at(proto::byte_offset(a.base, a.block_size), whole);
+        const ISaveFilesOnIo::Save& save = io_.slots[h.slot].save();
+        const proto::SaveSlotRule rule = proto::SaveSlotRule::at_mount(
+            save.extent.has_value(),
+            save.extent.value_or(proto::FileSize{}),
+            save.growable
+        );
 
-        const std::span<std::uint8_t> whole = w.data;
-        const std::span<std::uint8_t> dst = clamped_extent(whole, a.bytes);
-        auto n = b.read_at(a.offset, dst);
+        if (!n && n.error().code == Errc::not_found && rule.deferred_create) {
+            svc::fill_absent(save.blank, a.base, whole);
+            w.arena->window = proto::ResidentWindow::image(
+                a.base,
+                a.block_size,
+                proto::BlockSize{proto::kBlockStagingBytes}
+            );
+        } else if (n) {
 
-        if (n) {
-            const std::size_t got = *n < dst.size() ? *n : dst.size();
-            if (got < dst.size())
-                std::memset(dst.data() + got, 0, dst.size() - got);
-            c.bytes = static_cast<std::uint32_t>(got);
+            const std::size_t got = n->size();
+            if (got < whole.size())
+                std::memset(whole.data() + got, 0, whole.size() - got);
+            w.arena->window = got > 0 ? proto::ResidentWindow::image(
+                                            a.base,
+                                            a.block_size,
+                                            proto::BlockSize{static_cast<std::uint32_t>(got)}
+                                        )
+                                      : proto::ResidentWindow::substitute();
         } else {
+            w.arena->window = proto::ResidentWindow::substitute();
             st = status_of(n.error().code);
+        }
+    }
+    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+}
+
+void StorageService::on(const Req::ReadAhead& a, const Req::Head& h, Work& w) noexcept {
+    Cmp::ReadAhead c{};
+    proto::StorageStatus st = proto::StorageStatus::Ok;
+    if (!w.arena) {
+        st = proto::StorageStatus::Refused;
+    } else if (const auto live = live_(h.slot, w); !live) {
+
+        st = proto::StorageStatus::Refused;
+    } else {
+        IStorageBackend& b = *live;
+        b.note_tag(h.tag);
+        const std::span<std::uint8_t> whole = w.arena->bytes;
+        auto n = b.read_at(proto::byte_offset(a.base, a.block_size), whole);
+        if (!n) {
+            st = status_of(n.error().code);
+        } else {
+            const std::size_t got = n->size();
+            if (got < whole.size())
+                std::memset(whole.data() + got, 0, whole.size() - got);
+            if (got > 0)
+                w.arena->window = proto::ResidentWindow::image(
+                    a.base,
+                    a.block_size,
+                    proto::BlockSize{static_cast<std::uint32_t>(got)}
+                );
         }
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
 
 void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexcept {
-    Cmp::Write c{.offset = a.offset, .half = a.half};
+    Cmp::Write c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (const auto live = live_(h.slot, w); !live) {
+    if (!w.arena) {
+        st = proto::StorageStatus::Refused;
+    } else if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
-        const std::span<const std::uint8_t> whole = w.data;
+        const std::span<const std::uint8_t> whole = w.arena->bytes;
         const std::span<const std::uint8_t> want = clamped_extent(whole, a.bytes);
-        auto n = b.write_at(a.offset, want);
+        auto n = b.write_at(proto::FileSize{a.offset}, want);
         if (!n) {
             st = status_of(n.error().code);
+        } else if (n->size() != want.size()) {
+
+            st = proto::StorageStatus::ShortWrite;
         } else {
-            if (*n != want.size())
-                st = proto::StorageStatus::ShortWrite;
-            c.bytes = static_cast<std::uint32_t>(*n);
+            c.end = proto::FileSize{a.offset + n->size()};
         }
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
 
 void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexcept {
-    Cmp::Create c{.half = a.half};
+    Cmp::Create c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (const auto live = live_(h.slot, w); !live) {
+    if (!w.arena) {
+        st = proto::StorageStatus::Refused;
+    } else if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
-        const std::span<const std::uint8_t> whole = w.data;
-        const std::span<const std::uint8_t> ask = clamped_extent(whole, a.bytes);
+        const std::span<std::uint8_t> whole = w.arena->bytes;
+        const std::span<std::uint8_t> ask = clamped_extent(whole, a.bytes);
         auto e = b.create(ask);
         if (e) {
-            c.size = e->v;
+            c.size = *e;
             c.bytes = static_cast<std::uint32_t>(ask.size());
         } else {
             st = status_of(e.error().code);
@@ -222,13 +284,13 @@ void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexc
         st = proto::StorageStatus::Refused;
     } else {
         served->serve(w.gen);
-        auto e = w.backend->open_extent(h.slot, w.order);
+        auto e = w.backend->open_extent(h.slot, w.hand->order);
         if (e) {
             c.size = e->v;
         } else {
             st = status_of(e.error().code);
         }
-        served->attached(w.backend, e ? std::optional{*e} : std::nullopt, a.growable);
+        served->attached(w.backend, e ? std::optional{*e} : std::nullopt, a.growable, w.blank);
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
@@ -273,7 +335,14 @@ void StorageService::perform_(const Req& ask, Work& w) noexcept {
 void StorageService::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
     if (Ctl::Job j = ctl_.take()) {
-        Work w{{}, j->answer, j->backend, j->gen, j->order.view()};
+        Work w{
+            infra::OptRef<SlotArena>{},
+            j->answer,
+            j->backend,
+            j->gen,
+            infra::OptRef<const BlockCtl>{*j},
+            j->blank
+        };
         perform_(j->ask, w);
         if (w.performed) {
             j->answer = w.answer;
@@ -282,7 +351,7 @@ void StorageService::serve() noexcept {
         return;
     }
     if (Data::Job j = data_.take()) {
-        Work w{std::span<std::uint8_t>{j->data, kHalfBytes}, j->answer, j->backend, j->gen};
+        Work w{infra::OptRef<SlotArena>{*j}, j->answer, j->backend, j->gen};
         perform_(j->ask, w);
         if (w.performed) {
             j->answer = w.answer;
@@ -312,8 +381,7 @@ void StorageService::own_all_() noexcept {
         const auto slot = data_.index_of(l);
         if (!slot)
             break;
-        const HandAt at = HandAt::of(DataHand::of(*slot));
-        rt_.slots[at.slot].hand(at.half) = std::move(l);
+        rt_.slots[xthread::index_as<proto::SlotIndex>(*slot)].hand() = std::move(l);
     }
     for (std::size_t n = 0; n < Ctl::capacity(); ++n) {
         Ctl::Loan l = ctl_.acquire();
@@ -335,18 +403,15 @@ std::optional<proto::StorageSeq> StorageService::submit(const proto::StorageRequ
     AdmitReader reader{};
     const Admit a = infra::dispatch<proto::StorageRequestRoutes>(req, reader);
 
-    if (!a.known
-        || !rt_.slots.find(a.head.slot)
-        || !a.half.exists()
-        || a.head.seq == proto::StorageSeq::kRefused) {
+    if (!a.known || !rt_.slots.find(a.head.slot) || a.head.seq == proto::StorageSeq::kRefused) {
         refusals_.add();
         return std::nullopt;
     }
     own_all_();
     Rt::Slot& bind = rt_.slots[a.head.slot];
-
     if (a.data) {
-        Data::Loan& l = bind.hand(a.half);
+
+        Data::Loan& l = bind.hand();
         if (!l) {
             refusals_.add();
             return std::nullopt;
@@ -354,6 +419,8 @@ std::optional<proto::StorageSeq> StorageService::submit(const proto::StorageRequ
         l->ask = req;
         l->backend = bind.bound();
         l->gen = bind.gen();
+
+        l->window = proto::ResidentWindow{};
         data_.send(std::move(l));
     } else {
         Ctl::Loan& l = bind.ctl();
@@ -376,6 +443,7 @@ std::optional<proto::StorageSeq> StorageService::submit(const proto::StorageRequ
                 l->backend = bind.bound();
                 l->stage.reset();
                 l->order.clear();
+                l->blank.reset();
                 bind.unbind();
                 break;
             case Stamp::Bound:
@@ -407,12 +475,13 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
             l->backend.reset();
             rt_.slots[slot].ctl() = std::move(l);
         } else if (Data::Loan d = data_.reap()) {
-            const HandAt at = HandAt::of(DataHand::of(*data_.index_of(d)));
+
+            const proto::SlotIndex slot = xthread::index_as<proto::SlotIndex>(*data_.index_of(d));
             completed = d.completed();
             if (completed)
                 c = d->answer;
             d->backend.reset();
-            rt_.slots[at.slot].hand(at.half) = std::move(d);
+            rt_.slots[slot].hand() = std::move(d);
         } else {
             return std::nullopt;
         }
@@ -425,35 +494,61 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
     return std::nullopt;
 }
 
-std::span<const std::uint8_t> StorageService::half(
-    proto::SlotIndex slot,
-    proto::ArenaHalf which
-) const noexcept {
-    if (!rt_.slots.find(slot) || !which.exists() || !rt_.owned)
-        return {};
-    const Data::Loan& l = rt_.slots[slot].hand(which);
-    if (!l)
-        return {};
-    return std::span<const std::uint8_t>{l->data, kHalfBytes};
+StorageService::HandsOut StorageService::hands_out() const noexcept {
+    HandsOut out{};
+    if (!rt_.owned)
+        return out;
+    for (std::uint8_t i = 0; i < kSlots; ++i) {
+        const proto::SlotIndex slot{i};
+        const Rt::Slot& s = rt_.slots[slot];
+        if (!s.hand())
+            out.data = out.data.with(slot);
+        if (!s.ctl())
+            out.ctl = out.ctl.with(slot);
+    }
+    return out;
 }
 
-std::span<std::uint8_t> StorageService::half_mut(
-    proto::SlotIndex slot,
-    proto::ArenaHalf which
-) noexcept {
-    if (!rt_.slots.find(slot) || !which.exists())
+std::optional<StorageService::HomeWindow> StorageService::window(
+    proto::SlotIndex slot
+) const noexcept {
+    if (!rt_.slots.find(slot))
+        return std::nullopt;
+
+    if (!rt_.owned)
+        return HomeWindow{};
+    const Data::Loan& l = rt_.slots[slot].hand();
+    if (!l)
+        return std::nullopt;
+    return HomeWindow{.window = l->window, .bytes = std::span<const std::uint8_t>{l->bytes}};
+}
+
+std::span<std::uint8_t> StorageService::claim(proto::SlotIndex slot) noexcept {
+    if (!rt_.slots.find(slot))
         return {};
     own_all_();
-    const Data::Loan& l = rt_.slots[slot].hand(which);
+    Data::Loan& l = rt_.slots[slot].hand();
     if (!l)
         return {};
-    return std::span<std::uint8_t>{l->data, kHalfBytes};
+    l->window = proto::ResidentWindow{};
+    return std::span<std::uint8_t>{l->bytes};
+}
+
+void StorageService::install(proto::SlotIndex slot, const proto::ResidentWindow& window) noexcept {
+    if (!rt_.slots.find(slot))
+        return;
+    own_all_();
+    Data::Loan& l = rt_.slots[slot].hand();
+    if (!l)
+        return;
+    l->window = window;
 }
 
 bool StorageService::stage_backend(
     proto::SlotIndex slot,
     IStorageBackend& backend,
-    std::span<const std::byte> order
+    std::span<const std::byte> order,
+    infra::OptRef<const BlankSaveSpec> blank
 ) noexcept {
 
     if (!rt_.slots.find(slot) || !home_(slot) || order.size() > kStorageOrderBytes) {
@@ -465,7 +560,7 @@ bool StorageService::stage_backend(
     infra::OptRef<IStorageBackend>& staged = hand.stage;
 
     if (staged && &*staged == &backend) {
-        set_order_(hand, order);
+        set_order_(hand, order, blank);
         return true;
     }
     if (staged) {
@@ -473,12 +568,17 @@ bool StorageService::stage_backend(
         return false;
     }
     staged = infra::OptRef<IStorageBackend>{backend};
-    set_order_(hand, order);
+    set_order_(hand, order, blank);
     return true;
 }
 
-void StorageService::set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept {
+void StorageService::set_order_(
+    BlockCtl& hand,
+    std::span<const std::byte> order,
+    infra::OptRef<const BlankSaveSpec> blank
+) noexcept {
     (void)hand.order.set(order);
+    hand.blank = blank;
 }
 
 bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
@@ -492,6 +592,7 @@ bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
     if (rt_.owned) {
         bind.ctl()->stage.reset();
         bind.ctl()->order.clear();
+        bind.ctl()->blank.reset();
     }
     bind.forget();
     return true;

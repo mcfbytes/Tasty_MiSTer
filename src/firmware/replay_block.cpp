@@ -33,7 +33,7 @@ ReplayBlock::ReplayBlock(
           .conf = parts.cells.conf_str,
           .asks = parts.session.owner.ui_requests(),
           .video = parts.wires.video,
-          .input = parts.wires.input,
+          .input = parts.wires.core_input,
           .shots = shots,
           .diag = parts.wires.diag,
           .osd = osd,

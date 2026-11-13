@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,10 +35,11 @@ public:
         std::string_view core_image{};
         std::string_view path{};
         std::string_view title{};
-        proto::IoIndex ioctl_index{};
-        char slot = 0;
+        std::optional<proto::FileRowId> row{};
 
-        [[nodiscard]] bool names_a_game() const noexcept { return slot != 0 && !path.empty(); }
+        [[nodiscard]] bool names_a_game() const noexcept {
+            return row.has_value() && !path.empty();
+        }
     };
 
     struct Record {
@@ -46,8 +48,7 @@ public:
         std::string rbf;
         std::string path;
         std::string title;
-        proto::IoIndex ioctl_index{};
-        char slot = 0;
+        proto::FileRowId row;
         bool session = false;
     };
 
@@ -94,7 +95,7 @@ public:
 private:
     struct Source {
         std::string core;
-        RecentsStore::ListId id{};
+        proto::FileRowId row;
         std::chrono::sys_seconds mtime{};
         std::vector<RecentsStore::Entry> entries;
     };

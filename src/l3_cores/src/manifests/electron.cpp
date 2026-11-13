@@ -4,11 +4,17 @@
 #include <string_view>
 
 #include "cores/electron_core.h"
+#include "cores/uef_loader.h"
 
 namespace mister::cores::manifests {
 
 std::unique_ptr<Core> make_electron(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<ElectronCore>(p, g.services);
+}
+
+std::unique_ptr<ILoader> make_uef_loader(const LoaderContext& ctx) {
+    (void)ctx;
+    return std::make_unique<UefLoader>();
 }
 
 static_assert(kElectron.kind == CoreKind::Electron);

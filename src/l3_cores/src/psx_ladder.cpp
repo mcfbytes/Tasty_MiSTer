@@ -7,6 +7,7 @@
 #include "cores/file_slot.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
+#include "infra/path_parts.h"
 #include "proto/types.h"
 #include "svc/file.h"
 #include "svc/msf.h"
@@ -51,7 +52,7 @@ void PsxLadder::decide_stage_edge_() {
     if (!mount_answer().plan.data_first_track)
         return;
 
-    const std::string_view cur_dir = dir_or_empty(image_path());
+    const std::string_view cur_dir = infra::dir_or_empty(image_path());
     if (!last_dir_.empty() && cur_dir == last_dir_)
         return;
 
@@ -114,7 +115,7 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
 
 WideIoIndex PsxLadder::menu_file_index() const {
     std::uint8_t ext_idx = 0;
-    const std::string_view ext = ext_of(image_path());
+    const std::string_view ext = infra::extension(image_path());
     const std::string_view want = ext.empty() ? ext : ext.substr(1);
     for (const FileSlot& s : profile_.slots) {
         if (s.index != profile_.staging.disc_slot)
@@ -156,7 +157,7 @@ Ex<bool> PsxLadder::on_step() {
             report_.same_game = !stage_save_;
             report_.bios_found = false;
             rung_ = Rung::Bios;
-            row_i_ = 0;
+            row_.rewind();
             return false;
         }
 
@@ -166,15 +167,14 @@ Ex<bool> PsxLadder::on_step() {
                 rung_ = Rung::MemCard;
                 return false;
             }
-            const auto rows = profile_.boot_assets;
-            if (row_i_ < rows.size()) {
-                const BootAsset& row = rows[row_i_];
+            if (const auto at = row_.current()) {
+                const BootAsset& row = *at;
                 auto hit = load_row(row);
                 if (!hit)
                     return std::unexpected(hit.error());
                 if (*hit == AssetWait::Pending)
                     return false;
-                ++row_i_;
+                row_.advance();
                 if (*hit == AssetWait::Ready) {
                     report_.bios_found = true;
                     rung_ = Rung::MemCard;
@@ -195,16 +195,16 @@ Ex<bool> PsxLadder::on_step() {
                 if (!prepare_save(save_name()))
                     return false;
 
-                if (sub_ == 0) {
+                if (half_ == Half::Fresh) {
                     if (!profile_.staging.save
                         || !order_set_index(WideIoIndex::of(profile_.staging.save->slot)))
                         return false;
-                    sub_ = 1;
+                    half_ = Half::FirstOrdered;
                 }
                 if (!order_mount_save(save_name(), false))
                     return false;
                 report_.save_mounted = true;
-                sub_ = 0;
+                half_ = Half::Fresh;
             }
             rung_ = Rung::DiscPayload;
             return false;
@@ -212,36 +212,37 @@ Ex<bool> PsxLadder::on_step() {
 
         case Rung::DiscPayload:
 
-            if (sub_ == 0) {
+            if (half_ == Half::Fresh) {
                 ss_gen_ = next_gen();
                 ss_due_ns_ = now_ns() + kSaveStateHoldBound;
-                sub_ = host_.order_savestates(image_path(), ss_gen_) ? 1 : 2;
+                half_ = host_.order_savestates(image_path(), ss_gen_) ? Half::FirstOrdered
+                                                                      : Half::Settled;
             }
-            if (sub_ == 1) {
+            if (half_ == Half::FirstOrdered) {
                 if (!host_.savestates_answered().at_or_past(ss_gen_)) {
                     if (now_ns() < ss_due_ns_)
                         return false;
                     report_.savestate_hold_expired = true;
                 }
-                sub_ = 2;
+                half_ = Half::Settled;
             }
 
             if (!order_disc_payload(facts_))
                 return false;
-            sub_ = 0;
+            half_ = Half::Fresh;
             rung_ = Rung::Announce;
             return false;
 
         case Rung::Announce: {
 
-            if (sub_ == 0) {
+            if (half_ == Half::Fresh) {
                 if (!order_set_index(menu_file_index()))
                     return false;
-                sub_ = 1;
+                half_ = Half::FirstOrdered;
             }
             if (!order_announce_disc(mount_answer().plan.disc_size_bytes))
                 return false;
-            sub_ = 0;
+            half_ = Half::Fresh;
             rung_ = Rung::Done;
             return true;
         }

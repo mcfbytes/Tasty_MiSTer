@@ -1,38 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
-#include <cstdio>
-#include <limits>
 #include <optional>
 #include <string_view>
 
+#include "app/segment_index.h"
 #include "infra/fixed_str.h"
 
 namespace mister::app {
 
 using RecPath = FixedStr<256, StrFit::Reject>;
-
-using SegmentText = FixedStr<8, StrFit::Reject>;
-
-struct SegmentIndex {
-    std::uint16_t v{};
-
-    [[nodiscard]] static constexpr SegmentIndex last() noexcept {
-        return SegmentIndex{std::numeric_limits<std::uint16_t>::max()};
-    }
-
-    friend constexpr bool operator==(SegmentIndex, SegmentIndex) = default;
-
-    [[nodiscard]] SegmentText text() const noexcept {
-        char buf[SegmentText::kBufSize]{};
-        const int n = std::snprintf(buf, sizeof buf, "_%03u", static_cast<unsigned>(v));
-        SegmentText out{};
-        if (n > 0 && static_cast<std::size_t>(n) < sizeof buf)
-            (void)out.assign(std::string_view{buf, static_cast<std::size_t>(n)});
-        return out;
-    }
-};
 
 class RecordingName {
 public:

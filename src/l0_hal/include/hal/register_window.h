@@ -11,6 +11,7 @@
 #include "hal/phys_region.h"
 #include "hal/reg_block.h"
 #include "hal/reg_lend.h"
+#include "hal/reg_word.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
@@ -62,6 +63,10 @@ public:
 
     void write(Reg r, std::uint32_t v) { detail::regs_write(base_, offset_of(r), v); }
 
+    void write(Reg r, RegWord w) {
+        w.emit([this, r](auto bits) { write(r, bits); });
+    }
+
     class Transaction {
     public:
         explicit Transaction(RegisterWindow& w) {
@@ -79,7 +84,7 @@ private:
     friend class LwSysWindow;
 
     [[nodiscard]] static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
-        auto m = detail::map_lw_registers(lw_window, lw_offset, Layout::kSize);
+        auto m = detail::map_lw_registers(lw_window, lw_offset, LwExtent::of_layout<Layout>());
         if (!m)
             return std::unexpected(m.error());
         return RegisterWindow(std::move(m->pages), m->lead);

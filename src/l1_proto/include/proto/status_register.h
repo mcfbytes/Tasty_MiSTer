@@ -9,6 +9,7 @@
 #include "infra/opt_ref.h"
 #include "proto/link_frame.h"
 #include "proto/reset_fence.h"
+#include "proto/status_bit.h"
 #include "proto/status_edit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
@@ -20,10 +21,7 @@ class StatusRegister {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr unsigned kBits = StatusWord::kBits;
     static constexpr unsigned kWords = StatusWord::kWords;
-
-    [[nodiscard]] static constexpr bool holds(StatusBit bit) noexcept { return bit.v < kBits; }
 
     void write(const StatusEdit& edit) noexcept;
 

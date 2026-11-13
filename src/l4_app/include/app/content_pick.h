@@ -54,7 +54,6 @@
 #include "proto/status_cell.h"
 #include "proto/types.h"
 #include "svc/file.h"
-#include "svc/gzip_inflate.h"
 
 namespace mister::svc {
 class Vfs;
@@ -75,6 +74,8 @@ class ContentPick {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
+    static constexpr proto::FileSize kDerivedWholeMax{16u * 1024u * 1024u};
+
     struct ContentWatch {
         proto::ActKey act{};
         std::unique_ptr<svc::IFile> file{};
@@ -181,6 +182,16 @@ public:
         proto::FileSize save_bytes = {}
     );
 
+    [[nodiscard]] cores::LoaderContext loader_context_();
+
+    [[nodiscard]] std::optional<std::unique_ptr<svc::IFile>> derive_(
+        const ContentRequest& req,
+        std::unique_ptr<svc::IFile> raw,
+        proto::FileSize size
+    );
+
+    [[nodiscard]] bool order_empty_bracket_(const ContentRequest& req, std::string_view path);
+
     [[nodiscard]] std::optional<ContentRequest> content_for(
         const proto::ConfStrFileRow& row,
         std::string_view path
@@ -192,7 +203,11 @@ public:
         std::span<const svc::DirEntry> listing
     );
 
-    [[nodiscard]] bool order_content_tx(proto::FileId file, ContentWatch watch);
+    [[nodiscard]] bool order_content_tx(
+        proto::FileId file,
+        ContentWatch watch,
+        proto::LinkOp::FileTxPhase phase = proto::LinkOp::FileTxPhase::Whole
+    );
 
     [[nodiscard]] BeltOrders step_watch();
 
@@ -278,8 +293,6 @@ private:
     std::optional<ContentWatch> watch_{};
 
     cores::LoaderMemo loader_memo_{};
-
-    svc::GzipInflater inflater_{};
     Tally tally_{};
 };
 

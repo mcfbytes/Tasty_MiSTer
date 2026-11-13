@@ -3,15 +3,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string_view>
 
-#include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "svc/filter_bank.h"
 #include "svc/filter_format.h"
 #include "svc/filter_kernel.h"
 #include "svc/filter_send_plan.h"
+#include "svc/scaler_slot_mode.h"
 #include "svc/types.h"
 #include "svc/video_timing.h"
 
@@ -20,10 +21,6 @@ namespace mister::svc {
 class Vfs;
 struct FilterSet;
 
-}
-
-namespace mister::proto {
-class Link;
 }
 
 namespace mister::svc {
@@ -52,29 +49,6 @@ struct FilterParse {
 inline constexpr std::size_t kScalerNameCap = 1023;
 inline constexpr std::size_t kScalerCfgBytes = kScalerSlots * (1 + kScalerNameCap);
 
-struct ScalerSlotMode {
-    std::uint8_t v = 0;
-    static constexpr std::uint8_t kOff = 0;
-    static constexpr std::uint8_t kFromFile = 1;
-
-    [[nodiscard]] static constexpr ScalerSlotMode of(std::byte raw) noexcept {
-        return ScalerSlotMode{std::to_integer<std::uint8_t>(raw)};
-    }
-
-    [[nodiscard]] static constexpr ScalerSlotMode off() noexcept { return ScalerSlotMode{kOff}; }
-
-    [[nodiscard]] static constexpr ScalerSlotMode from_file() noexcept {
-        return ScalerSlotMode{kFromFile};
-    }
-
-    [[nodiscard]] constexpr bool enabled() const noexcept { return v != kOff; }
-
-    [[nodiscard]] constexpr bool legal() const noexcept { return v <= kFromFile; }
-
-    [[nodiscard]] Ex<void> write_to(proto::Link& link) const;
-    friend constexpr bool operator==(ScalerSlotMode, ScalerSlotMode) = default;
-};
-
 struct ScalerSlot {
     ScalerSlotMode mode{};
 
@@ -88,11 +62,10 @@ using ScalerSeeds = ScalerSlots<std::string_view>;
     const ScalerSeeds& seeds
 );
 
-void load_filter_set(
+[[nodiscard]] std::unique_ptr<FilterSet> load_filter_set(
     const Vfs& vfs,
     std::string_view core,
-    const ScalerSeeds& seeds,
-    FilterSet& out
+    const ScalerSeeds& seeds
 );
 
 [[nodiscard]] constexpr std::size_t filter_bank_word_count(FilterFormat fmt) noexcept {

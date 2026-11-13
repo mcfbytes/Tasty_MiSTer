@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "os/epoll_set.h"
 #include "infra/park_fds.h"
 #include "infra/park_timeout.h"
 #include "infra/pause_latch.h"
@@ -28,10 +29,11 @@ public:
 
     static constexpr std::uint32_t kMaxCoworkersDetail = kMaxCoworkers;
 
-    explicit IoMain(
+    explicit IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
+    IoMain(
         xthread::ParkFds fds,
-        infra::OptRef<xthread::WakeFlag> asker = {},
-        int doorbells = -1
+        infra::OptRef<xthread::WakeFlag> asker,
+        const os::EpollSet& doorbells
     ) noexcept;
     IoMain(const IoMain&) = delete;
     IoMain& operator=(const IoMain&) = delete;

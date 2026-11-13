@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -11,7 +12,9 @@
 #include "cores/n64_cheat_engine.h"
 #include "cores/n64_file_route.h"
 #include "cores/n64_layout_key_source.h"
+#include "cores/n64_option_view.h"
 #include "cores/n64_options.h"
+#include "cores/n64_ram_save_order.h"
 #include "cores/n64_saves.h"
 #include "cores/save_rows.h"
 #include "cores/stream_load.h"
@@ -19,6 +22,7 @@
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/bit_field.h"
 #include "proto/types.h"
 
 namespace mister::cores {
@@ -59,9 +63,11 @@ public:
 
     [[nodiscard]] std::uint32_t facts_refusals() const noexcept { return facts_refusals_; }
 
-    [[nodiscard]] bool disk_bound() const noexcept { return disk_addr_ != hal::FabricAddr{}; }
+    [[nodiscard]] bool disk_bound() const noexcept { return disk_.has_value(); }
 
-    [[nodiscard]] std::string_view disk_path() const noexcept { return disk_path_.view(); }
+    [[nodiscard]] std::string_view disk_path() const noexcept {
+        return disk_ ? disk_->disk_path.view() : std::string_view{};
+    }
 
     [[nodiscard]] WindowJobBuild on_osd_open(WindowJobOrder& order) noexcept override;
     [[nodiscard]] WindowJobBuild on_reset_edge(
@@ -86,7 +92,6 @@ private:
 
     void on_status_changed() noexcept override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
-    void on_set_pending_file_path(std::string_view path) noexcept override;
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
         return infra::OptRef<IStreamLoad>{*this};
@@ -95,7 +100,10 @@ private:
     [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
-    [[nodiscard]] Ex<void> on_apply_load_facts(std::span<const std::uint8_t> facts) override;
+    [[nodiscard]] Ex<void> on_apply_load_facts(
+        std::span<const std::uint8_t> facts,
+        std::string_view image
+    ) override;
 
     [[nodiscard]] infra::OptRef<ISaveChannel> on_save_channel() noexcept override {
         return infra::OptRef<ISaveChannel>{saves_};
@@ -113,26 +121,25 @@ private:
 
     [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return crc32_; }
 
-    void adopt_save_plan_(const n64::SaveRows& plan);
+    void adopt_save_plan_(const n64::SaveRows& plan, std::string_view image);
 
-    [[nodiscard]] proto::FieldValue read_(n64::StatusField f) const noexcept;
+    [[nodiscard]] n64::Options options_() const noexcept;
 
-    [[nodiscard]] bool cheats_enabled_() const noexcept;
     void disable_cheats_() noexcept;
 
     infra::OptRef<proto::CoreSession> session_{};
     bool turbo_core_ = false;
     FixedStr<8, StrFit::Clip> ext_{};
 
-    FixedStr<n64::SaveChannel::kPathChars + 1, StrFit::Clip> rom_path_{};
+    n64dd::CoreDir core_dir_{};
     svc::Crc32 crc32_{};
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
     proto::IoIndex last_index_{};
     std::uint32_t save_plan_errors_ = 0;
     std::uint32_t facts_refusals_ = 0;
-    hal::FabricAddr disk_addr_{};
-    FixedStr<n64::SaveChannel::kPathChars + 1, StrFit::Clip> disk_path_{};
+
+    std::optional<n64dd::RamSaveOrder> disk_{};
     bool loaded_ = false;
     n64::CheatEngine cheats_;
     n64::SaveChannel saves_;

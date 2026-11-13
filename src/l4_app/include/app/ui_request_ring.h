@@ -8,7 +8,6 @@
 #include <string_view>
 #include <type_traits>
 
-#include "app/remembered_path.h"
 #include "app/ui_request.h"
 #include "infra/inbox.h"
 #include "infra/message_sum.h"
@@ -16,6 +15,7 @@
 #include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -30,8 +30,7 @@ public:
         TASTY_SEAT_RESIDENT(Ui);
         CorrelationTag tag{};
         UiRequest::Kind which{};
-        proto::IoIndex index{};
-        std::optional<RememberedSlot> slot{};
+        std::optional<proto::FileRowId> row{};
         bool game = false;
         PathText path{};
     };
@@ -53,15 +52,15 @@ public:
         if constexpr (std::is_same_v<A, UiRequest::LoadFile>) {
             ui_.last_load = alt.path;
             ++ui_.load_asks;
-            note_({tag, A::kKind, alt.index, RememberedSlot::File, true, alt.path});
+            note_({tag, A::kKind, proto::FileRowId::file(alt.index), true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::LoadFileByDigit>) {
-            note_({tag, A::kKind, alt.digit.io_index(), RememberedSlot::File, true, alt.path});
+            note_({tag, A::kKind, proto::FileRowId::file(alt.digit.io_index()), true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::MountImage>) {
-            note_({tag, A::kKind, alt.index, RememberedSlot::Mount, true, alt.path});
+            note_({tag, A::kKind, proto::FileRowId::mount(alt.index), true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::UnmountImage>) {
-            note_({tag, A::kKind, alt.index, RememberedSlot::Mount, false, PathText{}});
+            note_({tag, A::kKind, proto::FileRowId::mount(alt.index), false, PathText{}});
         } else if constexpr (std::is_same_v<A, UiRequest::LoadCore>) {
-            note_({tag, A::kKind, proto::IoIndex{}, std::nullopt, false, alt.path});
+            note_({tag, A::kKind, std::nullopt, false, alt.path});
         }
         return tag;
     }

@@ -28,7 +28,7 @@ namespace {
 using namespace std::chrono_literals;
 
 struct RawItem {
-    MglItem::Slot slot = MglItem::Slot::File;
+    proto::FileRowKind slot = proto::FileRowKind::File;
     proto::FileSlotDigit index{};
     ResetHold hold{};
     DelaySeconds delay_s{};
@@ -71,10 +71,10 @@ bool parse_file_item(std::span<const xml::Attr> attrs, RawItem& it) {
         } else if (ieq(a.name, "type")) {
 
             if (ieq(a.value, "s")) {
-                it.slot = MglItem::Slot::Image;
+                it.slot = proto::FileRowKind::Mount;
                 valid.with(kHasType);
             } else if (ieq(a.value, "f")) {
-                it.slot = MglItem::Slot::File;
+                it.slot = proto::FileRowKind::File;
                 valid.with(kHasType);
             }
         } else if (ieq(a.name, "index")) {
@@ -261,7 +261,7 @@ Ex<void> MglPlayer::publish_load_(const MglItem::Load& load) {
     }
 
     const std::string_view p = load.path.view();
-    const PathText& home = load.slot == MglItem::Slot::File ? file_home_ : image_home_;
+    const PathText& home = load.slot == proto::FileRowKind::File ? file_home_ : image_home_;
     PathText path{};
     const bool fits = (p.front() == '/' || home.empty() || base_ == PathBase::Card)
         ? path.assign(p)
@@ -269,7 +269,7 @@ Ex<void> MglPlayer::publish_load_(const MglItem::Load& load) {
     if (!fits) {
         return std::unexpected(current_.refusal(Errc::bad_format, ERR_SITE()));
     }
-    const CorrelationTag tag = load.slot == MglItem::Slot::File
+    const CorrelationTag tag = load.slot == proto::FileRowKind::File
         ? asks_.push(UiRequest::LoadFileByDigit{.digit = load.index, .scope = scope_, .path = path})
         : asks_.push(
               UiRequest::MountImage{.index = load.index.io_index(), .scope = scope_, .path = path}
@@ -278,7 +278,7 @@ Ex<void> MglPlayer::publish_load_(const MglItem::Load& load) {
     entries_[current_].tag = tag;
 
     if (const auto& at = entries_[current_].remember; tag && at) {
-        if (names_.save_path(stem_, at->slot, at->ioctl_index, path.view()))
+        if (names_.save_path(stem_, *at, path.view()))
             ++remembered_;
         else
             ++remember_failures_;
@@ -286,16 +286,11 @@ Ex<void> MglPlayer::publish_load_(const MglItem::Load& load) {
     return {};
 }
 
-void MglPlayer::remember(
-    MglItemNo i,
-    const RememberedStem& stem,
-    RememberedSlot slot,
-    proto::IoIndex ioctl_index
-) noexcept {
+void MglPlayer::remember(MglItemNo i, const RememberedStem& stem, proto::FileRowId row) noexcept {
     if (!i.below(count_))
         return;
     stem_ = stem;
-    entries_[i].remember = RememberAt{slot, ioctl_index};
+    entries_[i].remember = row;
 }
 
 bool MglPlayer::owns(CorrelationTag tag) const noexcept {

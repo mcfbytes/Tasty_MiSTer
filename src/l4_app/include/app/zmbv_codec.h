@@ -60,13 +60,7 @@ public:
     ZmbvCodec(const ZmbvCodec&) = delete;
     ZmbvCodec& operator=(const ZmbvCodec&) = delete;
 
-    [[nodiscard]] Ex<void> begin(PictureSize size) noexcept override;
     void end() noexcept override;
-
-    [[nodiscard]] bool open() const noexcept override {
-        TASTY_SEAT_BODY(ZmbvCodec);
-        return !size_.empty();
-    }
 
     [[nodiscard]] PictureSize size() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
@@ -80,18 +74,18 @@ public:
 
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return arena_.bytes(); }
 
-    [[nodiscard]] std::span<const std::byte> encode(
+    [[nodiscard]] Encoded encode(
         RgbRows rgb,
         bool key,
-        std::span<std::byte> out
+        std::span<std::byte> out,
+        const FrameBudget& budget
     ) noexcept override;
     [[nodiscard]] std::span<const std::byte> rekey(std::span<std::byte> out) noexcept override;
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
-    void restart(const RecOptions& opt) noexcept override;
-    void arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_ns) noexcept override;
+    [[nodiscard]] Search restart(const RecOptions& opt) noexcept override;
 
-    [[nodiscard]] Search search() const noexcept override {
+    [[nodiscard]] Search search() const noexcept {
         TASTY_SEAT_BODY(ZmbvCodec);
         return {.radius = static_cast<std::uint8_t>(rung_ ? rung_->radius() : 0), .cut = me_cut_};
     }
@@ -116,6 +110,8 @@ private:
     };
 
     void release_() noexcept;
+    [[nodiscard]] Ex<void> begin_(PictureSize size) noexcept override;
+    void arm_(const FrameBudget& budget) noexcept;
 
     [[nodiscard]] std::span<const std::byte> deflate_sync_(
         std::span<const std::byte> in,

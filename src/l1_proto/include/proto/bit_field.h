@@ -3,8 +3,10 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string_view>
 
+#include "proto/status_bit.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -19,43 +21,16 @@ struct BitField {
 
     static constexpr unsigned kWordBits = 32;
 
-    struct Bits {
-        StatusBit first{};
-        StatusBit limit{};
-
-        struct Iterator {
-            StatusBit at{};
-            StatusBit limit{};
-
-            [[nodiscard]] constexpr StatusBit operator*() const noexcept { return at; }
-
-            constexpr Iterator& operator++() noexcept {
-                at = at.advanced(1);
-                return *this;
-            }
-
-            friend constexpr bool operator==(Iterator a, Iterator b) noexcept {
-                return a.at == b.at;
-            }
-
-            friend constexpr bool operator!=(Iterator a, Iterator b) noexcept {
-                return a.at != b.at;
-            }
-        };
-
-        [[nodiscard]] constexpr Iterator begin() const noexcept { return Iterator{first, limit}; }
-
-        [[nodiscard]] constexpr Iterator end() const noexcept { return Iterator{limit, limit}; }
-    };
-
-    [[nodiscard]] constexpr Bits each_bit() const noexcept {
-        return Bits{start, width == 0 ? start : start.advanced(width)};
-    }
-
     constexpr bool valid() const noexcept { return width != 0; }
 
-    constexpr StatusBit end() const noexcept {
-        return StatusBit{static_cast<std::uint8_t>(start.v + width - 1)};
+    [[nodiscard]] constexpr bool fits_status() const noexcept {
+        return valid() && start.plus(width - 1u).has_value();
+    }
+
+    [[nodiscard]] constexpr std::optional<StatusBit> end() const noexcept {
+        if (!valid())
+            return std::nullopt;
+        return start.plus(width - 1u);
     }
 
     constexpr std::uint32_t mask() const noexcept {
@@ -74,6 +49,8 @@ struct BitField {
 };
 
 static_assert(sizeof(BitField) == 2);
+
+inline constexpr BitField kResetField{kResetBit, 1};
 
 [[nodiscard]] BitField decode_bit_ref(std::string_view spec, ExShift ex) noexcept;
 

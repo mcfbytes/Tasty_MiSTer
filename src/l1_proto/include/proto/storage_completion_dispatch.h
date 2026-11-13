@@ -16,7 +16,8 @@ concept StorageCompletionSink = requires(
     const StorageCompletion::Head& h,
     Ctx&... c
 ) {
-    s.on(std::declval<const StorageCompletion::Read&>(), h, c...);
+    s.on(std::declval<const StorageCompletion::Fetch&>(), h, c...);
+    s.on(std::declval<const StorageCompletion::ReadAhead&>(), h, c...);
     s.on(std::declval<const StorageCompletion::Write&>(), h, c...);
     s.on(std::declval<const StorageCompletion::Create&>(), h, c...);
     s.on(std::declval<const StorageCompletion::Flush&>(), h, c...);

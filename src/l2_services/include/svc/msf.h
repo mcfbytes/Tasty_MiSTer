@@ -46,6 +46,18 @@ struct Msf {
         return Msf{packed.front(), packed[1], packed.back()};
     }
 
+    [[nodiscard]] constexpr proto::Lba lba_of_bcd() const noexcept {
+        return proto::Lba{
+            proto::PackedBcd{m}.value() * kFramesPerMinute
+            + proto::PackedBcd{s}.value() * kFramesPerSecond
+            + proto::PackedBcd{f}.value()
+        };
+    }
+
+    [[nodiscard]] static constexpr Msf of_lba_bcd_masked(proto::Lba position) noexcept {
+        return of_lba_bcd_masked(position.v);
+    }
+
     [[nodiscard]] static constexpr Msf of_lba_stock(std::int32_t lba) noexcept {
         constexpr std::int32_t kFps = static_cast<std::int32_t>(kFramesPerSecond);
         constexpr std::int32_t kSpm = static_cast<std::int32_t>(kSecondsPerMinute);
@@ -76,13 +88,12 @@ struct Msf {
     [[nodiscard]] static constexpr proto::Lba lba_from_bcd(
         std::span<const std::byte, 3> bytes
     ) noexcept {
-        const auto digit = [](std::byte b) {
-            return proto::PackedBcd{std::to_integer<std::uint8_t>(b)}.value();
-        };
-        const auto minute = digit(bytes.front());
-        const auto second = digit(bytes[1]);
-        const auto frame = digit(bytes.back());
-        return proto::Lba{minute * kFramesPerMinute + second * kFramesPerSecond + frame};
+        return Msf{
+            std::to_integer<std::uint8_t>(bytes.front()),
+            std::to_integer<std::uint8_t>(bytes[1]),
+            std::to_integer<std::uint8_t>(bytes.back())
+        }
+            .lba_of_bcd();
     }
 
     friend constexpr bool operator==(Msf, Msf) = default;

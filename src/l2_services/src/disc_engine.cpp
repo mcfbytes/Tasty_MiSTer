@@ -376,7 +376,7 @@ Ex<std::span<std::byte>> DiscEngine::read_form(
     Lba lba,
     std::span<std::byte> dst,
     Form form,
-    SectorHeader header
+    std::optional<SectorHeader> header
 ) {
     if (!mounted_)
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
@@ -416,30 +416,12 @@ Ex<std::span<std::byte>> DiscEngine::read_form(
     normalize_cdda_(t, form, dst.subspan(f.dst_off, f.len));
 
     if (form == Form::RedBook && t.type != TrackType::Cdda) {
-        if (header.named) {
-
-            std::memcpy(dst.data(), header.bytes.data(), kSectorHeaderBytes);
+        if (header) {
+            header->write(dst.first<SectorHeader::kBytes>());
         } else if (ss == kUserDataBytes) {
 
-            constexpr std::size_t kSyncBytes = 12;
-            constexpr std::size_t kSyncMiddleBytes = kSyncBytes - 2;
-            constexpr unsigned char kSyncFill = 0xFF;
-            constexpr unsigned kSecondShift = 8;
-            constexpr unsigned kFrameShift = 16;
-            constexpr unsigned kModeShift = 24;
-            constexpr std::uint32_t kSectorModeOne = 1;
-            auto b = infra::byte_cast<unsigned char>(dst);
-            b[0] = 0;
-            std::memset(b.data() + 1, kSyncFill, kSyncMiddleBytes);
-            b[kSyncBytes - 1] = 0;
-
-            const std::uint32_t f_lba = (lba + kRedBookPregap).v;
-            const Msf pos = Msf::of_lba_bcd_masked(f_lba);
-            const std::uint32_t word = std::uint32_t{pos.m}
-                | (std::uint32_t{pos.s} << kSecondShift)
-                | (std::uint32_t{pos.f} << kFrameShift)
-                | (kSectorModeOne << kModeShift);
-            infra::store_le<std::uint32_t>(b.subspan(kSyncBytes).first<sizeof(word)>(), word);
+            SectorHeader::mode1_at(Msf::of_lba_bcd_masked(lba + kRedBookPregap))
+                .write(dst.first<SectorHeader::kBytes>());
         }
     }
 
@@ -520,7 +502,7 @@ void DiscEngine::normalize_cdda_(
 Ex<std::span<std::byte>> DiscEngine::read_raw_frame(
     Lba lba,
     std::span<std::byte> dst,
-    SectorHeader header
+    std::optional<SectorHeader> header
 ) {
     return read_form(lba, dst, Form::RedBook, header);
 }

@@ -24,7 +24,8 @@
 #include "reactor/notifier_slot.h"
 #include "reactor/round_timer.h"
 #include "reactor/service_slot.h"
-#include "reactor/tick.h"
+#include "reactor/tick_deadline.h"
+#include "reactor/tick_no.h"
 #include "reactor/link_decoder_decl.h"
 #include "infra/seat.h"
 
@@ -70,7 +71,7 @@ public:
 
     [[nodiscard]] Ex<void> remove_fd(int fd);
 
-    [[nodiscard]] Ex<void> enter() noexcept;
+    void enter() noexcept;
 
     void block() noexcept;
 
@@ -140,6 +141,8 @@ public:
     Executive& operator=(Executive&&) = delete;
 
 private:
+    friend struct ExecutiveTestAccess;
+
     Executive(xthread::RtStats& stats, const Wiring& wiring)
         : stats_(stats),
           log_lane_(wiring.log_lane),
@@ -148,7 +151,7 @@ private:
             t = RaiseStamp{};
     }
 
-    static constexpr std::uint64_t kNeverRaised = ~std::uint64_t{0};
+    static constexpr TickNo kNeverRaised = kNeverTick;
 
     [[nodiscard]] ServiceSlot live_end() const noexcept {
         const std::optional<ServiceSlot> end = ServiceSlot::of(service_count_);
@@ -166,13 +169,11 @@ private:
     xthread::RtStats& stats_;
     xthread::RtLatency latency_{};
     UniqueFd epfd_;
-    UniqueFd tick_fd_;
-
     xthread::WakeFlag wake_;
 
     struct RaiseStamp {
         TASTY_SEAT_RESIDENT(RT);
-        std::uint64_t ms = kNeverRaised;
+        TickNo ms = kNeverRaised;
         std::uint64_t round = 0;
     };
 
@@ -215,7 +216,7 @@ private:
 
     struct RowState {
         TASTY_SEAT_RESIDENT(RT);
-        std::uint64_t next_due = 0;
+        TickNo next_due{};
         bool carried = false;
         std::uint32_t fallbacks = 0;
         std::uint32_t retirements = 0;
@@ -237,9 +238,10 @@ private:
     int borrowed_[kMaxBorrowedFds] = {};
 
     std::size_t borrowed_count_ = 0;
-    std::uint64_t tick_count_ = 0;
+    TickNo tick_count_{};
     std::uint64_t round_count_ = 0;
-    std::int64_t deadline_ns_ = 0;
+    TickDeadline tick_ = TickDeadline::held();
+    bool tick_held_ = false;
     std::optional<xthread::LogLane::Producer> log_lane_;
     infra::OptRef<RoundTimer> round_timer_;
     bool bound_in_round_ = false;

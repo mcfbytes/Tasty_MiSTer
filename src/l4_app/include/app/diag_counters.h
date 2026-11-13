@@ -5,6 +5,7 @@
 
 #include "app/link_condition.h"
 #include "cores/cd_drive_state.h"
+#include "cores/ladder_pc.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -30,7 +31,7 @@ struct DiagCounters {
 
     bool ladder_live = false;
 
-    std::uint8_t ladder_pc = 0;
+    cores::LadderPc ladder_pc{};
     std::uint32_t ladder_rungs = 0;
     proto::FileSize ladder_bytes{};
     std::uint32_t ladder_assets = 0;

@@ -10,6 +10,8 @@
 
 namespace mister::svc {
 
+struct BlankSaveSpec;
+
 class ISaveFilesOnIo {
 public:
     struct Save {
@@ -18,6 +20,8 @@ public:
         std::optional<proto::FileSize> extent{};
         bool growable = false;
         Generation gen{};
+
+        infra::OptRef<const BlankSaveSpec> blank{};
     };
 
     [[nodiscard]] virtual Save save_on_io(proto::SlotIndex slot) const noexcept = 0;

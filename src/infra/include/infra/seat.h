@@ -24,6 +24,7 @@ enum class SeatTag : std::uint8_t {
     RecWrite,
     Launcher,
     HdOsd,
+    Connect,
     Main,
     kCount,
 };
@@ -48,6 +49,7 @@ inline constexpr SeatTag Encode = SeatTag::Encode;
 inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
 inline constexpr SeatTag Launcher = SeatTag::Launcher;
 inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
+inline constexpr SeatTag Connect = SeatTag::Connect;
 inline constexpr SeatTag Main = SeatTag::Main;
 }
 
@@ -77,6 +79,7 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
     {SeatTag::RecWrite, "T-RECWRITE"},
     {SeatTag::Launcher, "T-LAUNCHER"},
     {SeatTag::HdOsd, "T-HDOSD"},
+    {SeatTag::Connect, "T-CONNECT"},
     {SeatTag::Main, "MAIN"},
 }};
 

@@ -55,14 +55,14 @@ Transition RecentRow::select() {
         return launch_.launch(record_);
     if (!launch_.ask(*this, title_, ask_body_))
         return Transition{};
-    return Transition{Transition::Kind::Push, PageId::Confirm};
+    return Transition::push(PageId::Confirm);
 }
 
 Transition RecentRow::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(RecentRow);
 
     if (choice != RecentLaunch::row_of(RecentLaunch::YesNo::Yes))
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     return launch_.launch(record_);
 }
 

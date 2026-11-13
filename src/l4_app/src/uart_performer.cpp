@@ -4,8 +4,10 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <optional>
 #include <string_view>
 
+#include "app/midi_link_facts.h"
 #include "app/process_integration.h"
 
 namespace mister::app {
@@ -21,9 +23,9 @@ void UartPerformer::on(const UartHandoff::MidiLink& a) {
     TASTY_SEAT_BODY(UartPerformer);
     for (const char* p : kMidiLinkRemovalOrder)
         (void)::unlink(p);
-    const infra::OptRef<const char* const> name = kMidiLinkSentinels.find(MidiLinkSlot::of(a.mode));
-    if (name)
-        (void)proc::write_tmp_handoff(*name, std::string_view{});
+    const std::optional<std::string_view> sentinel = midi_link_facts(a.mode).sentinel;
+    if (sentinel.has_value())
+        (void)proc::write_tmp_handoff(sentinel->data(), std::string_view{});
 }
 
 void UartPerformer::on(const UartHandoff::Mode& a) {

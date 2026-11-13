@@ -7,27 +7,27 @@
 
 #include "infra/error.h"
 #include "proto/types.h"
+#include "svc/block_ctl.h"
 
 namespace mister::svc {
-
-inline constexpr std::size_t kStorageOrderBytes = 2304;
 
 class IStorageBackend {
 public:
     virtual ~IStorageBackend() = default;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(
-        std::uint64_t offset,
+    [[nodiscard]] virtual Ex<std::span<std::uint8_t>> read_at(
+        proto::FileSize at,
         std::span<std::uint8_t> dst
     ) = 0;
-    [[nodiscard]] virtual Ex<std::size_t> write_at(
-        std::uint64_t offset,
+
+    [[nodiscard]] virtual Ex<std::span<const std::uint8_t>> write_at(
+        proto::FileSize at,
         std::span<const std::uint8_t> src
     ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> open_extent(
         proto::SlotIndex slot,
-        std::span<const std::byte> order
+        const BlockCtl::StorageOrder& order
     ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::uint8_t>) {

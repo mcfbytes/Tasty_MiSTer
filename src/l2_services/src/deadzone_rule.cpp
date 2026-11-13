@@ -5,9 +5,84 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "infra/ascii.h"
+#include "svc/device_facts.h"
+#include "svc/vid_pid_key.h"
+
 namespace mister::svc {
+
+namespace {
+
+std::optional<std::pair<UidKind, std::string_view>> vid_pid_digits(std::string_view t) {
+    if (t.empty())
+        return std::nullopt;
+    const char head = infra::ascii_lower(t[0]);
+    if (head != 'v' && head != 'p')
+        return std::nullopt;
+    std::size_t i = 1;
+    std::size_t n = 0;
+    while (i < t.size() && infra::ascii_lower(t[i]) == 'i') {
+        ++i;
+        ++n;
+    }
+    if (n == 0)
+        return std::nullopt;
+    n = 0;
+    while (i < t.size() && infra::ascii_lower(t[i]) == 'd') {
+        ++i;
+        ++n;
+    }
+    if (n == 0 || i >= t.size() || t[i] != ':')
+        return std::nullopt;
+    return std::pair<UidKind, std::string_view>{
+        head == 'v' ? UidKind::Vid : UidKind::Pid,
+        t.substr(i + 1)
+    };
+}
+
+}
+
+std::optional<DeadzoneMatcher> parse_deadzone_matcher(std::string_view token) {
+    DeadzoneMatcher m;
+    if (!m.uid.assign(token))
+        return std::nullopt;
+
+    if (const auto key = VidPidKey::parse_hex(token)) {
+        m.kind = UidKind::VidPid;
+        m.key = *key;
+    } else if (const auto half = vid_pid_digits(token)) {
+        if (half->first == UidKind::Vid) {
+            if (const auto vid = Vid::parse_hex(half->second)) {
+                m.kind = UidKind::Vid;
+                m.vid = *vid;
+            }
+        } else if (const auto pid = Pid::parse_hex(half->second)) {
+            m.kind = UidKind::Pid;
+            m.pid = *pid;
+        }
+    }
+    return m;
+}
+
+bool DeadzoneMatcher::matches(const DeviceFacts& dev) const {
+    switch (kind) {
+        case UidKind::VidPid:
+            return VidPidKey::of(dev.id.vid, dev.id.pid) == key;
+        case UidKind::Vid:
+            return dev.id.vid == vid;
+        case UidKind::Pid:
+            return dev.id.pid == pid;
+        case UidKind::Name:
+
+            return infra::icontains(dev.id.merge_id, uid.view())
+                || infra::icontains(dev.sysfs, uid.view())
+                || infra::icontains(dev.id.id, uid.view());
+    }
+    return false;
+}
 
 std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line) {
 
@@ -32,9 +107,11 @@ std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line) {
     }
     if (j == digits || j != line.size())
         return std::nullopt;
-    DeadzoneRule r{};
-    if (!r.uid.assign(line.substr(0, i)))
+    const auto match = parse_deadzone_matcher(line.substr(0, i));
+    if (!match)
         return std::nullopt;
+    DeadzoneRule r{};
+    r.match = *match;
 
     r.deadzone = Deadzone::clamped(value);
     return r;

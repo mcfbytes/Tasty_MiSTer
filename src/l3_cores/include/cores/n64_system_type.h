@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "proto/types.h"
+
 namespace mister::cores::n64 {
 
 enum class SystemType : std::uint32_t {
@@ -11,6 +13,14 @@ enum class SystemType : std::uint32_t {
     Pal,
     Unknown,
 };
+
+[[nodiscard]] constexpr SystemType system_type_of(proto::FieldValue v) noexcept {
+    return static_cast<SystemType>(v.v);
+}
+
+[[nodiscard]] constexpr proto::FieldValue field_of(SystemType t) noexcept {
+    return proto::FieldValue{static_cast<std::uint32_t>(t)};
+}
 
 enum class Cic : std::uint32_t {
     Nus6101 = 0,
@@ -31,6 +41,14 @@ enum class Cic : std::uint32_t {
     Unknown,
 };
 
+[[nodiscard]] constexpr Cic cic_of(proto::FieldValue v) noexcept {
+    return static_cast<Cic>(v.v);
+}
+
+[[nodiscard]] constexpr proto::FieldValue field_of(Cic c) noexcept {
+    return proto::FieldValue{static_cast<std::uint32_t>(c)};
+}
+
 enum class PadType : std::uint32_t {
     Pad = 0,
     Unplugged,
@@ -41,6 +59,14 @@ enum class PadType : std::uint32_t {
     Keyboard,
     Mouse,
 };
+
+[[nodiscard]] constexpr PadType pad_type_of(proto::FieldValue v) noexcept {
+    return static_cast<PadType>(v.v);
+}
+
+[[nodiscard]] constexpr proto::FieldValue field_of(PadType p) noexcept {
+    return proto::FieldValue{static_cast<std::uint32_t>(p)};
+}
 
 [[nodiscard]] constexpr std::string_view system_text(SystemType v) noexcept {
     switch (v) {

@@ -52,7 +52,7 @@ bool PcmRingFeeder::ready_for_source() noexcept {
         return false;
     }
 
-    return park_.load(std::memory_order_acquire) == Park::Idle && reap_leases_();
+    return park_.load(std::memory_order_acquire) == Park::Idle && reap_media_();
 }
 
 Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
@@ -65,7 +65,7 @@ Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
         );
     }
 
-    if (!parked() || !reap_leases_()) {
+    if (!parked() || !reap_media_()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
 
@@ -170,31 +170,31 @@ void PcmRingFeeder::reset_playback_() noexcept {
     drained_ = false;
 }
 
-bool PcmRingFeeder::reap_leases_() noexcept {
-    if (const auto st = state_.sample()) {
-        for (HeldLease& h : cmd_.held)
-            if (h.lease && static_cast<std::int32_t>(st.value.attaches - h.home_at) >= 0)
-                h.lease.reset();
+bool PcmRingFeeder::reap_media_() noexcept {
+    while (Media::Loan back = media_.reap()) {
     }
-    return media_.available() != 0;
+    return media_.has_free();
 }
 
 template <class Alt>
 Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
-    (void)reap_leases_();
-    auto lease = media_.acquire();
-    if (!lease)
+    (void)reap_media_();
+    Media::Loan loan = media_.acquire();
+    if (!loan)
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
-    *lease = std::move(media);
-    const xthread::PoolSlot idx = *media_.index_of(lease.get());
-    if (!commands_.push(infra::make<PcmCommand>(Alt{idx}))) {
+
+    if (commands_.size() >= kPcmCommandDepth) {
         drops_.add();
-        media = std::move(*lease);
-        *lease = PcmMedia{};
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    ++cmd_.sent;
-    cmd_.held[idx] = HeldLease{std::move(lease), cmd_.sent};
+    const xthread::PoolSlot slot = loan.slot();
+    *loan = std::move(media);
+    media_.send(std::move(loan));
+
+    if (!commands_.push(infra::make<PcmCommand>(Alt{slot}))) {
+        refused_markers_.add();
+        return std::unexpected(Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(slot.v)});
+    }
     return {};
 }
 
@@ -326,29 +326,57 @@ void PcmRingFeeder::on(const PcmCommand::Resume&) noexcept {
 }
 
 void PcmRingFeeder::on(const PcmCommand::AttachRing& a) noexcept {
-    PcmMedia& m = media_.at(a.lease);
-    if (m.ring.has_value()) {
+    std::optional<PcmMedia> m = take_media_(a.lease);
+    if (!m)
+        return;
+    if (m->ring.has_value()) {
         drop_ring_();
         rp_seen_ = 0;
         read_val_ = 0;
-        ring_.swap(m.ring);
+        ring_.swap(m->ring);
         ring_len_ = static_cast<std::uint32_t>(ring_->region().len);
         ring_mask_ = ring_len_ - 1u;
     }
-    ++work_.attaches;
     publish_state_();
 }
 
 void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
-    PcmMedia& m = media_.at(a.lease);
+    std::optional<PcmMedia> m = take_media_(a.lease);
+    if (!m)
+        return;
     release_source_();
     rp_seen_ = 0;
     read_val_ = 0;
-    if (!m.sheet.empty() && vfs_) {
-        src_ = cores::make_pcm_source(m.sheet.view(), *vfs_);
+    if (!m->sheet.empty() && vfs_) {
+        src_ = cores::make_pcm_source(m->sheet.view(), *vfs_);
     }
-    ++work_.attaches;
     publish_state_();
+}
+
+std::optional<PcmMedia> PcmRingFeeder::take_media_(xthread::PoolSlot announced) noexcept {
+    Media::Job job = media_.take();
+    if (!job) {
+        misrouted_.add();
+        return std::nullopt;
+    }
+    PcmMedia media{};
+    media.ring.swap(job->ring);
+    media.sheet = job->sheet;
+    if (job.slot() != announced) {
+        misrouted_.add();
+        return std::nullopt;
+    }
+    job.complete();
+    return media;
+}
+
+bool PcmRingFeeder::returned_media_hold_no_ring_for_test() noexcept {
+    bool empty = true;
+    while (Media::Loan back = media_.reap()) {
+        if (back->ring.has_value())
+            empty = false;
+    }
+    return empty;
 }
 
 void PcmRingFeeder::misrouted(const PcmCommand&) noexcept {
@@ -537,7 +565,6 @@ void PcmRingFeeder::publish_state_() noexcept {
     s.primed = primed_;
     s.drained = drained_;
     s.served = served_;
-    s.attaches = work_.attaches;
     if (s == published_ && state_.generation() != 0)
         return;
     published_ = s;

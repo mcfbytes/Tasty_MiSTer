@@ -8,6 +8,8 @@ namespace mister::app {
 struct UiRoundEdge {
     bool pumped = false;
     proto::OsdTarget target = proto::OsdTarget::All;
+
+    bool menu_present = false;
 };
 
 }

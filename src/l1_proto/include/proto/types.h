@@ -9,19 +9,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <type_traits>
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 
+#include "hal/reg_word.h"
 #include "hal/sdram_cfg.h"
 #include "infra/affine.h"
 #include "infra/ascii.h"
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
+#include "infra/error.h"
 #include "infra/json_out.h"
 #include "hal/types.h"
 #include "infra/seat.h"
+#include "os/map_length.h"
+#include "os/types.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
@@ -115,11 +121,6 @@ constexpr std::uint32_t SlotIndex::detail() const noexcept {
     return word;
 }
 
-[[nodiscard]] inline infra::DecimalText mount_list_digits(IoIndex slot) noexcept {
-    constexpr std::uint16_t kMountListBase = 500;
-    return infra::DecimalText{static_cast<std::uint16_t>(slot.v + kMountListBase)};
-}
-
 struct FileSlotDigit {
     friend constexpr auto operator<=>(FileSlotDigit, FileSlotDigit) = default;
 
@@ -158,6 +159,34 @@ private:
 
     std::uint8_t v = 0;
 };
+
+enum class FileRowKind : std::uint8_t { File, Mount };
+
+struct FileRowId {
+    FileRowKind kind;
+    IoIndex index;
+
+    [[nodiscard]] static constexpr FileRowId file(IoIndex i) noexcept {
+        return FileRowId{FileRowKind::File, i};
+    }
+
+    [[nodiscard]] static constexpr FileRowId mount(IoIndex i) noexcept {
+        return FileRowId{FileRowKind::Mount, i};
+    }
+
+    [[nodiscard]] static constexpr FileRowId of(FileRowKind k, IoIndex i) noexcept {
+        return FileRowId{k, i};
+    }
+
+    friend constexpr bool operator==(FileRowId, FileRowId) = default;
+
+private:
+    constexpr FileRowId(FileRowKind k, IoIndex i) noexcept : kind(k), index(i) {}
+};
+
+static_assert(sizeof(FileRowId) == 2 && std::is_trivially_copyable_v<FileRowId>);
+static_assert(!std::is_default_constructible_v<FileRowId>);
+static_assert(FileRowId::file(IoIndex{1}) != FileRowId::mount(IoIndex{1}));
 
 struct ItemOrdinal {
     std::uint16_t v = 0;
@@ -213,12 +242,31 @@ struct PathId {
 };
 
 struct BlockCount;
+struct BlockSize;
 
 struct FileSize {
     std::uint64_t v = 0;
 
     [[nodiscard]] static constexpr FileSize of(infra::ByteCount bytes) noexcept {
         return FileSize{static_cast<std::uint64_t>(bytes.v)};
+    }
+
+    template <class B>
+        requires(sizeof(B) == sizeof(char))
+    [[nodiscard]] static constexpr FileSize of(std::span<B> buf) noexcept {
+        return FileSize{buf.size_bytes()};
+    }
+
+    template <class B>
+        requires(sizeof(B) == sizeof(char))
+    [[nodiscard]] constexpr std::span<B> skip_in(std::span<B> buf) const noexcept {
+        return buf.subspan(static_cast<std::size_t>(v));
+    }
+
+    template <class B>
+        requires(sizeof(B) == sizeof(char))
+    [[nodiscard]] constexpr std::span<B> first_of(std::span<B> buf) const noexcept {
+        return buf.first(static_cast<std::size_t>(v));
     }
 
     [[nodiscard]] constexpr std::uint32_t low_word() const noexcept {
@@ -254,8 +302,6 @@ struct FileSize {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr std::size_t length_of(BlockCount n) const noexcept;
-
     [[nodiscard]] constexpr FileSize per_step(std::uint32_t steps) const noexcept {
         const std::uint64_t each = v / steps;
         return FileSize{each == 0 ? 1u : each};
@@ -279,15 +325,15 @@ struct FileSize {
         return static_cast<std::size_t>(std::min<std::uint64_t>(want, room));
     }
 
-    [[nodiscard]] constexpr std::size_t blocks_in(std::size_t budget) const noexcept {
-        return budget / static_cast<std::size_t>(v);
+    [[nodiscard]] constexpr std::size_t slots_in(std::size_t budget) const noexcept {
+        return v == 0 ? 0 : budget / static_cast<std::size_t>(v);
     }
 
     [[nodiscard]] constexpr FileSize after_header(FileSize header) const noexcept {
         return FileSize{v > header.v ? v - header.v : 0u};
     }
 
-    [[nodiscard]] constexpr BlockCount units_covering(FileSize unit) const noexcept;
+    [[nodiscard]] constexpr BlockCount units_covering(BlockSize unit) const noexcept;
 
     [[nodiscard]] constexpr std::chrono::nanoseconds mib_share_of(
         std::chrono::nanoseconds per_mib
@@ -298,7 +344,7 @@ struct FileSize {
         )};
     }
 
-    [[nodiscard]] constexpr BlockCount whole_units(FileSize unit) const noexcept;
+    [[nodiscard]] constexpr BlockCount whole_units(BlockSize unit) const noexcept;
     friend constexpr bool operator==(FileSize, FileSize) = default;
     friend constexpr auto operator<=>(FileSize, FileSize) = default;
 };
@@ -340,6 +386,10 @@ struct Lba {
         infra::store_be<std::uint32_t>(dst, v);
     }
 
+    [[nodiscard]] constexpr hal::RegWord register_word() const noexcept { return hal::RegWord{v}; }
+
+    [[nodiscard]] static constexpr Lba of(hal::RegWord w) noexcept { return Lba{w.bits()}; }
+
     friend constexpr bool operator==(Lba, Lba) = default;
     friend constexpr auto operator<=>(Lba, Lba) = default;
 };
@@ -347,18 +397,6 @@ struct Lba {
 template <std::integral Word = std::uint32_t>
 [[nodiscard]] constexpr Word detail_of(Lba lba) noexcept {
     return static_cast<Word>(lba.v & std::numeric_limits<std::uint32_t>::max());
-}
-
-constexpr BlockCount FileSize::units_covering(FileSize unit) const noexcept {
-    return BlockCount{static_cast<std::uint32_t>((v + unit.v - 1) / unit.v)};
-}
-
-constexpr BlockCount FileSize::whole_units(FileSize unit) const noexcept {
-    return BlockCount{static_cast<std::uint32_t>(v / unit.v)};
-}
-
-constexpr std::size_t FileSize::length_of(BlockCount n) const noexcept {
-    return static_cast<std::size_t>(v * n.v);
 }
 
 namespace detail {
@@ -395,6 +433,10 @@ struct SdStatusWord {
     };
 
     [[nodiscard]] constexpr bool valid() const noexcept { return (v & kValid) != 0u; }
+
+    [[nodiscard]] static constexpr SdStatusWord of(hal::RegWord w) noexcept {
+        return SdStatusWord{static_cast<std::uint16_t>(w.bits())};
+    }
 
     [[nodiscard]] constexpr bool decoded() const noexcept { return (v & kOpMask) != 0u; }
 
@@ -491,39 +533,6 @@ static_assert(
     "an absent cell reads the 'absent or zero' word"
 );
 
-struct StatusBit {
-    std::uint8_t v = 0;
-
-    [[nodiscard]] constexpr std::uint32_t detail() const noexcept { return v; }
-
-    [[nodiscard]] constexpr bool within(unsigned bound) const noexcept { return v < bound; }
-
-    [[nodiscard]] constexpr std::size_t word_index(unsigned bits_per_word) const noexcept {
-        return v / bits_per_word;
-    }
-
-    [[nodiscard]] constexpr unsigned bit_index(unsigned bits_per_word) const noexcept {
-        return v % bits_per_word;
-    }
-
-    [[nodiscard]] constexpr StatusBit advanced(unsigned n) const noexcept {
-        constexpr unsigned kMax = std::numeric_limits<std::uint8_t>::max();
-        const unsigned at = static_cast<unsigned>(v) + n;
-        return StatusBit{static_cast<std::uint8_t>(at > kMax ? kMax : at)};
-    }
-
-    friend constexpr bool operator==(StatusBit, StatusBit) = default;
-    friend constexpr auto operator<=>(StatusBit, StatusBit) = default;
-};
-
-enum BitRep : std::uint32_t {};
-
-[[nodiscard]] inline BitRep printed_bit(StatusBit bit) noexcept {
-    return static_cast<BitRep>(bit.v);
-}
-
-inline constexpr StatusBit kResetBit{0};
-
 struct OsdRow;
 
 struct OsdRowCount {
@@ -573,6 +582,20 @@ struct OsdRow {
 };
 
 inline constexpr OsdRowCount kOneOsdRow{1};
+
+struct OsdRowBytes {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr OsdRowBytes of(std::span<const std::uint8_t> row) noexcept {
+        return OsdRowBytes{static_cast<std::uint32_t>(row.size())};
+    }
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
+    friend constexpr bool operator==(OsdRowBytes, OsdRowBytes) = default;
+};
 
 struct OsdCol;
 
@@ -720,13 +743,6 @@ struct OsdMask {
 
     [[nodiscard]] constexpr bool has(OsdMask bits) const noexcept { return (v & bits.v) != 0; }
 
-    [[nodiscard]] constexpr bool has(StatusBit bit) const noexcept {
-        constexpr unsigned kMaskBits = std::numeric_limits<std::uint16_t>::digits;
-        if (!bit.within(kMaskBits))
-            return false;
-        return ((v >> bit.bit_index(kMaskBits)) & 1u) != 0u;
-    }
-
     [[nodiscard]] constexpr OsdMask only(OsdMask bits) const noexcept {
         return OsdMask{static_cast<std::uint16_t>(v & bits.v)};
     }
@@ -781,6 +797,72 @@ struct BindGeneration {
 static_assert(sizeof(BindGeneration) == 2);
 static_assert(BindGeneration{BindGeneration::kMaxGen}.next() == BindGeneration{1});
 
+struct StageSlot {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr bool within(StageSlot slots) const noexcept { return v < slots.v; }
+
+    [[nodiscard]] constexpr std::size_t table_index() const noexcept {
+        const std::size_t place = v;
+        return place;
+    }
+
+    friend constexpr bool operator==(StageSlot, StageSlot) = default;
+};
+
+struct StageGen {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr StageGen next() const noexcept {
+        const std::uint32_t n = v + 1u;
+        return StageGen{n != 0u ? n : 1u};
+    }
+
+    [[nodiscard]] constexpr bool is_set() const noexcept { return v != 0; }
+
+    [[nodiscard]] constexpr StageSlot slot_in(StageSlot slots) const noexcept {
+        const std::uint8_t place = static_cast<std::uint8_t>(v % slots.v);
+        return StageSlot{place};
+    }
+
+    [[nodiscard]] constexpr std::uint32_t stamp() const noexcept {
+        const std::uint32_t word = v;
+        return word;
+    }
+
+    friend constexpr bool operator==(StageGen, StageGen) = default;
+};
+
+static_assert(sizeof(StageGen) == 4);
+static_assert(StageGen{0xFFFFFFFFu}.next() == StageGen{1});
+
+struct MountEpoch {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr MountEpoch next() const noexcept { return MountEpoch{v + 1u}; }
+
+    friend constexpr bool operator==(MountEpoch, MountEpoch) = default;
+};
+
+struct ReplyMask {
+    std::uint16_t v = 0;
+    friend constexpr bool operator==(ReplyMask, ReplyMask) = default;
+};
+
+struct ReplyWord {
+    std::uint16_t v = 0;
+
+    [[nodiscard]] constexpr bool nonzero() const noexcept { return v != 0; }
+
+    [[nodiscard]] constexpr bool any(ReplyMask m) const noexcept { return (v & m.v) != 0; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    friend constexpr bool operator==(ReplyWord, ReplyWord) = default;
+};
+
+static_assert(sizeof(ReplyWord) == 2);
+
 struct CompanionBindGen {
     std::uint16_t v = 0;
 
@@ -821,30 +903,6 @@ struct RebootSeq {
 
 static_assert(sizeof(RebootSeq) == 2);
 static_assert(RebootSeq{RebootSeq::kMax}.next() == RebootSeq{0});
-
-struct ArenaHalf {
-    std::uint8_t v = 0;
-
-    enum : std::uint8_t { kCount = 2 };
-
-    [[nodiscard]] constexpr bool exists() const noexcept { return v < kCount; }
-
-    template <std::unsigned_integral I>
-    [[nodiscard]] static constexpr ArenaHalf of(I pool_index) noexcept {
-        return ArenaHalf{static_cast<std::uint8_t>(pool_index % kCount)};
-    }
-
-    template <std::unsigned_integral M>
-    [[nodiscard]] constexpr M mask() const noexcept {
-        return static_cast<M>(M{1} << v);
-    }
-
-    [[nodiscard]] constexpr ArenaHalf other() const noexcept {
-        return ArenaHalf{static_cast<std::uint8_t>(v ^ 1u)};
-    }
-
-    friend constexpr bool operator==(ArenaHalf, ArenaHalf) = default;
-};
 
 struct RxSlabId {
     TASTY_SEAT_MEDIATOR(Any, Any);
@@ -1040,10 +1098,6 @@ struct BlockSlotMask {
 struct BlockSize {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr BlockSize span_of(BlockCount n) const noexcept {
-        return BlockSize{n.v * v};
-    }
-
     [[nodiscard]] constexpr std::uint64_t position_of(Lba lba) const noexcept {
         return static_cast<std::uint64_t>(lba.v) * v;
     }
@@ -1058,8 +1112,13 @@ struct BlockSize {
         return FileSize{static_cast<std::uint64_t>(n.v) * v};
     }
 
-    [[nodiscard]] constexpr BlockCount blocks_in(BlockSize total) const noexcept {
-        return BlockCount{v == 0 ? 0u : total.v / v};
+    [[nodiscard]] constexpr BlockCount blocks_in(FileSize total) const noexcept {
+        if (v == 0)
+            return BlockCount{};
+
+        if (total.high_word() == 0)
+            return BlockCount{total.low_word() / v};
+        return BlockCount{static_cast<std::uint32_t>(total.v / v)};
     }
 
     template <class Byte>
@@ -1067,11 +1126,25 @@ struct BlockSize {
         return buf.first(static_cast<std::size_t>(v));
     }
 
+    [[nodiscard]] constexpr os::MapLength map_length() const noexcept { return os::MapLength{v}; }
+
+    [[nodiscard]] constexpr bool power_of_two() const noexcept {
+        return v != 0 && (v & (v - 1u)) == 0u;
+    }
+
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
     friend constexpr bool operator==(BlockSize, BlockSize) = default;
     friend constexpr auto operator<=>(BlockSize, BlockSize) = default;
 };
+
+constexpr BlockCount FileSize::units_covering(BlockSize unit) const noexcept {
+    return BlockCount{static_cast<std::uint32_t>((v + unit.v - 1) / unit.v)};
+}
+
+constexpr BlockCount FileSize::whole_units(BlockSize unit) const noexcept {
+    return BlockCount{static_cast<std::uint32_t>(v / unit.v)};
+}
 
 constexpr BlockCount SdStatusWord::block_count() const noexcept {
     return BlockCount{((static_cast<std::uint32_t>(v) >> kCountShift) & kCountMask) + 1u};
@@ -1122,6 +1195,10 @@ struct FieldValue {
     [[nodiscard]] constexpr FieldValue wrapped_back(FieldCount count) const noexcept;
 
     [[nodiscard]] constexpr ValueSet bit() const noexcept;
+
+    [[nodiscard]] static constexpr FieldValue flag(bool on) noexcept {
+        return FieldValue{on ? 1u : 0u};
+    }
 
     friend constexpr void json_field(
         infra::JsonOut& o,
@@ -1434,5 +1511,59 @@ struct Attenuation {
 };
 
 enum class VolumeStep : std::uint8_t { Quieter, Louder };
+
+struct LaneCaps {
+    std::uint32_t v = 0;
+    friend constexpr bool operator==(LaneCaps, LaneCaps) = default;
+};
+
+struct OsdGeometry {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
+    friend constexpr bool operator==(OsdGeometry, OsdGeometry) = default;
+};
+
+struct IrqOrdinal {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr os::UioLine line_after(IrqOrdinal pool_first) const noexcept {
+        return os::pool_line_at(v, pool_first.v);
+    }
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
+    friend constexpr bool operator==(IrqOrdinal, IrqOrdinal) = default;
+    friend constexpr auto operator<=>(IrqOrdinal, IrqOrdinal) = default;
+};
+
+struct CauseTag {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
+    friend constexpr bool operator==(CauseTag, CauseTag) = default;
+};
+
+struct CauseBits {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr bool holds(CauseBits bits) const noexcept {
+        return (v & bits.v) == bits.v;
+    }
+
+    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
+    friend constexpr bool operator==(CauseBits, CauseBits) = default;
+};
 
 }

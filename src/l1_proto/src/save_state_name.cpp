@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <utility>
 
+#include "infra/path_parts.h"
+
 namespace mister::proto {
 
 namespace {
@@ -13,13 +15,7 @@ enum : std::size_t { kPathSlack = 8 };
 }
 
 std::string savestate_stem(std::string_view rom_path) {
-    const std::size_t slash = rom_path.find_last_of('/');
-    std::string_view base = (slash == std::string_view::npos) ? rom_path
-                                                              : rom_path.substr(slash + 1u);
-    const std::size_t dot = base.find_last_of('.');
-    if (dot != std::string_view::npos)
-        base = base.substr(0, dot);
-    return std::string(base);
+    return std::string(infra::stem(rom_path));
 }
 
 std::optional<SaveStateName> SaveStateName::of(const SaveTarget& target) {

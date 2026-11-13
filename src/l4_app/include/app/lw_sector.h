@@ -2,11 +2,12 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
+#include <cstddef>
 #include <optional>
 
+#include "app/lw_grant_stamp.h"
+#include "app/sector_grant.h"
 #include "app/types.h"
-#include "cores/blank_save_spec.h"
 #include "hal/phys_region.h"
 #include "hal/register_window.h"
 #include "hal/sector_block.h"
@@ -21,6 +22,9 @@ namespace mister::app {
 
 struct LwSector {
     TASTY_SEAT_EXEMPT(component);
+    using Grant = SectorGrant;
+
+    static constexpr bool kHasEnable = true;
 
     struct Card {
         proto::SectorBlockDecl::Card decl{};
@@ -32,10 +36,7 @@ struct LwSector {
     proto::SectorBlockDecl block{};
     infra::OptRef<const svc::ISectorProgram> program{};
     std::array<Card, proto::SectorBlockDecl::kCards> cards{};
-    infra::OptRef<const cores::BlankSaveSpec> blank{};
-    std::uint16_t gen = 0;
-    FabricGeneration fabric_gen{};
-    bool fabric_lost = false;
+    LwGrantStamp stamp{};
 
     [[nodiscard]] proto::BlockSlotMask card_slots() const noexcept {
         proto::BlockSlotMask m{};
@@ -47,6 +48,32 @@ struct LwSector {
 
     [[nodiscard]] proto::BlockSlotMask bridge_slots() const noexcept {
         return card_slots().with(block.slot);
+    }
+
+    [[nodiscard]] Grant lend() const noexcept {
+        Grant g{
+            .block = regs.lend(),
+            .line = line.borrow(),
+            .program = program,
+            .gen = stamp.gen(),
+            .frame_words = block.frame_words
+        };
+        for (std::size_t c = 0; c < g.cards.size(); ++c) {
+            const Card& card = cards[c];
+            if (card.image.len == 0)
+                continue;
+            g.cards[c] = SectorCard{
+                .slot = card.decl.slot,
+                .frame_words = card.decl.frame_words,
+                .image = card.image
+            };
+        }
+        return g;
+    }
+
+    void disable() noexcept {
+        regs.write(hal::SectorBlock::Reg::Ctrl, 0);
+        (void)regs.read(hal::SectorBlock::Reg::Ctrl);
     }
 };
 

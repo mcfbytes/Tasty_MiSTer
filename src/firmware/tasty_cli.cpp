@@ -5,14 +5,14 @@
 #include <optional>
 
 #include "infra/parse_int.h"
+#include "tasty_cli_refusal.h"
+#include "tasty_command.h"
 
 namespace mister::fw {
 namespace {
 
-constexpr const char* kBadArguments = "bad arguments (try tasty help)";
-
 [[nodiscard]] Ex<TastyArgs> fail(TastyRefusal r) noexcept {
-    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), tasty_refusal_detail(r)});
+    return std::unexpected(r.error(ERR_SITE()));
 }
 
 }
@@ -64,74 +64,6 @@ void tasty_print_usage(std::FILE* out) noexcept {
         "row whose segment and avi_frame columns are S and N; -1 was hashed\n"
         "and not written. The hash is the core picture, not the AVI picture.\n"
     );
-}
-
-const char* tasty_args_refusal(std::uint32_t detail) noexcept {
-    const std::optional<TastyRefusal> r = tasty_refusal_of(detail);
-    if (!r)
-        return kBadArguments;
-    switch (*r) {
-        case TastyRefusal::NoVerb:
-            return "no verb (try tasty help)";
-        case TastyRefusal::NoMovie:
-            return "the verb needs a movie file";
-        case TastyRefusal::MovieTooLong:
-            return "the movie path is too long";
-        case TastyRefusal::NoRecAction:
-        case TastyRefusal::BadRecAction:
-            return "rec needs start or stop";
-        case TastyRefusal::UnknownVerb:
-            return "unknown verb (try tasty help)";
-        case TastyRefusal::BadRom:
-            return "--rom needs a file";
-        case TastyRefusal::BadCore:
-            return "--core needs a file";
-        case TastyRefusal::BadRecord:
-            return "--record needs a directory";
-        case TastyRefusal::BadLead:
-            return "--lead needs a whole number of frames";
-        case TastyRefusal::BadLinger:
-            return "--linger needs a whole number of seconds";
-        case TastyRefusal::BadVsyncAdjust:
-            return "--vsync-adjust is 0 or 1";
-        case TastyRefusal::BadStopAt:
-            return "--stop-at needs a frame number above 0";
-        case TastyRefusal::BadRamInit:
-            return "--ram-init is zero, ff or random";
-        case TastyRefusal::BadPhase:
-            return "--phase needs a whole number of microseconds";
-        case TastyRefusal::UnknownOption:
-            return "unknown option (try tasty help)";
-        case TastyRefusal::CheckNoRom:
-            return "this verb needs --rom";
-        case TastyRefusal::BadCodec:
-            return "--codec is cscd or zmbv";
-        case TastyRefusal::BadScale:
-            return "--scale is auto, native or half";
-        case TastyRefusal::BadEvery:
-            return "--every is a whole number from 1 to 600";
-        case TastyRefusal::BadFrom:
-            return "--from needs a movie frame number, 0 or more";
-        case TastyRefusal::BadTo:
-            return "--to needs a movie frame number, 0 or more";
-        case TastyRefusal::BadSegment:
-            return "--segment is a size from 16M to 2G (bytes, or with K, M or G)";
-        case TastyRefusal::BadRecBounds:
-            return "--to must be after --from";
-        case TastyRefusal::RecOptionsWithoutRecord:
-            return "--codec, --scale, --motion, --every, --from, --to and --segment need --record";
-        case TastyRefusal::BadMotion:
-            return "--motion is auto, off, small or full";
-        case TastyRefusal::SliceOnRecStart:
-            return "--from and --to count movie frames; use them with tasty play --record";
-        case TastyRefusal::BadSave:
-            return "--save needs a file";
-        case TastyRefusal::SaveNotPlay:
-            return "--save seeds a movie's battery save; use it with tasty play";
-        case TastyRefusal::kCount:
-            return kBadArguments;
-    }
-    return kBadArguments;
 }
 
 const char* tasty_verb_name(TastyVerb v) noexcept {
@@ -280,8 +212,8 @@ struct OptionRow {
             case OptionArity::Value:
                 return !field.has_value()
                     && take.has_value()
-                    && refusal != TastyRefusal::UnknownOption
-                    && refusal != TastyRefusal::kCount;
+                    && refusal.why() != TastyRefusal::UnknownOption
+                    && refusal.why() != TastyRefusal::kCount;
         }
         return false;
     }
@@ -551,13 +483,8 @@ template <class Row, std::size_t N>
     if (!a.record && record_option)
         return fail(TastyRefusal::RecOptionsWithoutRecord);
 
-    if (a.verb == TastyVerb::RecStart
-        && (a.rec.from_frame >= app::MovieFrame{} || a.rec.to_frame >= app::MovieFrame{}))
-        return fail(TastyRefusal::SliceOnRecStart);
-    if (a.verb == TastyVerb::Check && a.rom.empty())
-        return fail(TastyRefusal::CheckNoRom);
-    if (a.save && a.verb != TastyVerb::Play)
-        return fail(TastyRefusal::SaveNotPlay);
+    if (const std::optional<TastyRefusal> refusal = make_tasty_command(a.verb)->refuse(a))
+        return fail(*refusal);
     return a;
 }
 

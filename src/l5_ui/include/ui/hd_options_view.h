@@ -8,6 +8,7 @@
 #include "infra/seat.h"
 #include "ui/options_view.h"
 #include "ui/placer.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 struct FileSlot;
@@ -52,7 +53,7 @@ public:
     RowIndex selection() const override;
     bool empty() const override;
 
-    std::uint32_t refusals() const noexcept override;
+    svc::Tally refusals() const noexcept override;
 
 private:
     [[nodiscard]] std::unique_ptr<HdListPage> make_list_() const;
@@ -60,7 +61,7 @@ private:
     IOptionsSurface& surface_;
     Spec spec_;
     std::unique_ptr<HdListPage> list_;
-    std::uint32_t retired_refusals_ = 0;
+    svc::Tally retired_refusals_{};
 };
 
 }

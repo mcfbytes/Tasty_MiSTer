@@ -3,6 +3,7 @@
 
 #include "infra/seat.h"
 #include "ui/build_env.h"
+#include "ui/page_arg.h"
 #include "ui/page_id.h"
 #include "ui/types.h"
 
@@ -32,7 +33,7 @@ struct HdPlanInputs final {
     const NowPlaying& now_playing;
     const app::RecentGames& recent_games;
     BuildEnv env;
-    ItemId focus;
+    PageArg arg;
     PageId classic;
     bool front_end;
 };

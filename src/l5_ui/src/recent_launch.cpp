@@ -29,13 +29,13 @@ static_assert(
 );
 
 std::optional<app::Mgl> document_of(const app::RecentGames::Record& r) {
-    const std::optional<proto::FileSlotDigit> digit = proto::FileSlotDigit::from(r.ioctl_index);
+    const std::optional<proto::FileSlotDigit> digit = proto::FileSlotDigit::from(r.row.index);
     if (!digit)
         return std::nullopt;
     app::Mgl doc;
     (void)doc.rbf.assign(r.rbf);
     (void)doc.path.assign(r.path);
-    doc.slot = r.slot == 'S' ? app::MglItem::Slot::Image : app::MglItem::Slot::File;
+    doc.slot = r.row.kind;
     doc.index = *digit;
     doc.delay_s = app::DelaySeconds{};
     return doc;
@@ -52,7 +52,7 @@ RecentLaunch::RecentLaunch(const HdPlanInputs& in)
     if (front_end_)
         return;
     if (!page0_.run(in.items, in.env, true, in.verbs)) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     picks_.emplace(
@@ -78,9 +78,7 @@ bool RecentLaunch::asks_first(const app::RecentGames::Record& r) const {
 infra::OptRef<const OptionItem> RecentLaunch::slot_for_(const app::RecentGames::Record& r) const {
     if (!infra::ieq(r.core, running_core_))
         return {};
-    return page0_.slot_row(
-        SlotFocus{r.slot == 'S' ? SlotFocus::Kind::Image : SlotFocus::Kind::File, r.ioctl_index}
-    );
+    return page0_.slot_row(r.row);
 }
 
 Transition RecentLaunch::launch(const app::RecentGames::Record& r) {
@@ -92,13 +90,13 @@ Transition RecentLaunch::launch(const app::RecentGames::Record& r) {
 
     const std::optional<app::Mgl> doc = document_of(r);
     if (!doc)
-        return Transition{Transition::Kind::CloseAll};
+        return Transition::close_all();
     if (!ctx_.route || !ctx_.route->on(*doc)) {
-        ++refusals_;
+        refusals_.add();
         return Transition{};
     }
     ++published_;
-    return Transition{Transition::Kind::CloseAll};
+    return Transition::close_all();
 }
 
 bool RecentLaunch::ask(
@@ -108,7 +106,7 @@ bool RecentLaunch::ask(
 ) {
     TASTY_SEAT_BODY(RecentLaunch);
     if (!ctx_.launches.confirm) {
-        ++refusals_;
+        refusals_.add();
         return false;
     }
     ConfirmPage::Spec spec{};
@@ -121,9 +119,9 @@ bool RecentLaunch::ask(
     return true;
 }
 
-std::uint32_t RecentLaunch::refusals() const noexcept {
+svc::Tally RecentLaunch::refusals() const noexcept {
     TASTY_SEAT_BODY(RecentLaunch);
-    return refusals_ + (picks_ ? picks_->refusals() : 0u);
+    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
 }
 
 std::uint32_t RecentLaunch::commands_published() const noexcept {

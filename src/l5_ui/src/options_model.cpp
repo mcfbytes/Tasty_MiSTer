@@ -19,7 +19,7 @@ void OptionsModel::build(const proto::ItemTable& table, const BuildEnv& env) {
 
     const auto emit = [&](std::unique_ptr<OptionItem> it) {
         if (kind_draws(it->kind)) {
-            it->screen_row = osd_row_at(drawn_);
+            it->drawn_row = row_after(drawn_);
             drawn_ += kOneRow;
         }
         if (kind_selects(it->kind)) {

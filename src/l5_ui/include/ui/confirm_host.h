@@ -13,7 +13,7 @@ public:
 
     virtual Transition on_confirm(RowIndex choice) = 0;
 
-    virtual Transition on_cancel() { return Transition{Transition::Kind::Pop}; }
+    virtual Transition on_cancel() { return Transition::pop(); }
 
 protected:
     IConfirmHost() = default;

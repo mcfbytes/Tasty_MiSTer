@@ -82,7 +82,11 @@ void SaveStateAttach::take_ask_(const Ask& ask) noexcept {
     copy_.invalidate();
     ui_.held = ask.generation;
     ui_.facts.live = false;
-    const proto::SaveTarget target{ask.core_name.view(), ask.rom_path.view(), ask.arcade};
+    const proto::SaveTarget target{
+        ask.core_name.view(),
+        ask.rom_path.view(),
+        ask.load_hint == cores::LoadHint::XmlManifest
+    };
     if (!ui_.engine.arm(target) || !ui_.engine.window_valid(ask.decl)) {
         ui_.engine.disarm();
         answer_(false);
@@ -97,7 +101,7 @@ void SaveStateAttach::take_ask_(const Ask& ask) noexcept {
     loan->decl = ask.decl;
     loan->core_name = ask.core_name;
     loan->rom_path = ask.rom_path;
-    loan->arcade = ask.arcade;
+    loan->load_hint = ask.load_hint;
     loan->ok = false;
     loan->aborted = false;
     loan->abort_at = ui_.abort_level;
@@ -217,7 +221,11 @@ void SaveStateAttach::serve() noexcept {
         if (!io_.job)
             return;
         const PrimeOrder& order = *io_.job;
-        const proto::SaveTarget target{order.core_name.view(), order.rom_path.view(), order.arcade};
+        const proto::SaveTarget target{
+            order.core_name.view(),
+            order.rom_path.view(),
+            order.load_hint == cores::LoadHint::XmlManifest
+        };
         if (auto begun = io_.primer.begin(env, target, order.decl); !begun)
             finish_(false, begun.error());
         return;

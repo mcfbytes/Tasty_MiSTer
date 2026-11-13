@@ -4,12 +4,13 @@
 #include <algorithm>
 #include <chrono>
 
+#include "infra/seat_owner_io.h"
 #include "reactor/cause_decode.h"
 #include "reactor/notifier.h"
 
 namespace mister::app {
 
-LwSysEndpoint::LwSysEndpoint(const Wiring& w) noexcept : Base(w.grant), w_(w) {}
+LwSysEndpoint::LwSysEndpoint(const Wiring& w) noexcept : Base(w.grant, w.lease), w_(w) {}
 
 void LwSysEndpoint::serve() noexcept {
     TASTY_SEAT_BODY(LwSysEndpoint);
@@ -56,7 +57,7 @@ void LwSysEndpoint::bound_hook_() noexcept {
     sent_stflg_.reset();
 }
 
-void LwSysEndpoint::answer_hook_(std::uint16_t gen) noexcept {
+void LwSysEndpoint::answer_hook_(proto::BuildGeneration gen) noexcept {
     tally_.bind_gen = gen;
     publish_();
 }
@@ -89,20 +90,18 @@ LwSysEndpoint::Port& LwSysEndpoint::port_() noexcept {
 std::optional<proto::StatusSnapshot> LwSysEndpoint::read_snapshot_() noexcept {
     using hal::SysBlock;
     proto::StatusSnapshot snapshot{};
-    const std::optional<SysBlock::Stflg> first = SysBlock::decode(
-        port_().read(SysBlock::Reg::Stflg)
-    );
+    const std::optional<SysBlock::Stflg>
+        first = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
 
     std::array<std::uint16_t, proto::StatusWord::kWords> words{};
     for (std::uint32_t i = 0; i < SysBlock::kSnapshotWords; ++i) {
-        const std::uint32_t w = port_().read(SysBlock::status(i));
-        words[2 * i] = static_cast<std::uint16_t>(w);
-        words[2 * i + 1] = static_cast<std::uint16_t>(w >> 16);
+        const std::array<std::uint16_t, 2> halves = port_().read(SysBlock::status(i)).halves();
+        words[2 * i] = halves[0];
+        words[2 * i + 1] = halves[1];
     }
 
-    const std::optional<SysBlock::Stflg> second = SysBlock::decode(
-        port_().read(SysBlock::Reg::Stflg)
-    );
+    const std::optional<SysBlock::Stflg>
+        second = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
     if (!first || first != second)
         return std::nullopt;
     snapshot.stflg = *first;
@@ -155,4 +154,14 @@ void LwSysEndpoint::serve_status_(bool rang) noexcept {
     publish_();
 }
 
+template class LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
+
+}
+
+namespace mister::hal {
+template class ReadWindowPort<SysBlock, seat_owner::Io>;
+}
+
+namespace mister::xthread {
+template class GrantLease<app::SysGrant, seat_owner::Io>;
 }

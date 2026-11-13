@@ -82,10 +82,8 @@ bool LadderHostAdapter::order_load_facts(std::span<const std::uint8_t> facts) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     if (edges_.inbox.ring().size() >= proto::kLinkTxCapacity)
         return false;
-    const auto slab = edges_.inbox.intern(facts);
-    if (!slab)
-        return false;
-    return order(proto::LinkOp::LoadFacts{.facts = *slab});
+
+    return edges_.inbox.push_load_facts(facts, {}).has_value();
 }
 
 std::size_t LadderHostAdapter::link_in_flight() const noexcept {
@@ -107,7 +105,15 @@ cores::MountStatus LadderHostAdapter::mount_status() {
 
 bool LadderHostAdapter::order_walk(proto::IoIndex slot, std::string_view path, proto::ActKey gen) {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    return acts_.order_walk(slot, path, gen);
+    if (edges_.belt.any_live(kWalkBlockers))
+        return false;
+    WalkAsk ask{.slot = slot, .gen = gen};
+    if (walk_ || !ask.path.assign(path)) {
+        ++edges_.tally.files_failed;
+        return false;
+    }
+    walk_ = std::move(ask);
+    return true;
 }
 
 cores::MountStatus LadderHostAdapter::walk_status() {
@@ -117,7 +123,24 @@ cores::MountStatus LadderHostAdapter::walk_status() {
 
 bool LadderHostAdapter::order_savestates(std::string_view image, proto::ActKey gen) {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    return acts_.order_savestates(image, gen);
+    const auto& conf = edges_.negotiated.conf_str();
+    if (!conf || !conf->savestate().has_value())
+        return false;
+    const bool service = edges_.save_state_asks
+        && edges_.save_state_facts
+        && edges_.save_state_facts->generation() != 0;
+    SaveStateAttach::Ask ask{
+        .decl = *conf->savestate(),
+        .core_name = edges_.negotiated.core_name(),
+        .load_hint = edges_.negotiated.made_with_manifest() ? cores::LoadHint::XmlManifest
+                                                            : cores::LoadHint::None,
+        .generation = gen
+    };
+    if (!service || !ask.rom_path.assign(image) || !edges_.save_state_asks->push(ask)) {
+        ++edges_.tally.savestate_refusals;
+        return false;
+    }
+    return true;
 }
 
 proto::ActKey LadderHostAdapter::savestates_answered() {

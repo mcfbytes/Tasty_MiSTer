@@ -16,7 +16,7 @@ HdRecentGamesPlan::HdRecentGamesPlan(const HdPlanInputs& in) : launch_(in) {
         refs_.emplace_back(rows_.back());
     }
 
-    refusals_ = in.recent_games.hidden();
+    refusals_ = svc::Tally{in.recent_games.hidden()};
 }
 
 PageId HdRecentGamesPlan::id() const {
@@ -34,9 +34,9 @@ std::span<const std::reference_wrapper<IHdRow>> HdRecentGamesPlan::rows() const 
     return refs_;
 }
 
-std::uint32_t HdRecentGamesPlan::refusals() const noexcept {
+svc::Tally HdRecentGamesPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdRecentGamesPlan);
-    return refusals_ + launch_.refusals();
+    return refusals_.sum(launch_.refusals());
 }
 
 }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "proto/types.h"
 #include "svc/sector_header.h"
@@ -13,7 +14,7 @@ enum class DiscForm : std::uint8_t { UserData, RawFrame, Subcode, FullFrame };
 struct DiscAsk {
     DiscForm form = DiscForm::RawFrame;
     proto::Lba lba{};
-    SectorHeader header{};
+    std::optional<SectorHeader> header{};
     friend constexpr bool operator==(DiscAsk, DiscAsk) = default;
 };
 

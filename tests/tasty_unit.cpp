@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "support/check.h"
+#include "support/prelude_stand.h"
 #include "support/video_quiet.h"
 
 #include "app/encode_status.h"
@@ -27,18 +28,33 @@
 #include "proto/link.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "os/child_process.h"
 #include "os/clock.h"
 #include "proto/link_op.h"
 #include "svc/video_service.h"
 #include "svc/vfs.h"
 #include "tasty_cli.h"
-#include "tasty_ctl.h"
+#include "tasty_cli_refusal.h"
+#include "tasty_client.h"
+#include "tasty_movie.h"
+#include "tasty_owner_lock.h"
+#include "tasty_paths.h"
+#include "tasty_pid_file.h"
+#include "tasty_preflight.h"
+#include "tasty_record.h"
+#include "tasty_runtime.h"
+#include "tasty_say.h"
+#include "tasty_sentences.h"
 #include "replay_mode.h"
+#include "tasty_home_lane.h"
+#include "tasty_return_home.h"
 #include "tasty_osd.h"
 #include "tasty_registry.h"
 #include "tasty_session.h"
 #include "tasty_sink.h"
 #include "tasty_splash.h"
+#include "tasty_status_file.h"
+#include "tasty_stock_control.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -55,6 +71,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -64,18 +81,20 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <minizip/zip.h>
+#include "support/stand_ini.h"
 
 using namespace mister;
 
 namespace {
 
-struct FakeReplay final : fw::TastySession::Replay {
+struct FakeReplay final : fw::IReplayPort {
     TASTY_SEAT_RESIDENT(Ui);
     bool play_ok = true;
-    bool refuse_later = false;
     bool feeding = true;
     std::optional<fw::ReplayRefusal> ref{};
     unsigned plays = 0;
@@ -99,19 +118,15 @@ struct FakeReplay final : fw::TastySession::Replay {
         ++stops;
     }
 
-    app::FrameCount frames() const noexcept override { return app::FrameCount{12}; }
-
     app::FrameCount movie_frames() const noexcept override { return app::FrameCount{12}; }
-
-    bool refused() const noexcept override { return refuse_later; }
 
     bool active() const noexcept override { return feeding; }
 
     std::optional<fw::ReplayRefusal> refusal() const noexcept override { return ref; }
 
-    std::size_t settings_set() const noexcept override { return lines.size(); }
+    SettingNo settings_set() const noexcept override { return SettingNo{lines.size()}; }
 
-    std::string setting_line(std::size_t i) const override { return lines[i]; }
+    std::string setting_line(SettingNo i) const override { return lines[i.v]; }
 };
 
 struct Tmp {
@@ -152,6 +167,15 @@ struct Tmp {
         return ok;
     }
 };
+
+fw::TastyRuntime runtime_in(std::string_view dir) {
+    auto paths = fw::TastyPaths::in(dir);
+    CHECK(paths.has_value());
+    fw::TastyRuntime rt{};
+    if (paths)
+        rt.paths = *paths;
+    return rt;
+}
 
 void publish_id(app::IdentityLatch& ident, std::string_view rbf) {
     const SeatScope rt{SeatTag::RT};
@@ -219,15 +243,26 @@ struct Sess {
     std::atomic<int> stop{0};
     fw::RunExitCell run_exit{};
     fw::TastyArgs args = play_args();
+    fw::TastySession::PlayRun play_run{};
+    fw::TastySession::RecordOnlyRun rec_run{};
+    fw::TastyRuntime runtime{};
+    fw::TastyStatusFile status{runtime.paths};
     fw::TastySession::Wiring w;
     std::optional<fw::TastySession> s{};
     const SeatScope ui{SeatTag::Ui};
 
     explicit Sess(const svc::Vfs* vfs = nullptr, const std::atomic<int>* stop_flag = nullptr)
-        : Sess(vfs, stop_flag, Binds{}) {}
+        : Sess(vfs, stop_flag, Binds{}, fw::TastyRuntime{}) {}
 
-    Sess(const svc::Vfs* vfs, const std::atomic<int>* stop_flag, Binds b)
-        : w{.replay = replay,
+    Sess(
+        const svc::Vfs* vfs,
+        const std::atomic<int>* stop_flag,
+        Binds b,
+        const fw::TastyRuntime& rt = {}
+    )
+        : runtime(rt),
+          status(runtime.paths),
+          w{.replay = replay,
             .rec = b.rec != nullptr ? *b.rec : rec,
             .asks = asks,
             .link_tx = tx,
@@ -239,13 +274,14 @@ struct Sess {
             .vfs = vfs != nullptr ? *vfs : own_vfs,
             .stop = stop_flag != nullptr ? *stop_flag : stop,
             .run_exit = run_exit,
+            .status = status,
             .direct_video_ini = b.direct_video_ini != nullptr ? *b.direct_video_ini : dv_ini} {
 
         {
             const SeatScope as_main{SeatTag::Main};
             dv_ini.publish(std::uint8_t{0});
         }
-        s.emplace(w, args);
+        s.emplace(w, args, play_run);
     }
 
     void tick() {
@@ -361,6 +397,7 @@ struct PumpRig {
     ZeroClock clock{};
     mister::testing::QuietVideoEnv quiet{};
     app::LinkTxChannel<mister::SeatTag::Ui> tx{};
+    mister::testing::FakeLinkRouter replies{};
     std::optional<app::VideoPump> pump{};
     VresLink link{};
     std::int64_t t = 0;
@@ -375,14 +412,29 @@ struct PumpRig {
                 hal::board_by_id(hal::BoardId::De10Nano).video,
                 infra::OptRef<svc::adv7513::II2cAdapter>{},
                 quiet.hdmi,
-                app::VideoPump::Wiring{.activity = quiet.activity, .link_tx = tx}
+                mister::testing::video_wiring(quiet.activity, quiet.gates, tx, replies)
             );
+
+        if (pump) {
+            const SeatScope ui{SeatTag::Ui};
+            pump->wire().publish_prelude_level(app::PreludeLevel{.core = {}, .settled = true});
+        }
     }
 
     void core(std::uint32_t seq, std::uint32_t vtime) {
+        const auto now = os::RawMonotonicClock::time_point{std::chrono::nanoseconds{t}};
+        const proto::BindGeneration gen{static_cast<std::uint16_t>(seq)};
+        {
+            const SeatScope rt{SeatTag::RT};
+            link.vtime = vtime;
+            pump->wire().bind_core(app::CoreEdgeSeq{seq}, gen, now);
+            pump->wire().reset_geometry(seq);
+        }
+        {
+            const SeatScope ui{SeatTag::Ui};
+            pump->wire().publish_prelude_level(app::PreludeLevel{.core = gen, .settled = true});
+        }
         const SeatScope rt{SeatTag::RT};
-        link.vtime = vtime;
-        pump->wire().reset_geometry(seq);
         for (int i = 0; i < 3; ++i) {
             pump->wire().on_rt_round(link.view, t);
             t += 600'000'000;
@@ -464,7 +516,8 @@ void test_cli_record_options() {
     CHECK(!bc.has_value());
     if (!bc)
         CHECK(
-            std::string_view(fw::tasty_args_refusal(bc.error().detail)) == "--codec is cscd or zmbv"
+            std::string_view(fw::TastyRefusal::sentence_for(bc.error()))
+            == "--codec is cscd or zmbv"
         );
 
     const char* const no_record[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "zmbv"};
@@ -472,7 +525,7 @@ void test_cli_record_options() {
     CHECK(!nr.has_value());
     if (!nr)
         CHECK(
-            std::string_view(fw::tasty_args_refusal(nr.error().detail))
+            std::string_view(fw::TastyRefusal::sentence_for(nr.error()))
             == "--codec, --scale, --motion, --every, --from, --to and --segment need --record"
         );
 
@@ -481,7 +534,7 @@ void test_cli_record_options() {
         CHECK(!d.has_value());
         if (!d)
             CHECK(
-                std::string_view(fw::tasty_args_refusal(d.error().detail))
+                std::string_view(fw::TastyRefusal::sentence_for(d.error()))
                     .ends_with("need --record")
             );
     };
@@ -502,7 +555,7 @@ void test_cli_record_options() {
     CHECK(!bm.has_value());
     if (!bm)
         CHECK(
-            std::string_view(fw::tasty_args_refusal(bm.error().detail))
+            std::string_view(fw::TastyRefusal::sentence_for(bm.error()))
             == "--motion is auto, off, small or full"
         );
     const char* const bad_slice[] =
@@ -520,7 +573,7 @@ void test_cli_record_options() {
         CHECK(!rs.has_value());
         if (!rs)
             CHECK(
-                std::string_view(fw::tasty_args_refusal(rs.error().detail))
+                std::string_view(fw::TastyRefusal::sentence_for(rs.error()))
                 == "--from and --to count movie frames; use them with tasty play --record"
             );
     }
@@ -529,7 +582,7 @@ void test_cli_record_options() {
     CHECK(!br.has_value());
     if (!br)
         CHECK(
-            std::string_view(fw::tasty_args_refusal(br.error().detail))
+            std::string_view(fw::TastyRefusal::sentence_for(br.error()))
             == "--ram-init is zero, ff or random"
         );
 }
@@ -559,7 +612,7 @@ void test_session_passes_record_options() {
     x.args.rec.to_frame = app::MovieFrame{9};
     x.args.record.emplace();
     (void)x.args.record->assign(fat + "/cap");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     app::RecRequest got{};
     {
@@ -589,7 +642,8 @@ void test_cli_hashes() {
 }
 
 void test_boot_no_handoff() {
-    fw::ReplayMode mode{fw::TastyArgs{}};
+    fw::TastySession::PlayRun run{};
+    fw::ReplayMode mode{fw::TastyArgs{}, run};
     const fw::SessionMode::Traits t = mode.traits();
     CHECK(std::string_view{t.boot_args.core}.empty());
     CHECK(!t.boot_args.companion.has_value());
@@ -624,7 +678,7 @@ void test_cli_save_is_play_only() {
         CHECK(!d.has_value());
         if (!d)
             CHECK(
-                std::string_view(fw::tasty_args_refusal(d.error().detail))
+                std::string_view(fw::TastyRefusal::sentence_for(d.error()))
                 == "--save seeds a movie's battery save; use it with tasty play"
             );
     };
@@ -717,55 +771,157 @@ void test_lock_paths() {
 }
 
 void test_return_home() {
-    int n = 0;
     {
-        fw::ReturnHome h{};
-        h.spawned = infra::OptRef{n};
+        fw::ReturnHome h{{.probe = true}};
     }
-    CHECK(n == 1);
-    n = 0;
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount::of(1));
     {
-        fw::ReturnHome h{};
-        h.spawned = infra::OptRef{n};
-        h.armed = false;
+        fw::ReturnHome h{{.probe = true, .already_homed = true}};
     }
-    CHECK(n == 0);
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount{});
 }
 
 void test_return_home_error_path() {
-    int n = 0;
-    auto fail = [&] {
-        fw::ReturnHome h{};
-        h.spawned = infra::OptRef{n};
+    auto fail = [] {
+        fw::ReturnHome h{{.probe = true}};
         return 1;
     };
     CHECK(fail() == 1);
-    CHECK(n == 1);
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount::of(1));
+}
+
+void test_home_lane_claims_once_per_bind() {
+    fw::HomeLane::Bind b{.probe = true};
+    CHECK(fw::HomeLane::lane() == fw::HomeLane::Lane::Idle);
+    CHECK(fw::HomeLane::may_launch());
+    CHECK(fw::HomeLane::LaunchCount{} == fw::HomeLane::LaunchCount::of(0));
+    {
+        fw::ReturnHome h{b};
+        CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount{});
+        fw::HomeLane::launch();
+        fw::HomeLane::launch();
+        CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount::of(1));
+    }
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount::of(1));
+    {
+        fw::ReturnHome h{b};
+        CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount{});
+    }
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount::of(1));
+    b.already_homed = true;
+    {
+        fw::ReturnHome h{b};
+        fw::HomeLane::launch();
+    }
+    CHECK(fw::HomeLane::launches() == fw::HomeLane::LaunchCount{});
+}
+
+void test_run_exit_statuses() {
+    CHECK(fw::kSignalBase.v == 128);
+    CHECK(std::to_underlying(fw::ExitCode::BusyOwner) == 2);
+    CHECK(std::to_underlying(fw::ExitCode::RomMismatch) == 3);
+    CHECK(fw::process_status(fw::busy_owner()) == 2);
+    CHECK(fw::process_status(fw::rom_mismatch()) == 3);
+    CHECK(fw::process_status(fw::refused()) == 1);
+    CHECK(fw::process_status(fw::after_signal(os::ChildProcessExit::SignalNumber{SIGTERM})) == 143);
+    CHECK(fw::as_exit(fw::busy_owner()) == 2);
+    CHECK(fw::as_exit(fw::rom_mismatch()) == 3);
+    CHECK(fw::failed(fw::busy_owner()));
+    CHECK(fw::failed(fw::rom_mismatch()));
+    CHECK(fw::failed(fw::refused()));
+    CHECK(!fw::failed(fw::ExitCode::Done));
+    infra::JsonOut busy;
+    busy.field(infra::JsonName{"exit"}, fw::busy_owner());
+    CHECK(busy.view() == "\"exit\":2");
+    infra::JsonOut mismatch;
+    mismatch.field(infra::JsonName{"exit"}, fw::rom_mismatch());
+    CHECK(mismatch.view() == "\"exit\":3");
+
+    infra::JsonOut wedged;
+    wedged.field(infra::JsonName{"exit"}, fw::ExitCode::Wedged);
+    CHECK(wedged.view() == "\"exit\":75");
 }
 
 void test_lock_unlink() {
     Tmp t("/tasty_tasty_lock_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    auto fd = fw::tasty_lock_owner();
+    const fw::TastyRuntime rt = runtime_in(t.root);
+    auto fd = fw::TastyOwnerLock::take(rt.paths);
     CHECK(fd.has_value());
     if (!fd)
         return;
-    CHECK(fw::tasty_write_pid(4242).has_value());
-    CHECK(fw::tasty_write_status("x\n").has_value());
-    CHECK(fw::tasty_read_pid() == 4242);
-    fw::tasty_unlock(*fd);
-    CHECK(!fw::tasty_read_pid());
-    auto fd2 = fw::tasty_lock_owner();
+    CHECK(fd->write_pid(*os::ProcessId::of(4242)).has_value());
+    const fw::TastyStatusFile status{rt.paths};
+    CHECK(status.write("x\n").has_value());
+    const auto pid = fw::TastyPidFile{rt.paths}.pid();
+    CHECK(pid && pid->printed() == 4242);
+    fd->release();
+    CHECK(!fw::TastyPidFile{rt.paths}.pid());
+    auto fd2 = fw::TastyOwnerLock::take(rt.paths);
     CHECK(fd2.has_value());
     if (fd2)
-        fw::tasty_unlock(*fd2);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+        fd2->release();
+}
+
+void test_two_owner_locks_over_different_paths_coexist() {
+    Tmp a("/tasty_tasty_la_");
+    Tmp b("/tasty_tasty_lb_");
+    CHECK(!a.root.empty() && !b.root.empty());
+    if (a.root.empty() || b.root.empty())
+        return;
+    const fw::TastyRuntime ra = runtime_in(a.root);
+    const fw::TastyRuntime rb = runtime_in(b.root);
+    auto la = fw::TastyOwnerLock::take(ra.paths);
+    auto lb = fw::TastyOwnerLock::take(rb.paths);
+    CHECK(la.has_value());
+    CHECK(lb.has_value());
+    auto again = fw::TastyOwnerLock::take(ra.paths);
+    CHECK(!again.has_value());
+    if (!again)
+        CHECK(again.error().code == Errc::busy);
+    if (la)
+        la->release();
+    if (lb)
+        lb->release();
+}
+
+void test_status_tmp_path_is_not_clipped() {
+    Tmp t("/tasty_tasty_stmp_");
+    CHECK(!t.root.empty());
+    if (t.root.empty())
+        return;
+    std::string dir = t.root;
+    std::vector<std::string> made;
+    while (dir.size() < 300) {
+        dir += "/" + std::string(48, 's');
+        CHECK(::mkdir(dir.c_str(), 0755) == 0);
+        made.push_back(dir);
+    }
+    auto paths = fw::TastyPaths::in(dir);
+    CHECK(paths.has_value());
+    if (!paths)
+        return;
+    CHECK(paths->status.size() >= 300);
+    CHECK(fw::TastyStatusFile{*paths}.write("x\n").has_value());
+    struct stat st{};
+    CHECK(::stat(paths->status.c_str(), &st) == 0 && S_ISREG(st.st_mode));
+    const auto tmp = paths->status_tmp();
+    CHECK(tmp.has_value());
+    if (tmp)
+        CHECK(::stat(tmp->c_str(), &st) != 0);
+    (void)::unlink(paths->status.c_str());
+    for (auto it = made.rbegin(); it != made.rend(); ++it)
+        (void)::rmdir(it->c_str());
+
+    auto capped = fw::TastyPaths::in("/tmp");
+    CHECK(capped.has_value());
+    if (!capped)
+        return;
+    CHECK(capped->status.assign(std::string(1020, 'x')));
+    const auto over = capped->status_tmp();
+    CHECK(!over.has_value());
+    if (!over)
+        CHECK(over.error().code == Errc::bad_format);
 }
 
 void test_record_dir() {
@@ -860,7 +1016,7 @@ void test_info_missing() {
     CHECK(vfs.has_value());
     if (!vfs)
         return;
-    CHECK(fw::tasty_info_movie(*vfs, "missing.fm2") == 1);
+    CHECK(fw::tasty_info_movie(*vfs, "missing.fm2") == fw::tasty::Exit::Code::Refused);
 }
 
 void test_manifest_doc_role_follows_the_core_set() {
@@ -914,11 +1070,84 @@ void test_info_frames_and_rerecords() {
                 "port0 1\nport1 0\nport2 0\n|0|........|||\n|0|........|||\n|0|.......A|||\n";
     CHECK(t.put("m.fm2", movie));
     StdoutTo cap;
-    const int rc = fw::tasty_info_movie(*vfs, "m.fm2");
+    const fw::tasty::Exit rc = fw::tasty_info_movie(*vfs, "m.fm2");
     const std::string out = cap.text();
-    CHECK(rc == 0);
+    CHECK(rc.ok());
     CHECK(out.find("frames 3") != std::string::npos);
     CHECK(out.find("rerecords 5") != std::string::npos);
+    (void)::unlink(t.p("m.fm2").c_str());
+}
+
+void test_info_reads_an_overlong_header_line_as_the_feeder_does() {
+    const std::string rerecord = "rerecordCount 7";
+    const auto movie_for = [](const std::string& line) {
+        return line + "\nport0 1\nport1 0\nport2 0\n|0|........|||\n";
+    };
+
+    {
+        Tmp t("/tasty_tasty_ovl_");
+        CHECK(!t.root.empty());
+        auto vfs = svc::Vfs::create_at(t.root);
+        CHECK(vfs.has_value());
+        if (!vfs)
+            return;
+        std::string tail = rerecord;
+        tail.append(241, ' ');
+        tail.push_back('X');
+        CHECK_EQ(tail.size(), 257U);
+        const std::string line = "version 3\nromChecksum base64:AAAAAAAAAAAAAAAAAAAAAA==\n" + tail;
+        CHECK(t.put("m.fm2", movie_for(line)));
+        StdoutTo cap;
+        const fw::tasty::Exit rc = fw::tasty_info_movie(*vfs, "m.fm2");
+        const std::string out = cap.text();
+        CHECK(rc.ok());
+        CHECK(out.find("rerecords unknown") != std::string::npos);
+        (void)::unlink(t.p("m.fm2").c_str());
+    }
+
+    {
+        Tmp t("/tasty_tasty_ovl2_");
+        CHECK(!t.root.empty());
+        auto vfs = svc::Vfs::create_at(t.root);
+        CHECK(vfs.has_value());
+        if (!vfs)
+            return;
+        std::string tail = rerecord;
+        tail.append(242, ' ');
+        tail.push_back('X');
+        CHECK_EQ(tail.size(), 258U);
+        const std::string line = "version 3\nromChecksum base64:AAAAAAAAAAAAAAAAAAAAAA==\n" + tail;
+        CHECK(t.put("m.fm2", movie_for(line)));
+        StdoutTo cap;
+        const fw::tasty::Exit rc = fw::tasty_info_movie(*vfs, "m.fm2");
+        const std::string out = cap.text();
+        CHECK(rc.ok());
+        CHECK(out.find("rerecords 7") != std::string::npos);
+        (void)::unlink(t.p("m.fm2").c_str());
+    }
+}
+
+void test_info_reads_an_unterminated_last_header_line() {
+    Tmp t("/tasty_tasty_tail_");
+    CHECK(!t.root.empty());
+    auto vfs = svc::Vfs::create_at(t.root);
+    CHECK(vfs.has_value());
+    if (!vfs)
+        return;
+    CHECK(t.put(
+        "m.fm2",
+        std::string("version 3\n")
+            + "romChecksum base64:AAAAAAAAAAAAAAAAAAAAAA==\n"
+            + "port0 1\n"
+            + "port1 0\n"
+            + "port2 0\n"
+            + "rerecordCount 9"
+    ));
+    StdoutTo cap;
+    const fw::tasty::Exit rc = fw::tasty_info_movie(*vfs, "m.fm2");
+    const std::string out = cap.text();
+    CHECK(rc.ok());
+    CHECK(out.find("rerecords 9") != std::string::npos);
     (void)::unlink(t.p("m.fm2").c_str());
 }
 
@@ -929,46 +1158,41 @@ void test_check_missing() {
     CHECK(vfs.has_value());
     if (!vfs)
         return;
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "missing.fm2", .rom = "r.nes"}) == 1);
+    CHECK(
+        fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "missing.fm2", .rom = "r.nes"})
+        == fw::tasty::Exit::Code::Refused
+    );
 }
 
 void test_busy_text() {
     Tmp t("/tasty_tasty_busy_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    CHECK(fw::tasty_write_pid(99, "/media/fat/tas/smb.fm2").has_value());
-    const std::string msg = fw::tasty_busy_text();
+    const fw::TastyRuntime rt = runtime_in(t.root);
+    auto lock = fw::TastyOwnerLock::take(rt.paths);
+    CHECK(lock.has_value());
+    if (lock) {
+        const auto wrote = lock->write_pid(*os::ProcessId::of(99), "/media/fat/tas/smb.fm2");
+        CHECK(wrote.has_value());
+    }
+    const std::string msg = fw::TastyPidFile{rt.paths}.busy_text();
     CHECK(msg.find("smb.fm2") != std::string::npos);
     CHECK(msg.find("99") != std::string::npos);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+    if (lock)
+        lock->release();
 }
 
 void test_stop_idle() {
     Tmp t("/tasty_tasty_idle_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    CHECK(fw::tasty_client_act(fw::TastyVerb::Stop) == fw::TastyClientAct::Idle);
-    CHECK(fw::tasty_client_act(fw::TastyVerb::RecStop) == fw::TastyClientAct::Idle);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+    const fw::TastyRuntime rt = runtime_in(t.root);
+    const fw::TastyClient client{rt.paths, rt.owner};
+    CHECK(!client.owner_live());
 }
 
 void test_stop_owner_signaled() {
     Tmp t("/tasty_tasty_sig_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
+    fw::TastyRuntime rt = runtime_in(t.root);
     char comm[32]{};
     const int fd = ::open("/proc/self/comm", O_RDONLY | O_CLOEXEC);
     CHECK(fd >= 0);
@@ -978,30 +1202,33 @@ void test_stop_owner_signaled() {
         if (n > 0 && comm[n - 1] == '\n')
             comm[n - 1] = '\0';
     }
-    static char owner_comm[32];
-    std::snprintf(owner_comm, sizeof owner_comm, "%s", comm);
-    fw::tasty_set_owner_comm(owner_comm);
-    CHECK(fw::tasty_write_pid(::getpid()).has_value());
-    CHECK(fw::tasty_client_act(fw::TastyVerb::Stop) == fw::TastyClientAct::Signaled);
-    CHECK(fw::tasty_client_act(fw::TastyVerb::RecStop) == fw::TastyClientAct::WroteFifo);
-    (void)::unlink(pid.c_str());
-    fw::tasty_set_owner_comm("tasty");
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+    const auto owner = os::ProcessName::of(comm);
+    CHECK(owner.has_value());
+    if (!owner)
+        return;
+    rt.owner = *owner;
+    auto lock = fw::TastyOwnerLock::take(rt.paths);
+    CHECK(lock.has_value());
+    if (lock)
+        CHECK(lock->write_pid(os::ProcessId::self()).has_value());
+    const fw::TastyClient client{rt.paths, rt.owner};
+    CHECK(client.owner_live());
+    (void)::unlink(rt.paths.pid.c_str());
+    if (lock)
+        lock->release();
 }
 
 void test_rec_start_checks_the_owner() {
     Tmp t("/tasty_tasty_rec_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    fw::tasty_set_owner_comm("tasty");
-    CHECK(fw::tasty_write_pid(::getpid()).has_value());
-    CHECK(!fw::tasty_rec_start_joins_owner());
-    static char comm[32]{};
+    fw::TastyRuntime rt = runtime_in(t.root);
+    auto lock = fw::TastyOwnerLock::take(rt.paths);
+    CHECK(lock.has_value());
+    if (lock)
+        CHECK(lock->write_pid(os::ProcessId::self()).has_value());
+    const fw::TastyClient client{rt.paths, rt.owner};
+    CHECK(!client.joins_owner());
+    char comm[32]{};
     const int fd = ::open("/proc/self/comm", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
         const ssize_t n = ::read(fd, comm, sizeof comm - 1);
@@ -1009,30 +1236,32 @@ void test_rec_start_checks_the_owner() {
         if (n > 0 && comm[n - 1] == '\n')
             comm[n - 1] = '\0';
     }
-    fw::tasty_set_owner_comm(comm);
-    CHECK(fw::tasty_rec_start_joins_owner());
-    (void)::unlink(pid.c_str());
-    CHECK(!fw::tasty_rec_start_joins_owner());
-    fw::tasty_set_owner_comm("tasty");
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+    const auto owner = os::ProcessName::of(comm);
+    CHECK(owner.has_value());
+    if (!owner)
+        return;
+    rt.owner = *owner;
+    const fw::TastyClient named{rt.paths, rt.owner};
+    CHECK(named.joins_owner());
+    (void)::unlink(rt.paths.pid.c_str());
+    CHECK(!named.joins_owner());
+    if (lock)
+        lock->release();
 }
 
 void test_stop_stale_pid() {
     Tmp t("/tasty_tasty_stale_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
-    const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    fw::tasty_set_owner_comm("tasty");
-    CHECK(fw::tasty_write_pid(1).has_value());
-    CHECK(fw::tasty_client_act(fw::TastyVerb::Stop) == fw::TastyClientAct::Idle);
-    (void)::unlink(pid.c_str());
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
+    const fw::TastyRuntime rt = runtime_in(t.root);
+    auto lock = fw::TastyOwnerLock::take(rt.paths);
+    CHECK(lock.has_value());
+    if (lock)
+        CHECK(lock->write_pid(*os::ProcessId::of(1)).has_value());
+    const fw::TastyClient client{rt.paths, rt.owner};
+    CHECK(!client.owner_live());
+    (void)::unlink(rt.paths.pid.c_str());
+    if (lock)
+        lock->release();
 }
 
 void test_load_edge_rereads_geometry() {
@@ -1046,7 +1275,7 @@ void test_load_edge_rereads_geometry() {
     r.core(1, 1'671'559);
     auto g = r.tick();
     CHECK(g.valid);
-    CHECK_EQ(g.vtime, 1'671'559u);
+    CHECK(g.rate == app::FrameTicks::plausible(1'671'559));
     CHECK_EQ(g.core_seq, 1u);
     {
         const SeatScope ui{SeatTag::Ui};
@@ -1054,7 +1283,8 @@ void test_load_edge_rereads_geometry() {
     }
     r.core(3, 1'663'934);
     g = r.tick();
-    CHECK_EQ(g.vtime, 1'671'559u);
+
+    CHECK(g.rate == app::FrameTicks::plausible(1'671'559));
     {
         const SeatScope ui{SeatTag::Ui};
         sink.deliver(infra::make<app::Event>(app::Event::CoreLoaded{}, app::Event::Head{}));
@@ -1062,7 +1292,7 @@ void test_load_edge_rereads_geometry() {
     for (int i = 0; i < 3; ++i)
         g = r.tick();
     CHECK(g.valid);
-    CHECK_EQ(g.vtime, 1'663'934u);
+    CHECK(g.rate == app::FrameTicks::plausible(1'663'934));
     CHECK_EQ(g.core_seq, 3u);
     CHECK_EQ(r.pump->stats().edges, 1u);
 }
@@ -1088,7 +1318,7 @@ void test_start_waits_for_video_edge() {
     fw::TastySink sink{*r.pump, {}};
     Sess x;
     x.w.video = infra::OptRef{*r.pump};
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     x.tick();
     publish_id(x.ident, "NES");
     for (int i = 0; i < 3; ++i)
@@ -1111,12 +1341,181 @@ void test_take_play_refusal() {
     CHECK(x.replay.stops >= 1);
 }
 
+void test_a_port_that_forgets_a_verb_is_abstract() {
+    struct Full final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoTakePlay final : fw::IReplayPort {
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoTakeStop final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoMovieFrames final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoActive final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoRefusal final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoSettingsSet final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        std::string setting_line(SettingNo) const override { return {}; }
+    };
+
+    struct NoSettingLine final : fw::IReplayPort {
+        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+
+        void take_stop() noexcept override {}
+
+        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+
+        bool active() const noexcept override { return true; }
+
+        std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
+
+        SettingNo settings_set() const noexcept override { return {}; }
+    };
+
+    static_assert(std::is_abstract_v<fw::IReplayPort>);
+    static_assert(!std::is_abstract_v<Full>);
+    static_assert(std::is_abstract_v<NoTakePlay>);
+    static_assert(std::is_abstract_v<NoTakeStop>);
+    static_assert(std::is_abstract_v<NoMovieFrames>);
+    static_assert(std::is_abstract_v<NoActive>);
+    static_assert(std::is_abstract_v<NoRefusal>);
+    static_assert(std::is_abstract_v<NoSettingsSet>);
+    static_assert(std::is_abstract_v<NoSettingLine>);
+}
+
+void test_a_core_ask_on_a_full_ring_is_retried() {
+    Sess x;
+    unsigned filled = 0;
+    while (x.asks.push(app::UiRequest::LoadCore{}))
+        ++filled;
+    CHECK(filled > 0u);
+    x.tick();
+    unsigned drained = 0;
+    while (x.load_asked())
+        ++drained;
+    CHECK_EQ(drained, filled);
+    CHECK(!x.load_asked());
+    x.tick();
+    CHECK(x.load_asked());
+    CHECK_EQ(x.exit_code(), 0);
+}
+
+void test_a_taken_core_ask_is_not_repeated() {
+    Sess x;
+    x.tick();
+    CHECK(x.load_asked());
+    x.tick();
+    CHECK(!x.load_asked());
+}
+
+void test_a_menu_ask_on_a_full_ring_is_retried() {
+    Sess x;
+    to_run(x);
+    while (x.load_asked()) {
+    }
+    unsigned filled = 0;
+    while (x.asks.push(app::UiRequest::LoadCore{}))
+        ++filled;
+    CHECK(filled > 0u);
+    x.stop.store(1);
+    x.tick();
+    unsigned drained = 0;
+    while (x.load_asked())
+        ++drained;
+    CHECK_EQ(drained, filled);
+    x.tick();
+    CHECK(x.load_asked());
+}
+
 void test_later_refusal_ends_session() {
     Sess x;
     to_run(x);
     CHECK(x.replay.plays == 1);
     CHECK(x.exit_code() == 0);
-    x.replay.refuse_later = true;
     x.replay.ref = fw::ReplayRefusal{.why = app::PlayRefusal::Why::Setting};
     x.tick();
     CHECK(x.exit_code() == 1);
@@ -1279,7 +1678,7 @@ void test_prepare_record_says_why() {
 void test_loop_restarts_after_finish() {
     Sess x;
     x.args.loop = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     CHECK_EQ(x.replay.plays, 1u);
     while (x.load_asked()) {
@@ -1305,7 +1704,7 @@ void test_loop_wins_over_stay() {
     Sess x;
     x.args.loop = true;
     x.args.stay = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     x.replay.feeding = false;
     publish_end(x.play, app::ReplayEnd::Finished);
@@ -1318,7 +1717,7 @@ void test_loop_wins_over_stay() {
 void test_session_passes_ram_init() {
     Sess x;
     x.args.ram_fill = cores::IReplayCore::RamFill::Random;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     CHECK(x.replay.last.ram_fill == cores::IReplayCore::RamFill::Random);
 }
@@ -1326,7 +1725,7 @@ void test_session_passes_ram_init() {
 void test_stay_finished_holds() {
     Sess x;
     x.args.stay = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     publish_end(x.play, app::ReplayEnd::Finished);
     x.tick();
@@ -1336,7 +1735,7 @@ void test_stay_finished_holds() {
 void test_stay_stop_leaves() {
     Sess x;
     x.args.stay = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     x.stop.store(1);
     x.tick();
@@ -1346,9 +1745,8 @@ void test_stay_stop_leaves() {
 
 void test_rec_only_stop_leaves() {
     Sess x;
-    x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.rec_run);
     x.tick();
     CHECK(x.replay.plays == 0);
     x.stop.store(1);
@@ -1360,11 +1758,10 @@ void test_rec_only_stop_leaves() {
 void test_rec_only_leaves_when_its_recording_ends() {
     for (const bool refused : {false, true}) {
         Sess x;
-        x.args.verb = fw::TastyVerb::RecStart;
         x.args.no_splash = true;
         x.args.record.emplace();
         (void)x.args.record->assign("/tmp/cap");
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.rec_run);
         x.tick();
         x.tick();
         if (refused) {
@@ -1393,11 +1790,10 @@ void test_rec_only_leaves_when_its_recording_ends() {
 
 void test_rec_only_reports_a_failure_after_it_started() {
     Sess x;
-    x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     x.args.record.emplace();
     (void)x.args.record->assign("/tmp/cap");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.rec_run);
     StderrTo err;
     x.tick();
     x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
@@ -1419,11 +1815,10 @@ void test_rec_only_reports_a_failure_after_it_started() {
 
 void test_rec_only_a_stopped_recording_after_it_started_is_clean() {
     Sess x;
-    x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     x.args.record.emplace();
     (void)x.args.record->assign("/tmp/cap");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.rec_run);
     StderrTo err;
     x.tick();
     x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
@@ -1447,7 +1842,7 @@ void test_a_recorded_replay_reports_a_failure_while_it_runs() {
     app::PathText cap{};
     CHECK(cap.assign(t.p("cap")));
     x.args.record = cap;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     StderrTo err;
     to_run(x);
     CHECK(x.replay.plays == 1);
@@ -1477,7 +1872,7 @@ void test_a_recorded_replay_reports_a_failure_as_it_closes() {
     app::PathText cap{};
     CHECK(cap.assign(t.p("cap")));
     x.args.record = cap;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     StderrTo err;
     to_run(x);
     x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
@@ -1499,11 +1894,10 @@ void test_a_recorded_replay_reports_a_failure_as_it_closes() {
 void test_rec_only_probe_refusal_fails_the_run() {
     for (const auto v : {app::RecVerdict::NoLiveBuffer, app::RecVerdict::ScalerPortStuck}) {
         Sess x;
-        x.args.verb = fw::TastyVerb::RecStart;
         x.args.no_splash = true;
         x.args.record.emplace();
         (void)x.args.record->assign("/tmp/cap");
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.rec_run);
         StderrTo err;
         x.tick();
         x.tick();
@@ -1528,7 +1922,7 @@ void test_rec_only_probe_refusal_fails_the_run() {
 void test_a_stuck_port_ends_a_replay() {
     Sess x;
     x.args.stay = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     StderrTo err;
     x.capture_level(app::RecState::Idle, app::RecVerdict::None, app::RecVerdict::ScalerPortStuck);
@@ -1592,10 +1986,9 @@ void test_record_path_outside_the_root_is_refused() {
     CHECK(!t.root.empty());
     app::RecorderControl rc{app::RecorderControl::Wiring{.root = t.root}};
     Sess x{nullptr, nullptr, {.rec = &rc}};
-    x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     CHECK(x.args.record.emplace().assign("/proc/"));
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.rec_run);
     StderrTo err;
     x.tick();
     x.tick();
@@ -1615,7 +2008,7 @@ void test_stale_generation() {
     Sess x{&*vfs};
     x.args = play_args();
     (void)x.args.movie.assign("m.fm2");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     publish_id(x.ident, "NES");
     x.tick();
     x.tick();
@@ -1656,7 +2049,7 @@ SeedRun seed_run(const Tmp& t, const char* save) {
     Sess x{&*vfs};
     x.args.save.emplace();
     (void)x.args.save->assign(save);
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     out.plays = x.replay.plays;
     out.seeded = x.replay.last.seeded_save;
@@ -1730,14 +2123,12 @@ void test_save_seed_refusals() {
 void test_status_force() {
     Tmp t("/tasty_tasty_st_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
+    const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    Sess x;
+    Sess x{nullptr, nullptr, Sess::Binds{}, rt};
     to_run(x);
     x.tick();
-    const auto first = fw::tasty_read_status();
+    const auto first = fw::TastyClient{rt.paths, rt.owner}.status();
     CHECK(first.has_value());
     publish_end(x.play, app::ReplayEnd::Finished);
     struct stat a{};
@@ -1748,33 +2139,25 @@ void test_status_force() {
     CHECK(a.st_mtime == b.st_mtime && a.st_size == b.st_size);
     x.tick();
     home(x);
-    auto last = fw::tasty_read_status();
+    auto last = fw::TastyClient{rt.paths, rt.owner}.status();
     CHECK(last.has_value());
     if (last)
         CHECK(last->find("finished") != std::string::npos);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
 }
 
 void test_status_frames_total() {
     Tmp t("/tasty_tasty_fr_");
     CHECK(!t.root.empty());
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
+    const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
-    Sess x;
+    Sess x{nullptr, nullptr, Sess::Binds{}, rt};
     to_run(x);
     x.tick();
-    const auto s = fw::tasty_read_status();
+    const auto s = fw::TastyClient{rt.paths, rt.owner}.status();
     CHECK(s.has_value());
     if (s)
         CHECK(s->find("\"frames\":12") != std::string::npos);
     home(x);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
 }
 
 void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* needle) {
@@ -1782,12 +2165,10 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
     CHECK(!t.root.empty());
     if (t.root.empty())
         return;
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
+    const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
     app::EncodeStatusCell enc{};
-    Sess x{nullptr, nullptr, {.encstat = &enc}};
+    Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     {
         const SeatScope enc_seat{SeatTag::Encode};
         app::EncodeStatus body{};
@@ -1803,7 +2184,7 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
         x.tick();
         err = cap.text();
     }
-    const auto s = fw::tasty_read_status();
+    const auto s = fw::TastyClient{rt.paths, rt.owner}.status();
     CHECK(s.has_value());
     if (s)
         CHECK(s->find("\"scale\":2") != std::string::npos);
@@ -1818,9 +2199,6 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
         again = cap.text();
     }
     CHECK(again.find(needle) == std::string::npos);
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
 }
 
 void test_status_scale_step_warns_per_recording() {
@@ -1828,12 +2206,10 @@ void test_status_scale_step_warns_per_recording() {
     CHECK(!t.root.empty());
     if (t.root.empty())
         return;
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
+    const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
     app::EncodeStatusCell enc{};
-    Sess x{nullptr, nullptr, {.encstat = &enc}};
+    Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     const auto step = [&](std::uint16_t gen) {
         {
             const SeatScope cap{SeatTag::Capture};
@@ -1866,9 +2242,6 @@ void test_status_scale_step_warns_per_recording() {
         x.tick();
         home(x);
     }
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
 }
 
 void test_status_scale_step_warns_once() {
@@ -1894,12 +2267,10 @@ void test_status_scale_return_is_said() {
     CHECK(!t.root.empty());
     if (t.root.empty())
         return;
-    const std::string lock = t.p("lock");
-    const std::string pid = t.p("pid");
+    const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    fw::tasty_set_ctl_paths({.lock = lock.c_str(), .pid = pid.c_str(), .status = st.c_str()});
     app::EncodeStatusCell enc{};
-    Sess x{nullptr, nullptr, {.encstat = &enc}};
+    Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     const auto publish = [&](std::uint8_t steps, std::uint8_t recovered, std::uint8_t held = 0) {
         const SeatScope enc_seat{SeatTag::Encode};
         app::EncodeStatus body{};
@@ -1952,9 +2323,6 @@ void test_status_scale_return_is_said() {
         x.tick();
         home(x);
     }
-    fw::tasty_set_ctl_paths(
-        {.lock = fw::kTastyLockPath, .pid = fw::kTastyPidPath, .status = fw::kTastyStatusPath}
-    );
 }
 
 void test_check_exits() {
@@ -1970,7 +2338,7 @@ void test_check_exits() {
     gmv[0x14] = '6';
     gmv[0x15] = '6';
     CHECK(t.put("none.gmv", gmv));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "none.gmv", .rom = "r.nes"}) == 0);
+    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "none.gmv", .rom = "r.nes"}).ok());
     std::vector<std::uint8_t> rom(16 + 32 * 1024);
     for (std::size_t i = 0; i < rom.size(); ++i)
         rom[i] = static_cast<std::uint8_t>(i * 7u + 3u);
@@ -2002,23 +2370,26 @@ void test_check_exits() {
         + "\nromFilename x\nguid 1\nport0 1\nport1 0\nport2 0\n"
           "fourscore 0\nFDS 0\n|0|........|\n";
     CHECK(t.put("good.fm2", good));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "good.fm2", .rom = "r.nes"}) == 0);
+    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "good.fm2", .rom = "r.nes"}).ok());
     rom[20] ^= 0xFF;
     CHECK(
         t.put("bad.nes", std::string_view(reinterpret_cast<const char*>(rom.data()), rom.size()))
     );
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "good.fm2", .rom = "bad.nes"}) == 3);
+    CHECK(
+        fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "good.fm2", .rom = "bad.nes"})
+        == fw::tasty::Exit::Code::Mismatch
+    );
 
     CHECK(t.put("r.chd", std::string(4096, 'x')));
     {
         std::string err;
-        int rc = 0;
+        fw::tasty::Exit rc;
         {
             StderrTo cap;
             rc = fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "good.fm2", .rom = "r.chd"});
             err = cap.text();
         }
-        CHECK(rc == 1);
+        CHECK(rc == fw::tasty::Exit::Code::Refused);
         CHECK(err == "tasty: cannot hash rom r.chd\n");
     }
     (void)::unlink(t.p("r.chd").c_str());
@@ -2094,11 +2465,14 @@ void test_nes_bk2_check_header_forms() {
         + "\n";
     CHECK(write_bk2_text(t.p("nes.bk2"), head, log));
     CHECK(t.put("r.nes", nes2 + body));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}) == 0);
+    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}).ok());
     CHECK(t.put("r.nes", good));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}) == 0);
+    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}).ok());
     CHECK(t.put("r.nes", nes2 + body + "x"));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}) == 3);
+    CHECK(
+        fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"})
+        == fw::tasty::Exit::Code::Mismatch
+    );
 
     cores::RomDigest hb{cores::DigestKind::Sha1};
     hb.update(std::span(reinterpret_cast<const std::uint8_t*>(body.data()), body.size()));
@@ -2109,14 +2483,17 @@ void test_nes_bk2_check_header_forms() {
         log
     ));
     CHECK(t.put("r.nes", nes2 + body));
-    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}) == 0);
+    CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}).ok());
     (void)::unlink(t.p("nes.bk2").c_str());
     CHECK(write_bk2_text(t.p("nes.bk2"), head, log));
     (void)::unlink(t.p("nes.bk2").c_str());
     CHECK(write_bk2_text(t.p("nes.bk2"), head + "StartsFromSavestate True\n", log));
     {
         StderrTo cap;
-        CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"}) == 1);
+        CHECK(
+            fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "nes.bk2", .rom = "r.nes"})
+            == fw::tasty::Exit::Code::Refused
+        );
         CHECK_EQ_STR(
             cap.text(),
             "tasty: this movie starts from a savestate or saved game, not from power-on\n"
@@ -2153,13 +2530,18 @@ void test_bk2_sniff() {
 
     CHECK(t.put("junk.cue", "not a sheet\n"));
     std::string err;
-    int rc = 0;
+    std::optional<fw::TastyRefusal> why;
     {
         StderrTo cap;
-        rc = fw::tasty_preflight_rom(*vfs, fw::TastyFiles{.movie = "psx.bk2", .rom = "junk.cue"});
+        auto ok = fw::TastyPreflight{*vfs}.rom_readable(
+            fw::TastyFiles{.movie = "psx.bk2", .rom = "junk.cue"}
+        );
+        CHECK(!ok.has_value());
+        if (!ok)
+            why = fw::TastyRefusal::of(ok.error());
         err = cap.text();
     }
-    CHECK(rc == 1);
+    CHECK(why && why->why() == fw::TastyRefusal::RomUnhashable);
     CHECK(
         err
         == "tasty: cannot hash disc image junk.cue; use a Redump .cue/.bin or a chdman .chd of "
@@ -2169,10 +2551,15 @@ void test_bk2_sniff() {
     CHECK(t.put("junk.chd", std::string(4096, 'x')));
     {
         StderrTo cap;
-        rc = fw::tasty_preflight_rom(*vfs, fw::TastyFiles{.movie = "psx.bk2", .rom = "junk.chd"});
+        auto ok = fw::TastyPreflight{*vfs}.rom_readable(
+            fw::TastyFiles{.movie = "psx.bk2", .rom = "junk.chd"}
+        );
+        CHECK(!ok.has_value());
+        if (!ok)
+            why = fw::TastyRefusal::of(ok.error());
         err = cap.text();
     }
-    CHECK(rc == 1);
+    CHECK(why && why->why() == fw::TastyRefusal::RomUnhashable);
     CHECK(
         err
         == "tasty: cannot hash disc image junk.chd; use a Redump .cue/.bin or a chdman .chd of "
@@ -2193,14 +2580,20 @@ void test_bk2_unknown_platform_refused() {
         want = "tasty: this .bk2 is for N64; tasty plays NES, SNES, Genesis and PSX movies\n";
     {
         StderrTo cap;
-        CHECK(fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "n64.bk2", .rom = "r.nes"}) == 1);
+        CHECK(
+            fw::tasty_check_movie(*vfs, fw::TastyFiles{.movie = "n64.bk2", .rom = "r.nes"})
+            == fw::tasty::Exit::Code::Refused
+        );
         CHECK_EQ_STR(cap.text(), want);
     }
     {
         StderrTo cap;
-        CHECK(
-            fw::tasty_preflight_rom(*vfs, fw::TastyFiles{.movie = "n64.bk2", .rom = "r.nes"}) == 1
+        const auto ok = fw::TastyPreflight{*vfs}.rom_readable(
+            fw::TastyFiles{.movie = "n64.bk2", .rom = "r.nes"}
         );
+        CHECK(!ok.has_value());
+        const auto why = ok ? std::nullopt : fw::TastyRefusal::of(ok.error());
+        CHECK(why && why->why() == fw::TastyRefusal::RomUnplayable);
         CHECK_EQ_STR(cap.text(), want);
     }
     (void)::unlink(t.p("n64.bk2").c_str());
@@ -2246,9 +2639,9 @@ void test_cli_run_flags() {
     const auto m = fw::parse_tasty_args(std::span<const char* const>(miss));
     CHECK(!m.has_value());
     if (!m) {
-        CHECK_EQ(m.error().detail, fw::tasty_refusal_detail(fw::TastyRefusal::BadPhase));
+        CHECK_EQ(m.error().detail, fw::TastyRefusal{fw::TastyRefusal::BadPhase}.detail());
         CHECK(
-            std::string_view(fw::tasty_args_refusal(m.error().detail))
+            std::string_view(fw::TastyRefusal::sentence_for(m.error()))
             == "--phase needs a whole number of microseconds"
         );
     }
@@ -2266,7 +2659,7 @@ void test_session_play_ask() {
         x.args.stop_at = app::MovieFrame{3600};
         x.args.phase_us = std::chrono::microseconds{4000};
         x.args.strict = strict;
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         CHECK_EQ(x.replay.plays, 1u);
         CHECK(x.replay.last.stop_at == std::optional<app::MovieFrame>{app::MovieFrame{3600}});
@@ -2285,7 +2678,7 @@ void test_session_direct_video_force() {
         StderrTo err;
         Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.args.strict = true;
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         const std::string text = err.text();
         CHECK_EQ(x.replay.plays, 0u);
@@ -2302,7 +2695,7 @@ void test_session_direct_video_force() {
         cell.publish(std::uint8_t{1});
         StderrTo err;
         Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         x.tick();
         const std::string text = err.text();
@@ -2317,7 +2710,7 @@ void test_session_direct_video_force() {
         cell.publish(std::uint8_t{0});
         StderrTo err;
         Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         x.tick();
         CHECK_EQ(x.replay.plays, 1u);
@@ -2334,7 +2727,7 @@ void test_session_direct_video_force() {
         cell.publish(std::uint8_t{0});
         Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.w.video = infra::OptRef{*pump.pump};
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         x.tick();
         publish_id(x.ident, "NES");
         x.tick();
@@ -2368,10 +2761,9 @@ void test_strict_rec_start_waits_for_the_ini() {
     xthread::Telemetry<std::uint8_t, SeatTag::Main> cell{};
     Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
     x.w.video = infra::OptRef{*pump.pump};
-    x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     x.args.strict = true;
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.rec_run);
     {
         StderrTo err;
         for (int i = 0; i < 4; ++i)
@@ -2482,12 +2874,11 @@ void test_refusal_sentences() {
     for (const Case& c : cases) {
         Sess x;
         x.args.strict = c.strict;
-        x.s.emplace(x.w, x.args);
+        x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         std::string err;
         {
             StderrTo cap;
-            x.replay.refuse_later = true;
             x.replay.ref = fw::ReplayRefusal{
                 .why = c.why,
                 .movie = c.movie,
@@ -2510,7 +2901,18 @@ void test_movie_refusals_have_sentences() {
         const R why = static_cast<R>(r);
         CHECK(fw::tasty_movie_refusal_sentence(why) != nullptr);
     }
-    CHECK(fw::tasty_refusal_sentence(app::PlayRefusal::Why::Busy) == nullptr);
+    using W = app::PlayRefusal::Why;
+    for (std::uint32_t w = 1; w < static_cast<std::uint32_t>(W::kCount); ++w) {
+        char buf[1400];
+        CHECK(
+            fw::tasty_refusal_sentence(fw::ReplayRefusal{.why = static_cast<W>(w)}, {}, false, buf)
+            != nullptr
+        );
+    }
+    char buf[1400];
+    CHECK(
+        fw::tasty_refusal_sentence(fw::ReplayRefusal{.why = W::kCount}, {}, false, buf) == nullptr
+    );
 }
 
 void test_session_hides_the_osd_first() {
@@ -2568,7 +2970,7 @@ void test_recorded_replay_rereads_the_geometry() {
     x.args.record = cap;
 
     (void)x.args.movie.assign("m.gmv");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     r.core(1, 19'108);
     x.tick();
     publish_id(x.ident, "MegaDrive");
@@ -2586,20 +2988,21 @@ void test_recorded_replay_rereads_the_geometry() {
         }
     };
     passes(2);
-    CHECK_EQ(r.tick().vtime, 19'108u);
+    CHECK(!r.tick().rate.known());
     r.link.vtime = 1'668'814;
     passes(2);
-    CHECK_EQ(r.tick().vtime, 19'108u);
+
+    CHECK(!r.tick().rate.known());
     publish_running(x.play, 59);
     x.tick();
     (void)r.tick();
     passes(2);
-    CHECK_EQ(r.tick().vtime, 19'108u);
+    CHECK(!r.tick().rate.known());
     publish_running(x.play, 60);
     x.tick();
     (void)r.tick();
     passes(2);
-    CHECK_EQ(r.tick().vtime, 1'668'814u);
+    CHECK(r.tick().rate == app::FrameTicks::plausible(1'668'814));
 }
 
 void test_unrecorded_replay_leaves_the_geometry() {
@@ -2612,7 +3015,7 @@ void test_unrecorded_replay_leaves_the_geometry() {
     x.w.video = infra::OptRef{*r.pump};
 
     (void)x.args.movie.assign("m.gmv");
-    x.s.emplace(x.w, x.args);
+    x.s.emplace(x.w, x.args, x.play_run);
     r.core(1, 19'108);
     x.tick();
     publish_id(x.ident, "MegaDrive");
@@ -2635,7 +3038,7 @@ void test_unrecorded_replay_leaves_the_geometry() {
     x.tick();
     (void)r.tick();
     passes(2);
-    CHECK_EQ(r.tick().vtime, 19'108u);
+    CHECK(!r.tick().rate.known());
 }
 
 bool mkdir_p(const std::string& path) {
@@ -2749,7 +3152,7 @@ void test_loop_with_record_is_refused() {
     a.record = out;
     a.loop = true;
     StderrTo err;
-    CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+    CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     const std::string text = err.text();
     CHECK(text.find("--loop") != std::string::npos);
     CHECK(text.find("--record") != std::string::npos);
@@ -2805,7 +3208,7 @@ void test_prepare_play_lead_rom_and_ram() {
     a.lead = app::FrameCount{1000};
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         const std::string text = err.text();
         CHECK(text.find("outside") != std::string::npos);
         CHECK(text.find("--lead") != std::string::npos);
@@ -2813,45 +3216,45 @@ void test_prepare_play_lead_rom_and_ram() {
     a.lead = app::FrameCount{-9};
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         CHECK(err.text().find("outside") != std::string::npos);
     }
     CHECK(t.put("r.nes", rom));
     a.lead = app::FrameCount{-3};
     CHECK(a.rom.assign(t.p("r.nes")));
-    CHECK(fw::tasty_prepare_play(*vfs, a).has_value());
+    CHECK(fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     a.phase_us = std::chrono::microseconds{0};
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         CHECK(err.text().find("leave 2000 us before the next frame") != std::string::npos);
     }
     a.phase_us = std::chrono::microseconds{20'000};
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         CHECK(err.text().find("leave 2000 us before the next frame") != std::string::npos);
     }
 
     for (const std::uint32_t bad : {999u, 14'700u, 15'000u}) {
         a.phase_us = std::chrono::microseconds{bad};
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         CHECK(err.text().find("leave 2000 us before the next frame") != std::string::npos);
     }
     for (const std::uint32_t good : {1000u, 4000u, 14'600u}) {
         a.phase_us = std::chrono::microseconds{good};
-        CHECK(fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     }
     a.phase_us.reset();
     a.lead.reset();
-    CHECK(fw::tasty_prepare_play(*vfs, a).has_value());
+    CHECK(fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     a.rom = {};
     a.ram_fill = cores::IReplayCore::RamFill::Zero;
     CHECK(a.movie.assign("x.lsmv"));
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         const std::string text = err.text();
         CHECK(text.find("NES") != std::string::npos);
         CHECK(text.find("RAM Clear") != std::string::npos);
@@ -2863,12 +3266,12 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(mkdir_p(sub));
     CHECK(put_file(nes_dir + "/a.nes", rom));
     CHECK(put_file(sub + "/smb.nes", rom));
-    const auto first = fw::tasty_prepare_play(*vfs, a);
+    const auto first = fw::TastyPreflight{*vfs}.play_rom(a);
     CHECK(first.has_value());
     CHECK(first->view().find("/NES/a.nes") != std::string_view::npos);
     a.rom = {};
     (void)::unlink((nes_dir + "/a.nes").c_str());
-    const auto second = fw::tasty_prepare_play(*vfs, a);
+    const auto second = fw::TastyPreflight{*vfs}.play_rom(a);
     CHECK(second.has_value());
     CHECK(second->view().find("/usa/smb.nes") != std::string_view::npos);
     a.rom = {};
@@ -2878,7 +3281,7 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(put_file(nes_dir + "/other.nes", other));
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         const std::string text = err.text();
         CHECK(text.find("/media/fat/games/NES") != std::string::npos);
         CHECK(text.find("--rom") != std::string::npos);
@@ -2895,7 +3298,7 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(g.movie.assign("m.gmv"));
     {
         StderrTo err;
-        CHECK(!fw::tasty_prepare_play(*vfs, g).has_value());
+        CHECK(!fw::TastyPreflight{*vfs}.play_rom(g).has_value());
         CHECK(err.text().find("no ROM checksum") != std::string::npos);
     }
     (void)::unlink((nes_dir + "/other.nes").c_str());
@@ -2908,6 +3311,195 @@ void test_prepare_play_lead_rom_and_ram() {
     (void)::unlink(t.p("m.fm2").c_str());
     (void)::unlink(t.p("r.nes").c_str());
     (void)::unlink(t.p("m.gmv").c_str());
+}
+
+void test_tasty_refusal_round_trips() {
+    constexpr std::uint8_t kFirst = 1;
+    constexpr std::uint8_t kLast = std::to_underlying(fw::TastyRefusal::kCount) - 1;
+    for (std::uint8_t i = kFirst; i <= kLast; ++i) {
+        const auto why = static_cast<fw::TastyRefusal::Why>(i);
+        const fw::TastyRefusal r{why};
+        const Error e = r.error(infra::kNoSite);
+        const auto back = fw::TastyRefusal::of(e);
+        CHECK(back.has_value() && back->why() == why);
+        CHECK_EQ(e.detail, r.detail());
+        CHECK_EQ(r.detail(), 0x74610000u | i);
+    }
+
+    CHECK_EQ(fw::TastyRefusal{fw::TastyRefusal::NoVerb}.detail(), 0x74610001u);
+    CHECK_EQ(fw::TastyRefusal{fw::TastyRefusal::SaveNotPlay}.detail(), 0x7461001du);
+    CHECK_EQ(fw::TastyRefusal{fw::TastyRefusal::LoopWithRecord}.detail(), 0x7461001eu);
+    CHECK_EQ(fw::TastyRefusal{fw::TastyRefusal::RecordTooLong}.detail(), 0x74610031u);
+
+    CHECK(!fw::TastyRefusal::of(
+        Error{Errc::bad_format, infra::kNoSite, fw::TastyRefusal{fw::TastyRefusal::kCount}.detail()}
+    ));
+    CHECK(!fw::TastyRefusal::of(Error{Errc::bad_format, infra::kNoSite, 7}));
+    CHECK(
+        !fw::TastyRefusal::of(cores::movie_refusal(cores::MovieRefusal::BadLine, infra::kNoSite))
+    );
+    CHECK(!fw::TastyRefusal::of(
+        Error{Errc::os, infra::kNoSite, fw::TastyRefusal{fw::TastyRefusal::NoVerb}.detail()}
+    ));
+
+    for (std::uint8_t i = kFirst; i <= kLast; ++i) {
+        const auto why = static_cast<fw::TastyRefusal::Why>(i);
+        const bool figure = why == fw::TastyRefusal::NoCodec
+            || why == fw::TastyRefusal::MovieUnreadable
+            || why == fw::TastyRefusal::LeadOutOfRange
+            || why == fw::TastyRefusal::RomNotFound
+            || why == fw::TastyRefusal::RomSearchStopped
+            || why == fw::TastyRefusal::RomUnplayable
+            || why == fw::TastyRefusal::RomUnhashable;
+        CHECK_EQ(fw::TastyRefusal{why}.sentence() == nullptr, figure);
+    }
+    CHECK(
+        std::string_view(fw::TastyRefusal::sentence_for(Error{Errc::bad_format, infra::kNoSite, 0}))
+        == "bad arguments (try tasty help)"
+    );
+}
+
+void test_prepare_play_names_its_refusal() {
+    Tmp t("/tasty_tasty_t9_");
+    CHECK(!t.root.empty());
+    if (t.root.empty())
+        return;
+    auto vfs = svc::Vfs::create_at(t.root);
+    CHECK(vfs.has_value());
+    if (!vfs)
+        return;
+
+    auto refused = [](auto&& call, fw::TastyRefusal::Why why, std::string_view want) {
+        StderrTo err;
+        const auto r = call();
+        const std::string text = err.text();
+        CHECK(!r.has_value());
+        const auto got = r ? std::nullopt : fw::TastyRefusal::of(r.error());
+        CHECK(got.has_value() && got->why() == why);
+        CHECK(text.find('\n') == text.size() - 1);
+        if (!want.empty())
+            CHECK(std::string_view{text} == want);
+        else if (got && got->sentence() != nullptr)
+            CHECK(text == "tasty: " + std::string{got->sentence()} + "\n");
+    };
+    fw::TastyArgs a{};
+    CHECK(a.movie.assign("m.fm2"));
+    a.loop = true;
+    CHECK(a.record.emplace().assign("out.avi"));
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::LoopWithRecord,
+        "tasty: --loop and --record do not mix; drop --loop to record one pass\n"
+    );
+    a.loop = false;
+    a.record.reset();
+    CHECK(a.movie.assign("x.nope"));
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::NoCodec,
+        "tasty: no codec for x.nope\n"
+    );
+
+    CHECK(a.movie.assign("x.lsmv"));
+    a.ram_fill = cores::IReplayCore::RamFill::Zero;
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::RamInitUnsupported,
+        "tasty: this movie's core has no RAM-init setting; --ram-init works only where it has "
+        "one (NES: RAM Clear)\n"
+    );
+    a.ram_fill.reset();
+    CHECK(t.put("bad.fm2", "not a movie\n"));
+    CHECK(a.movie.assign("bad.fm2"));
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::MovieUnreadable,
+        "tasty: cannot read movie bad.fm2\n"
+    );
+
+    const std::string rom = nes_rom_bytes();
+    CHECK(t.put("m.fm2", nes_movie(std::string_view(rom).substr(16))));
+    CHECK(a.movie.assign("m.fm2"));
+    a.lead = app::FrameCount{1000};
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::LeadOutOfRange,
+        ""
+    );
+    a.lead.reset();
+    a.phase_us = std::chrono::microseconds{0};
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::PhaseOutOfRange,
+        "tasty: --phase must be at least 1000 us and leave 2000 us before the next frame\n"
+    );
+    a.phase_us.reset();
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
+        fw::TastyRefusal::RomNotFound,
+        "tasty: no ROM in /media/fat/games/NES matches this movie; pass --rom\n"
+    );
+
+    std::string gmv(64, '\0');
+    std::memcpy(gmv.data(), "Gens Movie TEST", 15);
+    gmv[0x0F] = 'A';
+    gmv[0x10] = 7;
+    gmv[0x14] = '3';
+    gmv[0x15] = '3';
+    CHECK(t.put("m.gmv", gmv));
+    fw::TastyArgs g{};
+    CHECK(g.movie.assign("m.gmv"));
+    refused(
+        [&] { return fw::TastyPreflight{*vfs}.play_rom(g); },
+        fw::TastyRefusal::RomNeedsChecksum,
+        "tasty: this movie names no ROM checksum; pass --rom\n"
+    );
+
+    auto record_refused = [&](const std::string& path, fw::TastyRefusal::Why why) {
+        app::PathText rec{};
+        CHECK(rec.assign(path));
+        refused(
+            [&] { return fw::tasty_prepare_record(rec, "m.fm2"); },
+            why,
+            "tasty: " + std::string{fw::TastyRefusal{why}.sentence()} + " (" + path + ")\n"
+        );
+    };
+    refused(
+        [&] { return fw::tasty_prepare_record(app::PathText{}, "m.fm2"); },
+        fw::TastyRefusal::RecordNoTarget,
+        "tasty: that record path names no directory or file ()\n"
+    );
+    CHECK(::mkdir(t.p("cap.avi").c_str(), 0755) == 0);
+    record_refused(t.p("cap.avi"), fw::TastyRefusal::RecordIsDirectory);
+    (void)::rmdir(t.p("cap.avi").c_str());
+    record_refused(t.p(".avi"), fw::TastyRefusal::RecordNoStem);
+    CHECK(t.put("capfile", "x"));
+    record_refused(t.p("capfile"), fw::TastyRefusal::RecordIsFile);
+    (void)::unlink(t.p("capfile").c_str());
+
+    const std::string overlong = t.root + "/" + std::string(300, 'a');
+    record_refused(overlong, fw::TastyRefusal::RecordDirFailed);
+    record_refused(overlong + "/x.avi", fw::TastyRefusal::RecordParentFailed);
+
+    std::string deep = t.root;
+    std::string levels[4];
+    for (std::string& level : levels) {
+        level.assign(220, 'b');
+        deep += "/" + level;
+    }
+    CHECK(mkdir_p(deep));
+    app::PathText deeprec{};
+    CHECK(deeprec.assign(deep));
+    const std::string long_movie = std::string(200, 'c') + ".fm2";
+    refused(
+        [&] { return fw::tasty_prepare_record(deeprec, long_movie); },
+        fw::TastyRefusal::RecordTooLong,
+        "tasty: that record path is too long (" + deep + ")\n"
+    );
+    for (std::size_t i = 4; i-- > 0;) {
+        deep.erase(deep.size() - levels[i].size() - 1);
+        (void)::rmdir(deep.c_str());
+    }
 }
 
 void test_cli_record_empty() {
@@ -2930,9 +3522,11 @@ void test_cli_record_empty() {
     CHECK(err.text().find("that record path names no directory or file") != std::string::npos);
 }
 
-void test_rom_search_reads_every_subdir() {
-    Tmp t("/tasty_tasty_dirs_");
+void test_rom_search_stop_sentence_end_to_end() {
+    Tmp t("/tasty_tasty_stop_");
     CHECK(!t.root.empty());
+    if (t.root.empty())
+        return;
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
     if (!vfs)
@@ -2940,101 +3534,31 @@ void test_rom_search_reads_every_subdir() {
     const std::string rom = nes_rom_bytes();
     const std::string movie = nes_movie(std::string_view(rom).substr(16));
     CHECK(t.put("m.fm2", movie));
-    std::string other = rom;
-    other[100] = '\x11';
-    const std::string nes = t.root + "/media/fat/games/NES";
+    const std::string nes_dir = t.root + "/media/fat/games/NES";
     Gone gone;
     gone.dirs.push_back(t.root + "/media");
     gone.dirs.push_back(t.root + "/media/fat");
     gone.dirs.push_back(t.root + "/media/fat/games");
-    gone.dirs.push_back(nes);
-    CHECK(mkdir_p(nes));
-    constexpr unsigned kDirs = 65;
-    for (unsigned i = 0; i < kDirs; ++i) {
-        char name[8];
-        std::snprintf(name, sizeof name, "d%02u", i);
-        const std::string dir = nes + "/" + name;
-        gone.dirs.push_back(dir);
-        CHECK(mkdir_p(dir));
-        const std::string file = dir + "/other.nes";
-        gone.files.push_back(file);
-        CHECK(put_file(file, other));
-    }
-    auto names = [](svc::Vfs& v) {
-        std::vector<std::string> out;
-        auto listing = v.scan("media/fat/games/NES", {});
-        if (!listing)
-            return out;
-        for (const svc::DirEntry& e : *listing) {
-            if (e.is_dir && e.name != "." && e.name != "..")
-                out.push_back(e.name);
-        }
-        return out;
-    };
-    const std::vector<std::string> first = names(*vfs);
-    CHECK(first.size() == kDirs);
-    if (first.size() != kDirs)
-        return;
-    const std::string last = first.back();
-    const std::string match = nes + "/" + last + "/smb.nes";
-    gone.files.push_back(match);
-    CHECK(put_file(match, rom));
-    const std::vector<std::string> second = names(*vfs);
-    CHECK(!second.empty() && second.back() == last);
-    if (second.empty() || second.back() != last)
-        return;
-    fw::TastyArgs a{};
-    CHECK(a.movie.assign("m.fm2"));
-    const auto found = fw::tasty_prepare_play(*vfs, a);
-    CHECK(found.has_value());
-    CHECK(found->view().find("/" + last + "/smb.nes") != std::string_view::npos);
-}
+    gone.dirs.push_back(nes_dir);
+    CHECK(mkdir_p(nes_dir));
 
-void test_rom_search_stops_at_the_hash_budget() {
-    constexpr std::uint64_t kBudget = 64ull << 20;
-    constexpr std::uint64_t kBig = 255ull * 16384ull + 8192ull;
-    constexpr std::uint64_t kPad = 14ull * 8192ull;
-    constexpr std::uint64_t kMatch = 16384ull + 8192ull;
-    static_assert(16 + kBig <= (4ull << 20));
-    static_assert(16 * kBig + kPad < kBudget);
-    static_assert(kBudget - (16 * kBig + kPad) < kMatch);
-
-    Tmp t("/tasty_tasty_budget_");
-    CHECK(!t.root.empty());
-    auto vfs = svc::Vfs::create_at(t.root);
-    CHECK(vfs.has_value());
-    if (!vfs)
-        return;
-    const std::string rom = nes_rom_bytes();
-    const std::string movie = nes_movie(std::string_view(rom).substr(16));
-    CHECK(t.put("m.fm2", movie));
-    const std::string nes = t.root + "/media/fat/games/NES";
-    const std::string late = nes + "/late";
-    Gone gone;
-    gone.dirs.push_back(t.root + "/media");
-    gone.dirs.push_back(t.root + "/media/fat");
-    gone.dirs.push_back(t.root + "/media/fat/games");
-    gone.dirs.push_back(nes);
-    gone.dirs.push_back(late);
-    CHECK(mkdir_p(late));
-    for (unsigned i = 0; i < 16; ++i) {
+    for (unsigned i = 0; i < 17; ++i) {
         char name[16];
         std::snprintf(name, sizeof name, "b%02u.nes", i);
-        const std::string file = nes + "/" + name;
+        const std::string file = nes_dir + "/" + name;
         gone.files.push_back(file);
         CHECK(put_nes_banks(file, 255, 1));
     }
-    const std::string pad = nes + "/pad.nes";
-    gone.files.push_back(pad);
-    CHECK(put_nes_banks(pad, 0, 14));
-    const std::string match = late + "/smb.nes";
-    gone.files.push_back(match);
-    CHECK(put_file(match, rom));
     fw::TastyArgs a{};
     CHECK(a.movie.assign("m.fm2"));
     StderrTo err;
-    CHECK(!fw::tasty_prepare_play(*vfs, a).has_value());
-    CHECK(err.text().find("the search stops there") != std::string::npos);
+    CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
+    const std::string text = err.text();
+    CHECK(
+        text.find("no ROM among the first 17 files in /media/fat/games/NES") != std::string::npos
+    );
+    CHECK(text.find("the search stops there") != std::string::npos);
+    CHECK(text.find("--rom") != std::string::npos);
 }
 
 struct ChildEnd {
@@ -3074,35 +3598,113 @@ ChildEnd in_child(F fn) {
     return e;
 }
 
-struct SharedInt {
-    int* p = nullptr;
+using LaunchCount = fw::HomeLane::LaunchCount;
 
-    SharedInt() {
+bool self_exe(char* dst, std::size_t n);
+
+struct HomeMarker {
+    char exe[4096] = {};
+    char arg[4200] = {};
+    char path[sizeof "/tmp/tasty_tasty_homeXXXXXX"] = "/tmp/tasty_tasty_homeXXXXXX";
+    bool ok = false;
+
+    HomeMarker() {
+        const int fd = ::mkstemp(path);
+        if (fd < 0)
+            return;
+        ::close(fd);
+        (void)::unlink(path);
+        if (!self_exe(exe, sizeof exe))
+            return;
+        std::snprintf(arg, sizeof arg, "--signal-probe=%s", path);
+        ok = true;
+    }
+
+    ~HomeMarker() {
+        if (path[0] != '\0')
+            (void)::unlink(path);
+    }
+
+    HomeMarker(const HomeMarker&) = delete;
+    HomeMarker& operator=(const HomeMarker&) = delete;
+
+    [[nodiscard]] bool started() const { return ::access(path, F_OK) == 0; }
+
+    [[nodiscard]] bool wait_started(int tries = 250) const {
+        for (int i = 0; i < tries && !started(); ++i)
+            ::usleep(20 * 1000);
+        return started();
+    }
+};
+
+struct SharedLaunch {
+    LaunchCount* p = nullptr;
+
+    SharedLaunch() {
         char path[] = "/tmp/tasty_tasty_sigXXXXXX";
         const int fd = ::mkstemp(path);
         if (fd < 0)
             return;
         (void)::unlink(path);
-        if (::ftruncate(fd, static_cast<off_t>(sizeof(int))) != 0) {
+        if (::ftruncate(fd, static_cast<off_t>(sizeof(LaunchCount))) != 0) {
             ::close(fd);
             return;
         }
-        void* m = ::mmap(nullptr, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        void* m = ::mmap(nullptr, sizeof(LaunchCount), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         ::close(fd);
         if (m == MAP_FAILED)
             return;
-        p = static_cast<int*>(m);
-        *p = 0;
+        p = new (m) LaunchCount();
     }
 
-    ~SharedInt() {
-        if (p != nullptr)
-            (void)::munmap(p, sizeof(int));
+    ~SharedLaunch() {
+        if (p == nullptr)
+            return;
+        p->~LaunchCount();
+        (void)::munmap(p, sizeof(LaunchCount));
     }
 
-    SharedInt(const SharedInt&) = delete;
-    SharedInt& operator=(const SharedInt&) = delete;
+    SharedLaunch(const SharedLaunch&) = delete;
+    SharedLaunch& operator=(const SharedLaunch&) = delete;
 };
+
+void test_home_lane_launch_count_shared_with_child() {
+    LaunchCount* shared = nullptr;
+    void* m = ::mmap(
+        nullptr,
+        sizeof(LaunchCount),
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+    CHECK(m != MAP_FAILED);
+    if (m == MAP_FAILED)
+        return;
+    shared = new (m) LaunchCount();
+    const ChildEnd end = in_child([shared] {
+        {
+            fw::ReturnHome h{{.probe = true}};
+            fw::HomeLane::launch();
+        }
+        *shared = fw::HomeLane::launches();
+        return *shared == LaunchCount::of(1) ? 0 : 1;
+    });
+    CHECK(end.exited && end.code == 0);
+    CHECK(*shared == LaunchCount::of(1));
+    shared->~LaunchCount();
+    (void)::munmap(m, sizeof(LaunchCount));
+}
+
+void test_home_lane_unbind_clears_the_probe() {
+    const ChildEnd end = in_child([] {
+        fw::ReturnHome h{{.image = {"/nonexistent/tasty_tasty_home", "menu.rbf"}, .probe = true}};
+        fw::HomeLane::unbind();
+        fw::HomeLane::launch();
+        return fw::HomeLane::launches() == LaunchCount{} ? 0 : 1;
+    });
+    CHECK(end.exited && end.code == 0);
+}
 
 void test_owner_sighup_keeps_running() {
     const ChildEnd end = in_child([] {
@@ -3126,33 +3728,35 @@ void test_owner_sighup_keeps_running() {
 }
 
 void test_owner_sigterm_ends_and_homes_once() {
-    SharedInt n;
+    SharedLaunch n;
     CHECK(n.p != nullptr);
     if (n.p == nullptr)
         return;
     const ChildEnd end = in_child([&] {
-        fw::ReturnHome home{};
-        home.spawned = infra::opt_ref_of(n.p);
-        fw::tasty_owe_home();
-        fw::tasty_arm_owner_signals();
-        Sess x{nullptr, &fw::tasty_owner_stop_flag()};
-        to_run(x);
-        while (x.load_asked()) {
+        {
+            fw::ReturnHome home{{.probe = true}};
+            fw::HomeLane::owe();
+            fw::tasty_arm_owner_signals();
+            Sess x{nullptr, &fw::tasty_owner_stop_flag()};
+            to_run(x);
+            while (x.load_asked()) {
+            }
+            ::raise(SIGTERM);
+            if (fw::HomeLane::launches() != LaunchCount{})
+                return 2;
+            if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0)
+                return 3;
+            x.tick();
+            if (x.replay.stops < 1)
+                return 4;
+            if (fw::HomeLane::launches() != LaunchCount{})
+                return 5;
         }
-        ::raise(SIGTERM);
-        if (*n.p != 0)
-            return 2;
-        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0)
-            return 3;
-        x.tick();
-        if (x.replay.stops < 1)
-            return 4;
-        if (*n.p != 0)
-            return 5;
+        *n.p = fw::HomeLane::launches();
         return 0;
     });
     CHECK(end.exited && end.code == 0);
-    CHECK(*n.p == 1);
+    CHECK(*n.p == LaunchCount::of(1));
 }
 
 void test_owner_closed_stdio_survives() {
@@ -3184,19 +3788,201 @@ void test_owner_closed_stdio_survives() {
     CHECK(end.exited && end.code == 0);
 }
 
+int ref_line(char* out, std::size_t n, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    const int r = std::vsnprintf(out, n, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+template <class... A>
+void check_render(
+    std::span<char> buf,
+    std::string_view want,
+    std::format_string<A...> f,
+    A&&... a
+) {
+    const std::string_view got = fw::tasty_render(buf, f, std::forward<A>(a)...);
+    CHECK_EQ_STR(std::string{got}, std::string{want});
+    CHECK(got.size() < buf.size());
+    CHECK(buf[got.size()] == '\0');
+}
+
+void test_tasty_render_matches_snprintf() {
+
+    {
+        char mine[16]{};
+        char ref[16]{};
+        const std::string_view text = "abcdefghijklmnopqrstuvwxyz";
+        (void)ref_line(ref, sizeof ref, "%s", std::string(text).c_str());
+        check_render(mine, std::string_view{ref}, "{}", text);
+    }
+
+    {
+        char mine[16]{};
+        char ref[16]{};
+        std::snprintf(ref, sizeof ref, "%d", -42);
+        check_render(mine, std::string_view{ref}, "{}", -42);
+    }
+
+    {
+        char mine[16]{};
+        char ref[16]{};
+        const std::uint32_t n = 4000000000u;
+        std::snprintf(ref, sizeof ref, "%u", n);
+        check_render(mine, std::string_view{ref}, "{}", n);
+    }
+
+    {
+        char mine[16]{};
+        char ref[16]{};
+        const std::string empty;
+        const std::string fits(15, 'a');
+        const std::string cuts(16, 'a');
+        (void)ref_line(ref, sizeof ref, "%s", empty.c_str());
+        check_render(mine, std::string_view{ref}, "{}", std::string_view{empty});
+        (void)ref_line(ref, sizeof ref, "%s", fits.c_str());
+        check_render(mine, std::string_view{ref}, "{}", std::string_view{fits});
+        (void)ref_line(ref, sizeof ref, "%s", cuts.c_str());
+        check_render(mine, std::string_view{ref}, "{}", std::string_view{cuts});
+    }
+
+    const std::pair<std::string, std::string> lines[] = {
+        {"one line", "one line"},
+        {"already ended\n", "already ended\n"}
+    };
+    for (const auto& [text, plain] : lines) {
+        std::string got;
+        {
+            StderrTo cap;
+            fw::tasty_sayf("{}", std::string_view{text});
+            got = cap.text();
+        }
+        fw::TastyLineBuf ref;
+        (void)ref_line(ref.data(), ref.size(), "%s", plain.c_str());
+        std::string old;
+        {
+            StderrTo cap;
+            fw::tasty_say(std::string_view{ref.data()});
+            old = cap.text();
+        }
+        CHECK_EQ_STR(got, old);
+        const std::size_t want = plain.back() == '\n' ? plain.size() : plain.size() + 1;
+        CHECK_EQ(got.size(), want);
+    }
+    {
+        const std::string big(2000, 'a');
+        std::string got;
+        {
+            StderrTo cap;
+            fw::tasty_sayf("{}", std::string_view{big});
+            got = cap.text();
+        }
+        fw::TastyLineBuf ref;
+        (void)ref_line(ref.data(), ref.size(), "%s", big.c_str());
+        std::string old;
+        {
+            StderrTo cap;
+            fw::tasty_say(std::string_view{ref.data()});
+            old = cap.text();
+        }
+        CHECK_EQ_STR(got, old);
+        CHECK_EQ(got.size(), fw::TastyLineBuf{}.size());
+        CHECK(got.back() == '\n');
+    }
+
+    const ChildEnd end = in_child([] {
+        int fds[2] = {-1, -1};
+        if (::pipe(fds) != 0)
+            return 2;
+        ::close(fds[0]);
+        if (::dup2(fds[1], STDERR_FILENO) < 0)
+            return 3;
+        ::close(fds[1]);
+        fw::tasty_sayf("tasty: {}", std::string_view{"dropped"});
+        return 0;
+    });
+    CHECK(end.exited && end.code == 0);
+}
+
+void test_converted_user_lines_are_unchanged() {
+
+    const char* sentence = fw::TastyRefusal{fw::TastyRefusal::BadLead}.sentence();
+    fw::TastyLineBuf ref;
+    std::snprintf(ref.data(), ref.size(), "tasty: %s", sentence);
+    std::string got;
+    {
+        StderrTo cap;
+        fw::TastyRefusal{fw::TastyRefusal::BadLead}.say();
+        got = cap.text();
+    }
+    std::string old;
+    {
+        StderrTo cap;
+        fw::tasty_say(std::string_view{ref.data()});
+        old = cap.text();
+    }
+    CHECK_EQ_STR(got, old);
+    CHECK_EQ_STR(got, "tasty: --lead needs a whole number of frames\n");
+
+    const std::string setting(1500, 's');
+    const fw::ReplayRefusal r{
+        .why = app::PlayRefusal::Why::Setting,
+        .setting = setting,
+        .setting_offered = true
+    };
+    got.clear();
+    {
+        StderrTo cap;
+        char buf[1400];
+        const char* const line = fw::tasty_refusal_sentence(r, {}, false, buf);
+        fw::tasty_say(std::string_view{line});
+        got = cap.text();
+    }
+    old.clear();
+    {
+        char buf[1400];
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: tasty could not set the core's %.*s for this run",
+            static_cast<int>(setting.size()),
+            setting.c_str()
+        );
+        StderrTo cap;
+        fw::tasty_say(std::string_view{buf});
+        old = cap.text();
+    }
+    CHECK_EQ_STR(got, old);
+    CHECK_EQ(got.size(), std::size_t{1400});
+
+    {
+        StderrTo cap;
+        fw::TastyRefusal{fw::TastyRefusal::LeadOutOfRange}.say();
+        CHECK_EQ_STR(cap.text(), "");
+    }
+
+    Tmp t("/tasty_tasty_say_");
+    CHECK(!t.root.empty());
+    const fw::TastyRuntime rt = runtime_in(t.root);
+    CHECK_EQ_STR(fw::TastyPidFile{rt.paths}.busy_text(), "tasty is already playing");
+}
+
 void test_owner_second_sigterm_homes_and_exits() {
-    SharedInt n;
-    CHECK(n.p != nullptr);
-    if (n.p == nullptr)
+    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file"))
+        return;
+    HomeMarker marker;
+    CHECK(marker.ok);
+    if (!marker.ok)
         return;
     const ChildEnd end = in_child([&] {
         (void)::alarm(2);
-        fw::ReturnHome home{};
-        home.spawned = infra::opt_ref_of(n.p);
-        fw::tasty_owe_home();
+        fw::ReturnHome home{{.image = {marker.exe, marker.arg}}};
+        fw::HomeLane::owe();
         fw::tasty_arm_owner_signals();
         ::raise(SIGTERM);
-        if (*n.p != 0)
+        if (marker.started())
             return 2;
         if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0)
             return 3;
@@ -3204,13 +3990,15 @@ void test_owner_second_sigterm_homes_and_exits() {
         return 4;
     });
     CHECK(end.exited && end.code == 128 + SIGTERM);
-    CHECK(*n.p == 1);
+    CHECK(marker.wait_started());
 }
 
 void test_owner_sigbus_homes() {
-    SharedInt n;
-    CHECK(n.p != nullptr);
-    if (n.p == nullptr)
+    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file"))
+        return;
+    HomeMarker marker;
+    CHECK(marker.ok);
+    if (!marker.ok)
         return;
     const ChildEnd end = in_child([&] {
         struct rlimit rl{};
@@ -3218,9 +4006,8 @@ void test_owner_sigbus_homes() {
         rl.rlim_max = 0;
         (void)::setrlimit(RLIMIT_CORE, &rl);
         (void)::alarm(2);
-        fw::ReturnHome home{};
-        home.spawned = infra::opt_ref_of(n.p);
-        fw::tasty_owe_home();
+        fw::ReturnHome home{{.image = {marker.exe, marker.arg}}};
+        fw::HomeLane::owe();
         fw::tasty_arm_owner_signals();
         ::raise(SIGBUS);
         return 5;
@@ -3228,7 +4015,7 @@ void test_owner_sigbus_homes() {
     const bool died = (end.signaled && end.sig == SIGBUS)
         || (end.exited && end.code == 128 + SIGBUS);
     CHECK(died);
-    CHECK(*n.p == 1);
+    CHECK(marker.wait_started());
 }
 
 const char* stock_comm() {
@@ -3317,8 +4104,9 @@ struct MisterHold {
 };
 
 struct BoardShare {
-    int home = 0;
     std::atomic<int> second_sent{0};
+
+    std::atomic<int> stopping{0};
 };
 
 static_assert(std::atomic<int>::is_always_lock_free);
@@ -3352,7 +4140,6 @@ struct ShareMap {
 };
 
 bool no_mister_yet() {
-    fw::tasty_set_stock_comm(stock_comm());
     const int already = count_mister_comm();
     if (already != 0)
         std::printf("stop test would signal %d process(es) named MiSTer\n", already);
@@ -3362,6 +4149,12 @@ bool no_mister_yet() {
 
 void test_second_sigterm_during_stop_homes_after_exit() {
     if (!no_mister_yet())
+        return;
+    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file"))
+        return;
+    HomeMarker marker;
+    CHECK(marker.ok);
+    if (!marker.ok)
         return;
     ShareMap share;
     CHECK(share.p != nullptr);
@@ -3412,8 +4205,7 @@ void test_second_sigterm_during_stop_homes_after_exit() {
     if (owner == 0) {
         (void)::alarm(12);
         fw::tasty_arm_owner_signals();
-        fw::ReturnHome home{};
-        home.spawned = infra::OptRef{share.p->home};
+        fw::ReturnHome home{{.image = {marker.exe, marker.arg}}};
         BoardShare* board = share.p;
         std::thread poke([board] {
             ::usleep(100 * 1000);
@@ -3422,13 +4214,17 @@ void test_second_sigterm_during_stop_homes_after_exit() {
                  i < 200 && fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0;
                  ++i)
                 ::usleep(1000);
+            if (!fw::HomeLane::may_launch() && fw::HomeLane::lane() == fw::HomeLane::Lane::Stopping)
+                board->stopping.store(1, std::memory_order_release);
             ::kill(::getpid(), SIGTERM);
             board->second_sent.store(1, std::memory_order_release);
         });
-        const int rc = fw::tasty_stop_and_owe();
+        const auto rc = fw::HomeLane::stop_and_owe(
+            fw::StockControl{*os::ProcessName::of(stock_comm())}
+        );
         if (poke.joinable())
             poke.join();
-        ::_exit(rc == 0 ? 4 : rc);
+        ::_exit(rc.has_value() ? 4 : 5);
     }
     hold.reaper = std::thread([pid = hold.pid] {
         int st = 0;
@@ -3443,14 +4239,15 @@ void test_second_sigterm_during_stop_homes_after_exit() {
     const ssize_t got = ::read(gone[0], &b, 1);
     ::close(gone[0]);
     CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 128 + SIGTERM);
-    CHECK(share.p->home == 1);
+    CHECK(marker.wait_started());
+    CHECK(share.p->stopping.load(std::memory_order_acquire) == 1);
     CHECK(got == 1);
 }
 
 void test_stop_wait_timeout_launches_nothing() {
     if (!no_mister_yet())
         return;
-    SharedInt n;
+    SharedLaunch n;
     CHECK(n.p != nullptr);
     if (n.p == nullptr)
         return;
@@ -3488,12 +4285,12 @@ void test_stop_wait_timeout_launches_nothing() {
         const int saved = ::dup(STDERR_FILENO);
         if (::dup2(sp[1], STDERR_FILENO) < 0)
             return 5;
-        int rc = 0;
+        auto rc = mister::Ex<void>{};
         {
-            fw::ReturnHome home{};
-            home.spawned = infra::opt_ref_of(n.p);
-            rc = fw::tasty_stop_and_owe();
+            fw::ReturnHome home{{.probe = true}};
+            rc = fw::HomeLane::stop_and_owe(fw::StockControl{*os::ProcessName::of(stock_comm())});
         }
+        *n.p = fw::HomeLane::launches();
         if (saved >= 0) {
             (void)::dup2(saved, STDERR_FILENO);
             ::close(saved);
@@ -3504,16 +4301,24 @@ void test_stop_wait_timeout_launches_nothing() {
         ::close(sp[0]);
         if (nr < 0)
             return 8;
-        if (*n.p != 0)
+        if (*n.p != LaunchCount{})
             return 6;
-        if (rc != 1)
+        if (rc.has_value())
             return 7;
+        const auto why = fw::TastyRefusal::of(rc.error());
+        if (!why || why->why() != fw::TastyRefusal::MenuLeftRunning)
+            return 11;
         if (std::strstr(msg, "the menu was left running") == nullptr)
             return 8;
+
+        if (fw::HomeLane::may_launch())
+            return 9;
+        if (fw::HomeLane::lane() != fw::HomeLane::Lane::Left)
+            return 10;
         return 0;
     });
     CHECK(end.exited && end.code == 0);
-    CHECK(*n.p == 0);
+    CHECK(*n.p == LaunchCount{});
 }
 
 namespace {
@@ -3528,9 +4333,11 @@ extern "C" void note_term(int) {
 void test_sigbus_during_stop_does_not_home() {
     if (!no_mister_yet())
         return;
-    SharedInt n;
-    CHECK(n.p != nullptr);
-    if (n.p == nullptr)
+    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file"))
+        return;
+    HomeMarker marker;
+    CHECK(marker.ok);
+    if (!marker.ok)
         return;
     int ready[2] = {-1, -1};
     if (::pipe(ready) != 0) {
@@ -3587,10 +4394,11 @@ void test_sigbus_during_stop_does_not_home() {
         (void)::setrlimit(RLIMIT_CORE, &rl);
         (void)::alarm(8);
         fw::tasty_arm_owner_signals();
-        fw::ReturnHome home{};
-        home.spawned = infra::opt_ref_of(n.p);
-        const int rc = fw::tasty_stop_and_owe();
-        ::_exit(rc == 0 ? 4 : 5);
+        fw::ReturnHome home{{.image = {marker.exe, marker.arg}}};
+        const auto rc = fw::HomeLane::stop_and_owe(
+            fw::StockControl{*os::ProcessName::of(stock_comm())}
+        );
+        ::_exit(rc.has_value() ? 4 : 5);
     }
 
     pollfd pf{termed[0], POLLIN, 0};
@@ -3604,7 +4412,34 @@ void test_sigbus_during_stop_does_not_home() {
     const bool died = (WIFSIGNALED(st) && WTERMSIG(st) == SIGBUS)
         || (WIFEXITED(st) && WEXITSTATUS(st) == 128 + SIGBUS);
     CHECK(died);
-    CHECK(*n.p == 0);
+    CHECK(!marker.wait_started(100));
+}
+
+void test_prepare_fails_when_the_pid_file_cannot_be_written() {
+    Tmp t("/tasty_tasty_d4_");
+    CHECK(!t.root.empty());
+    if (t.root.empty())
+        return;
+    fw::TastyRuntime rt = runtime_in(t.root);
+    CHECK(rt.paths.pid.assign(t.p("missing/pid")));
+
+    const auto stock = os::ProcessName::of("tasty-no-stock");
+    CHECK(stock.has_value());
+    if (!stock)
+        return;
+    rt.stock = *stock;
+    fw::TastySession::RecordOnlyRun run{};
+    const ChildEnd end = in_child([&] {
+        fw::ReplayMode mode{fw::TastyArgs{.verb = fw::TastyVerb::Status}, run, std::nullopt, rt};
+        const auto rc = mode.prepare();
+        if (!rc || *rc != 1)
+            ::_exit(11);
+        if (fw::HomeLane::lane() != fw::HomeLane::Lane::Open)
+            ::_exit(12);
+        ::_exit(1);
+        return 0;
+    });
+    CHECK(end.exited && end.code == 1);
 }
 
 [[noreturn]] void write_signal_probe(const char* path) {
@@ -3694,9 +4529,8 @@ void test_home_exec_resets_signals() {
         ::sigaddset(&block, SIGALRM);
         if (::sigprocmask(SIG_BLOCK, &block, nullptr) != 0)
             return 2;
-        fw::tasty_set_home_image({.exe = exe, .arg = arg});
-        if (fw::tasty_spawn_stock() != 0)
-            return 3;
+        fw::ReturnHome home{{.image = {exe, arg}}};
+        fw::HomeLane::launch();
         int st = 0;
         while (::waitpid(-1, &st, 0) < 0) {
             if (errno != EINTR)
@@ -3812,7 +4646,7 @@ void test_signal_during_grace_does_not_kill_early() {
         timespec t0{};
         timespec t1{};
         (void)::clock_gettime(CLOCK_MONOTONIC, &t0);
-        const auto stopped = fw::tasty_stop_stock();
+        const auto stopped = fw::StockControl{*os::ProcessName::of(stock_comm())}.stop();
         (void)::clock_gettime(CLOCK_MONOTONIC, &t1);
         const long long ms = mono_ms(t0, t1);
         if (poke.joinable())
@@ -3860,17 +4694,26 @@ int main(int argc, char** argv) {
     test_lock_paths();
     test_return_home();
     test_return_home_error_path();
+    test_home_lane_claims_once_per_bind();
+    test_run_exit_statuses();
+    test_home_lane_launch_count_shared_with_child();
+    test_home_lane_unbind_clears_the_probe();
     test_owner_sighup_keeps_running();
     test_owner_sigterm_ends_and_homes_once();
     test_owner_closed_stdio_survives();
+    test_tasty_render_matches_snprintf();
+    test_converted_user_lines_are_unchanged();
     test_owner_second_sigterm_homes_and_exits();
     test_owner_sigbus_homes();
     test_second_sigterm_during_stop_homes_after_exit();
     test_stop_wait_timeout_launches_nothing();
     test_sigbus_during_stop_does_not_home();
+    test_prepare_fails_when_the_pid_file_cannot_be_written();
     test_home_exec_resets_signals();
     test_signal_during_grace_does_not_kill_early();
     test_lock_unlink();
+    test_two_owner_locks_over_different_paths_coexist();
+    test_status_tmp_path_is_not_clipped();
     test_record_dir();
     test_prepare_record_stem();
     test_prepare_record_avi_stem();
@@ -3878,6 +4721,8 @@ int main(int argc, char** argv) {
     test_resolve_relative();
     test_info_missing();
     test_info_frames_and_rerecords();
+    test_info_reads_an_overlong_header_line_as_the_feeder_does();
+    test_info_reads_an_unterminated_last_header_line();
     test_check_missing();
     test_busy_text();
     test_stop_idle();
@@ -3889,6 +4734,10 @@ int main(int argc, char** argv) {
     test_start_waits_for_video_edge();
     test_strict_rec_start_waits_for_the_ini();
     test_take_play_refusal();
+    test_a_port_that_forgets_a_verb_is_abstract();
+    test_a_core_ask_on_a_full_ring_is_retried();
+    test_a_taken_core_ask_is_not_repeated();
+    test_a_menu_ask_on_a_full_ring_is_retried();
     test_later_refusal_ends_session();
     test_epoch_ambiguous_then_finished();
     test_epoch_ambiguous_final_leaves();
@@ -3897,8 +4746,9 @@ int main(int argc, char** argv) {
     test_loop_wins_over_stay();
     test_session_passes_ram_init();
     test_prepare_play_lead_rom_and_ram();
-    test_rom_search_reads_every_subdir();
-    test_rom_search_stops_at_the_hash_budget();
+    test_tasty_refusal_round_trips();
+    test_prepare_play_names_its_refusal();
+    test_rom_search_stop_sentence_end_to_end();
     test_loop_with_record_is_refused();
     test_rerecords_need_a_whole_decimal();
     test_ram_fill_is_the_codecs();

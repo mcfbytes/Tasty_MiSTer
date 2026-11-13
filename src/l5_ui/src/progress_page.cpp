@@ -4,15 +4,14 @@
 #include <algorithm>
 #include <array>
 
+#include "infra/path_parts.h"
 #include "ui/osd_renderer.h"
 
 namespace mister::ui {
 
 std::string_view progress_leaf(std::string_view path) noexcept {
-    const std::size_t slash = path.rfind('/');
-    if (slash != std::string_view::npos)
-        path.remove_prefix(slash + 1);
-    return path.substr(0, std::min(path.size(), kProgressNameMax));
+    const std::string_view leaf = infra::basename(path);
+    return leaf.substr(0, std::min(leaf.size(), kProgressNameMax));
 }
 
 ProgressPage::ProgressPage(std::string_view name) noexcept {

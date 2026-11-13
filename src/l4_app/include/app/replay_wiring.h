@@ -20,7 +20,7 @@ class DiagLog;
 namespace mister::app {
 
 class IdentityLatch;
-class InputWire;
+class CoreInputBinding;
 class IOsdClose;
 template <SeatTag Seat>
 class LinkTxChannel;
@@ -41,7 +41,7 @@ struct ReplayWiring {
     const ConfStrCell& conf;
     UiRequestRing& asks;
     const VideoPump& video;
-    InputWire& input;
+    CoreInputBinding& input;
     ScreenshotPump& shots;
     xthread::DiagLog& diag;
 

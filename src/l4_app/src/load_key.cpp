@@ -12,7 +12,7 @@ void LoadKey::feed(std::span<const std::uint8_t> bytes) noexcept {
         skip_ -= bytes.size();
         return;
     }
-    crc_ = svc::crc32_extend(crc_, bytes.subspan(static_cast<std::size_t>(skip_)));
+    crc_.extend(bytes.subspan(static_cast<std::size_t>(skip_)));
     skip_ = 0;
 }
 

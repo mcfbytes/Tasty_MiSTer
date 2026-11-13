@@ -9,7 +9,7 @@
 #include "app/video_pump.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
-#include "tasty_ctl.h"
+#include "tasty_say.h"
 
 namespace mister::fw {
 
@@ -22,6 +22,10 @@ void TastySink::on(const app::Event::CoreLoaded& a, const app::Event::Head&) {
     TASTY_SEAT_BODY(TastySink);
     const std::optional<app::SessionIdentity> id = identity_ ? identity_->copy() : std::nullopt;
     video_.set_core_name(id ? id->core.view() : std::string_view{});
+    video_.set_spd_identity(
+        id ? app::home_name(*id) : std::string_view{},
+        id ? id->rotation : proto::RotationDir::None
+    );
     video_.on_core_loaded(a.front_end);
 }
 

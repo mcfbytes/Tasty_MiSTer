@@ -45,14 +45,14 @@ Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFileBy
     if (negotiated_.conf_str() && !negotiated_.in_scope(r.scope))
         return std::unexpected(Error{Errc::stale, ERR_SITE(), r.scope.gen.v});
     const proto::FileSlotHit hit = negotiated_.conf_str()
-        ? negotiated_.conf_str()->find_load_slot(r.digit)
+        ? negotiated_.conf_str()->file_slots().load(r.digit)
         : proto::FileSlotHit{};
     if (!hit.entry)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.slot().detail()});
 
     if (hit.how == proto::FileSlotMatch::RowZero)
         owner_tally_.mgl_row0.add();
-    return proto::ConfStr::row_of(*hit.entry);
+    return hit.entry->wire_row();
 }
 
 template <class R>
@@ -131,10 +131,10 @@ std::optional<ContentRequest> ContentPick::content_for(
     ContentRequest cr{};
     if (!cr.path.assign(path))
         return std::nullopt;
-    cr.slot = proto::ConfStr::wire_index(row, path);
+    cr.slot = row.wire_index(path);
     if (const auto member = zip_member_(row, path)) {
         cr.path = *member;
-        cr.slot = proto::ConfStr::wire_index(row, member->view());
+        cr.slot = row.wire_index(member->view());
     }
     cr.load_addr = hal::FabricAddr{row.load_addr};
     return cr;
@@ -211,10 +211,27 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
     }
     const std::string_view path = req.path.view();
     auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
-    const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
+    auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
     if (!sz) {
         ++owner_tally_.files_failed;
         return {};
+    }
+
+    const auto row = negotiated_.load_row();
+    const bool derived = row && row->derives_content;
+    if (derived) {
+        auto made = derive_(req, std::move(*f), *sz);
+        if (!made) {
+            ++owner_tally_.files_failed;
+            return {};
+        }
+        f = std::move(*made);
+        auto made_size = (*f)->size();
+        if (!made_size) {
+            ++owner_tally_.files_failed;
+            return {};
+        }
+        sz = std::move(made_size);
     }
 
     const bool quiet = !req.whole && no_mount_in_flight_();
@@ -227,23 +244,29 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         forget_watch();
         return After{.orders = {.pieces = std::move(*p)}};
     }
+
+    if (derived && !quiet && *sz > kDerivedWholeMax) {
+        ++owner_tally_.files_failed;
+        return {};
+    }
+
+    if (derived && sz->empty()) {
+        if (!order_empty_bracket_(req, path)) {
+            ++owner_tally_.op_drops;
+            return {};
+        }
+        ++owner_tally_.files_loaded;
+        publish_done_(req.asked, req.tag);
+        if (req.load_addr == hal::FabricAddr{})
+            return After{.companion = req.path};
+        return {};
+    }
     auto buf = read_whole(**f, *sz);
     if (!buf) {
         ++owner_tally_.files_failed;
         return {};
     }
     const std::string_view ext = infra::extension(path);
-
-    const cores::CoreProfile& profile = negotiated_.loaded_profile();
-    const bool unpacked = profile.gzip_content.wants(ext) && svc::GzipInflater::is_gzip(*buf);
-    if (unpacked) {
-        auto image = inflater_.inflate(*buf, profile.gzip_content.cap);
-        if (!image) {
-            ++owner_tally_.files_failed;
-            return {};
-        }
-        *buf = std::move(*image);
-    }
     const std::uint64_t payload_bytes = buf->size();
     LoadKey key(buf->size());
     key.feed(*buf);
@@ -268,7 +291,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         .total = payload_bytes,
         .crc = key.value(),
         .wire_index = req.slot,
-        .cut_on_hold = unpacked || req.save != proto::FileId{} || req.edge != ContentEdge::Content
+        .cut_on_hold = req.save != proto::FileId{} || req.edge != ContentEdge::Content
     };
     if (!watch.path.assign(path))
         watch.file.reset();
@@ -283,11 +306,61 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
     return {};
 }
 
-bool ContentPick::order_content_tx(proto::FileId file, ContentWatch watch) {
+cores::LoaderContext ContentPick::loader_context_() {
+    TASTY_SEAT_BODY(ContentPick);
+    const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
+    return cores::LoaderContext{
+        vfs_,
+        negotiated_.loaded_profile(),
+        turbo,
+        loader_memo_,
+        aperture_,
+        infra::OptRef<const proto::StatusCell>{status_cell_}
+    };
+}
+
+std::optional<std::unique_ptr<svc::IFile>> ContentPick::derive_(
+    const ContentRequest& req,
+    std::unique_ptr<svc::IFile> raw,
+    proto::FileSize size
+) {
+    TASTY_SEAT_BODY(ContentPick);
+    const auto row = negotiated_.load_row();
+    if (!row || row->make_loader == nullptr)
+        return std::nullopt;
+    auto loader = row->make_loader(loader_context_());
+    const cores::LoadAsk
+        ask{.index = req.slot, .path = req.path.view(), .size = size, .load_addr = req.load_addr};
+    auto made = loader->source(ask, std::move(raw));
+    if (!made)
+        return std::nullopt;
+    return std::optional<std::unique_ptr<svc::IFile>>{std::move(*made)};
+}
+
+bool ContentPick::order_empty_bracket_(const ContentRequest& req, std::string_view path) {
+    TASTY_SEAT_BODY(ContentPick);
+    auto id = inbox_.intern_empty_file(
+        FileIntern{.path = path, .save = req.save, .edge = req.edge}
+    );
+    if (!id)
+        return false;
+    return order_content_tx(
+        *id,
+        ContentWatch{.total = 0, .wire_index = req.slot},
+        proto::LinkOp::FileTxPhase::Empty
+    );
+}
+
+bool ContentPick::order_content_tx(
+    proto::FileId file,
+    ContentWatch watch,
+    proto::LinkOp::FileTxPhase phase
+) {
     TASTY_SEAT_BODY(ContentPick);
     watch.act = act_keys_.next();
     const proto::LinkOp::FileTx op{
         .wire_index = watch.wire_index.fio_byte(),
+        .phase = phase,
         .file = file,
         .act = watch.act
     };
@@ -383,6 +456,9 @@ ContentPick::Armed ContentPick::arm_loader(
 ) {
     TASTY_SEAT_BODY(ContentPick);
     const auto row = negotiated_.load_row();
+
+    if (row && row->derives_content)
+        return {};
     const cores::MakeLoader make = cores::loader_for(row, req.load_addr);
     if (make == nullptr)
         return {};
@@ -406,17 +482,7 @@ ContentPick::Armed ContentPick::arm_loader(
         ++owner_tally_.files_failed;
         return Armed{.taken = true};
     }
-    const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
-    auto loader = make(
-        cores::LoaderContext{
-            vfs_,
-            profile,
-            turbo,
-            loader_memo_,
-            aperture_,
-            infra::OptRef<const proto::StatusCell>{status_cell_}
-        }
-    );
+    auto loader = make(loader_context_());
     const cores::LoadAsk
         ask{.index = req.slot, .path = path, .size = *sz, .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_cell_.sample().value);
@@ -466,7 +532,7 @@ std::optional<ContentPick::Armed> ContentPick::arm_window_row_(
 ) {
     const std::uint64_t extent = std::max<std::uint64_t>(
         size.v,
-        row.extent.length_of(proto::BlockCount{1})
+        row.extent.file_word<std::size_t>()
     );
     auto w = LoadWindow<seat_owner::Main>::open(
         window_map_,
@@ -525,17 +591,7 @@ ContentPick::Armed ContentPick::arm_walk_(
     const ContentRequest& req,
     const cores::CoreFactory& row
 ) {
-    const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
-    auto loader = row.make_loader(
-        cores::LoaderContext{
-            vfs_,
-            row.profile,
-            turbo,
-            loader_memo_,
-            aperture_,
-            infra::OptRef<const proto::StatusCell>{status_cell_}
-        }
-    );
+    auto loader = row.make_loader(loader_context_());
     const cores::LoadAsk ask{
         .index = req.slot,
         .path = req.path.view(),

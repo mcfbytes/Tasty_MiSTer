@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <sys/epoll.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
 #include "app/device_table_loans.h"
 #include "app/input_decode_tally.h"
-#include "app/input_wire.h"
+#include "app/capture_arm.h"
+#include "app/capture_hit.h"
+#include "app/input_gates_cell.h"
+#include "app/input_key_counts.h"
 #include "app/joy_level_emitter.h"
+#include "app/joy_menu_chords.h"
+#include "app/key_focus.h"
+#include "app/ps2_egress.h"
+#include "app/rumble_players_cell.h"
 #include "app/launcher_key_bridge.h"
 #include "app/launcher_state.h"
 #include "app/mouse_accumulator.h"
 #include "app/mouse_divider.h"
 #include "app/raw_key_edge.h"
 #include "app/rumble_relay.h"
+#include "infra/coalesced_kick.h"
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
@@ -24,14 +31,14 @@
 #include "infra/park_timeout.h"
 #include "infra/telemetry.h"
 #include "os/clock.h"
+#include "os/epoll_set.h"
 #include "proto/link_event.h"
-#include "proto/ps2_frame.h"
 #include "proto/ps2_keyboard.h"
 #include "proto/ps2_mouse.h"
-#include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "hal/boards_table.h"
 #include "svc/device_table.h"
+#include "svc/input_gates.h"
 #include "svc/input_service_counts.h"
 #include "svc/input_service.h"
 #include "svc/types.h"
@@ -42,10 +49,9 @@ class DiagLog;
 }
 
 namespace mister::app {
+class HostLedWatch;
 template <SeatTag Seat>
 class LinkTxChannel;
-template <SeatTag Seat>
-class LinkRxChannel;
 
 struct DeviceInputState {
     svc::JoyMask prev_menu{};
@@ -67,6 +73,8 @@ struct InputDecodeCounts {
     svc::PlayerMask joy_players{};
     std::uint32_t captures = 0;
 
+    InputKeyCounts keys{};
+
     svc::InputServiceCounts service{};
 };
 
@@ -81,8 +89,13 @@ public:
     using CountsCell = xthread::Telemetry<Counts, SeatTag::Input>;
 
     class Fds {
+        TASTY_SEAT_EXEMPT(boot);
+
     public:
-        [[nodiscard]] static Ex<Fds> create(InputWire& wire) noexcept;
+        [[nodiscard]] static Ex<Fds> create(
+            xthread::WakeFlag& ctrl,
+            infra::OptRef<const HostLedWatch> led = {}
+        ) noexcept;
         Fds(Fds&&) noexcept = default;
         Fds(const Fds&) = delete;
         Fds& operator=(const Fds&) = delete;
@@ -91,24 +104,35 @@ public:
     private:
         friend class InputDecode;
 
-        explicit Fds(UniqueFd epfd) noexcept : epfd_(std::move(epfd)) {}
+        explicit Fds(os::EpollSet epoll) noexcept : epoll_(std::move(epoll)) {}
 
-        UniqueFd epfd_;
+        os::EpollSet epoll_;
     };
 
     struct Wiring {
         xthread::DiagLog& diag;
         LinkTxChannel<SeatTag::Input>& inbox;
-        LinkRxChannel<SeatTag::Input>& link_rx;
-        xthread::WakeFlag::Kicker rt_wake;
+        xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>& rt_kick;
         infra::OptRef<const LauncherStateCell> cell{};
         infra::OptRef<LauncherKeyBridge> keys{};
-        infra::OptRef<xthread::WakeFlag> ui_wake{};
+        MenuKeyInbox& menu_keys;
+
+        infra::OptRef<HostLedWatch> led{};
+
+        xthread::WakeFlag& ctrl;
+
+        InputGatesCell& gates;
+        const KeyFocusCell& key_focus;
+        xthread::WakeFlag& hotplug;
+        const xthread::WakeFlag& joy_edge_reset;
+        xthread::Counter& activity;
+        const CaptureArmCell& capture_arm;
+        CaptureHitCell& capture_hit;
+        RumblePlayersCell& rumble_players;
     };
 
     InputDecode(
         Fds fds,
-        InputWire& wire,
         svc::InputService& svc,
         DeviceTableLoans& tables,
         os::IClock& clock,
@@ -133,19 +157,18 @@ public:
 
     [[nodiscard]] bool muted() const noexcept { return muted_; }
 
-    unsigned drop_link_events() noexcept;
-
-    void before_wait();
+    void begin_round();
+    void prepare_wait();
     void wait_events(infra::ParkTimeout timeout) noexcept;
-    unsigned after_wait();
 
-    unsigned decode_round(int timeout_ms);
+    [[nodiscard]] bool begin_batch();
+    unsigned decode_batch();
 
     Counts counts() const noexcept;
 
     const CountsCell& counts_cell() const noexcept { return counts_cell_; }
 
-    int epoll_fd() const noexcept { return epfd_.get(); }
+    int epoll_fd() const noexcept { return epoll_.fd(); }
 
     std::uint32_t joy_ui_keys() const noexcept { return joy_ui_keys_; }
 
@@ -169,39 +192,51 @@ private:
     void publish_from(const svc::DeviceReport& r, bool is_mouse, svc::DeviceSlot slot);
 
     void maybe_capture(const svc::InputDevice& d, svc::DeviceSlot slot);
-    void publish_joy_menu(const svc::DeviceReport& r, svc::DeviceSlot slot, bool osd_visible);
 
-    ReadyFd drain_ready_fd(int fd, std::uint32_t events);
+    ReadyFd drain_ready_fd(os::EpollSet::Event e);
     bool push_ui_edge(const RawKeyEdge& e);
-    void drain_link_events_();
-    unsigned flush_ps2_frames_();
     void flush_mouse_();
-    void sweep_dropped_keys_();
-    void note_dropped_mouse_();
 
     [[nodiscard]] bool is_osd_toggle_(svc::EvdevCode code) const noexcept;
     bool apply_requests();
+
+    void publish_gates_() noexcept;
 
     unsigned take_tables_() noexcept;
     void deregister_devices_() noexcept;
     void evict_fd(int fd);
 
-    InputWire& wire_;
+    xthread::WakeFlag& ctrl_;
+    InputGatesCell& gates_cell_;
+    const KeyFocusCell& key_focus_;
+    xthread::WakeFlag& hotplug_;
+    const xthread::WakeFlag& joy_edge_reset_;
+    xthread::Counter& activity_;
+    const CaptureArmCell& capture_arm_;
+    CaptureHitCell& capture_hit_;
+    RumblePlayersCell& rumble_players_;
+    KeyFocusCell::Reader focus_reader_{};
     svc::InputService& svc_;
     DeviceTableLoans::Worker tables_rx_;
     xthread::DiagLog& diag_;
     LinkTxChannel<SeatTag::Input>& inbox_;
-    LinkRxChannel<SeatTag::Input>& link_rx_;
 
-    xthread::WakeFlag::Kicker rt_wake_;
+    xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>& rt_kick_;
+
+    svc::InputGates gates_{};
+    svc::InputGates published_gates_{};
+
+    KeyFocus focus_ = KeyFocus::Core;
     InputDecodeTally tally_{};
     RumbleRelay rumble_;
 
     bool f12_mod_needed_ = false;
     infra::OptRef<const LauncherStateCell> launcher_cell_;
     infra::OptRef<LauncherKeyBridge> launcher_keys_;
+    JoyMenuChords chords_;
 
-    infra::OptRef<xthread::WakeFlag> ui_wake_;
+    MenuKeyInbox& menu_keys_;
+    infra::OptRef<HostLedWatch> led_;
     bool bridging_ = false;
 
     proto::Ps2Keyboard kbd_{};
@@ -209,18 +244,17 @@ private:
 
     MouseDivider mouse_divider_;
     JoyLevelEmitter joy_;
-    proto::FrameDrops wm_frame_drops_{};
-    proto::FrameDrops wm_mouse_drops_{};
-    bool sweep_owed_ = false;
+
+    InputKeyCounts keys_{};
+
+    Ps2Egress egress_;
 
     infra::IndexedArray<DeviceInputState, svc::DeviceTable::kMaxDevices, svc::DeviceSlot>
         devices_{};
-
-    svc::JoyMask osdbtn_{};
     std::uint32_t joy_ui_keys_ = 0;
     std::uint32_t link_event_misrouted_ = 0;
 
-    UniqueFd epfd_;
+    os::EpollSet epoll_;
 
     std::uint32_t registered_ = 0;
     svc::Generation seen_gen_{};
@@ -236,9 +270,7 @@ private:
     infra::OptRef<xthread::WakeFlag> pause_wake_;
     bool muted_ = false;
 
-    static constexpr std::size_t kMaxEpollEvents = 16;
-    epoll_event evs_[kMaxEpollEvents]{};
-    int n_ready_ = 0;
+    Ex<os::EpollSet::Ready> ready_{os::EpollSet::Ready{}};
     bool rebuilt_ = false;
 
     CountsCell counts_cell_{};
@@ -251,7 +283,7 @@ static_assert(
     "item: the decode round is the input LATENCY path — a pad "
     "edge must reach the wire before T-RT's next round. On a "
     "SCHED_OTHER row it queues behind every T-DIAG/T-UI runnable and "
-    "the coalesced kick buys nothing (arch §2)."
+    "the coalesced kick buys nothing."
 );
 static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
@@ -268,7 +300,7 @@ static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
         return hal::seat_of(m, InputDecode::kSeat).prio > hal::seat_of(m, SeatTag::Prefetch).prio;
     }),
-    "item: this is the INPUT half of arch's "
+    "item: this is the INPUT half of the "
     "kFifoOrder T-INPUT > T-PREFETCH edge — a decode round must PREEMPT a "
     "CHD hunk decode (measured 3.1-11.0 ms), never queue behind "
     "one."

@@ -3,18 +3,18 @@
 
 #include <dirent.h>
 #include <signal.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <format>
 #include <iterator>
 #include <limits>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,6 +23,7 @@
 #include "infra/fixed_str.h"
 #include "infra/parse_int.h"
 #include "infra/path_text.h"
+#include "os/path_buf.h"
 
 extern char** environ;
 
@@ -62,18 +63,8 @@ std::vector<std::string> child_env(bool lease) {
 
 }
 
-Ex<LauncherHost::Fds> LauncherHost::Fds::create() noexcept {
-    UniqueFd epoll(::epoll_create1(EPOLL_CLOEXEC));
-    if (!epoll.valid())
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    return Fds{std::move(epoll)};
-}
-
 void LauncherHost::watch_(int fd) noexcept {
-    epoll_event ev{};
-    ev.events = EPOLLIN;
-    ev.data.fd = fd;
-    (void)::epoll_ctl(epoll_.get(), EPOLL_CTL_ADD, fd, &ev);
+    (void)epoll_.add(fd);
 }
 
 void LauncherHost::publish_() noexcept {
@@ -164,8 +155,7 @@ void LauncherHost::claim_screen_() noexcept {
     if (!state_.owns_screen) {
         if (const auto vt = w_.console.active(); vt && *vt != demand_.profile->vt)
             prior_vt_ = *vt;
-        const std::string tty(demand_.profile->tty);
-        w_.console.blank(tty.c_str());
+        w_.console.blank(demand_.profile->vt);
     }
     ++state_.screen_gen;
     if (state_.screen_gen == 0)
@@ -202,8 +192,15 @@ void LauncherHost::spawn_() noexcept {
     for (const std::string& e : env)
         envp.push_back(e.c_str());
     const std::array<const char*, 1> argv{demand_.program.c_str()};
+
+    std::array<char, os::kVtTtyPathBuf> tty_node{};
+    std::string_view tty_text = w_.tty;
+    if (tty_text.empty()) {
+        if (const auto node = p.vt.tty_path(std::span<char>(tty_node)))
+            tty_text = *node;
+    }
     infra::PathText tty;
-    if (!tty.assign(p.tty)) {
+    if (!tty.assign(tty_text)) {
         ++n_.spawn_failures;
         on_spawn_failure_();
         return;
@@ -317,8 +314,7 @@ void LauncherHost::release_screen_(bool restore_console) noexcept {
     if (had)
         publish_();
     if (restore_console && demand_.profile) {
-        const std::string tty(demand_.profile->tty);
-        w_.console.restore_text(tty.c_str());
+        w_.console.restore_text(demand_.profile->vt);
         if (prior_vt_ != os::VtNumber{})
             (void)w_.console.activate(prior_vt_);
     }

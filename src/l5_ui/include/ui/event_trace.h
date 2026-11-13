@@ -5,6 +5,7 @@
 
 #include "app/event.h"
 #include "infra/diag_log.h"
+#include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
@@ -24,7 +25,7 @@ public:
 
     void lane(SeatTag from) noexcept { lane_ = from; }
 
-    bool open(const char* path) noexcept { return log_.open(path); }
+    [[nodiscard]] Ex<void> open(const char* path) noexcept { return log_.open(path); }
 
     void set_echo_stderr(bool on) noexcept { log_.set_echo_stderr(on); }
 

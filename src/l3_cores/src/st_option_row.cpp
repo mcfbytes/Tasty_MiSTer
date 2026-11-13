@@ -8,6 +8,7 @@
 
 #include "cores/st_config.h"
 #include "infra/indexed_array.h"
+#include "infra/path_parts.h"
 
 namespace mister::cores {
 
@@ -147,7 +148,7 @@ OptionRowView StOptionRowFloppy::on_file_view(const Facts& f, std::span<char> te
     const bool wp = f.system_ctrl.has(st_ctrl::write_protect_bit(drive_));
     const std::string_view path = infra::at_index(f.floppy, drive_);
     const bool inserted = !path.empty();
-    const std::string_view name = inserted ? StConfig::leaf_of(path) : kNoDisk;
+    const std::string_view name = inserted ? infra::basename(path) : kNoDisk;
     const int n = std::snprintf(
         text.data(),
         text.size(),
@@ -165,19 +166,19 @@ OptionRowView StOptionRowHdd::on_file_view(const Facts& f, std::span<char>) cons
     return {
         static_cast<std::uint8_t>(disk.bound ? 1 : 0),
         false,
-        disk.bound ? StConfig::leaf_of(disk.path) : kNoDisk
+        disk.bound ? infra::basename(disk.path) : kNoDisk
     };
 }
 
 OptionRowView StOptionRowTos::on_file_view(const Facts& f, std::span<char>) const noexcept {
-    return {static_cast<std::uint8_t>(f.tos.empty() ? 0 : 1), false, StConfig::leaf_of(f.tos)};
+    return {static_cast<std::uint8_t>(f.tos.empty() ? 0 : 1), false, infra::basename(f.tos)};
 }
 
 OptionRowView StOptionRowCartridge::on_file_view(const Facts& f, std::span<char>) const noexcept {
     return {
         static_cast<std::uint8_t>(f.cart.empty() ? 0 : 1),
         f.system_ctrl.has(st_ctrl::CtrlWord::kDongle),
-        f.cart.empty() ? kNoCartridge : StConfig::leaf_of(f.cart)
+        f.cart.empty() ? kNoCartridge : infra::basename(f.cart)
     };
 }
 

@@ -6,6 +6,8 @@
 
 #include "app/capture_arm.h"
 #include "infra/fixed_str.h"
+#include "infra/seat.h"
+#include "infra/telemetry.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -24,5 +26,7 @@ struct CaptureHit {
     svc::Pid pid{};
     FixedStr<kCaptureIdCap, StrFit::Clip> id{};
 };
+
+using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
 
 }

@@ -31,10 +31,10 @@ public:
     [[nodiscard]] Ex<RegisterWindow<CauseReg>> map_cause(LwOffset base) override {
         TASTY_SEAT_BODY(UioDoorbellSource);
 
-        auto win = LwSysWindow::discover(lw_, base, CauseReg::kSize);
+        auto win = LwSysWindow::discover(lw_, base, LwExtent::of_layout<CauseReg>());
         if (!win)
             return std::unexpected(win.error());
-        return win->map<CauseReg>(0);
+        return win->map<CauseReg>(LwOffset{});
     }
 
 private:

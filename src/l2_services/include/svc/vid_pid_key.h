@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <charconv>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
+#include <system_error>
 
 #include "svc/types.h"
 
@@ -15,6 +20,21 @@ struct VidPidKey {
         return VidPidKey{
             (static_cast<std::uint32_t>(vid.v) << kVidShift) | static_cast<std::uint32_t>(pid.v)
         };
+    }
+
+    [[nodiscard]] static std::optional<VidPidKey> parse_hex(std::string_view text) noexcept {
+        constexpr std::size_t kDigits = 8;
+        constexpr std::size_t kPrefix = 2;
+        constexpr int kRadix = 16;
+        if (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            text.remove_prefix(kPrefix);
+        if (text.empty() || text.size() > kDigits)
+            return std::nullopt;
+        std::uint32_t value = 0;
+        const auto r = std::from_chars(text.data(), text.data() + text.size(), value, kRadix);
+        if (r.ec != std::errc{} || r.ptr != text.data() + text.size())
+            return std::nullopt;
+        return VidPidKey{value};
     }
 
     [[nodiscard]] static constexpr VidPidKey every_device() noexcept { return VidPidKey{1}; }

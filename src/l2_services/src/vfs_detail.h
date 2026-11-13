@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/ascii.h"
+#include "infra/path_parts.h"
 #include "svc/asset_name.h"
 
 namespace mister::svc::detail {
@@ -45,9 +46,9 @@ constexpr std::optional<std::string_view> relative_member(
 }
 
 constexpr bool in_same_folder(std::string_view folder, std::string_view path) noexcept {
-    const std::size_t p = path.rfind('/');
-    const std::size_t len = (p == std::string_view::npos) ? 0 : p;
-    return folder.size() == len && infra::icompare_n(path, folder, infra::ByteCount{len}) == 0;
+    const std::string_view dir = infra::dir_or_empty(path);
+    return folder.size() == dir.size()
+        && infra::icompare_n(dir, folder, infra::ByteCount{dir.size()}) == 0;
 }
 
 constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {

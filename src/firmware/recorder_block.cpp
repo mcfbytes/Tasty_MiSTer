@@ -81,9 +81,9 @@ RecorderBlock::RecorderBlock(
 }
 
 void RecorderBlock::open_seats(ThreadAssembly::SeatMains& mains) noexcept {
-    mains.mains.bind(&seated(capture_main_, "T-CAPTURE bound past a refused open"));
-    mains.mains.bind(&seated(encode_main_, "T-ENCODE bound past a refused open"));
-    mains.mains.bind(&seated(rec_write_main_, "T-RECWRITE bound past a refused open"));
+    mains.bind(&seated(capture_main_, "T-CAPTURE bound past a refused open"));
+    mains.bind(&seated(encode_main_, "T-ENCODE bound past a refused open"));
+    mains.bind(&seated(rec_write_main_, "T-RECWRITE bound past a refused open"));
 }
 
 }

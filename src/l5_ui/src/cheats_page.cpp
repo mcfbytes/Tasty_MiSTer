@@ -157,7 +157,7 @@ void CheatsPage::publish_apply_() {
     TASTY_SEAT_BODY(CheatsPage);
 
     if (!link_tx_ || !link_tx_->push(proto::LinkOp::ApplyCheats{})) {
-        ++refusals_;
+        refusals_.add();
         return;
     }
     ++published_;
@@ -167,7 +167,7 @@ Transition CheatsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CheatsPage);
     if (ev.buttons.has_any({UiEvent::Menu})) {
 
-        return Transition{Transition::Kind::Pop};
+        return Transition::pop();
     }
     view_.set_height(osd_height());
 
@@ -191,14 +191,14 @@ Transition CheatsPage::handle(const UiEvent& ev) {
         const std::size_t i = view_.viewport().selected.v;
         auto changed = store_->toggle(i);
         if (!changed) {
-            ++refusals_;
+            refusals_.add();
             return Transition{};
         }
 
         if (*changed) {
             publish_apply_();
         } else {
-            ++refusals_;
+            refusals_.add();
         }
         rows_[i] = store_->row(i);
         return Transition{};

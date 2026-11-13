@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include "app/chunk_place.h"
 #include "app/frame_stamp.h"
 #include "app/picture_pixels.h"
 #include "app/picture_row.h"
@@ -36,8 +37,7 @@ struct SidecarMsg {
         PicturePixels width{};
         PictureRows height{};
         svc::Crc32 hash{};
-        std::int32_t segment = -1;
-        std::int32_t seg_frame = -1;
+        ChunkPlace place{};
         FrameStamp stamp{};
     };
 

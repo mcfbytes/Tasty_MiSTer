@@ -9,10 +9,16 @@
 #include "cores/n64_cpak.h"
 #include "cores/n64_save_attach.h"
 #include "cores/n64_save_layout_key.h"
+#include "infra/path_parts.h"
 
 namespace mister::cores::n64 {
 
-SaveChannelStore::SaveChannelStore(const svc::Vfs& vfs) noexcept : vfs_(vfs) {}
+SaveChannelStore::SaveChannelStore(
+    const svc::Vfs& vfs,
+    infra::OptRef<xthread::WakeFlag> activity
+) noexcept
+    : vfs_(vfs),
+      activity_(activity) {}
 
 bool SaveChannelStore::all_blank_(std::span<const std::uint8_t> image) const noexcept {
     if (image.empty())
@@ -81,7 +87,10 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
     auto on_disk = (*f)->size();
     if (!on_disk)
         return false;
-    const std::uint64_t end = std::min<std::uint64_t>(on_disk->v, kMaxPartitionBytes);
+    const std::uint64_t end = std::min<std::uint64_t>(
+        on_disk->file_word<std::uint64_t>(),
+        kMaxPartitionBytes
+    );
     if (o.offset >= end)
         return false;
     const std::size_t sz = o.bytes;
@@ -102,8 +111,8 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
 
 Ex<void> SaveChannelStore::create_(const SaveOrder& o, std::size_t bytes) {
     const std::string_view rel = o.path.view();
-    if (const std::size_t slash = rel.rfind('/'); slash != std::string_view::npos && slash > 0) {
-        if (auto r = vfs_.ensure_dir(rel.substr(0, slash)); !r)
+    if (const auto dir = infra::nested_dir(rel); dir) {
+        if (auto r = vfs_.ensure_dir(*dir); !r)
             return r;
     }
     tmp_.clear();
@@ -129,14 +138,14 @@ Ex<void> SaveChannelStore::create_(const SaveOrder& o, std::size_t bytes) {
 
 Ex<proto::FileSize> SaveChannelStore::open_extent(
     proto::SlotIndex slot,
-    std::span<const std::byte> order
+    const svc::BlockCtl::StorageOrder& order
 ) {
     TASTY_SEAT_BODY(SaveChannelStore);
 
     release(slot);
-    const auto attach = SaveAttach::decode(order);
+    const auto attach = SaveAttach::decode(order.view());
     if (!attach)
-        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), slot.v});
+        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), slot.detail()});
     const SaveOrder& o = attach->order;
 
     if (o.bytes > kMaxPartitionBytes)
@@ -185,12 +194,17 @@ Ex<proto::FileSize> SaveChannelStore::OpenPartition::open(
     return on_disk_;
 }
 
-Ex<std::size_t> SaveChannelStore::read_at(std::uint64_t offset, std::span<std::uint8_t> dst) {
+Ex<std::span<std::uint8_t>> SaveChannelStore::read_at(
+    proto::FileSize at,
+    std::span<std::uint8_t> dst
+) {
     TASTY_SEAT_BODY(SaveChannelStore);
+    const std::uint64_t offset = at.file_word<std::uint64_t>();
     if (layout_.count.none()) {
         ++stray_;
-        return std::size_t{0};
+        return dst.first(0);
     }
+    bool noted = false;
     std::size_t done = 0;
     while (done < dst.size()) {
         auto hit = layout_.locate(offset + done);
@@ -201,6 +215,11 @@ Ex<std::size_t> SaveChannelStore::read_at(std::uint64_t offset, std::span<std::u
         const auto f = parts_[hit->row].file();
         if (!f)
             break;
+        if (!noted) {
+            if (activity_)
+                activity_->request();
+            noted = true;
+        }
         auto got = f->read_at(hit->rest.offset, std::as_writable_bytes(dst.subspan(done, want)));
         if (!got)
             break;
@@ -212,25 +231,27 @@ Ex<std::size_t> SaveChannelStore::read_at(std::uint64_t offset, std::span<std::u
             std::memset(dst.data() + done + *got, 0, want - *got);
         done += want;
     }
-    return done;
+    return dst.first(done);
 }
 
-Ex<std::size_t> SaveChannelStore::write_at(
-    std::uint64_t offset,
+Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
+    proto::FileSize at,
     std::span<const std::uint8_t> src
 ) {
     TASTY_SEAT_BODY(SaveChannelStore);
+    const std::uint64_t offset = at.file_word<std::uint64_t>();
     if (layout_.count.none()) {
         ++stray_;
-        return std::size_t{0};
+        return src.first(0);
     }
 
     if (auto head = layout_.locate(offset); head
         && parts_[head->row].is_open()
         && !parts_[head->row].on_disk().holds_offset(head->rest.offset)) {
         ++clamped_;
-        return src.size();
+        return src;
     }
+    bool noted = false;
     std::size_t done = 0;
     while (done < src.size()) {
         auto hit = layout_.locate(offset + done);
@@ -249,6 +270,11 @@ Ex<std::size_t> SaveChannelStore::write_at(
         if (fits == 0) {
             done += want;
             continue;
+        }
+        if (!noted) {
+            if (activity_)
+                activity_->request();
+            noted = true;
         }
 
         std::memcpy(scratch_, src.data() + done, fits);
@@ -276,7 +302,7 @@ Ex<std::size_t> SaveChannelStore::write_at(
             break;
         done += want;
     }
-    return done;
+    return src.first(done);
 }
 
 }

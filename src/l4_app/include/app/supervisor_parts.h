@@ -9,6 +9,7 @@
 #include "app/built_core.h"
 #include "app/identity_record.h"
 #include "app/ini_parse.h"
+#include "app/rumble_players_cell.h"
 #include "app/ladder_cell.h"
 #include "app/uart_mode.h"
 #include "cores/save_copy_level.h"
@@ -44,13 +45,17 @@ class Vfs;
 class DiscReadService;
 class ChdPrefetch;
 class IStorageLifecycle;
+class IStorageBackend;
 class InputEmitter;
+}
+
+namespace mister::hal {
+class DiskLamp;
 }
 
 namespace mister::app {
 
 class VideoWire;
-class InputWire;
 class OsdWire;
 template <SeatTag Producer>
 class LinkTxChannel;
@@ -76,10 +81,12 @@ struct SupervisorParts {
         WindowJobService& window_jobs;
 
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
+
+        infra::OptRef<svc::IStorageBackend> disc_backend{};
     };
 
     VideoWire& video;
-    InputWire& input;
+    const RumblePlayersCell& rumble_players;
     OsdWire& osd;
 
     LinkTxChannel<SeatTag::Main>& link_inbox;
@@ -125,6 +132,9 @@ struct SupervisorParts {
     infra::OptRef<const proto::StatusSnapshotCell> status_snapshots{};
 
     infra::OptRef<proto::IStorageChannel> storage_channel{};
+
+    infra::OptRef<hal::DiskLamp> lamp{};
+    infra::OptRef<xthread::WakeFlag> disk_activity{};
 
     BoardOps board_ops{};
 

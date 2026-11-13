@@ -24,11 +24,7 @@ static_assert(
     "Ex<std::string>, not a dangling Ex<std::string_view>"
 );
 
-[[nodiscard]] Ex<void> bluetoothd_hcireset();
-[[nodiscard]] Ex<void> bluetoothd_renew();
-[[nodiscard]] Ex<void> hciconfig_reset();
 [[nodiscard]] Ex<void> btctl_disconnect(std::string_view mac);
-[[nodiscard]] Ex<void> killall_sigint_bt();
 [[nodiscard]] Ex<bool> bt_adapter_up();
 
 [[nodiscard]] Ex<void> killall(const char* name);

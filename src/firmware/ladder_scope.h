@@ -50,7 +50,7 @@ static_assert(
         return hal::seat_of(m, LadderScope::kSeat).policy == hal::SchedPolicy::Fifo;
     }),
     "item: this class exists to DEMOTE its seat for the duration "
-    "of a blocking ladder rung (arch §2's one named exception). "
+    "of a blocking ladder rung, the one place a FIFO seat may block. "
     "Point kSeat at a SCHED_OTHER row and relax()/restore() become "
     "a pair of no-ops around work that never needed bracketing."
 );

@@ -10,6 +10,7 @@
 #include "app/session_identity.h"
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
+#include "infra/path_parts.h"
 #include "proto/conf_str.h"
 #include "svc/search_policy.h"
 #include "svc/xml_scan.h"
@@ -35,10 +36,7 @@ struct RbfName {
 };
 
 [[nodiscard]] RbfName split_rbf(std::string_view want) {
-    const std::size_t slash = want.rfind('/');
-    if (slash == std::string_view::npos)
-        return RbfName{.dir = {}, .stem = want};
-    return RbfName{.dir = want.substr(0, slash), .stem = want.substr(slash + 1)};
+    return RbfName{.dir = infra::dir_or_empty(want), .stem = infra::basename(want)};
 }
 
 std::string games_home(const svc::Vfs& vfs, std::string_view dir) {
@@ -56,7 +54,7 @@ struct IsFileItem {
     using Result = bool;
 
     [[nodiscard]] bool on(const MglItem::Load& load, const MglItem::Head&) noexcept {
-        return load.slot == MglItem::Slot::File;
+        return load.slot == proto::FileRowKind::File;
     }
 
     [[nodiscard]] bool on(const MglItem::Reset&, const MglItem::Head&) noexcept { return false; }
@@ -113,7 +111,7 @@ void MglPump::latch_remember_() {
         return;
     const std::optional<SessionIdentity> id = identity_.copy();
     const RememberedStem stem = id ? id->stem : RememberedStem::of(table->core_name(), {});
-    const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
+    const proto::FileSlots slots = proto::FileSlots::of(*table);
     SlotRemember remember{player_, slots, stem};
     for (MglItemNo i{}; i.below(player_.count()); i = i.next())
         infra::dispatch<MglItemRoutes>(player_.item(i), remember, i);

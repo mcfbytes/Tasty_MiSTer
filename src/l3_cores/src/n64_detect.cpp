@@ -35,7 +35,7 @@ DetectOutcome DetectLadder::run(const RomFacts& facts, LoadFacts& slab) {
         if (apply_homebrew_(facts, slab)) {
             out.homebrew = true;
             detected_ = DetectFlags{}.with(DetectFlag::Db);
-        } else if (slab.auto_detect()) {
+        } else if (slab.options().auto_detect()) {
             apply_unknown_defaults_(slab);
         }
     }
@@ -57,11 +57,11 @@ DetectFlags DetectLadder::lookup_and_apply_(LoadFacts& slab, const DbKey& key) {
     match_ = match;
     if (match->tags)
         apply_tags_(slab, *match->tags);
-    return detect_level(*match, slab.auto_detect());
+    return detect_level(*match, slab.options().auto_detect());
 }
 
 void DetectLadder::apply_tags_(LoadFacts& slab, const DbTags& t) {
-    if (!slab.auto_detect())
+    if (!slab.options().auto_detect())
         return;
     if (t.system != SystemType::Unknown) {
         slab.set_system(t.system);
@@ -73,8 +73,8 @@ void DetectLadder::apply_tags_(LoadFacts& slab, const DbTags& t) {
         slab.set_flag(row.field, t.features.has(row.tag));
     slab.set_cart_save_type(t.save_type);
 
-    if (slab.auto_pak() && !pad_is_pinned(slab.controller(opt::kControllers[0]))) {
-        slab.set_controller(opt::kControllers[0], t.preferred_pad);
+    if (slab.options().auto_pak() && !pad_is_pinned(slab.options().controller(PadPort::P1))) {
+        slab.set_controller(PadPort::P1, t.preferred_pad);
     }
 }
 
@@ -85,7 +85,7 @@ bool DetectLadder::apply_homebrew_(const RomFacts& facts, LoadFacts& slab) {
     if (id[1] != 'E' || id[2] != 'D')
         return false;
 
-    if (!slab.auto_detect())
+    if (!slab.options().auto_detect())
         return false;
 
     switch (hex_to_dec(id[4])) {
@@ -126,22 +126,23 @@ bool DetectLadder::apply_homebrew_(const RomFacts& facts, LoadFacts& slab) {
         if (row.from_header)
             slab.set_flag(row.field, features.has(row.tag));
 
-    if (!slab.auto_pak())
+    if (!slab.options().auto_pak())
         return true;
-    for (std::size_t i = 0; i < cs.size(); ++i) {
-        const std::uint8_t want = cs[i];
+
+    for (const PadPort port : kPadPorts) {
+        const std::uint8_t want = cs[port_index(port)];
         if (want == 0)
             continue;
-        if (pad_is_pinned(slab.controller(opt::kControllers[i])))
+        if (pad_is_pinned(slab.options().controller(port)))
             continue;
         if (want < 0x80) {
-            const PadType p = want == 0x01 ? PadType::PadWithRpak
-                : want == 0x02             ? PadType::PadWithCpak
-                : (want == 0x03 && i == 0) ? PadType::PadWithTpak
-                                           : PadType::Pad;
-            slab.set_controller(opt::kControllers[i], p);
+            const PadType p = want == 0x01              ? PadType::PadWithRpak
+                : want == 0x02                          ? PadType::PadWithCpak
+                : (want == 0x03 && port == PadPort::P1) ? PadType::PadWithTpak
+                                                        : PadType::Pad;
+            slab.set_controller(port, p);
         } else if (want == 0xff) {
-            slab.set_controller(opt::kControllers[i], PadType::Unplugged);
+            slab.set_controller(port, PadType::Unplugged);
         }
     }
     return true;
@@ -155,7 +156,7 @@ void DetectLadder::apply_unknown_defaults_(LoadFacts& slab) {
 }
 
 void DetectLadder::apply_ipl3_(LoadFacts& slab, const Ipl3Detect& d, DetectFlags& detected) {
-    if (!slab.auto_detect()) {
+    if (!slab.options().auto_detect()) {
 
         detected = detected.with(DetectFlag::Region);
         return;
@@ -167,7 +168,7 @@ void DetectLadder::apply_ipl3_(LoadFacts& slab, const Ipl3Detect& d, DetectFlags
 }
 
 void DetectLadder::compose_info(const RomFacts& facts, const LoadFacts& slab, bool patched) {
-    if (!slab.auto_detect())
+    if (!slab.options().auto_detect())
         return;
     info_.clear();
 
@@ -200,8 +201,8 @@ void DetectLadder::compose_info(const RomFacts& facts, const LoadFacts& slab, bo
     if (!detected_.has(DetectFlag::Region)) {
         app("\nUnknown Region/CIC");
     } else {
-        const SystemType sys = slab.system();
-        const Cic cic = slab.cic();
+        const SystemType sys = slab.options().system();
+        const Cic cic = slab.options().cic();
         app("\nRegion: ");
         app(system_text(sys));
         app(" (");
@@ -212,13 +213,13 @@ void DetectLadder::compose_info(const RomFacts& facts, const LoadFacts& slab, bo
     if (!detected_.has(DetectFlag::Db)) {
         app("\nROM missing from database.\nYou might not be able to save.");
     } else {
-        const MemoryType save = slab.cart_save_type();
+        const MemoryType save = slab.options().cart_save_type();
         if (save != MemoryType::None) {
             app("\nSave Type: ");
             app(save_type_text(save));
         }
         for (const FeatureRow& row : kFeatureRows)
-            if (slab.flag(row.field))
+            if (slab.options().flag(row.field))
                 app(row.info);
         if (patched)
             app("\nPatched \x96");

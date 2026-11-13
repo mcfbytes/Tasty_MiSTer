@@ -34,8 +34,7 @@ public:
         std::string core_name;
         std::string path;
         std::string title;
-        proto::IoIndex ioctl_index{};
-        char slot = 0;
+        proto::FileRowId row;
         std::int64_t unix_time = 0;
     };
 
@@ -102,7 +101,7 @@ private:
     static_assert(sizeof(Stored) == kRecordBytes, "played.dat record size is the format");
 
     [[nodiscard]] static bool names_a_game(const Record& r) noexcept {
-        return r.slot != 0 && !r.path.empty() && !r.core_image.empty();
+        return !r.path.empty() && !r.core_image.empty();
     }
 
     [[nodiscard]] static bool fields_fit(const Record& r) noexcept {
