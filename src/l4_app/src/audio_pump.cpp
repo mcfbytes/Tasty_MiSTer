@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "app/durable_write.h"
 #include "app/stream_io.h"
+#include "app/ui_write_lane.h"
 #include "app/video_wire.h"
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
@@ -26,20 +26,6 @@ constexpr std::string_view kVolumeRel = "config/Volume.dat";
 
 constexpr proto::FileSize kFilterCfgReadCap{1023};
 
-[[nodiscard]] std::vector<std::byte> read_config(
-    const svc::Vfs& vfs,
-    std::string_view rel,
-    proto::FileSize cap
-) {
-    auto open = stream_open(vfs, rel);
-    if (!open)
-        return {};
-    auto bytes = svc::read_bounded(*open->f, cap.file_word<std::uint64_t>());
-    if (!bytes)
-        return {};
-    return *bytes;
-}
-
 [[nodiscard]] std::string config_rel(std::string_view core, std::string_view suffix) {
     std::string rel;
     rel.reserve(kConfigDir.size() + core.size() + suffix.size());
@@ -49,6 +35,31 @@ constexpr proto::FileSize kFilterCfgReadCap{1023};
     return rel;
 }
 
+}
+
+std::vector<std::byte> AudioPump::read_config_(std::string_view rel, proto::FileSize cap) const {
+    if (writes_) {
+        const auto armed = writes_->peek(rel);
+        if (!armed)
+            return {};
+        if (!armed->empty()) {
+            const std::span<const std::byte> kept = cap.min(proto::FileSize::of(*armed))
+                                                        .first_of(*armed);
+            return std::vector<std::byte>(kept.begin(), kept.end());
+        }
+    }
+    auto open = stream_open(vfs_, rel);
+    if (!open)
+        return {};
+    auto bytes = svc::read_bounded(*open->f, cap.file_word<std::uint64_t>());
+    if (!bytes)
+        return {};
+    return *bytes;
+}
+
+void AudioPump::write_(std::string_view rel, std::span<const std::byte> bytes) noexcept {
+    if (writes_)
+        (void)writes_->arm(rel, bytes);
 }
 
 void AudioPump::set_mute(bool on) noexcept {
@@ -101,8 +112,7 @@ void AudioPump::load_for_core(
 
     bool enabled = false;
     std::string name;
-    const std::vector<std::byte> cfg = read_config(
-        vfs_,
+    const std::vector<std::byte> cfg = read_config_(
         config_rel(core, "_afilter.cfg"),
         kFilterCfgReadCap
     );
@@ -118,12 +128,11 @@ void AudioPump::load_for_core(
         name.assign(afilter_default);
     }
 
-    const std::vector<std::byte> volume = read_config(vfs_, kVolumeRel, proto::FileSize{1});
+    const std::vector<std::byte> volume = read_config_(kVolumeRel, proto::FileSize{1});
     if (!volume.empty())
         model_.load_volume(svc::VolumeByte{std::to_integer<std::uint8_t>(volume[0])});
     if (!front_end) {
-        const std::vector<std::byte> corevol = read_config(
-            vfs_,
+        const std::vector<std::byte> corevol = read_config_(
             config_rel(core, "_volume.cfg"),
             proto::FileSize{1}
         );
@@ -166,7 +175,7 @@ void AudioPump::set_filter(std::string_view name) noexcept {
     stage_filter_push_();
 }
 
-void AudioPump::step_core_volume(svc::VolumeStep step) noexcept {
+void AudioPump::step_core_volume(proto::VolumeStep step) noexcept {
     model_.step_core_volume(step);
     note_change_();
     if (model_.has_boost() || model_.has_filter()) {
@@ -176,7 +185,7 @@ void AudioPump::step_core_volume(svc::VolumeStep step) noexcept {
     }
 }
 
-void AudioPump::save_filter_cfg_() const noexcept {
+void AudioPump::save_filter_cfg_() noexcept {
     if (core_.empty())
         return;
 
@@ -188,7 +197,7 @@ void AudioPump::save_filter_cfg_() const noexcept {
     const std::size_t room = cfg.size() - 1 - 1;
     const std::span<const std::byte> tail = infra::text_bytes(name.substr(0, room));
     std::copy(tail.begin(), tail.end(), cfg.begin() + 1);
-    (void)durable_write(vfs_, config_rel(core_, "_afilter.cfg"), cfg);
+    write_(config_rel(core_, "_afilter.cfg"), cfg);
 }
 
 void AudioPump::stage_filter_push_() noexcept {
@@ -266,11 +275,11 @@ void AudioPump::tick(os::RawMonotonicClock::time_point now) noexcept {
     save_at_.reset();
 
     const std::array<std::byte, 1> vol{std::byte{model_.volume_byte()}};
-    (void)durable_write(vfs_, kVolumeRel, vol);
+    write_(kVolumeRel, vol);
     if (core_.empty())
         return;
     const std::array<std::byte, 1> corevol{std::byte{model_.core_volume_byte()}};
-    (void)durable_write(vfs_, config_rel(core_, "_volume.cfg"), corevol);
+    write_(config_rel(core_, "_volume.cfg"), corevol);
 }
 
 }

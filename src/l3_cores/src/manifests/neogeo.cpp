@@ -138,7 +138,7 @@ static_assert(
 );
 
 static_assert(
-    kNeoGeo.staging.order == StageOrder::NeoGeoCd && kNeoGeo.staging.disc_slot == IoIndex{1},
+    kNeoGeo.staging.staged && kNeoGeo.staging.disc_slot == IoIndex{1},
     "menu.cpp:2833-2836: the S pick runs neocd_set_image"
 );
 static_assert(

@@ -75,28 +75,36 @@ void HpsFramebuffer::write_mode_param_(const FbView& picture) noexcept {
     (void)::close(fd);
 }
 
-Ex<void> HpsFramebuffer::raise() noexcept {
+Ex<FbLease> HpsFramebuffer::raise(FbTenant who) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
     constexpr std::size_t kBytes8888 = 4;
     const PictureSize out = output_size_();
     if (fb_.len == 0 || out.width.empty() || out.rows.empty())
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     const PictureSize picture_size = out.halved_if(!out.fits_scaler_frame(kFbFrame));
-    picture_ = FbView::of(
+    const FbView picture = FbView::of(
         picture_size,
         picture_size.stride_bytes(PixelBytes::of(kBytes8888)),
         FbView::FbFormat::Argb8888,
         true
     );
-    raised_ = true;
-    viewing_ = false;
+    const FbTenancy before = tenancy_;
+    const auto lease = tenancy_.claim(who);
+    if (!lease)
+        return std::unexpected(lease.error());
+    picture_ = picture;
     write_mode_param_(picture_);
-    if (held_)
-        return {};
-    return publish_(picture_, FbScanWindow::whole(out));
+    if (tenancy_.held())
+        return *lease;
+    const auto published = publish_(picture_, FbScanWindow::whole(out));
+    if (!published) {
+        tenancy_ = before;
+        return std::unexpected(published.error());
+    }
+    return *lease;
 }
 
-Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
+Ex<FbLease> HpsFramebuffer::raise_view(FbTenant who, const FbView& view) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
     const PictureSize out = output_size_();
     if (fb_.len == 0 || out.width.empty() || out.rows.empty())
@@ -104,25 +112,38 @@ Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     const std::uint64_t bytes = rows_span(view.stride, view.size.lines());
     if (view.offset > fb_.len || bytes > fb_.len - view.offset)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), view.offset});
-    picture_ = view;
+    FbView picture = view;
 
-    if (picture_.format != FbView::FbFormat::Rgb565)
-        picture_.red_blue_swap = true;
-    raised_ = true;
-    viewing_ = true;
-    if (held_)
-        return {};
-    return publish_(picture_, FbScanWindow::whole(out));
+    if (picture.format != FbView::FbFormat::Rgb565)
+        picture.red_blue_swap = true;
+    const FbTenancy before = tenancy_;
+    const auto lease = tenancy_.claim(who, FbShow::View);
+    if (!lease)
+        return std::unexpected(lease.error());
+    picture_ = picture;
+    if (tenancy_.held())
+        return *lease;
+    const auto published = publish_(picture_, FbScanWindow::whole(out));
+    if (!published) {
+        tenancy_ = before;
+        return std::unexpected(published.error());
+    }
+    return *lease;
 }
 
-Ex<void> HpsFramebuffer::drop() noexcept {
+Ex<void> HpsFramebuffer::drop(const FbLease& lease) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
-    raised_ = false;
-    viewing_ = false;
-    if (held_)
+    if (!tenancy_.holds(lease))
+        return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
+    if (tenancy_.held()) {
+        tenancy_.release(lease);
         return {};
+    }
     const std::array<std::uint16_t, 1> off{0};
-    return wire_.publish(proto::UioOp::SetFbuf, off);
+    const auto published = wire_.publish(proto::UioOp::SetFbuf, off);
+    if (published)
+        tenancy_.release(lease);
+    return published;
 }
 
 bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
@@ -137,7 +158,7 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     constexpr char kCmd2 = '2';
     constexpr std::size_t kBytes8888 = 4, kBytes16 = 2, kBytes8 = 1;
     constexpr std::size_t kStrideAlign = 16;
-    if (!raised_ || held_ || viewing_) {
+    if (!(tenancy_.claimed() && !tenancy_.held() && !tenancy_.viewing())) {
         ++refused_;
         return true;
     }

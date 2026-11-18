@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
@@ -30,9 +31,14 @@ public:
           focus_(focus),
           out_(router) {}
 
-    void service() noexcept;
+    [[nodiscard]] std::optional<OsdMask> service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return focus_.osd_focused(); }
+    [[nodiscard]] bool active() const noexcept { return focus_.osd_focused() || rearmed_; }
+
+    void rearm() noexcept {
+        rearmed_ = true;
+        div_ = 0;
+    }
 
     void forget(bool front_end) noexcept {
         seen_ = false;
@@ -52,6 +58,7 @@ private:
     OsdMask mask_{};
     bool seen_ = false;
     bool front_end_ = false;
+    bool rearmed_ = false;
     unsigned div_ = 0;
     std::uint32_t publishes_ = 0;
     std::uint32_t errors_ = 0;

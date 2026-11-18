@@ -24,7 +24,7 @@ public:
         const proto::StatusWord& status
     ) = 0;
 
-    virtual void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off);
+    virtual void shape(const TransferRow& row, std::span<std::uint8_t> piece, proto::FileOffset at);
 
     [[nodiscard]] virtual Ex<std::unique_ptr<svc::IFile>> source(
         const LoadAsk& ask,
@@ -34,7 +34,7 @@ public:
     [[nodiscard]] virtual Ex<void> place(
         const TransferRow& row,
         std::span<const std::uint8_t> piece,
-        std::uint64_t off,
+        proto::FileOffset at,
         ICoreWindow& window
     );
 
@@ -50,7 +50,7 @@ protected:
     ILoader& operator=(const ILoader&) = default;
 };
 
-inline void ILoader::shape(const TransferRow&, std::span<std::uint8_t>, std::uint64_t) {}
+inline void ILoader::shape(const TransferRow&, std::span<std::uint8_t>, proto::FileOffset) {}
 
 [[nodiscard]] inline Ex<std::unique_ptr<svc::IFile>> ILoader::source(
     const LoadAsk&,
@@ -62,7 +62,7 @@ inline void ILoader::shape(const TransferRow&, std::span<std::uint8_t>, std::uin
 [[nodiscard]] inline Ex<void> ILoader::place(
     const TransferRow&,
     std::span<const std::uint8_t>,
-    std::uint64_t,
+    proto::FileOffset,
     ICoreWindow&
 ) {
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});

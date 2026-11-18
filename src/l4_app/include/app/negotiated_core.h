@@ -25,6 +25,7 @@
 #include "app/ui_request.h"
 #include "app/xml_kind.h"
 #include "cores/ram_image_recipe.h"
+#include "cores/save_probe_rows.h"
 #include "hal/phys_region.h"
 #include "infra/byte_view.h"
 #include "infra/error.h"
@@ -32,8 +33,8 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
-#include "proto/core_session.h"
 #include "proto/link_event.h"
+#include "proto/save_trigger.h"
 #include "proto/types.h"
 #include "svc/vfs.h"
 
@@ -52,6 +53,11 @@ class NegotiatedCore final {
 public:
     struct Tally {
         std::uint32_t conf_str_parse_refusals = 0;
+    };
+
+    struct SaveProbe {
+        proto::SaveTrigger trigger;
+        cores::SaveProbeRow row;
     };
 
     NegotiatedCore(
@@ -75,7 +81,7 @@ public:
         TASTY_SEAT_BODY(NegotiatedCore);
 
         std::string raw;
-        if (c.chunk0.v != 0) {
+        if (c.chunk0 != proto::RxSlabId::kNone) {
             const auto bytes = rx_.bytes(c.chunk0);
             raw.append(infra::as_text(bytes));
         }
@@ -91,6 +97,7 @@ public:
         conf_str_cell_.publish(body);
 
         conf_str_.reset();
+        save_probe_.reset();
         pending_ram_image_ = {};
         auto conf = proto::ConfStr::parse(raw, aperture);
         if (!conf) {
@@ -101,6 +108,12 @@ public:
         const proto::ConfStr& cs = conf_str_.emplace(std::move(*conf));
 
         (void)core_name_.assign(cs.name());
+
+        const std::optional<proto::SaveTrigger> trigger = cs.save_trigger();
+        const std::optional<cores::SaveProbeRow> census = cores::find_save_probe(core_name_.view());
+        if (trigger && census && census->matches(*trigger)) {
+            save_probe_ = SaveProbe{*trigger, *census};
+        }
         return std::cref(cs);
     }
 
@@ -145,9 +158,9 @@ public:
         generic_identity_ = false;
     }
 
-    void note_width(bool wide) noexcept {
+    void note_width(hal::Width width) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
-        link_wide_ = wide;
+        link_width_ = width;
     }
 
     void facts_sent() noexcept {
@@ -159,6 +172,13 @@ public:
         TASTY_SEAT_BODY(NegotiatedCore);
         return conf_str_;
     }
+
+    [[nodiscard]] const std::optional<SaveProbe>& save_probe() const noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        return save_probe_;
+    }
+
+    [[nodiscard]] bool save_probe_usable(proto::OsdMask m) const noexcept;
 
     [[nodiscard]] CoreScope conf_scope() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
@@ -210,9 +230,9 @@ public:
         return generic_identity_;
     }
 
-    [[nodiscard]] bool link_wide() const noexcept {
+    [[nodiscard]] hal::Width link_width() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
-        return link_wide_;
+        return link_width_;
     }
 
     [[nodiscard]] bool core_live() const noexcept {
@@ -268,10 +288,12 @@ private:
     RememberedStem remembered_stem_{};
 
     std::optional<proto::ConfStr> conf_str_{};
+
+    std::optional<SaveProbe> save_probe_{};
     proto::BindGeneration conf_str_gen_{};
 
     bool core_live_ = false;
-    bool link_wide_ = false;
+    hal::Width link_width_ = hal::Width::Byte;
 
     cores::RamImageRecipe pending_ram_image_{};
     bool made_with_manifest_ = false;

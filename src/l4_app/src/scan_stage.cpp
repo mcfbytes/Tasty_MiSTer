@@ -42,9 +42,9 @@ IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
     if (!size)
         return Step::refuse(Refusal::MovieIo, static_cast<std::uint32_t>(size.error().code));
     file_ = std::move(*f);
-    file_size_ = size->v;
+    file_size_ = *size;
     scan = {};
-    off_ = 0;
+    off_ = proto::kFileStart;
     lines_.reset();
     in_log_ = false;
     log_done_ = false;
@@ -61,7 +61,7 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
     std::array<std::byte, ReplayPlay::kReadChunk> buf;
     std::uint32_t spent = 0;
     while (spent < ReplayPlay::kTickBudget) {
-        if (off_ >= file_size_) {
+        if (!file_size_.holds(off_)) {
             std::optional<PlayRefusal> refused;
             const bool go = lines_.finish([&](const cores::MovieLines::Line& l) {
                 refused = on_line_(ctx, l);
@@ -93,7 +93,7 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
         );
         if (!go)
             return Step::refuse(refused->why, refused->detail);
-        off_ += *got;
+        off_ += proto::FileSize{*got};
     }
     return Step::stay();
 }
@@ -156,7 +156,7 @@ void ScanStage::note_frame_(
         m[p] = fr.mask[p];
     if (!scan.runs.empty()) {
         ReplayMsg::Input& run = scan.runs.back();
-        if (run.mask == m && run.last - run.first + FrameCount{1} < ReplayPlay::kRunSplit) {
+        if (run.mask == m && run.last - run.first + MovieFrameCount{1} < ReplayPlay::kRunSplit) {
             run.last = movie_frame_from_wire(f);
             return;
         }
@@ -179,8 +179,8 @@ IReplayStage::Step ScanStage::finish_scan_(Ctx ctx) noexcept {
             static_cast<std::uint32_t>(cores::MovieRefusal::NotAMovie)
         );
     }
-    const FrameCount scanned = movie_frame_from_wire(scan.scanned) - MovieFrame{};
-    scan.movie_frames = req.stop_at ? std::min(scanned, *req.stop_at - MovieFrame{}) : scanned;
+    const MovieFrameCount scanned = movie_frame_from_wire(scan.scanned) - MoviePosition{};
+    scan.movie_frames = req.stop_at ? std::min(scanned, *req.stop_at - MoviePosition{}) : scanned;
 
     file_.reset();
     scan.runs.shrink_to_fit();

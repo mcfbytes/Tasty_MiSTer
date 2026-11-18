@@ -62,24 +62,6 @@ void SessionBindings::bind_uart(
         uart_ = *b;
 }
 
-void SessionBindings::bind_doorbells(
-    const proto::LinkOp::BindDoorbells& op,
-    const ILinkTxReader& inbox
-) noexcept {
-    doorbells_ = Doorbells{};
-    doorbells_.declared = op.declared;
-    if (op.table == proto::TxSlabId{})
-        return;
-    const auto bytes = inbox.bytes(op.table);
-    const std::size_t n = std::min(bytes.size() / sizeof(proto::IrqBinding), kDoorbellRows);
-    for (std::size_t i = 0; i < n; ++i) {
-        doorbells_.rows[i] = infra::load_native<proto::IrqBinding>(
-            bytes.subspan(i * sizeof(proto::IrqBinding)).first<sizeof(proto::IrqBinding)>()
-        );
-    }
-    doorbells_.count = static_cast<std::uint8_t>(n);
-}
-
 Ex<void> SessionBindings::bind_record(
     const IdentityRecordCell& cell,
     const proto::LinkOp::AdoptCore& op
@@ -91,7 +73,7 @@ Ex<void> SessionBindings::bind_record(
     }
     if (record_.stamp.is_none() || record_.stamp != op.identity) {
         record_ = no_record_;
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), op.identity.v});
+        return std::unexpected(op.identity.refusal(Errc::negotiation, ERR_SITE()));
     }
     return {};
 }
@@ -104,7 +86,7 @@ Ex<std::optional<SessionBindings::Mount>> SessionBindings::decode_mount(
         return std::optional<Mount>{};
     const infra::OptRef<const InternedFile> file = inbox.file(op.image);
     if (!file || file->path.empty()) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), op.image.v});
+        return std::unexpected(op.image.refusal(Errc::not_found, ERR_SITE()));
     }
     return std::optional<Mount>{Mount{file->path, file->size_bytes}};
 }

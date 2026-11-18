@@ -13,12 +13,12 @@
 #include "ui/browser_launch.h"
 #include "ui/config_slots_page.h"
 #include "ui/draw_classic.h"
-#include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
 #include "ui/slot_labels.h"
 #include "ui/options_keys.h"
 #include "ui/page_context.h"
+#include "ui/page_home.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -83,6 +83,10 @@ static_assert(
     infra::rows_are_ordinal(kLinkTargets),
     "every Link names its target; a row without one would refuse silently"
 );
+
+constexpr bool buildable(PageId page) noexcept {
+    return kPageHome[infra::ordinal(page)].builder != PageBuilder::None;
+}
 
 constexpr infra::OptRef<const LinkTarget> link_target_of(cores::OptionRow::Link link) {
     for (const LinkTarget& t : kLinkTargets) {
@@ -161,8 +165,12 @@ void CoreSettingsPage::rebuild() {
             continue;
 
         const cores::OptionRow::LinkArm* link = row.decl->link_arm();
-        if (link != nullptr && link->link == cores::OptionRow::Link::Mt32Pi && !mt32_available_) {
-            continue;
+        if (link != nullptr) {
+            const infra::OptRef<const LinkTarget> target = link_target_of(link->link);
+            if (!target || !buildable(target->page))
+                continue;
+            if (link->link == cores::OptionRow::Link::Mt32Pi && !mt32_available_)
+                continue;
         }
         Line l;
         l.index = static_cast<std::uint8_t>(i);
@@ -513,8 +521,7 @@ Transition CoreSettingsPage::open_browser(const app::OptionTable::Row& r, bool r
             return Transition{};
         req.recents_first = true;
     }
-    browser_->pending = std::move(req);
-    return Transition::push(PageId::Browser);
+    return browser_->open(PageId::Browser, std::move(req));
 }
 
 Transition CoreSettingsPage::handle(const UiEvent& ev) {
@@ -628,7 +635,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
             const infra::OptRef<const LinkTarget> found = link != nullptr
                 ? link_target_of(link->link)
                 : infra::OptRef<const LinkTarget>{};
-            if (!found || found->page == PageId::None || link == nullptr) {
+            if (!found || !buildable(found->page) || link == nullptr) {
                 refusals_.add();
                 return Transition{};
             }

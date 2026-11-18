@@ -23,20 +23,18 @@ struct DiscAnnounce {
     ) const {
         if (auto r = frame.begin(UioOp::SetSdInfo); !r)
             return r;
-        if (auto r = emit_u32(frame, size_bytes.low_word(), hal::Width::Word); !r)
-            return r;
-        if (auto r = emit_u32(frame, size_bytes.high_word(), hal::Width::Word); !r)
+        if (auto r = size_bytes.emit_words(frame, hal::Width::Word); !r)
             return r;
         if (auto r = frame.end(); !r)
             return r;
         if (slot > kLastAnnounceableSlot) {
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
+            return std::unexpected(slot.refusal(Errc::negotiation, ERR_SITE()));
         }
 
         const SdStatParameter parm = SdStatParameter::of(slot, false);
         if (auto r = frame.begin(UioOp::SetSdStat); !r)
             return r;
-        if (auto r = frame.word(parm.v); !r)
+        if (auto r = frame.word(parm.wire_word()); !r)
             return r;
         return frame.end();
     }

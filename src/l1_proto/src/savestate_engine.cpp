@@ -36,16 +36,18 @@ constexpr infra::IndexedArray<const char*, SaveStateEngine::kSlots, StateSlot> m
 constexpr auto kSlotNames = make_slot_names();
 
 bool exceeds_four_slot_span(const SaveStateDecl& ss, hal::PhysRegion aperture) noexcept {
-    const std::uint64_t span = hal::to_phys(ss.base).v
-        + std::uint64_t{ss.size} * SaveStateEngine::kSlots;
-    const std::uint64_t end = aperture.phys.v + std::uint64_t{aperture.len};
-    return span >= end;
+    const std::optional<hal::FabricAddr> high = hal::FabricAddr::of(aperture.end());
+    if (!high)
+        return false;
+    const hal::FabricAddr span_end = ss.base.advanced(ss.size * SaveStateEngine::kSlots);
+
+    return span_end < ss.base || span_end >= *high;
 }
 
 }
 
 bool SaveStateEngine::window_valid(const SaveStateDecl& ss) const noexcept {
-    return ss.within(aperture_);
+    return ss.within(aperture_.region);
 }
 
 Ex<void> SaveStateEngine::arm(const SaveTarget& target) {
@@ -75,17 +77,35 @@ std::string SaveStateEngine::path_for(StateSlot slot) const {
     return files_.path(slot);
 }
 
-hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, StateSlot slot) {
+Ex<hal::ApertureRegion> SaveStateEngine::region_for(const SaveStateDecl& ss, StateSlot slot) const {
+    return slot_region(aperture_, ss, slot);
+}
 
-    const hal::FabricAddr at{ss.base.v + slot.offset(ss.size)};
-    return hal::PhysRegion{hal::to_phys(at), static_cast<std::size_t>(ss.size), kSlotNames[slot]};
+Ex<hal::ApertureRegion> SaveStateEngine::slot_region(
+    const hal::FpgaAperture& aperture,
+    const SaveStateDecl& ss,
+    StateSlot slot
+) {
+    const std::optional<os::PhysAddr> base = ss.base.physical_in(aperture);
+    if (!base)
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.digit()});
+    auto region = aperture.resolve(base->advanced(slot.offset(ss.size)), ss.size, kSlotNames[slot]);
+    if (!region)
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.digit()});
+    return region;
 }
 
 Ex<void> SaveStateEngine::map_slots(const SaveStateDecl& ss, bool remap) {
     for (const StateSlot slot : kStateSlots) {
         if (remap)
             shadows_[slot].region.reset();
-        auto m = env_.map.map(region_for(ss, slot));
+        auto region = region_for(ss, slot);
+        if (!region) {
+
+            shadows_[slot].drop();
+            continue;
+        }
+        auto m = env_.map.map(*region);
         if (!m) {
 
             drop_slots();
@@ -117,7 +137,7 @@ Ex<void> SaveStateEngine::attach(const SaveStateDecl& ss) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), ss.size});
     }
 
-    if (exceeds_four_slot_span(ss, aperture_))
+    if (exceeds_four_slot_span(ss, aperture_.region))
         ++span_warnings_;
 
     if (auto m = map_slots(ss, mapped_); !m)
@@ -138,7 +158,7 @@ Ex<void> SaveStateEngine::rebind(const SaveStateDecl& ss) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), ss.size});
     }
 
-    if (exceeds_four_slot_span(ss, aperture_))
+    if (exceeds_four_slot_span(ss, aperture_.region))
         ++span_warnings_;
     if (auto m = map_slots(ss, mapped_); !m)
         return m;
@@ -154,6 +174,8 @@ Ex<void> SaveStateEngine::scan_slots() {
 
     for (const StateSlot slot : kStateSlots) {
         Shadow& shadow = shadows_[slot];
+        if (!shadow.region)
+            continue;
         auto& mem = *shadow.region;
 
         const std::uint32_t curcnt = mem.load_acquire(kCounterWord);

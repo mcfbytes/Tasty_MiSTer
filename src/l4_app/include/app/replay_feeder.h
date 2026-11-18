@@ -31,9 +31,9 @@ public:
         std::string_view movie{};
         std::string_view rom{};
         std::optional<std::chrono::microseconds> phase{};
-        std::optional<FrameCount> lead{};
+        std::optional<MovieFrameCount> lead{};
 
-        std::optional<MovieFrame> stop_at{};
+        std::optional<MoviePosition> stop_at{};
 
         bool set_settings = false;
 
@@ -87,7 +87,7 @@ public:
 
     [[nodiscard]] std::uint32_t scanned() const noexcept { return play_.scan.scanned; }
 
-    [[nodiscard]] FrameCount movie_frames() const noexcept { return play_.scan.movie_frames; }
+    [[nodiscard]] MovieFrameCount movie_frames() const noexcept { return play_.scan.movie_frames; }
 
     [[nodiscard]] std::uint32_t tries() const noexcept { return play_.run.tries; }
 

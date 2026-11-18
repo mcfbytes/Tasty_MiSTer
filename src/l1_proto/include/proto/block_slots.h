@@ -19,6 +19,7 @@
 #include "proto/block_roles.h"
 #include "proto/block_server.h"
 #include "proto/image_source.h"
+#include "proto/save_slot_rule.h"
 #include "proto/late_answers.h"
 #include "proto/slot_attributes.h"
 #include "proto/slot_record.h"
@@ -66,6 +67,8 @@ public:
         std::uint32_t unencodable_announce = 0;
         std::uint32_t blank_filled = 0;
         std::uint32_t write_failures = 0;
+        Error last_write_fault{};
+        Error last_fetch_fault{};
         std::uint32_t discarded_writes = 0;
         std::uint32_t deferred_passes = 0;
 
@@ -270,8 +273,7 @@ private:
     ) noexcept;
     [[nodiscard]] bool submit_write(
         SlotIndex slot,
-        std::uint64_t offset,
-        std::uint32_t len,
+        const SaveSlotRule::Plan& plan,
         const BlockBacking& backing
     ) noexcept;
     [[nodiscard]] Ex<void> submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept;
@@ -316,9 +318,7 @@ private:
 
     SpiBlockPoll block_poll_{SpiBlockPoll::Wiring{
         .link = link_,
-        .slot0_file_bytes = infra::OptRef<const std::uint64_t>{
-            records_[SlotIndex{0}].slot.file_bytes.v
-        }
+        .slot0_file_bytes = infra::OptRef<const FileSize>{records_[SlotIndex{0}].slot.file_bytes}
     }};
     Diagnostics diag_{};
     infra::OptRef<hal::DiskLamp> lamp_{};

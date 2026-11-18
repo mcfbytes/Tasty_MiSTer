@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <span>
 
+#include "proto/types.h"
+
 #include "app/avi_frame_count.h"
 #include "app/picture_pixels.h"
 #include "app/picture_row.h"
@@ -28,6 +30,7 @@ struct Fields {
 inline constexpr std::size_t kHeaderBytes = 4096;
 
 inline constexpr std::size_t kMoviFourcc = kHeaderBytes - 4;
+inline constexpr proto::FileOffset kMoviFourccAt = proto::kFileStart + proto::FileSize{kMoviFourcc};
 inline constexpr std::size_t kChunkHead = 8;
 inline constexpr std::size_t kIndexEntry = 16;
 inline constexpr std::uint32_t kKeyFlag = 0x10;
@@ -45,7 +48,7 @@ void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noe
 void index_head(AviFrameCount entries, std::span<std::byte, kChunkHead> out) noexcept;
 void index_entry(
     bool key,
-    std::uint32_t offset,
+    proto::FileSize from_movi,
     std::uint32_t payload,
     std::span<std::byte, kIndexEntry> out
 ) noexcept;

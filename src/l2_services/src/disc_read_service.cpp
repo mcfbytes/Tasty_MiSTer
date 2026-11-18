@@ -166,6 +166,7 @@ void DiscReadService::serve_(DiscReadSlot& s) noexcept {
     reads_.add(1);
     if (!r) {
         read_errors_.add(1);
+        last_read_fault_ = r.error();
         return;
     }
     s.got = static_cast<std::uint16_t>(r->size());

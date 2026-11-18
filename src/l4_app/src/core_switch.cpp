@@ -13,7 +13,7 @@ bool CoreSwitch::validate(const UiRequest::LoadCore& req) {
     return validate_load(vfs_, req);
 }
 
-void CoreSwitch::on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host) {
+bool CoreSwitch::on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     const auto refuse = [&](Errc code) {
         ++tally_.load_core_refusals;
@@ -22,21 +22,21 @@ void CoreSwitch::on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag
 
     if (req.xml >= XmlKind::Mgl) {
         refuse(Errc::bad_format);
-        return;
+        return false;
     }
     if (switch_standing_
         || readiness_.recovering()
         || reboot_.failed()
         || reboot_.owed().has_value()) {
         refuse(Errc::negotiation);
-        return;
+        return false;
     }
 
     const std::optional<HeldLoad> prior = std::exchange(held_load_, std::nullopt);
     const Asked asked = ask(req, tag, host);
     if (asked == Asked::Invalid) {
         held_load_ = prior;
-        return;
+        return false;
     }
     if (prior) {
         ++tally_.loads_cancelled;
@@ -46,24 +46,32 @@ void CoreSwitch::on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag
     if (asked == Asked::NoRoom) {
         held_load_.emplace(HeldLoad{.req = req, .tag = tag});
         ++tally_.loads_held;
+        return false;
     }
+    return true;
 }
 
-void CoreSwitch::retry_held_load(Host& host) {
+bool CoreSwitch::retry_held_load(Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!held_load_ || switch_standing_ || readiness_.recovering())
-        return;
+        return false;
     if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps)
-        return;
+        return false;
     const HeldLoad h = *held_load_;
     held_load_.reset();
-    on_load_core(h.req, h.tag, host);
+    return on_load_core(h.req, h.tag, host);
 }
 
-void CoreSwitch::ask_or_refuse(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host) {
+CoreSwitch::Asked CoreSwitch::ask_or_refuse(
+    const UiRequest::LoadCore& req,
+    CorrelationTag tag,
+    Host& host
+) {
     TASTY_SEAT_BODY(CoreSwitch);
-    if (ask(req, tag, host) == Asked::NoRoom)
+    const Asked asked = ask(req, tag, host);
+    if (asked == Asked::NoRoom)
         publish_refusal_(UiRequest::Kind::LoadCore, Errc::would_block, tag);
+    return asked;
 }
 
 bool CoreSwitch::push_last_order() noexcept {
@@ -82,7 +90,7 @@ bool CoreSwitch::push_last_order() noexcept {
 void CoreSwitch::pause_seats_(proto::BindGeneration gen, hal::PauseEdge edge) noexcept {
     for (const GrantedSeat& s : seats_)
         if (s.granted() && s.pause_at == edge)
-            s.latch->pause(pause_gen_of(gen));
+            s.latch->pause(gen.pause_gen());
 }
 
 void CoreSwitch::resume_seats_() noexcept {
@@ -93,16 +101,14 @@ void CoreSwitch::resume_seats_() noexcept {
 
 bool CoreSwitch::seats_paused_(proto::BindGeneration gen) const noexcept {
     for (const GrantedSeat& s : seats_)
-        if (s.granted() && !s.latch->paused_at(pause_gen_of(gen)))
+        if (s.granted() && !s.latch->paused_at(gen.pause_gen()))
             return false;
     return true;
 }
 
 bool CoreSwitch::mapping_owner_late_(proto::BindGeneration gen) const noexcept {
     for (const GrantedSeat& s : seats_)
-        if (s.granted()
-            && s.ddr == hal::DdrMapping::Owner
-            && !s.latch->paused_at(pause_gen_of(gen)))
+        if (s.granted() && s.ddr == hal::DdrMapping::Owner && !s.latch->paused_at(gen.pause_gen()))
             return true;
     return false;
 }
@@ -114,14 +120,14 @@ bool CoreSwitch::program_owed() const noexcept {
 
 bool CoreSwitch::receipt_owed() const noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
-    return switch_standing_ && minted_ != gen_ && park_.answered(pause_gen_of(gen_)).has_value();
+    return switch_standing_ && minted_ != gen_ && park_.answered(gen_.pause_gen()).has_value();
 }
 
 unsigned CoreSwitch::take_park_acks() {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!switch_standing_ || minted_ == gen_)
         return 0;
-    auto receipt = park_.answered(pause_gen_of(gen_));
+    auto receipt = park_.answered(gen_.pause_gen());
     if (!receipt)
         return 0;
     minted_ = gen_;
@@ -133,7 +139,7 @@ unsigned CoreSwitch::take_park_acks() {
     return 1;
 }
 
-std::optional<proto::BindGeneration> CoreSwitch::try_program(Host& host) {
+std::optional<CoreSwitch::Barrier> CoreSwitch::try_program(Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!receipt_ || readiness_.recovering())
         return std::nullopt;
@@ -157,6 +163,7 @@ std::optional<proto::BindGeneration> CoreSwitch::try_program(Host& host) {
 
     if (!all)
         tally_.pause_expiries.add();
+    const Barrier::Opened opened = all ? Barrier::Opened::Acked : Barrier::Opened::Expired;
     const ParkReceipt r = std::move(*receipt_);
     receipt_.reset();
     (void)::unlink("/tmp/GAMEID");
@@ -169,11 +176,10 @@ std::optional<proto::BindGeneration> CoreSwitch::try_program(Host& host) {
         switch_programmed_ = true;
         readiness_.clear_owed();
     }
-    if (p == Programmed::Failed) {
+
+    if (p == Programmed::Failed)
         end(proto::LinkOp::ApplyCore{.loaded = pending_step_arg_.loaded, .gen = gen_});
-        return std::nullopt;
-    }
-    return gen_;
+    return Barrier{.opened = opened, .program = p};
 }
 
 bool CoreSwitch::hold_on_lease_() noexcept {

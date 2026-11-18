@@ -72,12 +72,12 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
         refuse_window_(h, Errc::slot_range);
         return Pass::Stepped;
     }
-    auto win = LoadWindow<seat_owner::Main>::open(
-        h.map,
-        h.aperture,
-        hal::to_phys(w.address),
-        w.bytes
-    );
+    const auto at = w.address.physical_in(h.aperture);
+    if (!at) {
+        refuse_window_(h, Errc::aperture_range);
+        return Pass::Stepped;
+    }
+    auto win = LoadWindow<seat_owner::Main>::open(h.map, h.aperture, *at, w.bytes);
     if (!win) {
         refuse_window_(h, win.error().code);
         return Pass::Stepped;

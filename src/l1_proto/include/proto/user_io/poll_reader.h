@@ -90,14 +90,14 @@ public:
 
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
-    [[nodiscard]] std::uint16_t mirror(std::uint8_t param) const noexcept {
-        return param < mirror_.size() ? mirror_[param] : std::uint16_t{0};
+    [[nodiscard]] hal::SpiWord mirror(std::uint8_t param) const noexcept {
+        return param < mirror_.size() ? mirror_[param] : hal::SpiWord{};
     }
 
 private:
     void issue_(const PollShapeRow& row) noexcept;
     void beat_(const PollShapeRow& row, std::uint8_t param) noexcept;
-    [[nodiscard]] bool push_(PollShape shape, std::uint8_t param, std::uint16_t word) noexcept;
+    [[nodiscard]] bool push_(PollShape shape, std::uint8_t param, hal::SpiWord word) noexcept;
 
     hal::ISpiTransport& link_;
     const ISessionLive& live_;
@@ -106,7 +106,7 @@ private:
     Port out_;
     bool armed_ = false;
     BindGeneration gen_{};
-    std::array<std::uint16_t, kMaxPollParams> mirror_{};
+    std::array<hal::SpiWord, kMaxPollParams> mirror_{};
     std::uint32_t polls_ = 0;
     std::uint32_t pushes_ = 0;
     std::uint32_t declined_ = 0;

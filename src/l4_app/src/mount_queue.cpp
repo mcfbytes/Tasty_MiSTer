@@ -15,6 +15,7 @@ namespace mister::app {
 
 MountQueue::MountQueue(const Wiring& w) noexcept
     : vfs_(w.vfs),
+      card_(w.vfs),
       inbox_(w.inbox),
       owner_events_(w.events.producer()),
       clock_(w.clock),
@@ -87,7 +88,7 @@ void MountQueue::arm_mount(Host& host, const MountAsk& ask) {
     arm_plain_mount_(host, ask);
 }
 
-std::optional<std::uint8_t> MountQueue::pick_index_word_(
+std::optional<proto::FioIndexByte> MountQueue::pick_index_word_(
     proto::IoIndex index,
     std::string_view path
 ) const {
@@ -117,7 +118,7 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
     proto::LinkOp::BindMount op{.index = ask.index, .perform = true};
     if (!path.empty()) {
         proto::FileSize size{};
-        if (auto f = vfs_.open(path, svc::OpenMode::ReadWrite)) {
+        if (auto f = card_.open(path, svc::OpenMode::ReadWrite)) {
             if (auto sz = (*f)->size())
                 size = *sz;
         }
@@ -199,7 +200,7 @@ bool MountQueue::on_known_(Host& host, proto::SlotIndex slot) {
             .bracketed = m.bracketed,
             .path = *id,
             .sends_index = m.ask.index_word.has_value(),
-            .index_word = m.ask.index_word.value_or(0)
+            .index_word = m.ask.index_word.value_or(proto::FioIndexByte{})
         };
         if (host.ladder_host().order(op)) {
             finish_save_mount_(host, true);
@@ -240,7 +241,7 @@ void MountQueue::advance_unmount_(Host& host, proto::SlotIndex slot) {
                     .bind = proto::LinkOp::SlotBind::Unmount,
                     .bracketed = m.bracketed,
                     .sends_index = m.ask.index_word.has_value(),
-                    .index_word = m.ask.index_word.value_or(0)
+                    .index_word = m.ask.index_word.value_or(proto::FioIndexByte{})
                 }
             ))
             return;
@@ -285,7 +286,7 @@ void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     if (ok && !quiet) {
         ++tally_.save_mounts_done;
         owner_events_.push(
-            Event::SdActivity{.index = index},
+            Event::SdActivity{.index = proto::WideIoIndex::of(index).fio_byte()},
             Event::Head{ERR_SITE(), {}, kUncaused}
         );
         publish_done_(which, tag);
@@ -408,7 +409,7 @@ void MountQueue::queue_boot_images(const StartChain& chain) {
     for (const StartFile& f : chain.boot_images()) {
         MountAsk ask{
             .which = UiRequest::Kind::MountImage,
-            .index = proto::IoIndex{f.dest.sub().v},
+            .index = f.dest.sub().slot_index(),
             .path = f.path,
             .tag = kUncaused,
             .index_word = f.dest.fio_byte()

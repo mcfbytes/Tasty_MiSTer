@@ -25,6 +25,7 @@
 #include "app/doorbell_cell.h"
 #include "app/event.h"
 #include "app/diag_counters.h"
+#include "app/ladder_cell.h"
 #include "app/fallback_counts.h"
 #include "app/core_builder.h"
 #include "app/sector_grant.h"
@@ -49,12 +50,14 @@
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
+#include "infra/service_set.h"
 #include "infra/wake_flag.h"
 #include "hal/thread_map.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "proto/types.h"
 #include "svc/input_gates.h"
+#include "svc/io_pass.h"
 
 namespace mister::app {
 class IFrameSource;
@@ -102,6 +105,10 @@ public:
         const Main<app::LoadWindowCounts>& window_counts;
         const app::BayCountsCell& bay_counts;
         const app::DiagCountersCell& diag;
+
+        infra::OptRef<xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask{};
+
+        infra::OptRef<const app::LadderStateCell> ladder{};
         MainSessCells sess;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
@@ -114,6 +121,7 @@ public:
         infra::OptRef<const app::SectorLeaseCell> sector_lease{};
         infra::OptRef<const app::OsdLeaseCell> osd_lease{};
         infra::OptRef<const app::SysLeaseCell> sys_lease{};
+        infra::OptRef<const svc::IoPassCell> io_pass{};
         infra::OptRef<xthread::MainLogLane> main_log{};
     };
 
@@ -146,7 +154,6 @@ public:
         const app::EventQueue<SeatTag::RT>& events;
         const Main<RtEvidence>& ev;
         const xthread::WakeFlag& quiescing;
-        const xthread::Telemetry<bool, SeatTag::RT>& transitioning;
         xthread::DiagLog& diag;
         xthread::LogLane& rt_lane;
     };
@@ -245,7 +252,7 @@ public:
 private:
     struct CdInstruments {
         std::uint32_t deadline_misses = 0;
-        std::uint32_t deadline_slots = 0;
+        ServiceSet deadline_slots{};
         std::uint32_t prefetch_state = 0;
         std::uint32_t hits = 0, misses = 0, decodes = 0;
         std::uint32_t seeks = 0, drops = 0, errors = 0;
@@ -277,6 +284,19 @@ private:
 
     void render_log_rec(const LogRec& r) noexcept;
     void line_(LogRec::Kind k, const LogRec::Head& h, std::uint32_t a, std::uint32_t b) noexcept;
+
+    struct LogWords {
+        infra::DecimalText a;
+        infra::DecimalText b;
+    };
+
+    void line_(LogRec::Kind k, const LogRec::Head& h, const LogWords& w) noexcept;
+    void line_(
+        LogRec::Kind k,
+        const LogRec::Head& h,
+        std::chrono::duration<std::uint32_t, std::nano> a,
+        ServiceSlot slot
+    ) noexcept;
 
     void drain_log_lane() noexcept;
 
@@ -373,7 +393,6 @@ private:
 
     RtEvidence ev_{};
     const xthread::WakeFlag& quiescing_;
-    const xthread::Telemetry<bool, SeatTag::RT>& transitioning_;
 
     const app::VideoWire& video_wire_;
     const xthread::Telemetry<app::PreludeStats, SeatTag::Ui>& prelude_stats_;
@@ -399,6 +418,10 @@ private:
     const app::VideoStatsCell& video_stats_;
     const app::VideoGeometryCell& video_geo_;
     const app::DiagCountersCell& diag_cell_;
+
+    infra::OptRef<xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask_;
+
+    infra::OptRef<const app::LadderStateCell> ladder_;
     const app::RecorderStatusCell& rec_capture_;
     const app::EncodeStatusCell& rec_encode_;
     const app::DoorbellStatsCell& doorbell_cell_;

@@ -11,12 +11,12 @@ namespace mister::app {
 template <class Owner>
 Ex<LoadWindow<Owner>> LoadWindow<Owner>::open(
     ILoadWindowMap<Owner>& map,
-    const hal::PhysRegion& aperture,
+    const hal::FpgaAperture& aperture,
     os::PhysAddr addr,
     std::uint64_t len
 ) {
     TASTY_SEAT_BODY(SeatOwner);
-    auto region = hal::resolve_load_region(aperture, addr, len);
+    const auto region = aperture.resolve(addr, len);
     if (!region)
         return std::unexpected(region.error());
     auto mem = map.map(*region);

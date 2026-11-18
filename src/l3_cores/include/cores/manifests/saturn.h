@@ -46,7 +46,7 @@ inline constexpr CdTickPeriods kSaturnTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{13'333},
     .caller = std::chrono::microseconds{1'000},
-    .speeds = 3,
+    .speeds = CdSpeedCount{3},
     .speed = {
         std::chrono::microseconds{16'667},
         std::chrono::microseconds{13'333},
@@ -152,7 +152,7 @@ inline constexpr svc::BlankSaveSpec kSaturnBlankSave{
 };
 
 inline constexpr StagingPolicy kSaturnStaging{
-    .order = StageOrder::Saturn,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kSaturnSlots),
     .save = SaveMountPolicy{
@@ -178,6 +178,8 @@ inline constexpr CoreProfile kSaturn{
     .windows = kSaturnWindows,
 
     .reset = {.toggle_reacts = true, .button_reacts = true},
+
+    .grants = {Grant::Lamp, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_saturn(const CoreProfile& p, const CoreGrant& g);

@@ -13,6 +13,7 @@
 #include "cores/core_init_step.h"
 #include "cores/core_window_decl.h"
 #include "cores/file_slot.h"
+#include "cores/grant_set.h"
 #include "cores/host_policy.h"
 #include "cores/option_row.h"
 #include "cores/reset_row.h"
@@ -113,7 +114,6 @@ struct CoreProfile {
     bool saves_by_channel = false;
 
     bool suppress_reset_status_write = false;
-    bool skips_memsz = false;
 
     StagingPolicy staging{};
 
@@ -152,7 +152,7 @@ struct CoreProfile {
 
     std::span<const CoreWindowDecl> windows{};
 
-    bool file_tx_whole = false;
+    bool no_stream_role = false;
 
     ResetRow reset{};
 
@@ -167,6 +167,8 @@ struct CoreProfile {
     infra::OptRef<const svc::IDiscRules> disc_rules{};
 
     infra::OptRef<const IConfigCodec> config_codec{};
+
+    GrantSet grants{};
 };
 
 [[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {

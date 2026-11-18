@@ -11,19 +11,19 @@ namespace mister::cores {
 Ex<StreamLoadBracket> StreamLoadBracket::open(
     IStreamLoad& core,
     proto::IImageSink& sink,
-    IoIndex index,
+    const StreamAsk& ask,
     StreamLoadKind kind,
     std::uint32_t length
 ) {
-    auto params = core.stream_opening(index);
+    auto params = core.stream_opening(ask);
     if (!params)
         return std::unexpected(params.error());
     if (length != 0)
         params->aux = proto::AuxValue{length};
-    auto b = proto::ImageBracket::open(sink, proto::WideIoIndex{index.v}, *params);
+    auto b = proto::ImageBracket::open(sink, proto::WideIoIndex::of(ask.index), *params);
     if (!b)
         return std::unexpected(b.error());
-    return StreamLoadBracket(index, kind, std::move(*b));
+    return StreamLoadBracket(ask.index, kind, std::move(*b));
 }
 
 StreamLoadBracket::StreamLoadBracket(StreamLoadBracket&& o) noexcept
@@ -52,7 +52,7 @@ void StreamLoadBracket::cut_() noexcept {
 Ex<void> StreamLoadBracket::write(std::span<const std::uint8_t> piece) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_)
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
+        return std::unexpected(index_.refusal(Errc::negotiation, ERR_SITE()));
     while (!piece.empty()) {
         const std::size_t n = std::min(piece.size(), kFileTxChunkBytes);
         if (auto r = bracket_->write(piece.first(n)); !r)
@@ -67,7 +67,7 @@ Ex<std::span<const std::uint8_t>> StreamLoadBracket::write_taken(
 ) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_)
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
+        return std::unexpected(index_.refusal(Errc::negotiation, ERR_SITE()));
     std::size_t taken = 0;
     while (taken < piece.size()) {
         const std::size_t n = std::min(piece.size() - taken, kFileTxChunkBytes);
@@ -88,7 +88,7 @@ Ex<void> StreamLoadBracket::close(
 ) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_)
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
+        return std::unexpected(index_.refusal(Errc::negotiation, ERR_SITE()));
     auto r = bracket_->end();
     bracket_.reset();
     if (live) {

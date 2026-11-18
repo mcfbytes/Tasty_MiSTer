@@ -4,7 +4,6 @@
 #include <cstring>
 #include <utility>
 
-#include "app/durable_write.h"
 #include "app/verdict_sinks.h"
 
 namespace mister::app {
@@ -14,7 +13,16 @@ Ex<void> UiWriteLane::arm(
     std::span<const std::byte> bytes,
     VerdictSink sink
 ) noexcept {
+    return arm(Target{.rel = rel}, bytes, sink);
+}
+
+Ex<void> UiWriteLane::arm(
+    Target target,
+    std::span<const std::byte> bytes,
+    VerdictSink sink
+) noexcept {
     seat_assert<SeatTag::Ui>(ERR_SITE(), "UiWriteLane::arm off T-UI");
+    const std::string_view rel = target.rel;
     if (rel.empty() || bytes.size() > kBytes) {
         ++ui_.refusals;
         return std::unexpected(
@@ -26,12 +34,12 @@ Ex<void> UiWriteLane::arm(
         ++ui_.refusals;
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    if (!loan->rel.assign(rel)) {
+    if (!loan->rel.assign(rel) || !loan->retire.assign(target.retire)) {
         ++ui_.refusals;
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     loan->len = static_cast<std::uint32_t>(bytes.size());
-    loan->ok = false;
+    loan->fault.reset();
     if (!bytes.empty())
         std::memcpy(loan->data, bytes.data(), bytes.size());
 
@@ -54,11 +62,16 @@ void UiWriteLane::tick(VerdictSinks sinks) noexcept {
     while (auto done = chan_.reap()) {
         Shadow& sh = ui_.shadow[*chan_.index_of(done)];
         sh.live = false;
-        const bool ok = done.completed() && done->ok;
+        const bool ok = done.completed() && !done->fault;
         if (ok) {
             ++ui_.writes;
         } else {
             ++ui_.failures;
+            if (done.completed()) {
+                ui_.last_fault_ = done->fault;
+            } else {
+                ui_.last_fault_ = Error{Errc::cancelled, ERR_SITE(), 0};
+            }
         }
         const VerdictSink named = std::exchange(sh.sink, VerdictSink::None);
         switch (named) {
@@ -71,6 +84,10 @@ void UiWriteLane::tick(VerdictSinks sinks) noexcept {
             case VerdictSink::Recents:
                 if (sinks.recents)
                     sinks.recents->on_written(ok);
+                break;
+            case VerdictSink::Maps:
+                if (sinks.maps)
+                    sinks.maps->on_written(ok);
                 break;
         }
     }
@@ -105,12 +122,20 @@ void UiWriteLane::serve() noexcept {
     auto job = chan_.take();
     if (!job)
         return;
-    const auto r = durable_write(
-        *vfs_,
+
+    if (!job->retire.empty()) {
+        if (const auto gone = card_.remove(job->retire.view()); !gone) {
+            job->fault = gone.error();
+            job.complete();
+            return;
+        }
+    }
+    const auto r = card_.replace_file(
         job->rel.view(),
         std::span<const std::byte>{job->data, job->len}
     );
-    job->ok = r.has_value();
+    if (!r)
+        job->fault = r.error();
     job.complete();
 }
 

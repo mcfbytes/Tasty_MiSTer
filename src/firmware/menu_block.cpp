@@ -3,14 +3,25 @@
 
 #include "app/hd_look_ini.h"
 #include "hal/axi.h"
+#include "hal/board_regions.h"
 #include "infra/opt_ref.h"
 #include "infra/path_text.h"
 #include "os/process_title.h"
+#include "proto/osd_rotation.h"
 #include "report.h"
 
 namespace mister::fw {
 
 using namespace mister;
+
+namespace {
+
+hal::PhysRegion framebuffer_region(std::span<const hal::PhysRegion> rows) noexcept {
+    const auto row = hal::BoardRegions::aperture_region(rows, hal::RegionId::VideoFb);
+    return row ? row->region() : hal::PhysRegion{};
+}
+
+}
 
 static_assert(
     UiSink::kSeat == UiMain::kSeat,
@@ -33,8 +44,8 @@ MenuBlock::MenuBlock(
     : clock_{parts.wires.clock},
       diag_path_{plat.diag_path},
       trace_{parts.wires.events, parts.wires.owner_events},
-      ui_writes_{plat.vfs, parts.wires.io_wake},
-      stores_{plat, parts.cells.cheat_blob, ui_writes_},
+      stores_{plat, parts.cells.cheat_blob, parts.wires.ui_writes},
+      map_saves_{parts.wires.joymap},
       mgl_pump_{
           plat.vfs,
           parts.wires.clock,
@@ -47,11 +58,7 @@ MenuBlock::MenuBlock(
               .diag = parts.wires.diag
           }
       },
-      hps_fb_{
-          parts.wires.video.mode_sink(),
-          parts.wires.video,
-          hal::declared_region(plat.regions, hal::RegionId::VideoFb).value_or(hal::PhysRegion{})
-      },
+      hps_fb_{parts.wires.video.mode_sink(), parts.wires.video, framebuffer_region(plat.regions)},
       browse_source_{plat.vfs},
       connect_{plat.connect, verdict},
 
@@ -77,6 +84,7 @@ MenuBlock::MenuBlock(
           .ui_requests = infra::OptRef<app::UiRequestRing>{parts.session.owner.ui_requests()},
           .connect = infra::OptRef<ui::ConnectPort>{connect_.port()},
           .files = infra::OptRef<const svc::Vfs>{plat.vfs},
+          .writes = infra::OptRef<app::UiWriteLane>{parts.wires.ui_writes},
           .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()},
           .disk_activity = parts.cells.disk_activity,
           .ini = parts.cells.ini
@@ -113,9 +121,12 @@ MenuBlock::MenuBlock(
               .idle = parts.session.owner.idle_cell(),
               .ini = parts.cells.ini,
               .hd = hd_.screen(),
-              .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
+              .writes = infra::OptRef<app::UiWriteLane>{parts.wires.ui_writes},
               .video = infra::OptRef<const app::VideoPump>{parts.wires.video},
               .fb = infra::OptRef<const app::HpsFramebuffer>{hps_fb_},
+              .autosave = infra::opt_ref_of(&parts.session.owner.autosave_cell()),
+              .save_director = infra::opt_ref_of(&parts.session.owner.save_director_cell()),
+              .menu_focus = infra::OptRef<app::MenuFocusCell>{parts.cells.menu_focus},
           }
       },
       save_states_{app::SaveStateAttach::Wiring{
@@ -125,7 +136,7 @@ MenuBlock::MenuBlock(
           .vfs = plat.vfs,
           .map = parts.cells.io_windows,
           .ui_map = parts.cells.ui_windows,
-          .aperture = plat.fpga_mem.region,
+          .aperture = plat.fpga_mem,
           .clock = parts.wires.clock,
           .io_wake = parts.wires.io_wake,
           .toast = infra::OptRef<app::IEventSink>{ui_sink_}
@@ -135,7 +146,7 @@ MenuBlock::MenuBlock(
           .fb_ack = launcher.launcher_fb_ack_,
           .launcher_wake = launcher.launcher_wake_,
           .fb = hps_fb_,
-          .video = parts.wires.video,
+          .video_stats = parts.wires.video.stats_cell(),
           .osd = ui_model_
       }} {
 
@@ -153,11 +164,11 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .launcher_screen = infra::OptRef{launcher_screen_},
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
-        .ui_writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
         .verdicts =
             app::VerdictSinks{
                 .played = infra::OptRef<app::IWriteVerdict>{stores_.played_},
-                .recents = infra::OptRef<app::IWriteVerdict>{stores_.recents_}
+                .recents = infra::OptRef<app::IWriteVerdict>{stores_.recents_},
+                .maps = infra::OptRef<app::IWriteVerdict>{map_saves_}
             },
         .ui_pages = infra::OptRef{ui_round_.page_cell()},
         .hd = infra::OptRef<const app::HdOsdStatusCell>{hd_.hd_status_},
@@ -181,6 +192,7 @@ void MenuBlock::route_pages_to(app::ICmdVerbSink& route) noexcept {
 
 void MenuBlock::latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& mains) noexcept {
     ui_context_.bt_reset_before_pair = c.bt_reset_before_pair != 0;
+    ui_context_.osd_rotation = proto::osd_rotation_of_ini(c.osd_rotate);
     ui_sink_.set_log_file_entry(c.log_file_entry != 0);
     stores_.latch(c);
 

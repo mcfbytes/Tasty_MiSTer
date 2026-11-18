@@ -17,6 +17,7 @@
 #include "infra/byte_view.h"
 #include "infra/endian.h"
 #include "infra/path_parts.h"
+#include "svc/card_writer.h"
 #include "svc/read_bounded.h"
 #include "svc/search_policy.h"
 
@@ -65,7 +66,7 @@ namespace {
     return neogeo::Shape::None;
 }
 
-constexpr std::uint64_t kMaxXmlBytes = 16u * 1024u * 1024u;
+constexpr proto::FileSize kMaxXmlBytes{16u * 1024u * 1024u};
 
 }
 
@@ -106,12 +107,12 @@ public:
 private:
     struct Span {
         std::uint32_t size = 0;
-        std::uint64_t rest = 0;
+        proto::FileSize rest{};
     };
 
     [[nodiscard]] std::optional<Span> entry_span(
         std::string_view path,
-        std::uint32_t offset,
+        proto::FileOffset at,
         std::uint32_t size
     ) const;
     [[nodiscard]] bool exists(std::string_view path) const;
@@ -244,7 +245,8 @@ Ex<void> PlanWalk::frame_save(std::string_view pick) {
     const std::string save = neogeo::save_path(core, pick);
     std::string dir = "saves/";
     dir.append(core);
-    (void)vfs_->ensure_dir(dir);
+    svc::CardWriter card{*vfs_};
+    (void)card.ensure_dir(dir);
     if (!save_->assign(save))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 2});
     result_.plan.frame.save = save_->view();
@@ -312,8 +314,8 @@ Ex<std::optional<std::uint32_t>> PlanWalk::add_xml(std::string_view pick, std::s
     std::string doc;
     if (auto f = vfs_->open(xml, svc::OpenMode::ReadWhole)) {
         const auto sz = (*f)->size();
-        if (sz && sz->within(svc::FileSize{1u}, svc::FileSize{kMaxXmlBytes})) {
-            doc.resize(static_cast<std::size_t>(sz->v));
+        if (sz && sz->within(proto::FileSize{1u}, kMaxXmlBytes)) {
+            doc = sz->zeroed<std::string>();
 
             const auto got = svc::read_bounded_partial(
                 **f,
@@ -370,7 +372,7 @@ Ex<std::optional<std::uint32_t>> PlanWalk::add_xml(std::string_view pick, std::s
 
 std::optional<PlanWalk::Span> PlanWalk::entry_span(
     std::string_view path,
-    std::uint32_t offset,
+    proto::FileOffset at,
     std::uint32_t size
 ) const {
     auto f = vfs_->open(path, svc::OpenMode::Read);
@@ -379,11 +381,9 @@ std::optional<PlanWalk::Span> PlanWalk::entry_span(
     const auto fs = (*f)->size();
     if (!fs)
         return std::nullopt;
-    const std::uint64_t rest = fs->v > offset ? fs->v - offset : 0u;
+    const proto::FileSize rest = at.remaining_in(*fs);
     if (size == 0)
-        size = static_cast<std::uint32_t>(
-            std::min<std::uint64_t>(rest, std::numeric_limits<std::uint32_t>::max())
-        );
+        size = rest.min(proto::FileSize{std::numeric_limits<std::uint32_t>::max()}).low_word();
     return Span{.size = size, .rest = rest};
 }
 
@@ -473,15 +473,15 @@ Ex<void> PlanWalk::flush_crom() {
 }
 
 Ex<std::uint32_t> PlanWalk::add_crom(const neogeo::RomsetFile& e) {
-    const auto s = entry_span(e.path, e.offset, e.size);
+    const auto s = entry_span(e.path, proto::FileOffset{e.offset}, e.size);
     if (!s || s->size == 0) {
         ++result_.tally.skipped;
         return 0u;
     }
     const std::uint32_t end = e.index.crom_offset() + 2u * s->size;
     crom_sz_ = std::max(crom_sz_, end);
-    const auto readable = static_cast<std::uint32_t>(std::min<std::uint64_t>(s->size, s->rest));
-    if (readable == 0) {
+    const proto::FileSize readable = s->rest.min(proto::FileSize{s->size});
+    if (readable.empty()) {
         ++result_.tally.skipped;
         return end;
     }
@@ -495,9 +495,9 @@ Ex<std::uint32_t> PlanWalk::add_crom(const neogeo::RomsetFile& e) {
     row.addr = e.index.crom_offset();
     row.stride = 2;
     row.lane = e.index.crom_lane();
-    row.file_offset = e.offset;
-    row.file_len = proto::FileSize{readable};
-    row.extent = proto::FileSize{2u * readable};
+    row.file_offset = proto::FileOffset{e.offset};
+    row.file_len = readable;
+    row.extent = readable * std::uint64_t{2};
     last_crom_ = *i;
     return end;
 }
@@ -507,7 +507,7 @@ Ex<std::uint32_t> PlanWalk::add_rom(
     const neogeo::RomsetFile& e,
     std::uint32_t concat
 ) {
-    const auto s = entry_span(path, e.offset, e.size);
+    const auto s = entry_span(path, proto::FileOffset{e.offset}, e.size);
     if (!s || s->size == 0)
         return 0u;
     const std::uint32_t extent = e.expand != 0 ? e.expand : s->size;
@@ -523,8 +523,8 @@ Ex<std::uint32_t> PlanWalk::add_rom(
     row.window = place.window;
     row.addr = place.offset;
     row.fill = row.shaped ? 0u : e.index.vrom_fill();
-    row.file_offset = e.offset;
-    row.file_len = proto::FileSize{neogeo::stock_read_len(s->size, extent, s->rest)};
+    row.file_offset = proto::FileOffset{e.offset};
+    row.file_len = neogeo::stock_read_len(s->size, extent, s->rest);
     row.extent = proto::FileSize{extent};
     return extent;
 }
@@ -544,7 +544,7 @@ Ex<void> PlanWalk::add_fill() {
 
 Ex<bool> PlanWalk::add_lo_rom(std::string_view home) {
     const std::string path = neogeo::make_path(home, "000-lo.lo");
-    const auto s = entry_span(path, 0, neogeo::kLoRomBytes);
+    const auto s = entry_span(path, proto::kFileStart, neogeo::kLoRomBytes);
     if (!s)
         return false;
     auto i = add_row(path, RowDest::Payload);
@@ -554,7 +554,7 @@ Ex<bool> PlanWalk::add_lo_rom(std::string_view home) {
     const neogeo::FileIndex lo_index = neogeo::FileIndex::LoRom;
     row.index = lo_index.wide();
     row.byte_words = true;
-    row.file_len = proto::FileSize{std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)};
+    row.file_len = s->rest.min(proto::FileSize{neogeo::kLoRomBytes});
     row.extent = proto::FileSize{neogeo::kLoRomBytes};
     return true;
 }
@@ -610,7 +610,7 @@ neogeo::IRomShape* NeoGeoLoader::shaper_(neogeo::Shape kind) noexcept {
     return nullptr;
 }
 
-void NeoGeoLoader::shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t) {
+void NeoGeoLoader::shape(const TransferRow& row, std::span<std::uint8_t> piece, proto::FileOffset) {
     TASTY_SEAT_BODY(NeoGeoLoader);
     const std::optional<neogeo::Shape> kind = neogeo::shape_of(row.shape);
     if (!kind)

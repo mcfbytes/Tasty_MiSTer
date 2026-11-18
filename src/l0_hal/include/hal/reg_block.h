@@ -9,9 +9,8 @@
 #include <utility>
 
 #include "infra/seat.h"
+#include "hal/block_view.h"
 #include "hal/phys_region.h"
-#include "hal/reg.h"
-#include "hal/reg_field.h"
 #include "hal/reg_lend.h"
 #include "os/mmio_region.h"
 
@@ -61,19 +60,15 @@ public:
         return Block(std::exchange(base_, nullptr), len);
     }
 
-    template <Access A>
-    [[nodiscard]] std::optional<Reg<A>> at(std::uint32_t byte_off) const noexcept {
+    template <class Layout>
+    [[nodiscard]] std::optional<BlockView<Layout>> view(std::uint32_t byte_off) const noexcept {
+        const std::size_t off = byte_off;
         if (base_ == nullptr
             || (byte_off & kWordAlignMask) != 0u
-            || !span_fits(static_cast<std::size_t>(byte_off), sizeof(std::uint32_t), len_)) {
+            || !span_fits(off, Layout::kSize, len_)) {
             return std::nullopt;
         }
-        return Reg<A>(reinterpret_cast<volatile std::uint32_t*>(base_ + byte_off));
-    }
-
-    template <Access A, std::uint32_t Off>
-    [[nodiscard]] std::optional<Reg<A>> at(Field<A, Off>) const noexcept {
-        return at<A>(Off);
+        return BlockView<Layout>(const_cast<std::byte*>(base_ + off));
     }
 
 private:

@@ -1,5 +1,6 @@
 add_library(mister_ui STATIC
   src/arc_label.cpp
+  src/autosave_clock.cpp
   src/browser_model.cpp
   src/browser_page.cpp
   src/cheats_page.cpp
@@ -14,6 +15,7 @@ add_library(mister_ui STATIC
   src/core_options_page.cpp
   src/core_pick_host.cpp
   src/core_settings_page.cpp
+  src/cores_entry.cpp
   src/cycle_value.cpp
   src/dips_page.cpp
   src/draw_classic.cpp
@@ -24,6 +26,9 @@ add_library(mister_ui STATIC
   src/game_slot.cpp
   src/hd_key_remap.cpp
   src/hd_label.cpp
+  src/indicator_badge.cpp
+  src/indicator_board.cpp
+  src/indicator_page.cpp
   src/info_page.cpp
   src/joymap_page.cpp
   src/key_decoder.cpp
@@ -42,6 +47,7 @@ add_library(mister_ui STATIC
   src/script_pick_host.cpp
   src/script_run_page.cpp
   src/script_runner.cpp
+  src/scripts_entry.cpp
   src/sdram_latch.cpp
   src/select_ini_page.cpp
   src/show_edge_latch.cpp
@@ -53,7 +59,7 @@ add_library(mister_ui STATIC
 )
 target_include_directories(mister_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_ui
-  PUBLIC mister_app
+  PUBLIC mister_app mister_app_hd mister_app_recents mister_app_connect
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
@@ -68,12 +74,14 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/key_grid_layer.h
   ui/keyboard_text.h
   ui/shift_state.h
+  ui/source_revision.h
   ui/text_entry_host.h
   ui/text_entry_kind.h
   ui/text_entry_launch.h
   ui/text_entry_page.h
   ui/text_entry_request.h
   ui/text_entry_result.h
+  ui/autosave_clock.h
   ui/browse_source.h
   ui/browser_entry.h
   ui/browser_host.h
@@ -90,6 +98,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/core_pick_host.h
   ui/core_options_page.h
   ui/core_settings_page.h
+  ui/cores_entry.h
   ui/cycle_value.h
   ui/cheats_page.h
   ui/dips_page.h
@@ -103,6 +112,11 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/hd_key_remap.h
   ui/hd_label.h
   ui/host_sampler.h
+  ui/indicator_board.h
+  ui/indicator_canvas.h
+  ui/indicator_page.h
+  ui/indicator_row.h
+  ui/indicator_source.h
   ui/info_page.h
   ui/joymap_page.h
   ui/key_decoder.h
@@ -134,6 +148,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/option_items/version_item.h
   ui/options_model.h
   ui/osd_renderer.h
+  ui/osd_tree.h
   ui/osd_style_preference.h
   ui/osd_visible_file.h
   ui/page.h
@@ -152,6 +167,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/script_pick_host.h
   ui/script_run_page.h
   ui/script_runner.h
+  ui/scripts_entry.h
   ui/sdram_latch.h
   ui/select_ini_page.h
   ui/show_edge_latch.h
@@ -168,6 +184,13 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/ui_event.h
   ui/ui_round.h
   ui/vfs_browse_source.h
+  ui/blob_word.h
+  ui/host_sample.h
+  ui/joymap_blob.h
+  ui/launch_slot.h
+  ui/options_keys.h
+  ui/script_request.h
+  ui/session_facts.h
 )
 
 

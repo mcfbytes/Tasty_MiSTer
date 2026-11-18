@@ -3,36 +3,28 @@
 
 namespace mister::proto {
 
-void AxiStatusDecoder::bind(
+void AxiStatusSource::bind(
     infra::OptRef<const StatusSnapshotCell> src,
     BuildGeneration gen
 ) noexcept {
-    TASTY_SEAT_BODY(AxiStatusDecoder);
+    TASTY_SEAT_BODY(AxiStatusSource);
     src_ = src;
     gen_ = src ? gen : BuildGeneration{};
 
     reader_.forget();
 }
 
-void AxiStatusDecoder::service() noexcept {
-    TASTY_SEAT_BODY(AxiStatusDecoder);
-
-    if (!session_.flush_owed()) {
-        ++flush_refusals_;
-        return;
-    }
+std::optional<StatusChange> AxiStatusSource::take(StatusChange, StatusWord& words) noexcept {
+    TASTY_SEAT_BODY(AxiStatusSource);
     if (!src_ || !gen_.built() || !reader_.take_if_changed(*src_, scratch_))
-        return;
+        return std::nullopt;
     if (scratch_.gen != gen_) {
         ++stale_;
-        return;
+        return std::nullopt;
     }
-    last_ = scratch_.stflg.flag;
-    if (!session_.adopt_from_core(scratch_.words))
-        ++flush_refusals_;
+    words = scratch_.words;
     ++adopted_;
-    published_ = session_.status().value();
-    cell_.publish(published_);
+    return StatusChange::of(scratch_.stflg);
 }
 
 }

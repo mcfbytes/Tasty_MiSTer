@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ladder_host_adapter.h"
 
+#include <algorithm>
+#include <span>
 #include <utility>
 
 #include "app/negotiated_core.h"
@@ -38,16 +40,12 @@ Ex<proto::FileId> LadderHostAdapter::intern_piece(
     std::span<const std::uint8_t> bytes,
     std::string_view ext,
     proto::FileSize whole,
-    std::uint64_t offset
+    proto::FileOffset at
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
     return edges_.inbox.intern_file(
-        FileIntern{
-            .bytes = std::move(buf),
-            .ext = ext,
-            .piece = {.whole = whole, .offset = proto::FileSize{offset}}
-        }
+        FileIntern{.bytes = std::move(buf), .ext = ext, .piece = {.whole = whole, .offset = at}}
     );
 }
 
@@ -78,6 +76,14 @@ cores::FileTxAnswer LadderHostAdapter::file_tx_answer(proto::ActKey act) {
     return level.stream_served ? cores::FileTxAnswer::Served : cores::FileTxAnswer::Dropped;
 }
 
+cores::FileTxAnswer LadderHostAdapter::payload_answer(proto::ActKey16 act) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    const FileTxLevel level = edges_.ftx_level_cell.sample().value;
+    if (!act || !level.payload || level.act != act.widen())
+        return cores::FileTxAnswer::Pending;
+    return level.open ? cores::FileTxAnswer::Served : cores::FileTxAnswer::Dropped;
+}
+
 bool LadderHostAdapter::order_load_facts(std::span<const std::uint8_t> facts) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     if (edges_.inbox.ring().size() >= proto::kLinkTxCapacity)
@@ -91,11 +97,9 @@ std::size_t LadderHostAdapter::link_in_flight() const noexcept {
     return edges_.inbox.ring().size();
 }
 
-cores::WireWordBytes LadderHostAdapter::link_word_bytes() const noexcept {
+hal::Width LadderHostAdapter::link_width() const noexcept {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    return cores::WireWordBytes::of(
-        edges_.negotiated.link_wide() ? hal::Width::Word : hal::Width::Byte
-    );
+    return edges_.negotiated.link_width();
 }
 
 cores::MountStatus LadderHostAdapter::mount_status() {
@@ -157,6 +161,18 @@ cores::SaveExtent LadderHostAdapter::save_extent() {
 proto::StatusWord LadderHostAdapter::status_word() {
     TASTY_SEAT_BODY(LadderHostAdapter);
     return edges_.status_cell.sample().value;
+}
+
+std::optional<proto::FieldValue> LadderHostAdapter::option_choice(cores::OptionTag tag) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    const OptionTable table = edges_.option_cell.sample().value;
+    const auto rows = std::span(table.rows).first(table.count);
+    const auto row = std::ranges::find_if(rows, [tag](const OptionTable::Row& r) {
+        return r.decl.has_value() && r.decl->id == tag;
+    });
+    if (row == rows.end())
+        return std::nullopt;
+    return proto::FieldValue{row->current};
 }
 
 }

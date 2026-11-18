@@ -7,12 +7,12 @@ namespace mister::proto {
 
 Ex<void> HeldPadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(HeldPadEncoder);
-    return hold_(opcode, 0, map.v);
+    return hold_(opcode, 0, PadWord::of(map));
 }
 
 Ex<void> HeldPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(HeldPadEncoder);
-    return hold_(opcode, index, pos.packed());
+    return hold_(opcode, index, PadWord::of(pos));
 }
 
 std::uint32_t HeldPadEncoder::link_words(UioOp, bool) const noexcept {
@@ -29,10 +29,10 @@ Ex<void> HeldPadEncoder::release(ILinkPadEncoder& to) const {
     return first;
 }
 
-Ex<void> HeldPadEncoder::hold_(UioOp opcode, std::uint8_t index, std::uint32_t word) {
+Ex<void> HeldPadEncoder::hold_(UioOp opcode, std::uint8_t index, PadWord word) {
     const PadLevels::Slot s = PadLevels::level_of(opcode, index);
     if (!PadLevels::is_level(s))
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), proto::word(opcode).v});
+        return std::unexpected(proto::word(opcode).refusal(Errc::fpga_not_ready, ERR_SITE()));
     want_.put(s, word);
     ++held_;
     return {};

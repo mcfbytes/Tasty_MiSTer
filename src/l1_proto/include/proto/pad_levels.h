@@ -12,6 +12,7 @@
 #include "proto/joystick_port.h"
 #include "proto/stick_pos.h"
 #include "proto/link_pad_encoder.h"
+#include "proto/pad_word.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
@@ -56,22 +57,20 @@ public:
         return not_a_level();
     }
 
-    void put(Slot level, std::uint32_t word) noexcept { words_[level] = word; }
+    void put(Slot level, PadWord word) noexcept { words_[level] = word; }
 
-    [[nodiscard]] std::optional<std::uint32_t> at(Slot level) const noexcept {
-        return words_[level];
-    }
+    [[nodiscard]] std::optional<PadWord> at(Slot level) const noexcept { return words_[level]; }
 
     [[nodiscard]] Ex<void> replay(Slot level, ILinkPadEncoder& to) const;
 
 private:
-    infra::IndexedArray<std::optional<std::uint32_t>, kCount, Slot> words_{};
+    infra::IndexedArray<std::optional<PadWord>, kCount, Slot> words_{};
 };
 
 inline constexpr std::array<PadLevels::Reg, PadLevels::kCount> PadLevels::kRegs = [] {
     std::array<Reg, kCount> r{};
     for (std::uint8_t p = 0; p < kPorts; ++p) {
-        r[p] = Reg{JoystickPort::digital_opcode(p), 0};
+        r[p] = Reg{JoystickPort::digital_opcode(PlayerIndex{p}), 0};
         r[kPorts + p] = Reg{UioOp::Astick, JoystickPort::stick_index(PlayerIndex{p})};
         r[2 * kPorts + p] = Reg{UioOp::Astick, JoystickPort::paddle_index(PlayerIndex{p})};
         r[3 * kPorts + p] = Reg{UioOp::Astick2, JoystickPort::stick_index(PlayerIndex{p})};

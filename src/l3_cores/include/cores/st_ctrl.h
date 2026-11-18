@@ -8,6 +8,7 @@
 
 #include "cores/st_sysctrl.h"
 #include "cores/types.h"
+#include "hal/spi_halves.h"
 #include "infra/endian.h"
 #include "proto/status_bit.h"
 #include "proto/status_word.h"
@@ -41,6 +42,11 @@ struct CtrlWord {
 
     struct Aspect {
         std::uint8_t v = 0;
+
+        [[nodiscard]] constexpr proto::FieldValue choice() const noexcept {
+            return proto::FieldValue{v};
+        }
+
         friend constexpr bool operator==(Aspect, Aspect) = default;
     };
 
@@ -104,18 +110,24 @@ struct CtrlWord {
 
     constexpr void store_raw(std::span<std::uint32_t, 1> dst) const noexcept { dst[0] = raw(); }
 
+    [[nodiscard]] static constexpr CtrlWord load_raw(
+        std::span<const std::uint32_t, 1> src
+    ) noexcept {
+        return CtrlWord{src[0]};
+    }
+
+    [[nodiscard]] constexpr hal::SpiHalves wire_halves() const noexcept {
+        return hal::SpiHalves::of(raw());
+    }
+
     [[nodiscard]] constexpr proto::StatusWord status_word() const noexcept {
-        proto::StatusWord w{};
-        w.words[0] = static_cast<std::uint16_t>(v);
-        w.words[1] = static_cast<std::uint16_t>(v >> proto::StatusBit::kWordBits);
-        return w;
+        return proto::StatusWord::of(wire_halves());
     }
 
     [[nodiscard]] static constexpr CtrlWord of(const proto::StatusWord& w) noexcept {
-        return CtrlWord{
-            static_cast<std::uint32_t>(w.words[0])
-            | (static_cast<std::uint32_t>(w.words[1]) << proto::StatusBit::kWordBits)
-        };
+        return hal::SpiHalves{.low = w.words[0], .high = w.words[1]}.joined([](std::uint32_t d) {
+            return CtrlWord{d};
+        });
     }
 
     [[nodiscard]] constexpr bool has(Bit b) const noexcept { return (v & b.v) != 0; }

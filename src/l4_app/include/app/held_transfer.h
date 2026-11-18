@@ -10,7 +10,6 @@
 #include <string_view>
 #include <utility>
 
-#include "app/board_ops.h"
 #include "app/bracket_close.h"
 #include "app/cheat_apply.h"
 #include "app/core_block_roles.h"
@@ -25,7 +24,6 @@
 #include "app/link_op_dispatch.h"
 #include "app/link_tx_reader.h"
 #include "app/osd_wire.h"
-#include "app/rt_relax_scope.h"
 #include "app/session_bindings.h"
 #include "app/session_machine.h"
 #include "app/session_tally.h"
@@ -101,7 +99,6 @@ public:
         const SessionBindings& bindings;
         ICheatApply& cheats;
         OsdWire& osd;
-        BoardOps ops;
 
         SlotBindings& slot_bindings;
         const CoreTenancy& tenancy;
@@ -120,6 +117,7 @@ public:
     using Result = Delivered;
     Result on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StagePayload& a, const LinkOpCtx& ctx) noexcept;
+    Result on(const proto::LinkOp::PlainDownload& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StageDiscPayload& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StageReset& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SetWideIndex& a, const LinkOpCtx& ctx) noexcept;
@@ -133,8 +131,17 @@ public:
 
     [[nodiscard]] bool wire_held() const noexcept {
         TASTY_SEAT_BODY(HeldTransfer);
-        return copy_ds_.has_value() || link_.posted();
+        return copy_ds_.has_value() || dat_window_held() || link_.posted();
     }
+
+    [[nodiscard]] bool dat_window_held() const noexcept {
+        TASTY_SEAT_BODY(HeldTransfer);
+        return plain_ds_ && plain_ds_->dat_held();
+    }
+
+    [[nodiscard]] bool keeps_window(const proto::LinkOp::PlainDownload& a) const noexcept;
+
+    void release_window() noexcept;
 
     void cut_all() noexcept;
 
@@ -148,8 +155,8 @@ public:
         std::optional<std::uint32_t> held = std::nullopt
     ) noexcept;
 
-    void after_file_tx(
-        proto::IoIndex index,
+    [[nodiscard]] Delivered::Edge after_file_tx(
+        proto::FioIndexByte index,
         std::string_view path,
         ContentEdge edge,
         cores::Core& current
@@ -162,12 +169,12 @@ public:
     [[nodiscard]] bool stage_held() const noexcept { return stage_open_.has_value(); }
 
     [[nodiscard]] bool fio_held() const noexcept {
-        return ftx_open_.has_value() || stage_open_.has_value();
+        return ftx_open_.has_value() || stage_open_.has_value() || plain_ds_.has_value();
     }
 
     [[nodiscard]] bool copy_posted() const noexcept { return copy_ds_.has_value(); }
 
-    [[nodiscard]] std::optional<proto::IoIndex> last_download() const noexcept {
+    [[nodiscard]] std::optional<proto::FioIndexByte> last_download() const noexcept {
         return last_download_;
     }
 
@@ -188,7 +195,7 @@ private:
 
     void announce_open_save(proto::IBlockRoles& roles) noexcept;
 
-    [[nodiscard]] bool stream_file_tx_(
+    [[nodiscard]] std::optional<Delivered::Edge> stream_file_tx_(
         const proto::LinkOp::FileTx& a,
         infra::OptRef<const InternedFile> file,
         cores::Core& current
@@ -200,22 +207,13 @@ private:
         cores::Core& current
     );
 
-    [[nodiscard]] bool close_stream_bracket_(
+    [[nodiscard]] std::optional<Delivered::Edge> close_stream_bracket_(
         const proto::LinkOp::FileTx& a,
         const InternedFile& file,
         cores::Core& current
     );
 
     void refuse_open_(bool window, proto::ActKey act) noexcept;
-
-    [[nodiscard]] Ex<void> perform_file_tx_(
-        std::span<const std::uint8_t> bytes,
-        std::string_view path,
-        proto::IoIndex index,
-        ContentEdge edge,
-        cores::Core& current,
-        bool remounts_saves
-    );
 
     void cut_file_tx_(infra::OptRef<cores::Core> current) noexcept;
 
@@ -240,10 +238,13 @@ private:
     [[nodiscard]] bool drain_payload_(
         std::span<const std::uint8_t> bytes,
         std::uint16_t chunk,
-        std::uint64_t at
+        const InternedFile& from
     ) noexcept;
     [[nodiscard]] ILinkEncoder::Outcome drop_stage_() noexcept;
     [[nodiscard]] bool stage_fits_round_(std::size_t bytes) const noexcept;
+
+    [[nodiscard]] ILinkEncoder::Outcome drop_plain_() noexcept;
+    void end_plain_() noexcept;
     void cut_stage_() noexcept;
     void arm_open_save_(
         infra::OptRef<const InternedFile> file,
@@ -262,7 +263,6 @@ private:
     const SessionBindings& bindings_;
     ICheatApply& cheats_;
     OsdWire& osd_;
-    const BoardOps ops_;
     SlotBindings& slot_bindings_;
     const CoreTenancy& tenancy_;
     SessionTally& session_tally_;
@@ -270,7 +270,7 @@ private:
     Tally tally_{};
 
     proto::FileSize last_tx_bytes_{};
-    std::optional<proto::IoIndex> last_download_{};
+    std::optional<proto::FioIndexByte> last_download_{};
 
     struct OpenSave {
         proto::PathId path{};
@@ -291,6 +291,8 @@ private:
     std::optional<cores::StreamLoadBracket> ftx_open_{};
 
     std::optional<proto::ImageBracket> stage_open_{};
+
+    std::optional<proto::DownloadSession> plain_ds_{};
 };
 
 static_assert(LinkOpTransferSink<HeldTransfer>);

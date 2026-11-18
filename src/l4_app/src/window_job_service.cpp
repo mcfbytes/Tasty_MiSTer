@@ -126,7 +126,12 @@ void WindowJobService::serve() noexcept {
     }
     cores::IWindowJob& job = *io_.running;
     if (!io_.window) {
-        auto w = Window::open(*map_, aperture_, hal::to_phys(job.window_addr()), job.window_len());
+        const auto at = job.window_addr().physical_in(aperture_);
+        if (!at) {
+            finish_(Error{Errc::aperture_range, ERR_SITE(), 0});
+            return;
+        }
+        auto w = Window::open(*map_, aperture_, *at, job.window_len());
         if (!w) {
             finish_(w.error());
             return;

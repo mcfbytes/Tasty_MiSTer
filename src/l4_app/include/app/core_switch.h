@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -32,6 +33,7 @@
 #include "infra/telemetry.h"
 #include "os/clock.h"
 #include "os/deadline.h"
+#include "proto/autosave_policy.h"
 #include "proto/link_op.h"
 #include "proto/types.h"
 
@@ -40,10 +42,6 @@ class Vfs;
 }
 
 namespace mister::app {
-
-[[nodiscard]] constexpr xthread::PauseGen pause_gen_of(proto::BindGeneration gen) noexcept {
-    return xthread::PauseGen{gen.v};
-}
 
 class CoreSwitch {
     TASTY_SEAT_RESIDENT(Main);
@@ -90,6 +88,13 @@ public:
 
     enum class Programmed : std::uint8_t { NotNeeded, Ok, Failed };
 
+    struct Barrier {
+
+        enum class Opened : std::uint8_t { Acked, Expired };
+        Opened opened;
+        Programmed program;
+    };
+
     struct StepArg {
         bool loaded = false;
     };
@@ -135,14 +140,14 @@ public:
         };
     }
 
-    void on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
+    [[nodiscard]] bool on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
 
-    void retry_held_load(Host& host);
+    [[nodiscard]] bool retry_held_load(Host& host);
     Asked ask(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
 
     [[nodiscard]] bool validate(const UiRequest::LoadCore& req);
 
-    void ask_or_refuse(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
+    Asked ask_or_refuse(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
 
     template <class A>
     void end(A alt) noexcept;
@@ -153,7 +158,7 @@ public:
 
     [[nodiscard]] bool receipt_owed() const noexcept;
 
-    [[nodiscard]] std::optional<proto::BindGeneration> try_program(Host& host);
+    [[nodiscard]] std::optional<Barrier> try_program(Host& host);
 
     [[nodiscard]] bool refuse_in_switch(UiRequest::Kind kind, CorrelationTag tag) noexcept;
 
@@ -214,6 +219,8 @@ private:
     };
 
     static constexpr std::int64_t kPauseDeadlineNs = 1'000'000'000;
+
+    static_assert(2 * proto::kSavePauseDrain <= std::chrono::nanoseconds{kPauseDeadlineNs});
 
     static constexpr std::int64_t kLeaseHoldWarnNs = 1'000'000'000;
 
@@ -301,7 +308,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
 
     const proto::BindGeneration next = gen_.next();
     ++tally_.switches_asked;
-    park_.ask(pause_gen_of(next));
+    park_.ask(next.pause_gen());
     gen_ = next;
 
     host.switch_minted(req);

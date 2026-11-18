@@ -29,6 +29,7 @@
 #include "svc/data_sector_sealer.h"
 #include "svc/image_opener.h"
 #include "svc/msf.h"
+#include "svc/seek_span.h"
 #include "svc/subcode_interleaver.h"
 #include "svc/subcode_sidecar.h"
 #include "svc/toc.h"
@@ -90,7 +91,7 @@ public:
 
     std::optional<TrackIndex> track_for_lba(Lba lba) const;
 
-    SeekTime seek_time(Lba from_lba, Lba to_lba) const;
+    SeekTime seek_time(SeekSpan span) const;
 
     static constexpr proto::BlockCount kAdviseAheadSectors{kFramesPerSecond};
 

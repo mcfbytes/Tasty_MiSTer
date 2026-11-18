@@ -11,6 +11,9 @@
 
 namespace mister::cores::mdp {
 
+constexpr proto::FileSize kMaxCueFileBytes{CueWavSource::kMaxCueBytes};
+constexpr proto::FileSize kMaxWavBytes{std::numeric_limits<std::uint32_t>::max()};
+
 CueWavSource::CueWavSource(const svc::Vfs& vfs, std::string_view rom_path) noexcept : vfs_(&vfs) {
 
     const std::string_view stem = infra::cut_at_last_dot(rom_path);
@@ -28,12 +31,12 @@ Ex<void> CueWavSource::ensure_parsed_() {
     auto sz = (*f)->size();
     if (!sz)
         return std::unexpected(sz.error());
-    if (sz->v > kMaxCueBytes) {
+    if (*sz > kMaxCueFileBytes) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kMaxCueBytes});
     }
-    std::vector<char> text(static_cast<std::size_t>(sz->v), '\0');
+    std::vector<char> text = sz->zeroed<std::vector<char>>();
     if (!text.empty()) {
-        auto got = (*f)->read_at(0, std::as_writable_bytes(std::span<char>(text)));
+        auto got = (*f)->read_at(proto::kFileStart, std::as_writable_bytes(std::span<char>(text)));
         if (!got)
             return std::unexpected(got.error());
         text.resize(*got);
@@ -43,10 +46,10 @@ Ex<void> CueWavSource::ensure_parsed_() {
     return {};
 }
 
-Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
-    std::uint32_t pos = wav::kPrefixBytes;
+Ex<void> CueWavSource::locate_data_(svc::IFile& f, proto::FileSize file_size) {
+    proto::FileOffset pos = proto::kFileStart + wav::kPrefix;
     std::byte header[wav::kChunkHeaderBytes]{};
-    while (wav::can_read_header(pos, proto::FileSize{file_size})) {
+    while (wav::can_read_header(pos, file_size)) {
         auto got = f.read_at(pos, std::span<std::byte>(header));
         if (!got)
             return std::unexpected(got.error());
@@ -54,13 +57,13 @@ Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
             break;
         const std::uint32_t size = wav::declared_size(header);
         if (wav::is_data_chunk(header)) {
-            data_start_ = pos + wav::kChunkHeaderBytes;
+            data_start_ = pos + wav::kChunkHeader;
             data_size_ = size;
             return {};
         }
 
-        const std::uint64_t next = static_cast<std::uint64_t>(pos) + wav::kChunkHeaderBytes + size;
-        if (next > std::numeric_limits<std::uint32_t>::max()) {
+        const proto::FileOffset next = pos + wav::kChunkHeader + proto::FileSize{size};
+        if (next > wav::kRiffPositionLimit) {
             return std::unexpected(
                 Error{
                     Errc::bad_format,
@@ -69,7 +72,7 @@ Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
                 }
             );
         }
-        pos = static_cast<std::uint32_t>(next);
+        pos = next;
     }
     return std::unexpected(
         Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(wav::Refusal::kNoDataChunk)}
@@ -83,7 +86,7 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
         return std::unexpected(r.error());
     const auto t = sheet_.track(track);
     if (!t || t->wav_path.empty()) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), track.v});
+        return std::unexpected(track.refusal(Errc::not_found, ERR_SITE()));
     }
     auto f = vfs_->open(t->wav_path.view(), svc::OpenMode::Read);
     if (!f)
@@ -91,9 +94,9 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     auto sz = (*f)->size();
     if (!sz)
         return std::unexpected(sz.error());
-    if (sz->v > std::numeric_limits<std::uint32_t>::max())
+    if (*sz > kMaxWavBytes)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    if (auto r = locate_data_(**f, static_cast<std::uint32_t>(sz->v)); !r) {
+    if (auto r = locate_data_(**f, *sz); !r) {
         return std::unexpected(r.error());
     }
     wav_ = std::move(*f);
@@ -105,11 +108,11 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     return ex;
 }
 
-Ex<std::span<std::byte>> CueWavSource::read_at(std::uint64_t off, std::span<std::byte> dst) {
+Ex<std::span<std::byte>> CueWavSource::read_at(proto::FileSize into, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(CueWavSource);
     if (wav_ == nullptr)
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
-    auto got = wav_->read_at(static_cast<std::uint64_t>(data_start_) + off, dst);
+    auto got = wav_->read_at(data_start_ + into, dst);
     if (!got)
         return std::unexpected(got.error());
     return dst.first(*got);
@@ -118,7 +121,7 @@ Ex<std::span<std::byte>> CueWavSource::read_at(std::uint64_t off, std::span<std:
 void CueWavSource::close() noexcept {
     TASTY_SEAT_BODY(CueWavSource);
     wav_.reset();
-    data_start_ = 0;
+    data_start_ = proto::kFileStart;
     data_size_ = 0;
 }
 

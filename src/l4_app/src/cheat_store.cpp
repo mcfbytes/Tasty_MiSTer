@@ -5,6 +5,7 @@
 #include <cstring>
 #include <span>
 
+#include "infra/indexed_array.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -145,11 +146,16 @@ void CheatStore::take(const CheatCatalog& cat) {
     ++opens_;
 }
 
-CheatRow CheatStore::row(std::size_t i) const noexcept {
+bool CheatStore::in_range_(RowIndex i) const noexcept {
+    return RowCount::of(recs_.size()).contains(i);
+}
+
+CheatRow CheatStore::row(RowIndex i) const noexcept {
     TASTY_SEAT_BODY(CheatStore);
-    if (i >= recs_.size())
+    if (!in_range_(i))
         return CheatRow{};
-    return CheatRow{recs_[i].name.view(), recs_[i].enabled};
+    const CheatRecord& r = infra::at_index(recs_, i);
+    return CheatRow{r.name.view(), r.enabled};
 }
 
 std::span<const std::uint8_t> CheatStore::blob() const noexcept {
@@ -183,13 +189,13 @@ void CheatStore::publish_() noexcept {
     blob_cell_->publish(blob_);
 }
 
-Ex<bool> CheatStore::toggle(std::size_t i) {
+Ex<bool> CheatStore::toggle(RowIndex i) {
     TASTY_SEAT_BODY(CheatStore);
-    if (i >= recs_.size()) {
+    if (!in_range_(i)) {
         ++refusals_;
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     }
-    CheatRecord& r = recs_[i];
+    CheatRecord& r = infra::at_index(recs_, i);
     bool changed = false;
 
     if (r.enabled) {
@@ -217,8 +223,11 @@ Ex<bool> CheatStore::toggle(std::size_t i) {
                         ++refusals_;
                     } else {
 
-                        std::vector<std::uint8_t> buf(static_cast<std::size_t>(sz->v));
-                        auto got = (*f)->read_at(0, std::as_writable_bytes(std::span{buf}));
+                        std::vector<std::uint8_t> buf = sz->zeroed<std::vector<std::uint8_t>>();
+                        auto got = (*f)->read_at(
+                            proto::kFileStart,
+                            std::as_writable_bytes(std::span{buf})
+                        );
                         if (!got || *got != buf.size()) {
                             ++refusals_;
                         } else {

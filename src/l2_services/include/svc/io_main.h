@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "os/epoll_set.h"
@@ -15,6 +16,7 @@
 #include "infra/seat_park.h"
 #include "infra/wake_flag.h"
 #include "svc/io_coworker.h"
+#include "svc/io_pass.h"
 
 namespace mister::svc {
 
@@ -29,20 +31,30 @@ public:
 
     static constexpr std::uint32_t kMaxCoworkersDetail = kMaxCoworkers;
 
-    explicit IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
+    explicit IoMain(
+        xthread::ParkFds fds,
+        infra::OptRef<xthread::WakeFlag> asker = {},
+        infra::OptRef<IoPassCell> pass = {}
+    ) noexcept;
     IoMain(
         xthread::ParkFds fds,
         infra::OptRef<xthread::WakeFlag> asker,
-        const os::EpollSet& doorbells
+        const os::EpollSet& doorbells,
+        infra::OptRef<IoPassCell> pass = {}
     ) noexcept;
     IoMain(const IoMain&) = delete;
     IoMain& operator=(const IoMain&) = delete;
     IoMain(IoMain&&) = delete;
     IoMain& operator=(IoMain&&) = delete;
 
-    [[nodiscard]] Ex<void> add_coworker(IIoCoworker& c) noexcept;
+    [[nodiscard]] Ex<void> add_coworker(
+        IIoCoworker& c,
+        LaneClass cls = LaneClass::Deadline
+    ) noexcept;
 
     [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
+
+    [[nodiscard]] const xthread::Counter& bulk_deferred() const noexcept { return bulk_deferred_; }
 
     void start() noexcept;
 
@@ -65,18 +77,26 @@ public:
 
     void on_pause() noexcept;
     void on_resume() noexcept;
-
-    [[nodiscard]] bool quiescent() const noexcept { return idle(); }
+    [[nodiscard]] bool quiescent() const noexcept;
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
 
 private:
+    struct Lane {
+        IIoCoworker* lane;
+        LaneClass cls = LaneClass::Deadline;
+    };
+
     xthread::WakeFlag& wake_;
     xthread::PauseLatch pause_;
     xthread::PauseLatch::Observer pause_seen_{};
     xthread::WakeFlag stop_;
-    IIoCoworker* coworkers_[kMaxCoworkers]{};
+    Lane lanes_[kMaxCoworkers]{};
     std::uint8_t n_coworkers_ = 0;
+    xthread::Counter bulk_deferred_;
+    infra::OptRef<IoPassCell> pass_cell_;
+    IoPass pass_acc_{};
+    IoPassCount bulk_run_{};
     xthread::SeatPark park_;
 };
 

@@ -39,6 +39,11 @@ struct Put {
         at += sizeof(std::uint32_t);
     }
 
+    void u32(proto::FileSize size) noexcept {
+        size.store_le32(out.subspan(at).first<sizeof(std::uint32_t)>());
+        at += sizeof(std::uint32_t);
+    }
+
     void u16(PicturePixels width) noexcept {
         width.store_le16(out.subspan(at).first<sizeof(std::uint16_t)>());
         at += sizeof(std::uint16_t);
@@ -176,14 +181,14 @@ void index_head(AviFrameCount entries, std::span<std::byte, kChunkHead> out) noe
 
 void index_entry(
     bool key,
-    std::uint32_t offset,
+    proto::FileSize from_movi,
     std::uint32_t payload,
     std::span<std::byte, kIndexEntry> out
 ) noexcept {
     Put p{out};
     p.cc("00dc");
     p.u32(key ? kKeyFlag : 0u);
-    p.u32(offset);
+    p.u32(from_movi);
     p.u32(payload);
 }
 

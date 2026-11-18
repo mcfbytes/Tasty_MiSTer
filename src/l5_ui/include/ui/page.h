@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "app/info_plane.h"
 #include "app/page_description.h"
 #include "cores/progress.h"
 #include "proto/info_window.h"
@@ -108,6 +109,10 @@ public:
     virtual void on_facts(const struct SystemFacts&, const struct SessionFacts&) {}
 
     [[nodiscard]] virtual std::optional<proto::InfoWindow> info_window() const { return {}; }
+
+    [[nodiscard]] virtual app::InfoAnchor info_anchor() const {
+        return app::InfoAnchor::InfoOrigin;
+    }
 
     virtual infra::OptRef<IProgressView> progress_view() { return {}; }
 

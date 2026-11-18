@@ -96,13 +96,14 @@ std::optional<std::string> movie_bk2_platform(std::string_view text) noexcept {
     const auto sz = movie.size();
     if (!sz)
         return std::unexpected(sz.error());
-    const auto cap = static_cast<std::size_t>(
-        std::min<std::uint64_t>(sz->v, MovieArchiveFormat::kHeadMax)
-    );
-    if (cap == 0)
+    const proto::FileSize cap = sz->min(proto::FileSize{MovieArchiveFormat::kHeadMax});
+    if (cap.empty())
         return std::optional<std::string>{};
-    std::vector<char> raw(cap);
-    const auto n = movie.read_at(0, std::as_writable_bytes(std::span(raw.data(), raw.size())));
+    auto raw = cap.zeroed<std::vector<char>>();
+    const auto n = movie.read_at(
+        proto::kFileStart,
+        std::as_writable_bytes(std::span(raw.data(), raw.size()))
+    );
     if (!n)
         return std::unexpected(n.error());
     if (*n == 0)
@@ -222,38 +223,7 @@ std::string movie_unplayable_reason(const svc::Vfs& vfs, std::string_view movie_
 }
 
 bool movie_system_supported(const MovieSystem& sys) noexcept {
-    switch (sys.kind) {
-        case CoreKind::Generic:
-        case CoreKind::Snes:
-        case CoreKind::MegaDrive:
-        case CoreKind::Psx:
-        case CoreKind::Menu:
-            return sys.codec.has_value() || sys.kind == CoreKind::Menu;
-        case CoreKind::MegaCd:
-        case CoreKind::PceCd:
-        case CoreKind::Sgb:
-        case CoreKind::Arcade:
-        case CoreKind::Electron:
-        case CoreKind::AtariSt:
-        case CoreKind::ThreeDo:
-        case CoreKind::N64:
-        case CoreKind::NeoGeo:
-        case CoreKind::Ao486:
-        case CoreKind::Pc110:
-        case CoreKind::Z486:
-        case CoreKind::Z386:
-        case CoreKind::Pcxt:
-        case CoreKind::Tandy1000:
-        case CoreKind::Pcjr:
-        case CoreKind::PcxtEga:
-        case CoreKind::Uneon:
-        case CoreKind::Saturn:
-        case CoreKind::Cdi:
-        case CoreKind::Count:
-            return false;
-    }
-
-    return false;
+    return sys.codec.has_value() || sys.kind == CoreKind::Menu;
 }
 
 bool movie_system_plays(std::string_view conf_str_name) noexcept {

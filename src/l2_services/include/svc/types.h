@@ -15,6 +15,7 @@
 #include <system_error>
 #include <type_traits>
 
+#include "hal/types.h"
 #include "infra/affine.h"
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
@@ -32,6 +33,10 @@ struct SlotStride;
 
 namespace mister::proto {
 class Link;
+}
+
+namespace mister::os {
+class IKeyInjector;
 }
 
 namespace mister::svc {
@@ -157,6 +162,7 @@ struct KeyHash {
 };
 
 struct TrackIndex;
+struct Msf;
 
 struct CueField {
     std::uint32_t v = 0;
@@ -174,6 +180,16 @@ struct TrackNumber {
 
     constexpr void store_le32(std::span<std::uint8_t, 4> dst) const noexcept {
         infra::store_le<std::uint32_t>(dst, v);
+    }
+
+    constexpr void store_byte(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = v; }
+
+    [[nodiscard]] constexpr hal::SpiWord in_high_byte(hal::SpiWord base) const noexcept {
+        return base.with_high_byte(v);
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
     }
 
     [[nodiscard]] constexpr std::uint8_t bcd_byte() const noexcept {
@@ -214,6 +230,10 @@ struct TrackCount {
         return proto::PackedBcd::unmasked_byte(v);
     }
 
+    constexpr void store_byte(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = v; }
+
+    [[nodiscard]] constexpr Msf as_toc_minute() const noexcept;
+
     [[nodiscard]] constexpr std::uint32_t bcd_over_binary_word() const noexcept {
         using Bcd = proto::PackedBcd;
         const std::uint32_t bcd = ((std::uint32_t{v} / Bcd::kRadix) << Bcd::kNibbleBits)
@@ -248,6 +268,10 @@ struct TrackIndex {
 
     [[nodiscard]] constexpr TrackNumber number() const noexcept {
         return TrackNumber{static_cast<std::uint8_t>(v + 1)};
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
     }
 
     friend constexpr bool operator==(TrackIndex, TrackIndex) = default;
@@ -346,6 +370,16 @@ struct EvdevCode {
         return infra::HexText{v, infra::HexCase::Upper};
     }
 
+    [[nodiscard]] constexpr infra::DecimalText decimal_text() const noexcept {
+        return infra::DecimalText{v};
+    }
+
+    [[nodiscard]] constexpr std::uint32_t stored_with(EvdevCode high) const noexcept {
+        constexpr unsigned kHighShift = 16;
+        return static_cast<std::uint32_t>(v) | (static_cast<std::uint32_t>(high.v) << kHighShift);
+    }
+
+    void inject_into(os::IKeyInjector& to, bool down) const noexcept;
     friend constexpr bool operator==(EvdevCode, EvdevCode) = default;
     friend constexpr auto operator<=>(EvdevCode, EvdevCode) = default;
 };
@@ -354,6 +388,19 @@ static_assert(
     EvdevCode{255}.is_key() && !EvdevCode{EvdevCode::kVirtualBase}.is_key(),
     "the boundary is 256: codes below it are keys"
 );
+
+struct EvdevRun {
+    EvdevCode first{};
+    EvdevCode last{};
+
+    [[nodiscard]] constexpr std::optional<std::size_t> place_of(EvdevCode c) const noexcept {
+        if (c < first || c > last)
+            return std::nullopt;
+        return static_cast<std::size_t>(c.v - first.v);
+    }
+
+    friend constexpr bool operator==(EvdevRun, EvdevRun) = default;
+};
 
 struct DeviceSlot {
     std::uint8_t v = 0;
@@ -475,6 +522,15 @@ struct Vid {
 
     [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
 
+    [[nodiscard]] constexpr std::array<std::uint8_t, 2> bytes_le() const noexcept {
+        constexpr unsigned kByteBits = 8;
+        return {static_cast<std::uint8_t>(v), static_cast<std::uint8_t>(v >> kByteBits)};
+    }
+
+    [[nodiscard]] infra::HexText padded_text() const noexcept {
+        return infra::HexText::zero_padded(v);
+    }
+
     [[nodiscard]] static std::optional<Vid> parse_hex(std::string_view text) noexcept {
         constexpr std::size_t kDigits = 4;
         constexpr std::size_t kPrefix = 2;
@@ -497,6 +553,20 @@ struct Pid {
     std::uint16_t v = 0;
 
     [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
+
+    [[nodiscard]] constexpr std::array<std::uint8_t, 2> bytes_le() const noexcept {
+        constexpr unsigned kByteBits = 8;
+        return {static_cast<std::uint8_t>(v), static_cast<std::uint8_t>(v >> kByteBits)};
+    }
+
+    [[nodiscard]] constexpr bool has_high_byte(std::uint8_t high) const noexcept {
+        constexpr unsigned kByteBits = 8;
+        return (v >> kByteBits) == high;
+    }
+
+    [[nodiscard]] infra::HexText padded_text() const noexcept {
+        return infra::HexText::zero_padded(v);
+    }
 
     [[nodiscard]] static std::optional<Pid> parse_hex(std::string_view text) noexcept {
         constexpr std::size_t kDigits = 4;
@@ -552,8 +622,6 @@ struct FltFlags {
     friend constexpr bool operator==(FltFlags, FltFlags) = default;
 };
 
-enum class VolumeStep : std::uint8_t { Quieter, Hold, Louder };
-
 struct CoreVolume {
     std::uint8_t v = 0;
     static constexpr std::uint8_t kAttenMask = proto::Attenuation::kMax;
@@ -571,13 +639,13 @@ struct CoreVolume {
     }
 
     [[nodiscard]] constexpr CoreVolume stepped(
-        VolumeStep step,
+        proto::VolumeStep step,
         bool boost_available
     ) const noexcept {
         std::uint8_t out = v & kAttenMask;
         if (boost_available) {
             unsigned boost = v & kBoostMask;
-            if (step == VolumeStep::Quieter) {
+            if (step == proto::VolumeStep::Quieter) {
                 if (boost != 0) {
                     out = 0;
                     boost -= kBoostStep;
@@ -585,7 +653,7 @@ struct CoreVolume {
                     ++out;
                 }
             }
-            if (step == VolumeStep::Louder) {
+            if (step == proto::VolumeStep::Louder) {
                 if (boost != 0 || out == 0) {
                     boost += kBoostStep;
                     if (boost > kBoostMax)
@@ -596,9 +664,9 @@ struct CoreVolume {
             }
             out = static_cast<std::uint8_t>(out | boost);
         } else {
-            if (step == VolumeStep::Quieter && out < kAttenMax)
+            if (step == proto::VolumeStep::Quieter && out < kAttenMax)
                 ++out;
-            if (step == VolumeStep::Louder && out > 0)
+            if (step == proto::VolumeStep::Louder && out > 0)
                 --out;
         }
         return CoreVolume{out};
@@ -796,6 +864,11 @@ struct OpenFileCount {
 struct OpenFileId {
     std::uint16_t v = 0;
     using affine_count = OpenFileCount;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(OpenFileId, OpenFileId) = default;
     friend constexpr auto operator<=>(OpenFileId, OpenFileId) = default;
 };

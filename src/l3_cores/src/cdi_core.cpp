@@ -121,9 +121,7 @@ MountState CdiCore::finish_mount_() {
         session_->post(proto::StatusEdit::bit(kServoAudioCd, audio_cd_));
     }
     disc_type_ = cdi::disc_type(geom_.toc, disc_type_);
-    plan_.disc_size_bytes = proto::FileSize{
-        static_cast<std::uint64_t>(geom_.toc.end.v) * cdi::kSectorBytes
-    };
+    plan_.disc_size_bytes = proto::BlockSize{cdi::kSectorBytes}.image_bytes(geom_.toc.end);
     plan_.data_first_track = geom_.toc.at(svc::TrackIndex{}).type != svc::TrackType::Cdda;
     probed_ = true;
     return MountState::Done;

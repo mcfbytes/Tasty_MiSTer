@@ -70,7 +70,7 @@ private:
     };
 
     [[nodiscard]] Ex<void> open_(ICoreWindow& window, const svc::Vfs& vfs);
-    [[nodiscard]] Ex<void> gather_(ICoreWindow& window, std::uint64_t off, std::size_t n);
+    [[nodiscard]] Ex<void> gather_(ICoreWindow& window, proto::FileOffset at, std::size_t n);
     [[nodiscard]] Ex<void> compare_step_(ICoreWindow& window);
     [[nodiscard]] Ex<void> write_step_(ICoreWindow& window, const svc::Vfs& vfs);
     [[nodiscard]] Ex<void> clear_(ICoreWindow& window);
@@ -80,7 +80,7 @@ private:
     CoreDir core_dir_{};
     bool path_ok_ = false;
     Phase phase_ = Phase::Open;
-    std::uint64_t off_ = 0;
+    proto::FileOffset off_{};
     proto::FileSize total_{};
     std::uint32_t cleared_ = 0;
     bool wrote_ = false;

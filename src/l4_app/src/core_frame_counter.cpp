@@ -49,7 +49,11 @@ Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     return r;
 }
 
-void CoreFrameCounter::settle(bool ready, std::uint32_t core_seq, MovieFrame movie_frame) noexcept {
+void CoreFrameCounter::settle(
+    bool ready,
+    std::uint32_t core_seq,
+    MoviePosition movie_frame
+) noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
     sample_demand_();
 

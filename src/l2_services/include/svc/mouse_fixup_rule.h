@@ -15,6 +15,6 @@ struct MouseFixupRule {
     const char* why;
 };
 
-std::optional<MouseFixupRule> find_mouse_fixup(Vid vid, Pid pid);
+std::optional<MouseFixupRule> find_mouse_fixup(VidPidKey device);
 
 }

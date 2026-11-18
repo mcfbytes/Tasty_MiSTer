@@ -4,13 +4,14 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
 
 #include "cores/mount_status.h"
 #include "cores/save_extent.h"
-#include "cores/wire_word.h"
+#include "cores/types.h"
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
@@ -46,12 +47,12 @@ public:
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
         proto::FileSize whole,
-        std::uint64_t offset
+        proto::FileOffset at
     ) = 0;
 
     [[nodiscard]] virtual std::size_t link_in_flight() const noexcept = 0;
 
-    [[nodiscard]] virtual WireWordBytes link_word_bytes() const noexcept = 0;
+    [[nodiscard]] virtual hal::Width link_width() const noexcept = 0;
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_whole(
         std::vector<std::uint8_t>&& bytes,
@@ -59,6 +60,8 @@ public:
     ) = 0;
 
     [[nodiscard]] virtual FileTxAnswer file_tx_answer(proto::ActKey act) = 0;
+
+    [[nodiscard]] virtual FileTxAnswer payload_answer(proto::ActKey16 act) = 0;
 
     [[nodiscard]] virtual bool order_load_facts(std::span<const std::uint8_t> facts) = 0;
 
@@ -84,6 +87,8 @@ public:
     [[nodiscard]] virtual proto::ActKey savestates_answered() = 0;
     [[nodiscard]] virtual SaveExtent save_extent() = 0;
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
+
+    [[nodiscard]] virtual std::optional<proto::FieldValue> option_choice(OptionTag tag) = 0;
 
 protected:
     ILadderHost() = default;

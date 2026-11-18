@@ -25,7 +25,7 @@ inline constexpr HeaderScore kRefused{};
 inline constexpr std::uint32_t kCopierHeaderBytes = 512;
 
 [[nodiscard]] constexpr std::uint32_t copier_offset(proto::FileSize file_size) noexcept {
-    return (file_size.v & kCopierHeaderBytes) ? kCopierHeaderBytes : 0u;
+    return file_size.has_bits(proto::FileSize{kCopierHeaderBytes}) ? kCopierHeaderBytes : 0u;
 }
 
 inline constexpr ResetVector kResetVectorFloor{0x8000};

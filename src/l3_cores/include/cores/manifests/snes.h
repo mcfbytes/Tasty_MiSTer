@@ -4,13 +4,18 @@
 #include <array>
 #include <memory>
 
-#include "cores/core_grant.h"
 #include "cores/companion_load.h"
+#include "cores/core_grant.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/mailbox_census_rows.h"
 #include "cores/msu_wire.h"
 #include "proto/mailbox_frame_decl.h"
+
+namespace mister::cores {
+class ILoader;
+struct LoaderContext;
+}
 
 namespace mister::cores::manifests {
 
@@ -32,7 +37,7 @@ inline constexpr proto::MailboxFrameDecl kSnesMailboxFrame{
 };
 
 inline constexpr auto kSnesWindows = std::to_array<CoreWindowDecl>({
-    {.region = {0x0060'0000u, 0u, "snes-msu-data"}, .feeds_pcm = false},
+    {.region = {msu::kTrackOffset, 0u, "snes-msu-data"}, .feeds_pcm = false},
 });
 
 inline constexpr auto kSnesStartAssets = stock_start_chain("SNES");
@@ -49,7 +54,8 @@ inline constexpr CoreProfile kSnes{
     .signatures = {},
     .tasty_playable = true,
     .windows = kSnesWindows,
-    .file_tx_whole = true,
+
+    .grants = {Grant::Mailbox},
 };
 
 extern const CoreProfile kSgb;
@@ -67,7 +73,7 @@ inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
 inline constexpr proto::MailboxFrameDecl kSgbMailboxFrame = kSnesMailboxFrame;
 
 inline constexpr auto kSgbWindows = std::to_array<CoreWindowDecl>({
-    {.region = {0x0060'0000u, 0u, "sgb-msu-data"}, .feeds_pcm = false},
+    {.region = {msu::kTrackOffset, 0u, "sgb-msu-data"}, .feeds_pcm = false},
 });
 
 inline constexpr CoreProfile kSgb{
@@ -80,9 +86,13 @@ inline constexpr CoreProfile kSgb{
     .signatures = {},
     .windows = kSgbWindows,
     .undeclared_start_mount = StartMount::Unmodelled,
+
+    .grants = {Grant::Mailbox},
 };
 
 std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g);
+
+std::unique_ptr<ILoader> make_snes_loader(const LoaderContext& ctx);
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
 

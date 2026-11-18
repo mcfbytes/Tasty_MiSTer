@@ -50,6 +50,10 @@ public:
         friend constexpr bool operator==(ChooseClassicStyle, ChooseClassicStyle) = default;
     };
 
+    struct EnterClassic {
+        friend constexpr bool operator==(EnterClassic, EnterClassic) = default;
+    };
+
     enum class Kind : std::uint8_t {
         Stay,
         Push,
@@ -59,10 +63,19 @@ public:
         Leave,
         ChooseHdStyle,
         ChooseClassicStyle,
+        EnterClassic,
         kCount
     };
-    using Arm = std::
-        variant<Stay, Push, Pop, Replace, CloseAll, Leave, ChooseHdStyle, ChooseClassicStyle>;
+    using Arm = std::variant<
+        Stay,
+        Push,
+        Pop,
+        Replace,
+        CloseAll,
+        Leave,
+        ChooseHdStyle,
+        ChooseClassicStyle,
+        EnterClassic>;
     static_assert(
         std::variant_size_v<Arm> == infra::ordinal(Kind::kCount),
         "Transition: one Kind per arm"
@@ -79,6 +92,7 @@ public:
         && kArmIs<Kind::Leave, Leave>
         && kArmIs<Kind::ChooseHdStyle, ChooseHdStyle>
         && kArmIs<Kind::ChooseClassicStyle, ChooseClassicStyle>
+        && kArmIs<Kind::EnterClassic, EnterClassic>
     );
 
     constexpr Transition() noexcept = default;
@@ -110,6 +124,10 @@ public:
         return Transition{Arm{ChooseClassicStyle{}}};
     }
 
+    [[nodiscard]] static constexpr Transition enter_classic() noexcept {
+        return Transition{Arm{EnterClassic{}}};
+    }
+
     [[nodiscard]] constexpr Kind kind() const noexcept { return static_cast<Kind>(arm_.index()); }
 
     [[nodiscard]] constexpr infra::OptRef<const Push> as_push() const noexcept {
@@ -118,6 +136,10 @@ public:
 
     [[nodiscard]] constexpr infra::OptRef<const Replace> as_replace() const noexcept {
         return infra::opt_ref_of(std::get_if<Replace>(&arm_));
+    }
+
+    [[nodiscard]] constexpr infra::OptRef<const EnterClassic> as_enter_classic() const noexcept {
+        return infra::opt_ref_of(std::get_if<EnterClassic>(&arm_));
     }
 
     friend constexpr bool operator==(const Transition&, const Transition&) = default;

@@ -25,9 +25,7 @@ public:
         proto::FileSize size;
         std::string_view path;
 
-        [[nodiscard]] constexpr proto::SlotIndex slot() const noexcept {
-            return proto::SlotIndex{row.v};
-        }
+        [[nodiscard]] constexpr proto::SlotIndex slot() const noexcept { return row.block_slot(); }
     };
 
     class MountPlan {
@@ -62,7 +60,7 @@ public:
 
     [[nodiscard]] virtual infra::OptRef<const MountPlan> mount_plan() const noexcept = 0;
 
-    [[nodiscard]] virtual svc::IStorageBackend& backend() noexcept = 0;
+    [[nodiscard]] virtual infra::OptRef<svc::IStorageBackend> backend() noexcept = 0;
 
     [[nodiscard]] virtual std::span<const std::byte> compose_order(
         SaveRow row,

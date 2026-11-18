@@ -62,8 +62,7 @@ public:
     [[nodiscard]] Ex<bool> submit(
         proto::ILinkFrame& frame,
         PlayerIndex player,
-        JoyMask buttons,
-        JoyMask autofire
+        proto::PadMasks masks
     );
     [[nodiscard]] Ex<bool> release(proto::ILinkFrame& frame, PlayerIndex player, JoyMask composed);
 
@@ -129,6 +128,8 @@ private:
         }
 
         [[nodiscard]] JoyMask composed() const noexcept;
+
+        [[nodiscard]] proto::PadMasks pad() const noexcept;
 
         [[nodiscard]] bool zero_armed() const noexcept { return zero_armed_; }
 

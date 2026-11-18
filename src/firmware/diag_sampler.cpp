@@ -57,7 +57,8 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
             d.sys_route,
             d.sector_lease,
             d.osd_lease,
-            d.sys_lease
+            d.sys_lease,
+            d.io_pass
         },
         RndRecord{d.round_timing},
         TasRecord{sources.replay},
@@ -98,7 +99,6 @@ DiagSampler::DiagSampler(
       events_(wiring.events),
       ev_cell_(wiring.ev),
       quiescing_(wiring.quiescing),
-      transitioning_(wiring.transitioning),
       video_wire_(sources.video_wire),
       prelude_stats_(sources.prelude_stats),
       input_build_(services.input_build),
@@ -114,6 +114,8 @@ DiagSampler::DiagSampler(
       video_stats_(sources.video_stats),
       video_geo_(sources.video_geometry),
       diag_cell_(sources.device.diag),
+      diag_ask_(sources.device.diag_ask),
+      ladder_(sources.device.ladder),
       rec_capture_(sources.rec_capture),
       rec_encode_(sources.rec_encode),
       doorbell_cell_(sources.device.doorbell),
@@ -167,11 +169,7 @@ void DiagSampler::sample(bool stopping) noexcept {
     diag_stats_.heartbeat_last.publish(hb);
     heartbeat_prev_ = hb;
 
-    if (!stopping
-        && !quiescing_.ever_requested()
-        && !transitioning_.sample().value
-        && hb != 0
-        && hb == prev) {
+    if (!stopping && !quiescing_.ever_requested() && hb != 0 && hb == prev) {
         constexpr std::uint32_t kStallStreak = 2;
         if (++unchanged_streak_ >= kStallStreak) {
             diag_stats_.heartbeat_stalls.add();
@@ -204,6 +202,9 @@ void DiagSampler::sample(bool stopping) noexcept {
     diag_stats_.drains.add();
 
     if (diag_.is_open()) {
+
+        if (diag_ask_)
+            diag_ask_->publish(diag_stats_.drains.get());
 
         const auto ev_now = events_.losses();
         for (std::size_t k = 0; k < app::EventQueue<SeatTag::RT>::kKinds; ++k) {
@@ -355,12 +356,32 @@ void DiagSampler::line_(
     );
 }
 
+void DiagSampler::line_(LogRec::Kind k, const LogRec::Head& h, const LogWords& w) noexcept {
+    diag_.appendf(
+        "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%s,\"b\":%s}",
+        static_cast<unsigned>(k),
+        static_cast<unsigned>(h.sev),
+        static_cast<unsigned long long>(h.t.count()),
+        w.a.c_str(),
+        w.b.c_str()
+    );
+}
+
+void DiagSampler::line_(
+    LogRec::Kind k,
+    const LogRec::Head& h,
+    std::chrono::duration<std::uint32_t, std::nano> a,
+    ServiceSlot slot
+) noexcept {
+    line_(k, h, a.count(), slot.wire());
+}
+
 void DiagSampler::render_log_rec(const LogRec& r) noexcept {
     infra::dispatch<LogRecRoutes>(r, *this);
 }
 
 void DiagSampler::on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.over.count(), a.slot.wire());
+    line_(a.kKind, h, a.over, a.slot);
 }
 
 void DiagSampler::on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept {
@@ -403,7 +424,11 @@ void DiagSampler::on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept 
 }
 
 void DiagSampler::on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.cause_base, pack_bytes(a.klass, a.line));
+    line_(
+        a.kKind,
+        h,
+        {.a = a.cause_base.text(), .b = infra::DecimalText{pack_bytes(a.klass, a.line)}}
+    );
 }
 
 void DiagSampler::on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept {
@@ -415,7 +440,12 @@ void DiagSampler::on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noe
 }
 
 void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.bind_gen, pack_bytes(a.phase, a.under, std::uint8_t{a.awaited}));
+    line_(
+        a.kKind,
+        h,
+        {.a = a.bind_gen.text(),
+         .b = infra::DecimalText{pack_bytes(a.phase, a.under, std::uint8_t{a.awaited})}}
+    );
 }
 
 static_assert(LogRecSink<DiagSampler>);
@@ -574,11 +604,11 @@ void DiagSampler::voice_log_losses_(const LossMoves& moved, LogLaneId lane) noex
 
 DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
     CdInstruments c{};
-    for (ServiceSlot i{}; i.index() < kMaxServices; i = i.next()) {
+    for (ServiceSlot i{}; i < ServiceSlot::end(); i = i.next()) {
         const std::uint32_t n = stats_.deadline_miss[i].get();
         if (n == 0)
             continue;
-        c.deadline_slots |= (1u << i.wire());
+        c.deadline_slots = c.deadline_slots.with(i);
 
         c.deadline_misses = app::sat_u32(std::uint64_t{c.deadline_misses} + n);
     }
@@ -629,6 +659,18 @@ void DiagSampler::render_records(RecordReason reason) noexcept {
         dc.file_tx_window_refusal_code = 0;
         if (w.refusal)
             dc.file_tx_window_refusal_code = errc_code(*w.refusal);
+    }
+
+    if (ladder_) {
+        const app::LadderCell lad = ladder_->sample().value;
+        dc.ladder_live = lad.live;
+        dc.ladder_pc = lad.pc;
+        dc.ladder_rungs = lad.report.rungs;
+        dc.ladder_bytes = lad.report.bytes_downloaded;
+        dc.ladder_assets = lad.report.assets_loaded;
+        dc.ladder_bios_found = lad.report.bios_found;
+        dc.ladder_disc_mounted = lad.report.disc_mounted;
+        dc.ladder_save_mounted = lad.report.save_mounted;
     }
     render_rtstats(reason, dc);
     const RecordCtx ctx{dc};
@@ -794,7 +836,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         ps.fb_ack.text().c_str(),
         static_cast<unsigned>(gr.fb_en),
         static_cast<unsigned>(gr.valid),
-        static_cast<unsigned>(gr.res),
+        gr.res.text().c_str(),
         gr.width,
         gr.height,
         gs.samples,
@@ -882,7 +924,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         mgl_row0,
         dc.file_tx_count,
         dc.file_tx_bytes.text().c_str(),
-        static_cast<unsigned>(dc.file_tx_index.fio_byte()),
+        static_cast<unsigned>(dc.file_tx_index.wire_word().low_byte()),
         dc.file_tx_window,
         dc.file_tx_window_refusals,
         static_cast<unsigned>(dc.file_tx_window_refusal_code),
@@ -950,7 +992,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         static_cast<unsigned>(rnd.all_life_blame.lifecycle_marks.mask()),
         reactor::round_us(rnd.all_wake_max_ns),
         cd.deadline_misses,
-        cd.deadline_slots,
+        cd.deadline_slots.mask(),
         cd.prefetch_state,
         cd.hits,
         cd.misses,

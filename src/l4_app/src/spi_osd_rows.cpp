@@ -3,6 +3,8 @@
 
 #include <span>
 
+#include "proto/spi_frame.h"
+
 namespace mister::app {
 
 template <proto::OsdRow First>
@@ -48,9 +50,9 @@ bool SpiOsdRows<First>::flush_one() noexcept {
         ++tally_->sample_refusals;
         return false;
     }
-    proto::Link link{*link_};
+    proto::SpiFrame frame{*link_};
     const auto flushed = rows_.flush_row(
-        link,
+        frame,
         row,
         std::span<const std::uint8_t>(scratch_.b, sizeof scratch_.b)
     );

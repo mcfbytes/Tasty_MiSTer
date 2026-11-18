@@ -70,7 +70,7 @@ void StartChain::plan_boot_images_(bool slot0_held, std::string_view home, const
         path.append(name);
         if (!vfs.file_exists(path) || image_count_ >= images_.size())
             return;
-        if (auto s = file_(path, dest, proto::FileSize{}))
+        if (auto s = file_(path, dest, proto::kFileStart))
             images_[image_count_++] = *s;
     };
 
@@ -105,31 +105,31 @@ bool StartChain::plan_composite_(std::string_view rbf, const svc::Vfs& vfs) {
     if (!src)
         return false;
     const auto w = read_payload_window(*src->f, src->size);
-    if (!w || w->base != kContainerHeader)
+    if (!w || w->base != kPayloadAt)
         return false;
-    const proto::FileSize tail = w->base + w->length;
-    if (tail < src->size)
+    const proto::FileOffset tail = w->base + w->length;
+    if (src->size.holds(tail))
         add_(rbf, proto::WideIoIndex{0}, tail);
     return true;
 }
 
-void StartChain::add_(std::string_view path, proto::WideIoIndex dest, proto::FileSize offset) {
+void StartChain::add_(std::string_view path, proto::WideIoIndex dest, proto::FileOffset at) {
     if (count_ >= files_.size())
         return;
-    if (auto s = file_(path, dest, offset))
+    if (auto s = file_(path, dest, at))
         files_[count_++] = *s;
 }
 
 std::optional<StartFile> StartChain::file_(
     std::string_view path,
     proto::WideIoIndex dest,
-    proto::FileSize offset
+    proto::FileOffset at
 ) {
     StartFile s{};
     if (!s.path.assign(path))
         return std::nullopt;
     s.dest = dest;
-    s.offset = offset;
+    s.at = at;
     return s;
 }
 

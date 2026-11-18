@@ -42,7 +42,7 @@ public:
 private:
     std::unique_ptr<svc::IFile> file_{};
 
-    proto::FileSize read_at_{};
+    proto::FileOffset read_at_{};
     proto::FileSize remaining_{};
     cores::RomDigest digest_{};
     std::vector<cores::RomDigest> alts_{};

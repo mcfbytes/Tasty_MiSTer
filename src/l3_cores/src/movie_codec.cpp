@@ -153,10 +153,13 @@ Ex<IMovieFormat::DigestSource> IMovieFormat::head_digest_source(
     const auto size = (*f)->size();
     if (!size)
         return std::unexpected(size.error());
-    if (size->v > kRomMax)
+    if (*size > IMovieFormat::kRomMax)
         return std::unexpected(movie_refusal(MovieRefusal::TooLong, ERR_SITE()));
     std::array<std::uint8_t, kRomHead> head{};
-    const auto got = (*f)->read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(head)));
+    const auto got = (*f)->read_at(
+        proto::kFileStart,
+        std::as_writable_bytes(std::span<std::uint8_t>(head))
+    );
     if (!got)
         return std::unexpected(got.error());
     const auto span = rom_digest_span(std::span<const std::uint8_t>(head.data(), *got), *size);

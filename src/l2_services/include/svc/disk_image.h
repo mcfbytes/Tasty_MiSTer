@@ -15,6 +15,8 @@
 
 namespace mister::svc {
 
+class CardWriter;
+
 class IDiskImage {
 public:
     virtual ~IDiskImage() = default;
@@ -22,9 +24,12 @@ public:
     [[nodiscard]] virtual FileSize size() const noexcept = 0;
     [[nodiscard]] virtual bool writable() const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) = 0;
     [[nodiscard]] virtual Ex<std::size_t> write_at(
-        std::uint64_t off,
+        proto::FileOffset at,
         std::span<const std::byte> src
     ) = 0;
 
@@ -39,6 +44,12 @@ protected:
     std::string_view path,
     std::span<const DiskFormatRow> rows,
     OpenMode mode
+);
+
+[[nodiscard]] Ex<std::unique_ptr<IDiskImage>> open_disk_image(
+    CardWriter& card,
+    std::string_view path,
+    std::span<const DiskFormatRow> rows
 );
 
 }

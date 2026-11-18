@@ -14,6 +14,7 @@
 #include "infra/opt_ref.h"
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
+#include "hal/memory_model.h"
 #include "hal/phys_region.h"
 #include "hal/program_geometry.h"
 #include "hal/thread_map.h"
@@ -50,6 +51,8 @@ struct BootParts {
     hal::DoorbellPolicy doorbells;
     os::UioLineSpace doorbell_nodes;
     hal::VideoOutDecl video;
+
+    hal::WriteCombine write_combine = hal::WriteCombine::Forbidden;
     hal::KernelContract kernel;
 
     infra::OptRef<hal::DiskLamp> disk_lamp{};

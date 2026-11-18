@@ -47,24 +47,24 @@ void ChdPrefetch::rest_(infra::ParkTimeout ms, HunkIndex want, bool watch_free) 
 bool ChdPrefetch::idle() const noexcept {
     if (!rests_)
         return false;
+
     if (rest_parked_)
-        return parked() && media_.outbound() == 0;
+        return parked() && media_.outbound() == 0 && !latch_.pending();
     return !(
         media_.outbound() != 0
-        || park_req_.load(std::memory_order_acquire)
+        || latch_.pending()
         || want_hunk_.load(std::memory_order_acquire) != want_seen_
         || (watch_free_ && chan_.outbound() != 0)
     );
 }
 
 void ChdPrefetch::request_park() noexcept {
-    park_req_.store(true, std::memory_order_release);
-    wake_.kick();
+    latch_.handed_over();
+    ticket_ = latch_.ask(PrefetchRelease::Source);
 }
 
 bool ChdPrefetch::park_acked() noexcept {
-    request_park();
-    return parked();
+    return !opened() || latch_.released(ticket_);
 }
 
 void ChdPrefetch::reset_consumer_() noexcept {
@@ -76,12 +76,22 @@ void ChdPrefetch::reset_consumer_() noexcept {
     want_ = HunkIndex::none();
 }
 
+bool ChdPrefetch::owner_sees_parked_() noexcept {
+    reap_handovers_();
+    return !handover_out_ && parked();
+}
+
+void ChdPrefetch::reap_handovers_() noexcept {
+
+    while (Media::Loan back = media_.reap())
+        handover_out_ = false;
+}
+
 bool ChdPrefetch::settle_park() noexcept {
 
     if (!opened())
         return true;
-    request_park();
-    if (!parked()) {
+    if (!owner_sees_parked_()) {
 
         poisoned_ = true;
         return false;
@@ -93,10 +103,10 @@ bool ChdPrefetch::settle_park() noexcept {
 
 Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) noexcept {
 
-    if (!parked())
+    if (!owner_sees_parked_())
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     if (!src || geo.hunk_extent() == 0 || geo.hunk_count == HunkCount{}) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
+        return std::unexpected(geo.hunk_bytes.refusal(Errc::bad_format, ERR_SITE()));
     }
     if (!opened())
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
@@ -107,14 +117,14 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
 
     const std::optional<HunkCount> depth = derive_depth(kPrefetchBudgetBytes, geo.hunk_bytes);
     if (!depth) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
+        return std::unexpected(geo.hunk_bytes.refusal(Errc::bad_format, ERR_SITE()));
     }
 
     if (slab_ == nullptr) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), geo.hunk_detail()});
+        return std::unexpected(geo.hunk_bytes.refusal(Errc::os, ERR_SITE()));
     }
     if (geo.extent_of(*depth) > kPrefetchBudgetBytes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
+        return std::unexpected(geo.hunk_bytes.refusal(Errc::bad_format, ERR_SITE()));
     }
 
     for (std::size_t i = 0; i < resident_count_; ++i)
@@ -133,6 +143,8 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
     media.geo = geo;
     media.forward_span = avail < kPrefetchForwardSpan ? avail : kPrefetchForwardSpan;
 
+    media.stamp = latch_.asked();
+
     if (!chan_.set_live(static_cast<std::uint8_t>(depth_.v))) {
         depth_ = HunkCount{};
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
@@ -146,21 +158,22 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
         return r;
     }
 
-    park_req_.store(false, std::memory_order_release);
-    parked_.store(false, std::memory_order_release);
     wake_.kick();
     return {};
 }
 
 Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
-
-    while (Media::Loan back = media_.reap()) {
-    }
+    reap_handovers_();
     Media::Loan loan = media_.acquire();
     if (!loan)
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     *loan = std::move(media);
+    const std::uint32_t refused = media_.breaches();
     media_.send(std::move(loan));
+
+    if (media_.breaches() != refused)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    handover_out_ = true;
     return {};
 }
 
@@ -174,6 +187,10 @@ void ChdPrefetch::take_attaches_() noexcept {
         next_ = HunkIndex{};
         tracking_ = HunkIndex::none();
         disabled_ = false;
+
+        latch_.answer_through(m.stamp);
+
+        parked_.store(false, std::memory_order_release);
         job.complete();
     }
 }
@@ -193,9 +210,11 @@ void ChdPrefetch::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(ChdPrefetch, A);
     rests_ = false;
     take_attaches_();
-    if (park_due(parked_, park_req_)) {
+    if (const auto taken = latch_.take()) {
+
         release_media_();
         parked_.store(true, std::memory_order_release);
+        latch_.done(*taken);
     }
     if (parked()) {
         rests_ = true;
@@ -265,16 +284,20 @@ void ChdPrefetch::serve() noexcept {
 }
 
 void ChdPrefetch::release() noexcept {
+    const auto t = latch_.take();
     release_media_();
     parked_.store(true, std::memory_order_release);
+    if (t)
+        latch_.done(*t);
 }
 
 void ChdPrefetch::park_now() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(ChdPrefetch, A);
-    if (parked())
-        return;
+    const auto t = latch_.take();
     release_media_();
     parked_.store(true, std::memory_order_release);
+    if (t)
+        latch_.done(*t);
 }
 
 void ChdPrefetch::kick_worker_() noexcept {

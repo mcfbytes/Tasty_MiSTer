@@ -11,6 +11,7 @@
 #include "app/sector_route.h"
 #include "cores/disk_servant.h"
 #include "cores/servant_id.h"
+#include "hal/board_regions.h"
 #include "hal/boards_table.h"
 #include "infra/opt_ref.h"
 #include "reactor/notifier.h"
@@ -19,8 +20,10 @@ namespace mister::fw {
 
 using namespace mister;
 
-bool DeviceBlock::rides_io_(svc::IIoCoworker& lane, const char* what) noexcept {
-    const Ex<void> added = seated(io_main_, "T-IO bound past a refused open").add_coworker(lane);
+template <class Lane>
+bool DeviceBlock::rides_io_(Lane& lane, const char* what) noexcept {
+    const Ex<void> added = seated(io_main_, "T-IO bound past a refused open")
+                               .add_coworker(lane, svc::lane_class_of<Lane>);
     if (added)
         return true;
     opened_.refuse(what, added.error());
@@ -42,7 +45,7 @@ std::optional<app::CmdFifo> DeviceBlock::open_cmd_fifo(
 std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
     const BootParts& plat
 ) noexcept {
-    const auto region = hal::declared_region(plat.regions, hal::RegionId::ScalerOut);
+    const auto region = hal::BoardRegions::aperture_region(plat.regions, hal::RegionId::ScalerOut);
     if (!region)
         return std::nullopt;
     auto w = hal::FpgaMemory::map(*region, os::MmioRegion::Access::ReadOnly);
@@ -159,13 +162,15 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .window_counts = owner_.window_cell(),
         .bay_counts = owner_.core_builder().counts_cell(),
         .diag = session_.diag_cell(),
+        .diag_ask = infra::OptRef<xthread::Telemetry<std::uint32_t, SeatTag::Diag>>{diag_ask_},
+        .ladder = infra::OptRef<const app::LadderStateCell>{ladder_cell_},
         .sess =
             {.pause_expiries = owner_.pause_expiries_cell(),
              .recover_polls = owner_.recover_polls_cell(),
              .save_write_failures = owner_.save_write_failures_cell(),
              .fallbacks = owner_.fallback_cell(),
              .ini_write_failures = owner_.ini_write_failures_cell()},
-        .doorbell = session_.doorbell_cell(),
+        .doorbell = owner_.doorbell_cell(),
         .round_timing = plat.round_timer.cell(),
         .round_traces = plat.round_timer.traces(),
 
@@ -177,6 +182,7 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .sector_lease = infra::OptRef<const app::SectorLeaseCell>{sector_lease_},
         .osd_lease = infra::OptRef<const app::OsdLeaseCell>{osd_lease_},
         .sys_lease = infra::OptRef<const app::SysLeaseCell>{sys_lease_},
+        .io_pass = infra::OptRef<const svc::IoPassCell>{io_pass_},
         .main_log = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
     };
 }
@@ -250,6 +256,7 @@ DeviceBlock::DeviceBlock(
       clock_(),
       main_rx_{main_wake_},
       link_router_{main_rx_, ui_rx_, input_rx_},
+      ui_writes_{plat.vfs, io_wake_},
       video_pump_{
           plat.vfs,
           clock_,
@@ -262,6 +269,7 @@ DeviceBlock::DeviceBlock(
               .link_tx = ui_inbox_,
               .replies = link_router_,
               .ini = ini_cell_,
+              .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
           }
       },
       input_emit_{edge_reset_, plat.link, link_router_},
@@ -277,11 +285,14 @@ DeviceBlock::DeviceBlock(
       frame_(open_frame_clock(plat.video.vsync_device, clock_, opened_)),
       prefetch_(),
       prefetch_main_(open_prefetch_main_()),
-      pcm_feeder_{clock_, pcm_commands_, infra::OptRef<const svc::Vfs>{plat.vfs}},
+      pcm_feeder_{clock_, pcm_commands_, pcm_wake_, infra::OptRef<const svc::Vfs>{plat.vfs}},
       mailbox_relay_{pcm_wake_},
       companion_host_{pcm_wake_},
       pcm_main_(open_pcm_main_()),
       io_main_(open_io_main_()),
+      save_stage_orders_{io_wake_},
+      save_stage_keeper_{plat.vfs, clock_, save_stage_orders_, save_stage_cell_},
+      save_backends_{svc::make_save_slot_backends(plat.vfs, save_stage_keeper_)},
       storage_(io_wake_),
       disc_store_{plat.vfs, disc_geometry_, disc_counters_, prefetch_},
       discs_(
@@ -311,7 +322,7 @@ DeviceBlock::DeviceBlock(
               .doorbells = io_doorbell_set_()
           }
       ),
-      window_jobs_(plat.vfs, io_window_map_, plat.fpga_mem.region, io_wake_),
+      window_jobs_(plat.vfs, io_window_map_, plat.fpga_mem, io_wake_),
       shots_(),
       frame_src_(open_frame_source_(plat)),
       surface_(),
@@ -324,7 +335,6 @@ DeviceBlock::DeviceBlock(
               .surface = surface_
           }
       ),
-      ladder_{transitioning_, infra::OptRef<reactor::RoundTimer>{plat.round_timer}},
       board_reset_{plat.bridges},
       parts_{
           .video = video_pump_.wire(),
@@ -332,12 +342,15 @@ DeviceBlock::DeviceBlock(
           .osd = osd_wire_,
           .link_inbox = main_inbox_,
           .link_rx = main_rx_,
+          .fabric_cell = fabric_cell_,
+          .switch_park = switch_park_,
           .config_cell = config_cell_,
           .identity_record_cell = identity_record_cell_,
           .ui_inbox = ui_inbox_,
           .input_inbox = input_inbox_,
           .router = link_router_,
-          .ladder_cell = ladder_cell_,
+          .diag_ask = infra::OptRef<
+              const xthread::Telemetry<std::uint32_t, SeatTag::Diag>>{diag_ask_},
           .unbound_discs = unbound_discs_.service,
           .pin_levels = pin_levels_,
           .main_wake = main_wake_,
@@ -353,7 +366,6 @@ DeviceBlock::DeviceBlock(
           .bay_releases = bay_releases_,
           .vfs = infra::OptRef<const svc::Vfs>{plat.vfs},
           .uart_handoffs = infra::opt_ref_of(front.grants_uart ? &uart_handoffs_ : nullptr),
-          .stdout_routing = true,
           .doorbells = plat.doorbells,
           .fpga_mem = plat.fpga_mem,
           .lw_window = plat.lw_window,
@@ -365,16 +377,15 @@ DeviceBlock::DeviceBlock(
           .lamp = plat.disk_lamp,
           .disk_activity = infra::OptRef<xthread::WakeFlag>{disk_activity_},
 
-          .board_ops =
-              {.rt = infra::OptRef<app::IRtPriorityScope>{ladder_},
-               .stop = infra::OptRef<app::IStopSignal>{stop}},
+          .board_ops = {.stop = infra::OptRef<app::IStopSignal>{stop}},
           .save_copy = infra::OptRef<const cores::SaveCopyCell>{save_copy_},
           .services = services_(),
+          .osd_mask_cell = infra::OptRef<app::OsdMaskCell>{osd_mask_cell_},
       },
       session_{plat.link, plat.link, plat.link, plat.fpga_mem.region, events_, parts_},
       bitstream_{plat.programmer, plat.bridges, plat.vfs, plat.program},
       owner_{
-          session_.switch_park(),
+          switch_park_,
           app::SessionOwner::Link{
               .inbox = main_inbox_,
               .rx = main_rx_,
@@ -389,16 +400,18 @@ DeviceBlock::DeviceBlock(
 
               .ops = {.reset = infra::OptRef<app::IBoardReset>{board_reset_}},
               .boot_handoff = plat.programmer.boot_handoff(),
+              .stdout_routing = true,
               .launcher_demand = front.launcher_demand,
               .launcher_wake = front.launcher_wake,
               .programmer = bitstream_,
               .storage = plat.vfs,
               .window_map = window_map_,
-              .fabric_cell = session_.fabric_cell(),
+              .fabric_cell = fabric_cell_,
               .status_cell = session_.status_cell(),
               .mount_status_cell = session_.mount_status_cell(),
               .save_extent_cell = session_.save_extent_cell(),
               .file_tx_level_cell = session_.file_tx_level_cell(),
+              .option_cell = session_.option_cell(),
               .pin_levels = pin_levels_,
               .clock = clock_,
               .save_state_asks = infra::OptRef{save_state_asks_},
@@ -423,8 +436,12 @@ DeviceBlock::DeviceBlock(
                       .wake = infra::OptRef<xthread::WakeFlag>{io_wake_}
                   },
               .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
+              .save_stages = app::SaveStageDirector::
+                  Ends{.orders = save_stage_orders_, .report = save_stage_cell_},
               .log_lane = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
-              .aperture = plat.fpga_mem.region
+              .aperture = plat.fpga_mem,
+              .osd_mask_cell = infra::OptRef<const app::OsdMaskCell>{osd_mask_cell_},
+              .menu_focus_cell = infra::OptRef<const app::MenuFocusCell>{menu_focus_cell_}
           }
       },
       frame_counter_{app::CoreFrameCounter::Wiring{
@@ -435,7 +452,11 @@ DeviceBlock::DeviceBlock(
       }},
       vfs_(plat.vfs) {
 
-    static_assert(svc::IoMain::kMaxCoworkers >= 9);
+    static_assert(svc::IoMain::kMaxCoworkers >= 10);
+
+    const app::RunPolicy& policy = front.policy;
+    video_pump_.apply_run_policy(policy);
+    owner_.apply_run_policy(policy);
     companion_host_.install(cores::make_servants(vfs_));
 }
 
@@ -448,6 +469,7 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .main_stop = main_stop_,
              .ui_wake = ui_wake_,
              .io_wake = io_wake_,
+             .ui_writes = ui_writes_,
              .ui_inbox = ui_inbox_,
              .video = video_pump_,
              .key_focus = key_focus_,
@@ -475,7 +497,8 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .frame_demand = frame_demand_,
              .core_frames = core_frames_,
              .ini = ini_cell_,
-             .disk_activity = disk_activity_},
+             .disk_activity = disk_activity_,
+             .menu_focus = menu_focus_cell_},
         .session = {.link = session_, .owner = owner_},
     };
 }
@@ -537,7 +560,8 @@ std::optional<svc::IoMain> DeviceBlock::open_io_main_() {
             std::in_place,
             std::move(*fds),
             infra::OptRef{main_wake_},
-            *io_doorbells_
+            *io_doorbells_,
+            infra::OptRef{io_pass_}
         };
     }
 }
@@ -551,6 +575,7 @@ app::SupervisorParts::Services DeviceBlock::services_() noexcept {
         .saves = save_relay_,
         .discs = discs_,
         .window_jobs = window_jobs_,
+        .save_backends = save_backends_,
         .storage_life = infra::OptRef<svc::IStorageLifecycle>{storage_},
         .disc_backend = infra::OptRef<svc::IStorageBackend>{disc_store_},
     };
@@ -607,8 +632,9 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
         seats.save_states->start();
     }
 
-    if (seats.ui_writes)
-        (void)rides_io_(*seats.ui_writes, "T-IO: add_coworker(ui_writes)");
+    (void)rides_io_(ui_writes_, "T-IO: add_coworker(ui_writes)");
+
+    (void)rides_io_(save_stage_keeper_, "T-IO: add_coworker(save_stage_keeper)");
 
     (void)rides_io_(storage_, "T-IO: add_coworker(storage)");
 

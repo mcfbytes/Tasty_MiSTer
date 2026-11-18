@@ -3,7 +3,7 @@
 
 #include <memory>
 
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/status_cell.h"
@@ -22,7 +22,7 @@ struct LoaderContext {
     bool turbo = false;
     LoaderMemo& memo;
 
-    hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
+    hal::FpgaAperture aperture{};
 
     infra::OptRef<const proto::StatusCell> status_cell{};
 };

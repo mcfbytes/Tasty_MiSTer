@@ -23,25 +23,6 @@ ssize_t read_exact(int fd, void* buf, std::size_t n) {
 
 }
 
-Ex<Notifier> Notifier::doorbell_adopt(
-    os::UioLineRef uio,
-    infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> cause,
-    Cause klass
-) {
-
-    if (uio.fd() < 0) {
-        return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(EBADF)}
-        );
-    }
-
-    (void)uio.consume();
-    if (auto armed = uio.rearm(); !armed) {
-        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), armed.error().detail});
-    }
-    return Notifier{uio, cause, klass};
-}
-
 Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {
 
     if (period <= std::chrono::nanoseconds::zero()) {
@@ -94,20 +75,6 @@ CauseDecode Notifier::drain_checked() {
             if (n != static_cast<ssize_t>(sizeof v))
                 return CauseDecode::idle();
             return CauseDecode::of(delivers_);
-        }
-        case Kind::Doorbell: {
-
-            if (!uio_.consume())
-                return CauseDecode::idle();
-            const std::uint32_t word = cause_ ? cause_->read(hal::CauseReg::Reg::Cause) : 0u;
-            const CauseDecode d = decode_cause_checked(word);
-
-            (void)uio_.rearm();
-
-            if (d.cause() != Cause::None && d.cause() != delivers_) {
-                return CauseDecode::refused();
-            }
-            return d;
         }
     }
     return CauseDecode::idle();

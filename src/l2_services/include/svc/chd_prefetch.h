@@ -13,6 +13,7 @@
 #include "infra/park_timeout.h"
 #include "infra/polled.h"
 #include "infra/pool_slot.h"
+#include "infra/release_latch.h"
 #include "infra/rt_stats.h"
 #include "infra/loan_channel.h"
 #include "infra/spsc_ring.h"
@@ -100,6 +101,8 @@ struct ChdMedia {
 
     ChdGeometry geo{};
     HunkCount forward_span{};
+
+    xthread::ReleaseGen stamp{};
 };
 
 enum class PrefetchState : std::uint32_t {
@@ -107,6 +110,10 @@ enum class PrefetchState : std::uint32_t {
     Parked,
     Running,
 };
+
+enum class PrefetchRelease : std::uint8_t { Source };
+
+using PrefetchLatch = xthread::BasicReleaseLatch<PrefetchRelease>;
 
 struct PrefetchCounters {
     std::uint32_t hits = 0;
@@ -164,11 +171,6 @@ public:
 
     bool parked() const noexcept { return parked_.load(std::memory_order_acquire); }
 
-    template <class Flag>
-    [[nodiscard]] static bool park_due(const Flag& parked, const Flag& park_req) noexcept {
-        return !parked.load(std::memory_order_acquire) && park_req.load(std::memory_order_acquire);
-    }
-
     bool attached() const noexcept { return depth_ != HunkCount{}; }
 
     HunkCount depth() const noexcept { return depth_; }
@@ -195,6 +197,9 @@ private:
 
     void reset_consumer_() noexcept;
 
+    [[nodiscard]] bool owner_sees_parked_() noexcept;
+    void reap_handovers_() noexcept;
+
     void rest_(infra::ParkTimeout ms, HunkIndex want, bool watch_free) noexcept;
     void release_media_() noexcept;
 
@@ -208,14 +213,18 @@ private:
 
     xthread::WakeFlag wake_{};
 
+    PrefetchLatch latch_{wake_};
+
     Chan chan_{wake_, xthread::Polled{}};
 
     Media media_{wake_, xthread::Polled{}};
     std::atomic<HunkIndex> want_hunk_{HunkIndex::none()};
-    std::atomic<bool> park_req_{false};
+
     std::atomic<bool> parked_{true};
 
     xthread::Counter hits_, misses_, decodes_, decode_us_, evictions_, seeks_, errors_;
+
+    PrefetchLatch::Ticket ticket_{};
 
     std::unique_ptr<IChdSource> src_{};
     ChdGeometry geo_{};
@@ -242,6 +251,8 @@ private:
     HunkIndex resident_hunk_[kPrefetchMaxDepth]{};
     std::size_t resident_count_ = 0;
     HunkIndex want_{HunkIndex::none()};
+
+    bool handover_out_ = false;
 
     bool poisoned_ = false;
 };

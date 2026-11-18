@@ -2,6 +2,9 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
+
+#include "hal/types.h"
 
 namespace mister::proto::user_io {
 
@@ -11,15 +14,20 @@ struct RumbleMotors {
     friend constexpr bool operator==(const RumbleMotors&, const RumbleMotors&) = default;
 };
 
-[[nodiscard]] constexpr RumbleMotors rumble_motors(std::uint16_t word) noexcept {
-    const unsigned w = word;
-    return RumbleMotors{
-        .strong = static_cast<std::uint16_t>((w & 0xFF00u) + (w >> 8u)),
-        .weak = static_cast<std::uint16_t>((w << 8u) + (w & 0x00FFu)),
+[[nodiscard]] constexpr RumbleMotors rumble_motors(hal::SpiWord w) noexcept {
+    constexpr auto level = [](std::uint8_t b) {
+        return static_cast<std::uint16_t>(
+            (std::uint16_t{b} << std::numeric_limits<std::uint8_t>::digits) | b
+        );
     };
+    return RumbleMotors{.strong = level(w.high_byte()), .weak = level(w.low_byte())};
 }
 
-static_assert(rumble_motors(0x0080) == RumbleMotors{.strong = 0x0000, .weak = 0x8080});
-static_assert(rumble_motors(0xFFFF) == RumbleMotors{.strong = 0xFFFF, .weak = 0xFFFF});
+static_assert(
+    rumble_motors(hal::SpiWord{0x0080}) == RumbleMotors{.strong = 0x0000, .weak = 0x8080}
+);
+static_assert(
+    rumble_motors(hal::SpiWord{0xFFFF}) == RumbleMotors{.strong = 0xFFFF, .weak = 0xFFFF}
+);
 
 }

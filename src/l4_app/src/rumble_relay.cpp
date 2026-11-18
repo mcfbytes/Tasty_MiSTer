@@ -19,10 +19,10 @@ void RumbleRelay::refresh() noexcept {
         if (now.pads[p] == seen_[p].pad)
             continue;
 
-        const std::uint16_t held = seen_[p].word;
+        const hal::SpiWord held = seen_[p].word;
         seen_[p].pad = now.pads[p];
-        seen_[p].word = 0;
-        if (held != 0 && now.players.has(p)) {
+        seen_[p].word = hal::SpiWord{};
+        if (held != hal::SpiWord{} && now.players.has(p)) {
             ++reapplied_;
             apply_(p, held);
         }
@@ -48,7 +48,7 @@ void RumbleRelay::on(const proto::LinkEvent::PolledWord& w) noexcept {
     apply_(player, w.word);
 }
 
-void RumbleRelay::apply_(svc::PlayerIndex player, std::uint16_t word) noexcept {
+void RumbleRelay::apply_(svc::PlayerIndex player, hal::SpiWord word) noexcept {
     const proto::user_io::RumbleMotors m = proto::user_io::rumble_motors(word);
     switch (out_.rumble(player, m)) {
         case svc::RumbleApply::NoDevice:
@@ -61,9 +61,9 @@ void RumbleRelay::apply_(svc::PlayerIndex player, std::uint16_t word) noexcept {
 
             if (failures_++ == 0)
                 diag_.appendf(
-                    "{\"t\":\"rumble_fail\",\"player\":%u,\"word\":%u}",
-                    static_cast<unsigned>(player.v),
-                    static_cast<unsigned>(word)
+                    "{\"t\":\"rumble_fail\",\"player\":%s,\"word\":%s}",
+                    player.text().c_str(),
+                    word.text().c_str()
                 );
             break;
     }

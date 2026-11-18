@@ -39,7 +39,9 @@ public:
 
     DownloadSession(DownloadSession&& o) noexcept
         : bracket_(std::move(o.bracket_)),
-          posted_(std::exchange(o.posted_, false)) {}
+          posted_(std::exchange(o.posted_, false)),
+          dat_(o.dat_),
+          dat_held_(std::exchange(o.dat_held_, false)) {}
 
     DownloadSession& operator=(DownloadSession&&) = delete;
 
@@ -58,7 +60,13 @@ public:
 
     [[nodiscard]] bool posted() const noexcept { return posted_; }
 
-    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, IoIndex index);
+    [[nodiscard]] Ex<void> open_dat(hal::Width w);
+    [[nodiscard]] Ex<void> feed(std::span<const std::uint8_t> data);
+    void release_dat() noexcept;
+
+    [[nodiscard]] bool dat_held() const noexcept { return dat_held_; }
+
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, FioIndexByte index);
     [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, WideIoIndex index);
 
     [[nodiscard]] static Ex<void> send_file_info(ILinkFrame& frame, std::string_view ext);
@@ -77,6 +85,8 @@ private:
 
     FioBracket bracket_;
     bool posted_ = false;
+    hal::Width dat_ = hal::Width::Byte;
+    bool dat_held_ = false;
 };
 
 }

@@ -33,7 +33,7 @@ struct InternedFile {
     PathText path{};
     hal::FabricAddr load_addr{};
     proto::FileSize size_bytes{};
-    std::uint64_t offset = 0;
+    proto::FileOffset offset{};
     svc::Crc32 crc{};
     proto::FileId save{};
     std::uint32_t aux = 0;

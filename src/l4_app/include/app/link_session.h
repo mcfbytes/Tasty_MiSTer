@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 
+#include "app/autosave_cells.h"
 #include "app/rumble_players_cell.h"
 #include "app/types.h"
 #include "app/delivered.h"
@@ -25,7 +26,6 @@
 #include "app/boot_args.h"
 #include "app/boot_arm.h"
 #include "app/reboot_answer.h"
-#include "app/config_pair.h"
 #include "app/log_clock.h"
 #include "app/core_tenancy.h"
 #include "app/slot_bindings.h"
@@ -33,7 +33,6 @@
 #include "app/session_rows.h"
 #include "app/held_transfer.h"
 #include "app/ladder_cell.h"
-#include "app/doorbell_cell.h"
 #include "app/session_tally.h"
 #include "app/diag_counters.h"
 #include "app/event.h"
@@ -60,7 +59,6 @@
 #include "app/save_image_source.h"
 #include "app/ui_request.h"
 #include "app/uart_mode.h"
-#include "app/stdout_paths.h"
 #include "cores/cd_flow.h"
 #include "cores/save_channel.h"
 #include "cores/core_init_host.h"
@@ -83,7 +81,6 @@
 
 namespace mister::svc {
 class DiscReadService;
-struct ConfigSnapshot;
 class Vfs;
 class InputEmitter;
 }
@@ -140,7 +137,15 @@ public:
 
     [[nodiscard]] const CoreTenancy& tenancy() const noexcept { return tenancy_; }
 
-    [[nodiscard]] const HeldTransfer& held() const noexcept { return held_; }
+    [[nodiscard]] const HeldTransfer& held() const noexcept {
+        TASTY_SEAT_BODY(LinkSession);
+        return held_;
+    }
+
+    [[nodiscard]] HeldTransfer& held() noexcept {
+        TASTY_SEAT_BODY(LinkSession);
+        return held_;
+    }
 
     [[nodiscard]] const SlotBindings& slot_bindings() const noexcept { return slot_bindings_; }
 
@@ -176,16 +181,11 @@ public:
 
     [[nodiscard]] LinkRxChannel<SeatTag::Main>& link_rx() noexcept { return link_rx_; }
 
-    [[nodiscard]] const xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>&
-    config_cell() noexcept {
-        return config_cell_;
-    }
-
     [[nodiscard]] IdentityRecordCell& identity_record_cell() noexcept {
         return identity_record_cell_;
     }
 
-    [[nodiscard]] std::optional<proto::IoIndex> last_download() const noexcept {
+    [[nodiscard]] std::optional<proto::FioIndexByte> last_download() const noexcept {
         return held_.last_download();
     }
 
@@ -218,7 +218,6 @@ public:
     Result on(const proto::LinkOp::ApplyCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::AbortSwitch& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::BindIdentity& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::BindDoorbells& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::DropCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::AdoptCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SessionUp& a, const LinkOpCtx& ctx) noexcept;
@@ -248,6 +247,8 @@ public:
     [[nodiscard]] DiskRelay& disks() noexcept { return disks_; }
 
     [[nodiscard]] SaveUploadRelay& saves() noexcept { return saves_; }
+
+    [[nodiscard]] MailboxRelay& mailbox() noexcept { return mailbox_; }
 
     void settle_boot_slot_mount() noexcept;
 
@@ -293,14 +294,6 @@ public:
 
     [[nodiscard]] LinkBinder& binder() noexcept { return binder_; }
 
-    void enable_stdout_routing(std::optional<StdoutPaths> paths = std::nullopt) noexcept {
-        boot_.enable_stdout_routing(paths);
-    }
-
-    [[nodiscard]] infra::OptRef<StdoutRouter> boot_stdout_router() noexcept {
-        return boot_.boot_stdout_router();
-    }
-
     struct RoundEntry {
         bool live = false;
     };
@@ -321,10 +314,6 @@ public:
 
     void poll_osd_mask();
 
-    void publish_doorbell_stats() noexcept;
-
-    [[nodiscard]] const DoorbellStatsCell& doorbell_cell() const noexcept { return doorbell_cell_; }
-
     [[nodiscard]] Ex<std::size_t> flush_save_upload() {
         return nvram_.flush_save_upload(save_ctx_());
     }
@@ -337,12 +326,10 @@ public:
 
     [[nodiscard]] Ex<std::optional<UiRequest::LoadCore>> boot(const BootArgs& args);
 
-    [[nodiscard]] ExitReboot handoff_to_alternate_executable(
-        const char* exe,
-        const BootArgs& args
-    ) {
-        return boot_.handoff_to_alternate_executable(exe, args);
-    }
+    void hold_core();
+
+    [[nodiscard]] bool save_lane_fio_free() noexcept;
+    [[nodiscard]] bool settle_save_step(bool fio_free);
 
     [[nodiscard]] const BoardOps& board_ops() const noexcept { return ops_; }
 
@@ -354,25 +341,17 @@ public:
 
     [[nodiscard]] Ex<void> load_core(const LoadRequest& req);
 
-    [[nodiscard]] Ex<void> reset_core();
-
     [[nodiscard]] Ex<ExitReboot> shutdown();
 
     void release_bus() noexcept;
 
     bool fpga_unconfigured() const noexcept { return fabric_.unconfigured(); }
 
-    [[nodiscard]] FabricCell& fabric_cell() noexcept { return fabric_cell_; }
-
     [[nodiscard]] const FabricStateView& fabric() const noexcept { return fabric_; }
-
-    [[nodiscard]] SwitchPark& switch_park() noexcept { return switch_park_; }
 
     [[nodiscard]] const QuiesceAck& park() const noexcept { return park_; }
 
     bool ever_running() const noexcept { return ever_running_; }
-
-    const svc::ConfigSnapshot* config() const noexcept { return config_.config(); }
 
 private:
     [[nodiscard]] bool session_live() const noexcept override;
@@ -384,6 +363,16 @@ private:
     [[nodiscard]] bool osd_focused() const noexcept override;
 
     [[nodiscard]] Ex<void> detach();
+
+    void bind_routes_(
+        infra::OptRef<const SessionRoutes> routes,
+        proto::BuildGeneration gen,
+        bool made
+    ) noexcept;
+
+    void drop_routes_() noexcept;
+
+    void release_pads_() noexcept;
 
     [[nodiscard]] Ex<void> raise_session_(const proto::RtcImage& rtc);
 
@@ -445,13 +434,10 @@ private:
     LinkRouter& router_;
     Port out_;
     proto::SpiSampler sampler_;
-    const xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>& config_cell_;
 
     IdentityRecordCell& identity_record_cell_;
 
     BootArm boot_;
-
-    ConfigPair config_;
 
     StartInFlight start_;
     SessionTally tally_{};
@@ -468,6 +454,8 @@ private:
 
     proto::SpiOsdMaskDecoder osd_mask_decoder_;
 
+    infra::OptRef<OsdMaskCell> osd_mask_cell_;
+
     IdentityLatch identity_;
 
     void publish_identity();
@@ -479,9 +467,9 @@ private:
     const BoardOps ops_;
     RebootAnswer reboot_;
 
-    FabricCell fabric_cell_{};
+    FabricCell& fabric_cell_;
     FabricStateView fabric_{};
-    SwitchPark switch_park_;
+    SwitchPark& switch_park_;
     QuiesceAck park_{};
 
     xthread::PauseGen dropped_gen_{};
@@ -505,16 +493,19 @@ private:
     xthread::LogLane::Producer log_lane_;
     LogInstant load_start_{};
 
-    const LadderStateCell& ladder_cell_;
-
     DiagCountersCell diag_{};
 
-    void gather_diag(DiagCounters& out) const noexcept;
-    void publish_diag() noexcept;
-    void on_osd_visibility_edge(bool visible);
+    infra::OptRef<const xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Diag>::Reader diag_ask_seen_{};
 
-    DoorbellStatsCell doorbell_cell_{};
-    DoorbellStats doorbell_last_{};
+    void gather_diag(DiagCounters& out) const noexcept;
+
+    void publish_diag() noexcept;
+
+    void publish_diag_final() noexcept;
+
+    void publish_diag_record() noexcept;
+    void on_osd_visibility_edge(bool visible);
 
     ICheatApply& cheats_;
 

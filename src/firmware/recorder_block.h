@@ -49,6 +49,7 @@ public:
 
 private:
     [[nodiscard]] static std::optional<hal::ScalerBuffers> map_scaler_buffers(
+        const hal::FpgaAperture& aperture,
         std::span<const hal::PhysRegion> regions,
         OpenVerdict& verdict
     );

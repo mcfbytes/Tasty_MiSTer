@@ -66,10 +66,7 @@ Ex<proto::SlotIndex> FileBytes<P>::stage_(std::string_view path) noexcept {
 
 template <SeatTag P>
 std::optional<proto::SlotIndex> FileBytes<P>::pooled_slot_(proto::FileId id) noexcept {
-    const std::uint32_t id_v = id.v;
-    if (id_v == InternedFile::kNone || id_v > InternedFile::kRecycleSlots)
-        return std::nullopt;
-    return proto::SlotIndex::of(id_v - 1u);
+    return id.pooled_slot(InternedFile::kRecycleSlots);
 }
 
 template <SeatTag P>
@@ -83,7 +80,8 @@ infra::OptRef<InternedFile> FileBytes<P>::staged_payload_(proto::FileId id) noex
 template <SeatTag P>
 Ex<proto::FileId> FileBytes<P>::intern(FileIntern&& file) {
 
-    if (file.bytes.empty() && (file.piece.whole.empty() || file.piece.offset != file.piece.whole))
+    if (file.bytes.empty()
+        && (file.piece.whole.empty() || file.piece.offset != proto::kFileStart + file.piece.whole))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
 
     if (file.bytes.empty() && (file.save != proto::FileId{} || file.edge != ContentEdge::Content))
@@ -107,8 +105,7 @@ Ex<proto::FileId> FileBytes<P>::intern(FileIntern&& file) {
     s.bytes = infra::at_index(heap_, *i);
     s.load_addr = file.load_addr;
     s.size_bytes = file.piece.whole.empty() ? proto::FileSize{s.bytes.size()} : file.piece.whole;
-
-    s.offset = proto::detail::positional_word(file.piece.offset);
+    s.offset = file.piece.offset;
     s.crc = file.crc;
     s.save = file.save;
     s.edge = file.edge;
@@ -120,7 +117,8 @@ Ex<proto::FileId> FileBytes<P>::intern_path(
     std::string_view path,
     proto::FileSize size,
     svc::Crc32 crc,
-    std::uint32_t aux
+    std::uint32_t aux,
+    ContentEdge edge
 ) {
     if (path.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -136,6 +134,7 @@ Ex<proto::FileId> FileBytes<P>::intern_path(
     s.size_bytes = size;
     s.crc = crc;
     s.aux = aux;
+    s.edge = edge;
     return proto::FileId::of_slot(*i);
 }
 

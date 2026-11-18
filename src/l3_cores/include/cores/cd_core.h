@@ -51,7 +51,7 @@ public:
 
     void set_region(proto::RegionCode region) override {
         TASTY_SEAT_BODY(CdCore);
-        drive_.set_region(region.v);
+        drive_.set_region(region);
     }
 
     [[nodiscard]] Ex<void> deferred_reset() override {
@@ -99,14 +99,12 @@ private:
 
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
-    [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
+    [[nodiscard]] Ex<proto::SessionParams> stream_opening(const StreamAsk& ask) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
         return infra::OptRef<IStreamLoad>{*this};
     }
-
-    void on_set_pending_file_ext(std::string_view ext) noexcept override { tx_.set_ext(ext); }
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return tx_.bytes(); }
 

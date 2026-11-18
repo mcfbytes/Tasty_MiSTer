@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/reg_access.h"
+
 namespace mister::hal {
 
 struct SysDirectory {
@@ -17,6 +19,8 @@ struct SysDirectory {
     static constexpr std::uint32_t kEntryStride = 0x40;
     static constexpr std::uint32_t kMaxEntries = 8;
     static constexpr std::size_t kSize = kEntryBase + kEntryStride * kMaxEntries;
+
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
 
     [[nodiscard]] static constexpr std::uint32_t offset_of(
         EntryIndex i,

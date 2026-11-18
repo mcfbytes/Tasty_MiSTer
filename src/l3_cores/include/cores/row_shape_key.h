@@ -10,7 +10,7 @@ namespace mister::cores {
 struct RowShapeKey {
     std::uint8_t v = 0;
 
-    [[nodiscard]] constexpr Error refused(Errc code, infra::ErrorSite site) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
         return Error{code, site, v};
     }
 

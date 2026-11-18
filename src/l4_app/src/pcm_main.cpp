@@ -40,10 +40,11 @@ void PcmMain::serve() noexcept {
         (void)drain_();
         feeder_.finish_park();
     }
-    if (feeder_.parked())
-        return;
+
     while (const auto c = cmds_.pop())
         infra::dispatch<app::PcmCommandRoutes>(*c, feeder_);
+    if (feeder_.parked())
+        return;
     feeder_.fill_pass();
 }
 
@@ -60,6 +61,8 @@ bool PcmMain::mailbox_rest_() const noexcept {
 }
 
 void PcmMain::on_pause() noexcept {
+
+    (void)feeder_.take_park_ask();
     paused_cmd_drops_ += drain_();
     feeder_.park_now();
     if (mailbox_) {
@@ -69,6 +72,8 @@ void PcmMain::on_pause() noexcept {
 }
 
 void PcmMain::settle() noexcept {
+
+    (void)feeder_.take_park_ask();
     (void)drain_();
     feeder_.release();
     if (mailbox_)
@@ -82,7 +87,7 @@ bool PcmMain::idle() const noexcept {
         return false;
     if (!feeder_.rest())
         return false;
-    return feeder_.parked() || inboxes_empty_();
+    return inboxes_empty_();
 }
 
 }

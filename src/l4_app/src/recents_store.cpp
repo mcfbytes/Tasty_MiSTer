@@ -166,14 +166,15 @@ Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId 
     auto f = vfs_->open(rel, svc::OpenMode::ReadWhole);
     if (!f)
         return std::unexpected(f.error());
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = (*f)->read_at(off, std::span{buf}.subspan(off));
+    proto::FileOffset at = proto::kFileStart;
+    const proto::FileSize total = proto::FileSize::of(std::span{buf});
+    while (total.holds(at)) {
+        auto n = (*f)->read_at(at, at.skip_in(std::span{buf}));
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0)
             break;
-        off += *n;
+        at += proto::FileSize{*n};
     }
     return buf;
 }

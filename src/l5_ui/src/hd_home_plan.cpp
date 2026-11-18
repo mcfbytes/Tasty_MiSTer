@@ -7,7 +7,6 @@
 #include "app/recent_games.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/page_context.h"
-#include "ui/system_page.h"
 
 namespace mister::ui {
 namespace {
@@ -18,7 +17,6 @@ constexpr std::size_t kInlineRecent = 5;
 
 HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
-      cores_(make_system_page(in.ctx.sys, in.ctx.session)),
       launch_(in),
       pair_(
           HdPushRow::Spec{
@@ -46,7 +44,7 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
           }
       ) {
     TASTY_SEAT_BODY(HdHomePlan);
-    cores_->on_enter(ctx_);
+    cores_.bind(ctx_);
     const std::span<const app::RecentGames::Record> records = in.recent_games.records();
     has_any_ = !records.empty();
     const std::size_t shown = std::min(kInlineRecent, records.size());
@@ -93,13 +91,7 @@ bool HdHomePlan::remembers_focus() const noexcept {
 
 svc::Tally HdHomePlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdHomePlan);
-    return refusals_.sum(cores_ != nullptr ? cores_->refusals() : svc::Tally{})
-        .sum(launch_.refusals());
-}
-
-bool HdHomePlan::BrowseRow::shown() const {
-    TASTY_SEAT_BODY(BrowseRow);
-    return plan_.cores_ != nullptr;
+    return refusals_.sum(cores_.refusals()).sum(launch_.refusals());
 }
 
 app::PageDescription::Row HdHomePlan::BrowseRow::describe() const {
@@ -114,9 +106,7 @@ app::PageDescription::Row HdHomePlan::BrowseRow::describe() const {
 
 Transition HdHomePlan::BrowseRow::select() {
     TASTY_SEAT_BODY(BrowseRow);
-    if (plan_.cores_ == nullptr)
-        return Transition{};
-    return plan_.cores_->open_root_child(plan_.ctx_);
+    return plan_.cores_.open(plan_.ctx_, false);
 }
 
 }

@@ -6,9 +6,9 @@
 
 #include "app/cheat_store.h"
 #include "infra/ascii.h"
+#include "infra/indexed_array.h"
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
-#include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"
 #include "ui/page_row.h"
@@ -71,7 +71,7 @@ void CheatsPage::refresh_() {
     const std::size_t n = store_->count();
     rows_.reserve(n);
     for (std::size_t i = 0; i < n; ++i)
-        rows_.push_back(store_->row(i));
+        rows_.push_back(store_->row(RowIndex::of(i)));
     view_.set_items(rows_);
     opens_seen_ = store_->opens();
 }
@@ -188,7 +188,7 @@ Transition CheatsPage::handle(const UiEvent& ev) {
         return Transition{};
     }
     if (ev.buttons.has_any({UiEvent::Select})) {
-        const std::size_t i = view_.viewport().selected.v;
+        const RowIndex i = view_.viewport().selected;
         auto changed = store_->toggle(i);
         if (!changed) {
             refusals_.add();
@@ -200,7 +200,7 @@ Transition CheatsPage::handle(const UiEvent& ev) {
         } else {
             refusals_.add();
         }
-        rows_[i] = store_->row(i);
+        infra::at_index(rows_, i) = store_->row(i);
         return Transition{};
     }
     return Transition{};

@@ -94,14 +94,14 @@ void ConfStr::walk_items() {
 }
 
 std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept {
-    const auto items = ast_.items();
-    const std::size_t row = ItemTable::index_of(item);
-    if (row >= items.size())
+    const auto found = ast_.table().find(item);
+    if (!found)
         return std::nullopt;
-    const Item& it = items[row];
+    const Item& it = *found;
     if (it.kind != ItemKind::FileSlot)
         return std::nullopt;
 
+    const auto items = ast_.items();
     const Item* addon = detail::bound_addon(items, &it);
     return ConfStrFileRow{
         ast_.subfield(it, 1),

@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "hal/types.h"
+#include "hal/spi_output.h"
 
 namespace mister::hal {
 

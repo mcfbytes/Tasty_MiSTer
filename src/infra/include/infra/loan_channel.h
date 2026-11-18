@@ -128,9 +128,8 @@ public:
         }
 
         [[nodiscard]] Slot* checked_() const noexcept {
-            if constexpr (kSeatChecksEnabled)
-                if (lease_ == nullptr)
-                    fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "empty Loan");
+            if (lease_ == nullptr)
+                fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "empty Loan");
             return lease_.get();
         }
 
@@ -181,9 +180,8 @@ public:
         Job(LoanChannel* ch, Handoff h) noexcept : ch_(ch), h_(h) {}
 
         [[nodiscard]] Slot* checked_() const noexcept {
-            if constexpr (kSeatChecksEnabled)
-                if (ch_ == nullptr)
-                    fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "empty Job");
+            if (ch_ == nullptr)
+                fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "empty Job");
             return &ch_->pool_.at(h_.slot);
         }
 

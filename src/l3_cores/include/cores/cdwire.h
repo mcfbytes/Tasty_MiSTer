@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 
+#include "cores/cd_speed_index.h"
 #include "hal/types.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
@@ -49,7 +50,11 @@ constexpr std::uint8_t bcd(svc::TrackNumber n) noexcept {
     return n.bcd_byte();
 }
 
-std::uint64_t sega_compose(std::uint16_t w0, std::uint16_t w1, std::uint16_t w2) noexcept;
+std::uint64_t sega_compose(std::span<const hal::SpiWord, 3> words) noexcept;
+
+inline constexpr hal::SpiWord kSegaResetWord{0x00FF};
+
+[[nodiscard]] CdSpeedIndex sega_speed_index(hal::SpiWord w2) noexcept;
 
 std::uint8_t sega_crc(std::span<const std::uint8_t, 9> nibbles, std::uint8_t crc_start) noexcept;
 

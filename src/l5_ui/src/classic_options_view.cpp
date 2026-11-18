@@ -110,7 +110,7 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
     const app::HdWindow win = out.window(drawn.selected, total);
     out.page.row_count = win.count;
 
-    std::vector<Line> storage(rows.size());
+    std::vector<Line> storage = rows.sized_table<std::vector<Line>>();
     const RowSpan<Line> lines{std::span<Line>{storage}};
     compose_lines(lines);
 

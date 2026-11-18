@@ -208,7 +208,7 @@ void ReplayGate::decide_silence_(FrameReference::Step step) noexcept {
     status_.epoch_edge = *run_.epoch;
 }
 
-bool ReplayGate::pre_epoch_(MovieFrame frame) const noexcept {
+bool ReplayGate::pre_epoch_(MoviePosition frame) const noexcept {
     return wide_frame(frame) + facts_.lead < facts_.pre_epoch_below;
 }
 
@@ -224,9 +224,9 @@ bool ReplayGate::due_(const ReplayMsg::Input& r) const noexcept {
     return first < run_.mf || (first == run_.mf && since_offset_() >= std::chrono::nanoseconds{0});
 }
 
-void ReplayGate::note_late_(MovieFrame first) noexcept {
+void ReplayGate::note_late_(MoviePosition first) noexcept {
     ++status_.late;
-    if (status_.first_late_frame >= MovieFrame{})
+    if (status_.first_late_frame >= MoviePosition{})
         return;
     status_.first_late_frame = first;
     status_.late_gap_us = us_of(run_.gap);
@@ -300,7 +300,7 @@ void ReplayGate::write_masks_(
         const proto::PlayerIndex port = joy.wire_port(slot);
         const std::uint32_t words = w_.emitter.link_words_bound(port);
         const std::uint32_t held = w_.emitter.pad_facts_held();
-        const auto out = w_.emitter.submit(frame_, port, mask[p], proto::JoyMask{});
+        const auto out = w_.emitter.submit(frame_, port, proto::PadMasks{mask[p], {}});
         if (!out || *out)
             round_words_ += words;
         count_write_(out, held);
@@ -316,7 +316,7 @@ void ReplayGate::force_release_(svc::PlayerMask ports) noexcept {
         const proto::PlayerIndex port = joy.wire_port(slot);
         const std::uint32_t words = w_.emitter.link_words_bound(port);
         const std::uint32_t held = w_.emitter.pad_facts_held();
-        auto out = w_.emitter.submit(frame_, port, proto::JoyMask{}, proto::JoyMask{});
+        auto out = w_.emitter.submit(frame_, port, proto::PadMasks{});
         if (out && !*out)
             out = w_.emitter.release(frame_, port, proto::JoyMask{~0u});
         if (!out || *out)
@@ -409,7 +409,7 @@ void ReplayGate::settle() noexcept {
             const WideMovieFrame at = run_.mf;
             run_.underrun_at = at;
             ++status_.underruns;
-            if (status_.first_underrun_frame < MovieFrame{})
+            if (status_.first_underrun_frame < MoviePosition{})
                 status_.first_underrun_frame = run_.mf.narrowed();
         }
     }
@@ -422,7 +422,7 @@ void ReplayGate::settle() noexcept {
     dirty_ = false;
 }
 
-void ReplayGate::note_download_end(proto::IoIndex wire_index) noexcept {
+void ReplayGate::note_download_end(proto::FioIndexByte wire_index) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
     if (level_ != ReplayLevel::AwaitPowerOn || facts_.event != ReplayMsg::PowerOnEvent::LoadEnd)
         return;
@@ -487,8 +487,8 @@ std::optional<ReplayGate::ArmFacts> ReplayGate::ArmFacts::of(const ReplayMsg::Ar
     return f;
 }
 
-bool ReplayGate::ArmFacts::admits(proto::IoIndex wire) const noexcept {
-    return rom == kNoRomSlot || proto::WideIoIndex::of(wire, 0).io() == rom;
+bool ReplayGate::ArmFacts::admits(proto::FioIndexByte wire) const noexcept {
+    return rom == kNoRomSlot || wire.io() == rom;
 }
 
 bool ReplayGate::ArmFacts::untimed(const EpochRule::Pick& p) const noexcept {

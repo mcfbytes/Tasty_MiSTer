@@ -25,6 +25,7 @@
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/types.h"
+#include "svc/card_writer.h"
 #include "svc/file.h"
 #include "svc/slot_path.h"
 #include "svc/storage_backend.h"
@@ -57,11 +58,11 @@ public:
     void note_tag(proto::ImageTag tag) noexcept override;
 
     [[nodiscard]] Ex<std::span<std::uint8_t>> read_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<std::uint8_t> dst
     ) override;
     [[nodiscard]] Ex<std::span<const std::uint8_t>> write_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<const std::uint8_t> src
     ) override;
 
@@ -98,7 +99,7 @@ private:
             close();
         }
 
-        [[nodiscard]] Ex<proto::FileSize> open(const svc::Vfs& vfs, std::string_view path);
+        [[nodiscard]] Ex<proto::FileSize> open(svc::CardWriter& card, std::string_view path);
 
         void close() noexcept {
             file_.reset();
@@ -128,6 +129,7 @@ private:
     [[nodiscard]] bool all_blank_(std::span<const std::uint8_t> image) const noexcept;
 
     const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     infra::OptRef<xthread::WakeFlag> activity_{};
 
     SavePlan plan_{};

@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "app/config_rel.h"
-#include "app/durable_write.h"
+#include "app/hd_look.h"
 #include "app/ini_key_edit.h"
 #include "app/owner_push.h"
 #include "app/stream_io.h"
@@ -37,6 +37,7 @@ ConfigSaves::ConfigSaves(const Wiring& w) noexcept
       tally_(w.tally),
       owner_events_(w.owner_events.producer()),
       vfs_(w.vfs),
+      card_(w.vfs),
       status_cell_(w.status_cell),
       negotiated_(w.negotiated),
       sleeper_(w.sleeper),
@@ -80,29 +81,44 @@ Ex<proto::FileId> ConfigSaves::intern_value_(std::span<const std::byte> value) {
     return inbox_.intern_file(FileIntern{.bytes = std::move(buf)});
 }
 
-void ConfigSaves::save_dips(CorrelationTag tag) noexcept {
+void ConfigSaves::on(const UiRequest::SaveDips&, const UiRequest::Head& head) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
-    if (!order_save_ask(proto::SaveKind::Dips, cores::ConfigSlot{}, tag)) {
+    const CorrelationTag tag = head.tag;
+    if (!order_save_ask(proto::SaveKind::Dips, tag)) {
         publish_save_verdict_(false, tag);
     }
 }
 
-void ConfigSaves::save_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept {
+void ConfigSaves::on(const UiRequest::SaveCoreConfig& req, const UiRequest::Head& head) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
-    slot_save_slot_ = slot;
-    if (!order_save_ask(proto::SaveKind::Slot, slot, tag)) {
+    const CorrelationTag tag = head.tag;
+    slot_save_slot_ = req.slot;
+    if (!order_save_ask(proto::SaveKind::Slot, tag)) {
         publish_save_verdict_(false, tag);
     }
 }
 
-void ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
+void ConfigSaves::on(const UiRequest::SetOsdStyle& req, const UiRequest::Head&) {
+    TASTY_SEAT_BODY(ConfigSaves);
+    set_ini_key(kIniOsdStyle, req.style == OsdStyle::Hd ? "1" : "0");
+}
+
+void ConfigSaves::on(const UiRequest::SetHdLook& req, const UiRequest::Head&) {
+    TASTY_SEAT_BODY(ConfigSaves);
+    const std::string_view key = hd_look_ini_key(req.field);
+    if (key.empty())
+        return;
+    set_ini_key(key, std::to_string(req.value));
+}
+
+bool ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
     TASTY_SEAT_BODY(ConfigSaves);
     const svc::IniCatalog cat = ini_.sample().value;
     const std::string_view kIni = cat.active_name();
 
     if (kIni.empty()) {
         tally_.ini_write_failures.add();
-        return;
+        return false;
     }
     std::string text;
     auto buf = read_file(vfs_, kIni);
@@ -112,7 +128,7 @@ void ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
         const bool absent = (e.code == Errc::os && e.detail == ENOENT) || e.code == Errc::not_found;
         if (!absent) {
             tally_.ini_write_failures.add();
-            return;
+            return false;
         }
     } else {
         text.assign(infra::as_text(std::span(*buf)));
@@ -120,7 +136,9 @@ void ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
     const std::string out = ini_set_key(text, key, value);
     if (!write_durably_(kIni, std::as_bytes(std::span<const char>(out.data(), out.size())))) {
         tally_.ini_write_failures.add();
+        return false;
     }
+    return true;
 }
 
 void ConfigSaves::publish_slot_previews() {
@@ -132,17 +150,16 @@ void ConfigSaves::publish_slot_previews() {
             codec->slot_count(),
             cores::ConfigSlotCount::of(cores::kMaxConfigSlots)
         );
-        preview_scratch_.count = count.v;
-        for (std::uint8_t i = 0; i < count.v; ++i) {
-            const cores::ConfigSlot slot{i};
+        preview_scratch_.count = count;
+        count.for_each_slot([&](cores::ConfigSlot slot) {
             const std::vector<std::uint8_t> bytes = read_slot_(slot_rel(slot));
             if (!bytes.empty())
                 preview_scratch_.exists = preview_scratch_.exists.with(slot);
             const auto blob = cores::ConfigBlob{
                 infra::byte_cast<const std::byte>(std::span(bytes))
             };
-            preview_scratch_.preview[i] = codec->preview(blob);
-        }
+            preview_scratch_.preview[slot] = codec->preview(blob);
+        });
     }
     config_slot_cell_.publish(preview_scratch_);
 }
@@ -155,7 +172,7 @@ bool ConfigSaves::bind_slot_value(std::string_view rel) {
     std::array<std::byte, cores::kMaxConfigValueBytes> value{};
     const std::vector<std::uint8_t> bytes = read_slot_(rel);
     const auto value_span = std::span<std::byte>(value).first(
-        codec->value_bytes().clamp_write(0, value.size())
+        codec->value_bytes().clamp_write(proto::kFileStart, value.size())
     );
     if (!codec->decode(
             cores::ConfigBlob{infra::byte_cast<const std::byte>(std::span(bytes))},
@@ -194,15 +211,10 @@ void ConfigSaves::order_save_upload_() noexcept {
     (void)push_dropping(inbox_, tally_, proto::LinkOp::SaveUpload{});
 }
 
-bool ConfigSaves::order_save_ask(
-    proto::SaveKind kind,
-    cores::ConfigSlot slot,
-    CorrelationTag tag,
-    bool gating
-) noexcept {
+bool ConfigSaves::order_save_ask(proto::SaveKind kind, CorrelationTag tag, bool gating) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
     const proto::LinkOp op = infra::make<proto::LinkOp>(
-        proto::LinkOp::SaveAsk{.which = kind, .slot = slot.v, .tag = tag}
+        proto::LinkOp::SaveAsk{.which = kind, .tag = tag}
     );
     if (gating)
         return push_gating(inbox_, tally_, sleeper_, op);
@@ -210,14 +222,15 @@ bool ConfigSaves::order_save_ask(
 }
 
 bool ConfigSaves::write_durably_(std::string_view rel, std::span<const std::byte> bytes) {
-    if (durable_write(vfs_, rel, bytes).has_value())
+    if (card_.replace_file(rel, bytes).has_value())
         return true;
     tally_.save_write_failures.add();
     return false;
 }
 
-void ConfigSaves::save_config(CorrelationTag tag) {
+void ConfigSaves::on(const UiRequest::SaveConfig&, const UiRequest::Head& head) {
     TASTY_SEAT_BODY(ConfigSaves);
+    const CorrelationTag tag = head.tag;
     const auto rel = core_cfg_rel(negotiated_.saved_cfg_stem().view());
     if (!rel) {
         publish_save_verdict_(false, tag);

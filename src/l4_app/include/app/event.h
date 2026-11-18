@@ -17,10 +17,6 @@
 #include "infra/seat.h"
 #include "proto/types.h"
 
-namespace mister::proto {
-enum class CoreType : std::uint8_t;
-}
-
 namespace mister::app {
 
 enum class InfoId : std::uint32_t {
@@ -82,7 +78,7 @@ struct Event {
 
     struct SdActivity {
         static constexpr Kind kKind = Kind::SdActivity;
-        proto::IoIndex index{};
+        proto::FioIndexByte index{};
     };
 
     struct InfoRequest {

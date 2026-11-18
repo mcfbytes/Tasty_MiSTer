@@ -31,23 +31,6 @@ enum class SessionPhase : std::uint8_t {
     Failed,
 };
 
-enum class CoreType : std::uint8_t {
-    Unknown = 0x55,
-    EightBit = 0xA4,
-    SharpMz = 0xA7,
-};
-
-inline constexpr hal::CoreTypeByte kEightBitWire{0xA4};
-inline constexpr hal::CoreTypeByte kPrivateDialectWire{0xA7};
-
-[[nodiscard]] constexpr CoreType fold_core_type(hal::CoreTypeByte type_byte) noexcept {
-    if (type_byte == kEightBitWire || type_byte.dual_sdram())
-        return CoreType::EightBit;
-    if (type_byte == kPrivateDialectWire)
-        return CoreType::SharpMz;
-    return CoreType::Unknown;
-}
-
 class CoreSession {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -121,8 +104,6 @@ public:
     [[nodiscard]] std::uint32_t deferred_bursts() const noexcept { return deferred_bursts_; }
 
     [[nodiscard]] Ex<void> pulse(StatusBit bit);
-
-    [[nodiscard]] Ex<void> pulse_reset();
 
     [[nodiscard]] Ex<void> adopt_from_core(const StatusWord& core);
 

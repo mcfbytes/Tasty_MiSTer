@@ -15,7 +15,6 @@
 #include "proto/axi_unkinded_decl.h"
 #include "proto/capability.h"
 #include "infra/seat.h"
-#include "reactor/notifier.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "os/types.h"
@@ -50,7 +49,7 @@ public:
 
     const std::optional<SaveStateDecl>& savestate() const noexcept { return ss_; }
 
-    std::optional<os::UioLine> irq_line_for(reactor::Cause klass) const;
+    std::optional<os::UioLine> irq_line_for(IrqClass klass) const;
 
 private:
     std::vector<Capability> caps_;

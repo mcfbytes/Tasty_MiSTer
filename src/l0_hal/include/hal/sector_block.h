@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/reg_access.h"
 #include "hal/reg_word.h"
 #include "hal/types.h"
 
@@ -28,6 +29,8 @@ struct SectorBlock {
         Id = 0x38,
     };
     static constexpr std::size_t kSize = 0x2000;
+
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
     static constexpr std::uint32_t kId = 0x31434553u;
     static constexpr std::uint32_t kIdV2 = 0x32434553u;
     static constexpr std::uint32_t kDataBase = 0x1000;
@@ -36,32 +39,34 @@ struct SectorBlock {
         kWordBytes = 4,
         kCardSlots = 4,
         kCtrlCardShift = 4,
+    };
+
+    enum SlotTable : std::uint32_t {
         kBeginSlotBase = 0x40,
         kWackSlotBase = 0x50,
-        kLbaSlotBase = 0x60,
+        kLbaSlotBase = 0x60
     };
 
     static constexpr std::uint32_t kMaxFrameWords = (kSize - kDataBase) / kWordBytes;
+
+    struct CardSlot {
+        std::uint8_t v = 0;
+        friend constexpr bool operator==(CardSlot, CardSlot) = default;
+    };
 
     static constexpr std::uint32_t kReqPending = 1u << 31;
     static constexpr std::uint32_t kCtrlEnable = 1u << 0;
     static constexpr std::uint32_t kCtrlAbort = 1u << 1;
 
-    static constexpr std::uint32_t ctrl_enable_slot(std::uint8_t slot) noexcept {
-        return slot < kCardSlots ? 1u << (kCtrlCardShift + slot) : 0u;
+    static constexpr std::uint32_t ctrl_enable_slot(CardSlot slot) noexcept {
+        return slot.v < kCardSlots ? 1u << (kCtrlCardShift + slot.v) : 0u;
     }
 
-    static constexpr Reg begin_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(kBeginSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
-    }
+    static constexpr Reg begin_slot(CardSlot s) noexcept { return slot_reg(kBeginSlotBase, s); }
 
-    static constexpr Reg wack_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(kWackSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
-    }
+    static constexpr Reg wack_slot(CardSlot s) noexcept { return slot_reg(kWackSlotBase, s); }
 
-    static constexpr Reg lba_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(kLbaSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
-    }
+    static constexpr Reg lba_slot(CardSlot s) noexcept { return slot_reg(kLbaSlotBase, s); }
 
     static constexpr Reg data(std::uint32_t i) noexcept {
         return static_cast<Reg>(kDataBase + kWordBytes * i);
@@ -112,6 +117,11 @@ struct SectorBlock {
             .reset_fills = EventCount8::of_lane(w, 0)
         };
     }
+
+private:
+    [[nodiscard]] static constexpr Reg slot_reg(SlotTable base, CardSlot s) noexcept {
+        return static_cast<Reg>(base + kWordBytes * (s.v & (kCardSlots - 1u)));
+    }
 };
 
 static_assert(
@@ -121,11 +131,11 @@ static_assert(
 );
 static_assert(SectorBlock::kMaxFrameWords == 1024, "the 10-bit index the FIFO entry carries");
 static_assert(
-    static_cast<std::uint32_t>(SectorBlock::begin_slot(2)) == 0x48
-        && static_cast<std::uint32_t>(SectorBlock::wack_slot(3)) == 0x5C
-        && static_cast<std::uint32_t>(SectorBlock::lba_slot(2)) == 0x68
-        && SectorBlock::ctrl_enable_slot(2) == 0x40u
-        && SectorBlock::ctrl_enable_slot(3) == 0x80u,
+    static_cast<std::uint32_t>(SectorBlock::begin_slot(SectorBlock::CardSlot{2})) == 0x48
+        && static_cast<std::uint32_t>(SectorBlock::wack_slot(SectorBlock::CardSlot{3})) == 0x5C
+        && static_cast<std::uint32_t>(SectorBlock::lba_slot(SectorBlock::CardSlot{2})) == 0x68
+        && SectorBlock::ctrl_enable_slot(SectorBlock::CardSlot{2}) == 0x40u
+        && SectorBlock::ctrl_enable_slot(SectorBlock::CardSlot{3}) == 0x80u,
     "lw_sector.sv's SEC2 offsets and per-slot enables"
 );
 static_assert(

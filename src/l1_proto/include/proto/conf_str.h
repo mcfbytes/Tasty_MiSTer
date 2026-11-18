@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "infra/error.h"
-#include "reactor/notifier.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "os/types.h"
@@ -17,6 +16,7 @@
 #include "proto/irq_binding.h"
 #include "proto/item_table.h"
 #include "proto/save_state_decl.h"
+#include "proto/save_trigger.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
@@ -46,7 +46,7 @@ public:
 
     const std::optional<SaveStateDecl>& savestate() const noexcept { return caps_.savestate(); }
 
-    std::optional<os::UioLine> irq_line_for(reactor::Cause klass) const {
+    std::optional<os::UioLine> irq_line_for(IrqClass klass) const {
         return caps_.irq_line_for(klass);
     }
 
@@ -60,6 +60,14 @@ public:
                 return true;
         }
         return false;
+    }
+
+    [[nodiscard]] std::optional<SaveTrigger> save_trigger() const noexcept {
+        return find_save_trigger(ast_);
+    }
+
+    [[nodiscard]] bool save_trigger_usable(const SaveTrigger& t, OsdMask m) const noexcept {
+        return t.usable(ast_, m);
     }
 
     [[nodiscard]] bool declares_info() const noexcept { return ast_.info_row().has_value(); }

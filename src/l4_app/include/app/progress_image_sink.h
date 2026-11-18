@@ -75,7 +75,7 @@ public:
         if (!armed_)
             return;
         sent_ += n;
-        tick_.advance(sent_);
+        tick_.advance(proto::FileSize{sent_});
     }
 
     void disarm() noexcept {

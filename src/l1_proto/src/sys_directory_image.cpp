@@ -53,7 +53,7 @@ Ex<SysDirEntry> SysDirectoryImage::find(
     }
     const DirVersion header_version = version();
     if (!header_version.has_major(DirMajor::V1)) {
-        return std::unexpected(header_version.refused(Errc::negotiation, ERR_SITE()));
+        return std::unexpected(header_version.refusal(Errc::negotiation, ERR_SITE()));
     }
     const std::uint32_t n = count();
     for (std::uint32_t i = 0; i < n; ++i) {
@@ -61,13 +61,13 @@ Ex<SysDirEntry> SysDirectoryImage::find(
         if (d.kind != facts.kind)
             continue;
         if (!d.version.has_major(facts.major)) {
-            return std::unexpected(d.version.refused(Errc::negotiation, ERR_SITE()));
+            return std::unexpected(d.version.refusal(Errc::negotiation, ERR_SITE()));
         }
         if (!d.offset.dword_aligned()
             || !d.size.covers(facts.block)
             || d.offset < kDirectoryEnd
             || !d.offset.fits(window, facts.block)) {
-            return std::unexpected(d.offset.refused(Errc::aperture_range, ERR_SITE()));
+            return std::unexpected(d.offset.refusal(Errc::aperture_range, ERR_SITE()));
         }
         return d;
     }

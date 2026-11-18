@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 
+#include "infra/error.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -14,7 +15,7 @@ namespace mister::cores {
 struct StMediaFact {
     TASTY_SEAT_EXEMPT(component);
 
-    enum class Verb : std::uint8_t { Hold, NoTos, NoCart, Release, kCount };
+    enum class Verb : std::uint8_t { Hold, NoTos, Release, kCount };
     Verb verb = Verb::Hold;
     bool cold = false;
     std::uint8_t pad_[2]{};
@@ -36,12 +37,12 @@ struct StMediaFact {
             return std::nullopt;
         return f;
     }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, static_cast<std::uint32_t>(verb)};
+    }
 };
 
 static_assert(sizeof(StMediaFact) == 4);
-
-[[nodiscard]] constexpr std::uint32_t detail_of(StMediaFact::Verb verb) noexcept {
-    return static_cast<std::uint32_t>(verb);
-}
 
 }

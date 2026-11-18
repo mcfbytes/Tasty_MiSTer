@@ -17,8 +17,8 @@ SessionRows::SessionRows(const Wiring& w) noexcept
       osd_(w.osd),
       rumble_players_(w.rumble_players),
       identify_decoder_(w.signals, session_, w.router, bindings_.generation()),
-      status_decoder_(w.link, session_, status_cell_, w.live),
-      axi_status_decoder_(session_, status_cell_, w.live),
+      status_decoder_(session_, status_cell_, w.live, spi_status_source_),
+      spi_status_source_(w.link),
       status_lw_(w.status_lw),
       conf_str_decoder_(w.link, session_, w.router, bindings_.generation()),
       block_decoder_(w.router, w.slots, w.live),
@@ -128,7 +128,7 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
             n,
             status_route_ == StatusRoute::Lw
                 ? reactor::
-                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, reactor::kEveryRound, reactor::RoundClaim::Never}
+                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &status_row_, reactor::kEveryRound, reactor::RoundClaim::Never}
                 : reactor::LinkDecoderDecl{
                       "link.status_poll",
                       reactor::Cause::Tick,
@@ -149,11 +149,13 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
 void SessionRows::bind_status_route(StatusRoute route, proto::BuildGeneration gen) noexcept {
     TASTY_SEAT_BODY(SessionRows);
     status_route_ = status_lw_ ? route : StatusRoute::Link;
-    axi_status_decoder_.bind(
-        status_route_ == StatusRoute::Lw ? status_lw_
-                                         : infra::OptRef<const proto::StatusSnapshotCell>{},
-        gen
-    );
+    if (status_route_ == StatusRoute::Lw) {
+        axi_status_source_.bind(status_lw_, gen);
+        status_decoder_.bind_source(axi_status_source_);
+    } else {
+        axi_status_source_.bind(infra::OptRef<const proto::StatusSnapshotCell>{}, gen);
+        status_decoder_.bind_source(spi_status_source_);
+    }
 }
 
 std::optional<bool> SessionRows::latch_osd_edge() {

@@ -25,7 +25,7 @@ public:
     static constexpr std::uint16_t kFbEnWord = 0x8016;
     static constexpr std::chrono::nanoseconds kShowNs{std::chrono::seconds{2}};
 
-    [[nodiscard]] Ex<void> map(const hal::PhysRegion& fb) noexcept;
+    [[nodiscard]] Ex<void> map(const hal::ApertureRegion& fb) noexcept;
     [[nodiscard]] bool blit(app::OutputSize out) noexcept;
     [[nodiscard]] Ex<void> show(app::VideoPump& video, app::OutputSize out) noexcept;
     [[nodiscard]] Ex<void> hide(app::VideoPump& video) noexcept;
@@ -36,7 +36,7 @@ public:
 
 private:
     std::optional<hal::FpgaMemory> fb_{};
-    hal::PhysRegion fb_region_{};
+    std::optional<hal::ApertureRegion> fb_region_{};
 };
 
 }

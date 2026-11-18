@@ -18,7 +18,7 @@ public:
     [[nodiscard]] virtual Ex<PcmExtent> open(svc::TrackNumber track) = 0;
 
     [[nodiscard]] virtual Ex<std::span<std::byte>> read_at(
-        std::uint64_t off,
+        proto::FileSize into,
         std::span<std::byte> dst
     ) = 0;
 

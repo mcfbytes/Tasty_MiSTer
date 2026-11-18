@@ -32,7 +32,7 @@ struct BlankSaveSpec {
 
 inline void render_blank(
     const BlankSaveSpec& spec,
-    proto::FileSize base,
+    proto::FileOffset base,
     std::span<std::uint8_t> out
 ) {
     if (out.empty())
@@ -50,7 +50,7 @@ inline void fill_absent(
     std::span<std::uint8_t> out
 ) noexcept {
     if (spec && spec->declared()) {
-        render_blank(*spec, proto::byte_offset(lba, spec->lba_bytes), out);
+        render_blank(*spec, spec->lba_bytes.position_of(lba), out);
         return;
     }
     std::ranges::fill(infra::byte_cast<std::byte>(out), BlankSaveSpec::kErased);

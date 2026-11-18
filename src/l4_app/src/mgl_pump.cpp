@@ -104,7 +104,7 @@ void MglPump::latch_remember_() {
     if (remember_ == MglRemember::Never)
         return;
 
-    if (player_.scope().gen.v == 0 || conf_scratch_.truncated)
+    if (player_.scope().gen.is_unminted() || conf_scratch_.truncated)
         return;
     const auto table = proto::ItemTable::parse(conf_scratch_.view());
     if (!table)
@@ -352,14 +352,14 @@ void MglPump::begin_read() {
         return;
     }
     auto sz = (*f)->size();
-    if (!sz || sz->v == 0 || sz->v > kMglDocMax) {
+    if (!sz || sz->empty() || *sz > proto::FileSize{kMglDocMax}) {
 
         fail_read_(sz ? Errc::bad_format : sz.error().code);
         return;
     }
     auto got = (*f)->read_at(
-        0,
-        std::as_writable_bytes(std::span(doc_)).first(static_cast<std::size_t>(sz->v))
+        proto::kFileStart,
+        sz->first_of(std::span<std::byte>(std::as_writable_bytes(std::span(doc_))))
     );
     if (!got || *got == 0) {
         fail_read_(got ? Errc::io : got.error().code);

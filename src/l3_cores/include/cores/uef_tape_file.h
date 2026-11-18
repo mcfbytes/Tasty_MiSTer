@@ -22,9 +22,9 @@ public:
     explicit UefTapeFile(std::vector<std::uint8_t>&& image);
     ~UefTapeFile() override;
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override;
+    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override;
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override;
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override;
 
     [[nodiscard]] Ex<proto::FileSize> size() const override;
     [[nodiscard]] Ex<void> flush() override;

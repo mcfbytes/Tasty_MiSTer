@@ -13,7 +13,7 @@ DiscFileAccess::DiscFileAccess(const Vfs& vfs)
 Ex<std::unique_ptr<IFile>> DiscFileAccess::open_file(std::string_view path) const {
     Ex<std::unique_ptr<IFile>> f = opener_.open_read(path);
     if (f)
-        (void)(*f)->advise(IFile::Access::Sequential, 0, 0);
+        (void)(*f)->advise(IFile::Access::Sequential, proto::kFileStart, FileSize{});
     return f;
 }
 
@@ -25,13 +25,11 @@ Ex<std::string> DiscFileAccess::read_cue_text(std::string_view cue_path) const {
     if (!cue_size)
         return std::unexpected(cue_size.error());
 
-    constexpr std::uint64_t kMaxCueBytes = 100u * 1024u;
-    const std::size_t want = static_cast<std::size_t>(
-        std::min<std::uint64_t>(cue_size->v, kMaxCueBytes)
-    );
-    std::string text(want, '\0');
-    if (want != 0) {
-        auto rd = (*cue)->read_at(0, std::as_writable_bytes(std::span<char>(text.data(), want)));
+    constexpr proto::FileSize kMaxCueBytes{100u * 1024u};
+    const proto::FileSize want = cue_size->min(kMaxCueBytes);
+    std::string text = want.zeroed<std::string>();
+    if (!want.empty()) {
+        auto rd = (*cue)->read_at(proto::kFileStart, std::as_writable_bytes(std::span<char>(text)));
         if (!rd)
             return std::unexpected(rd.error());
         text.resize(*rd);

@@ -4,7 +4,6 @@
 #include <cerrno>
 #include <utility>
 
-#include "app/durable_write.h"
 #include "app/event.h"
 #include "infra/polled.h"
 #include "svc/file.h"
@@ -15,6 +14,7 @@ SaveStateAttach::SaveStateAttach(const Wiring& w) noexcept
     : asks_(w.asks),
       facts_cell_(w.facts),
       copy_(w.copy),
+      aperture_(w.aperture),
       toast_(w.toast),
       files_(w.vfs),
       io_map_(w.map),
@@ -30,7 +30,7 @@ SaveStateAttach::SaveStateAttach(const Wiring& w) noexcept
 
 Ex<std::size_t> SaveStateAttach::Files::read_at(
     std::string_view path,
-    std::uint64_t offset,
+    proto::FileOffset at,
     std::span<std::byte> dst
 ) {
     auto f = vfs_.open(path, svc::OpenMode::Read);
@@ -42,7 +42,7 @@ Ex<std::size_t> SaveStateAttach::Files::read_at(
         return std::unexpected(f.error());
     std::size_t got = 0;
     while (got < dst.size()) {
-        auto n = (*f)->read_at(offset + got, dst.subspan(got));
+        auto n = (*f)->read_at(at + proto::FileSize{got}, dst.subspan(got));
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0)
@@ -56,7 +56,7 @@ Ex<void> SaveStateAttach::Files::write_all_sync(
     std::string_view path,
     std::span<const std::byte> src
 ) {
-    return durable_write(vfs_, path, src);
+    return card_.replace_file(path, src);
 }
 
 void SaveStateAttach::start() noexcept {
@@ -226,7 +226,7 @@ void SaveStateAttach::serve() noexcept {
             order.rom_path.view(),
             order.load_hint == cores::LoadHint::XmlManifest
         };
-        if (auto begun = io_.primer.begin(env, target, order.decl); !begun)
+        if (auto begun = io_.primer.begin(env, target, order.decl, aperture_); !begun)
             finish_(false, begun.error());
         return;
     }

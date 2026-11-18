@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <string_view>
 
-#include "app/board_ops.h"
 #include "hal/spi_transport.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -45,13 +44,11 @@ public:
         hal::ISpiTransport& link,
         infra::OptRef<const svc::Vfs> vfs,
         SaveUploadRelay& saves,
-        infra::OptRef<ISleeper> sleeper,
         xthread::LogLane& log_lane
     ) noexcept
         : link_(link),
           vfs_(vfs),
           saves_(saves),
-          sleeper_(sleeper),
           log_lane_(log_lane.producer()) {}
 
     [[nodiscard]] Ex<std::size_t> flush_save_upload(const SaveCtx& ctx);
@@ -60,7 +57,7 @@ public:
 
     [[nodiscard]] bool save_upload_counted(const SaveCtx& ctx) noexcept;
 
-    void settle_save_lane(bool fio_free);
+    [[nodiscard]] bool settle_step(bool fio_free);
 
     [[nodiscard]] bool saves_drained() const noexcept;
 
@@ -74,7 +71,6 @@ private:
     hal::ISpiTransport& link_;
     infra::OptRef<const svc::Vfs> vfs_{};
     SaveUploadRelay& saves_;
-    infra::OptRef<ISleeper> sleeper_{};
     xthread::LogLane::Producer log_lane_;
     Tally tally_{};
 };

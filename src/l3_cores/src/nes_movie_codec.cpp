@@ -191,8 +191,8 @@ Ex<MovieFacts> NesFm2Codec::header_line(
 }
 
 Ex<void> NesFm2Codec::finish_header(const MovieFacts& f) const noexcept {
-    constexpr std::uint16_t kMovieVersion = 3;
-    if (f.version.number() != kMovieVersion)
+    constexpr MovieRevision kMovieVersion{3};
+    if (f.version != kMovieVersion)
         return std::unexpected(movie_refusal(MovieRefusal::NotAMovie, ERR_SITE()));
     if (f.ports.empty())
         return std::unexpected(movie_refusal(MovieRefusal::PortType, ERR_SITE()));
@@ -360,7 +360,10 @@ std::optional<IMovieFormat::DigestSpan> NesFm2Codec::rom_digest_span(
         + ((head[kInesFlags6At] & kInesTrainerBit) != 0 ? kTrainerBytes : 0u);
     if (prg + chr == 0 || proto::FileSize{offset + prg + chr} > size)
         return std::nullopt;
-    return DigestSpan{.offset = proto::FileSize{offset}, .length = proto::FileSize{prg + chr}};
+    return DigestSpan{
+        .offset = proto::kFileStart + proto::FileSize{offset},
+        .length = proto::FileSize{prg + chr}
+    };
 }
 
 }

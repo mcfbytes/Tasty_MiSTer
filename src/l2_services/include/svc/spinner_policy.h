@@ -2,6 +2,7 @@
 #pragma once
 
 #include "svc/types.h"
+#include "svc/vid_pid_key.h"
 
 namespace mister::svc {
 
@@ -12,9 +13,12 @@ struct SpinnerPolicy {
     Vid vid{};
     Pid pid{};
 
-    [[nodiscard]] constexpr bool claims(Vid v, Pid p) const noexcept {
+    [[nodiscard]] constexpr bool claims(VidPidKey device) const noexcept {
         const bool all_mice = vid == kAllMiceVid && pid == kAllMicePid;
-        const bool exact = vid != kAnyVid && pid != kAnyPid && v == vid && p == pid;
+        const bool exact = vid != kAnyVid
+            && pid != kAnyPid
+            && device.vid() == vid
+            && device.pid() == pid;
         return all_mice || exact;
     }
 };

@@ -39,21 +39,20 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
     std::vector<std::byte> out;
     std::array<std::byte, 4096> chunk{};
 
-    proto::FileSize got{};
-    while (got < size) {
-
-        auto n = file.read_at(got.file_word<std::size_t>(), chunk);
+    proto::FileOffset got = proto::kFileStart;
+    while (size.holds(got)) {
+        auto n = file.read_at(got, chunk);
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0)
             return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
         const proto::FileSize answered{*n};
-        if (got + answered > size)
+        if (got + answered > proto::kFileStart + size)
             return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
         out.insert(out.end(), chunk.data(), chunk.data() + *n);
         got += answered;
     }
-    if (got != size)
+    if (got != proto::kFileStart + size)
         return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
     return out;
 }
@@ -123,6 +122,13 @@ IdleKnobs idle_knobs_of(const svc::ConfigSnapshot& cfg) noexcept {
         .video_off_logo = cfg.video_off_logo != 0,
         .fb_terminal = cfg.fb_terminal != 0
     };
+}
+
+AutosaveKnobs autosave_knobs_of(const svc::ConfigSnapshot& cfg) noexcept {
+    AutosaveKnobs k{.enabled = cfg.autosave != 0};
+    if (cfg.autosave_info != 0)
+        k.saved_toast = std::chrono::seconds{cfg.autosave_info};
+    return k;
 }
 
 }

@@ -12,6 +12,7 @@
 #include "hal/boards_table.h"
 #include "menu_block.h"
 #include "report.h"
+#include "svc/card_writer.h"
 
 extern char** environ;
 
@@ -57,14 +58,14 @@ void announce_irq_pin(const hal::IrqPinResult& r) {
     if (r.outcome == hal::IrqPinOutcome::Applied) {
         std::fprintf(
             stderr,
-            "mister: irq %u (%.*s) confined to cpus 0x%x",
-            r.irq.v,
+            "mister: irq %s (%.*s) confined to cpus 0x%s",
+            r.irq.text().c_str(),
             alen,
             r.action.data(),
-            r.read_back.v
+            r.read_back.hex().c_str()
         );
         if (r.effective_known)
-            std::fprintf(stderr, ", effective 0x%x", r.effective.v);
+            std::fprintf(stderr, ", effective 0x%s", r.effective.hex().c_str());
         std::fputc('\n', stderr);
         return;
     }
@@ -214,7 +215,8 @@ void MenuMode::StderrVoice::fabric_not_ready(const hal::BoardProfile& board) con
 
 void MenuMode::storage_ready(svc::Vfs& vfs) {
 
-    if (auto d = vfs.ensure_dir("config"); !d) {
+    svc::CardWriter card{vfs};
+    if (auto d = card.ensure_dir("config"); !d) {
         report("ensure_dir(config)", d.error());
     }
 }
@@ -223,8 +225,8 @@ void MenuMode::StderrVoice::kernel(os::KernelRt kernel) const {
     std::fprintf(stderr, "mister: kernel: %s\n", kernel_label(kernel));
 }
 
-Ex<void> MenuMode::before_boot(app::LinkSession& session) {
-    const infra::OptRef<app::StdoutRouter> router = session.boot_stdout_router();
+Ex<void> MenuMode::before_boot(app::SessionOwner& owner) {
+    const infra::OptRef<app::StdoutRouter> router = owner.boot_stdout_router();
     if (!router)
         return {};
     return router->install_initial_silence();

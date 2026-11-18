@@ -38,7 +38,7 @@ std::optional<n64::DbMatch> N64DbReader::scan_file_(std::string_view name, const
     if (!file)
         return std::nullopt;
 
-    std::uint64_t off = 0;
+    proto::FileOffset off = proto::kFileStart;
     std::size_t carry = 0;
     bool skipping = false;
     for (;;) {
@@ -50,7 +50,7 @@ std::optional<n64::DbMatch> N64DbReader::scan_file_(std::string_view name, const
             return std::nullopt;
         const bool eof = (*got == 0);
         std::size_t filled = carry + *got;
-        off += *got;
+        off += proto::FileSize{*got};
         if (filled == 0)
             return std::nullopt;
 

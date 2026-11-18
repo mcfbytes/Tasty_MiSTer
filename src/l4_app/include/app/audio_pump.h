@@ -2,12 +2,16 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "app/staged_frame.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/types.h"
@@ -21,20 +25,24 @@ class Vfs;
 
 namespace mister::app {
 
+class UiWriteLane;
 class VideoWire;
 
 class AudioPump {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    AudioPump(const svc::Vfs& vfs, VideoWire& wire) noexcept : vfs_(vfs), wire_(wire) {}
+    AudioPump(const svc::Vfs& vfs, VideoWire& wire, infra::OptRef<UiWriteLane> writes) noexcept
+        : vfs_(vfs),
+          wire_(wire),
+          writes_(writes) {}
 
     void set_mute(bool on) noexcept;
     void set_attenuation(proto::Attenuation a) noexcept;
     void nudge(proto::VolumeStep step) noexcept;
     void toggle_mute() noexcept;
 
-    void step_core_volume(svc::VolumeStep step) noexcept;
+    void step_core_volume(proto::VolumeStep step) noexcept;
 
     [[nodiscard]] svc::AfilterEnable filter_enable() const noexcept {
         return model_.filter_enable();
@@ -68,10 +76,18 @@ private:
 
     void reload_filter_file_(bool enabled) noexcept;
 
-    void save_filter_cfg_() const noexcept;
+    void save_filter_cfg_() noexcept;
+
+    void write_(std::string_view rel, std::span<const std::byte> bytes) noexcept;
+
+    [[nodiscard]] std::vector<std::byte> read_config_(
+        std::string_view rel,
+        proto::FileSize cap
+    ) const;
 
     const svc::Vfs& vfs_;
     VideoWire& wire_;
+    infra::OptRef<UiWriteLane> writes_;
     svc::AfilterParser parser_{};
     svc::AudioService model_{svc::AudioService::create()};
 

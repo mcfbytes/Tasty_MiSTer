@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "app/lw_block_endpoint.h"
-#include "app/lw_line.h"
+#include "app/block_line.h"
 #include "app/sys_grant.h"
 #include "app/sys_route.h"
 #include "hal/read_window_port.h"
@@ -32,7 +32,7 @@ class LwSysEndpoint final : public svc::IIoCoworker,
     );
 
 public:
-    using Port = hal::IRegPort<hal::SysBlock, hal::RegAccess::ReadOnly>;
+    using Port = hal::IRegPort<hal::SysBlock>;
 
     static constexpr unsigned kMaxReads = 4;
 
@@ -78,7 +78,7 @@ private:
 
     Wiring w_;
     std::optional<hal::ReadWindowPort<hal::SysBlock, seat_owner::Io>> block_{};
-    LwLine line_{};
+    BlockLine<seat_owner::Io> line_{};
     bool recheck_ = false;
     std::optional<hal::SysBlock::Stflg> sent_stflg_{};
     os::MonotonicClock clock_{};

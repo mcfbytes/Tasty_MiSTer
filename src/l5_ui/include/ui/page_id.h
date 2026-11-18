@@ -68,6 +68,8 @@ enum class PageId : std::uint8_t {
     BtPair,
     BtDevices,
 
+    Indicators,
+
     kCount,
 };
 
@@ -80,8 +82,8 @@ enum class PageId : std::uint8_t {
 }
 
 static_assert(
-    static_cast<unsigned>(PageId::kCount) == 50,
-    "30 stock pages, nineteen pages with no stock state, and the closed sentinel. "
+    static_cast<unsigned>(PageId::kCount) == 51,
+    "30 stock pages, twenty pages with no stock state, and the closed sentinel. "
     "This pins the CARDINALITY only; the map itself — every ordinal, "
     "every New home — is joined by a check."
 );

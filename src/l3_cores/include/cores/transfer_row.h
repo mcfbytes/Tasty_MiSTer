@@ -37,7 +37,7 @@ struct TransferRow {
     std::uint8_t fill = 0;
 
     std::string_view source{};
-    std::uint32_t file_offset = 0;
+    proto::FileOffset file_offset{};
     proto::FileSize file_len{};
     proto::FileSize extent{};
     proto::FileSize length{};
@@ -49,12 +49,6 @@ struct TransferRow {
         proto::FileSize file_bytes
     ) const noexcept {
         return file_bytes * std::uint64_t{stride};
-    }
-
-    [[nodiscard]] constexpr proto::FileSize spread_at(
-        proto::FileSize file_position
-    ) const noexcept {
-        return file_position * std::uint64_t{stride};
     }
 
     [[nodiscard]] constexpr proto::FileSize extent_bytes(
@@ -86,9 +80,10 @@ struct TransferRow {
     if (!window)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r.addr});
     const os::PhysAddr at = aperture.advanced(window->region.offset).advanced(r.addr);
-    if (!hal::to_fabric(at).has_value())
+    const auto fabric = hal::FabricAddr::of(at);
+    if (!fabric)
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), r.addr});
-    return hal::FabricAddr{static_cast<std::uint32_t>(at.v)};
+    return fabric.value_or(hal::FabricAddr{});
 }
 
 }

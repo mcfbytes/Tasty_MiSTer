@@ -7,6 +7,7 @@
 
 #include "infra/fixed_ring.h"
 #include "infra/seat.h"
+#include "proto/ps2_control_word.h"
 
 namespace mister::proto {
 
@@ -57,13 +58,13 @@ public:
     static constexpr std::size_t kReplyCap = 16;
 
     template <class Decode>
-    void accept(std::uint16_t word, Decode&& decode) {
-        if ((word & 0x100u) == 0u)
+    void accept(Ps2ControlWord word, Decode&& decode) {
+        const std::optional<std::uint8_t> byte = word.byte();
+        if (!byte)
             return;
-        const auto byte = static_cast<std::uint8_t>(word);
         if (!awaiting_param_)
-            cmd_ = command_of(byte);
-        decode(byte);
+            cmd_ = command_of(*byte);
+        decode(*byte);
     }
 
     void end() noexcept {

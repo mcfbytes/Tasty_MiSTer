@@ -53,7 +53,7 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kPceCdTicks.speeds == 0, "PCE-CD engages no speed-indexed override");
+static_assert(kPceCdTicks.speeds == CdSpeedCount{}, "PCE-CD engages no speed-indexed override");
 
 static_assert(
     kPceCdCuePolicy.type_detect == svc::CuePolicy::TypeDetect::PerTrack,

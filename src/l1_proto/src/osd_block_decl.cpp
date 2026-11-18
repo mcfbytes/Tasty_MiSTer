@@ -31,9 +31,11 @@ constexpr DirEntryFacts kFacts{
 
     const OsdGeometry shape = e->word(OsdWord::Shape).osd_geometry();
     if (shape != OsdGeometry{hal::OsdBlock::kGeometry}) {
-        return std::unexpected(shape.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(shape.refusal(Errc::bad_format, ERR_SITE()));
     }
     return OsdBlockDecl{.offset = e->offset(), .size = e->size(), .geometry = shape};
 }
+
+static_assert(!CarriesOpBitmap<OsdWord>, "an OSDBUF entry declares no ops bitmap");
 
 }

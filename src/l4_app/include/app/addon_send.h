@@ -39,10 +39,10 @@ struct AddonDest {
     std::uint16_t v = 0;
     static constexpr unsigned kFioBits = 8;
 
-    [[nodiscard]] static constexpr AddonDest of(EntryNo entry, std::uint8_t fio) noexcept {
-        return AddonDest{
-            static_cast<std::uint16_t>((static_cast<std::uint16_t>(entry.v) << kFioBits) | fio)
-        };
+    [[nodiscard]] static constexpr AddonDest of(EntryNo entry, proto::FioIndexByte fio) noexcept {
+        return AddonDest{static_cast<std::uint16_t>(
+            (static_cast<std::uint16_t>(entry.v) << kFioBits) | fio.wire_word().low_byte()
+        )};
     }
 
     [[nodiscard]] constexpr proto::WideIoIndex wide() const noexcept {
@@ -53,7 +53,7 @@ struct AddonDest {
 };
 
 static_assert(
-    AddonDest::of(EntryNo{3}, 0x81) == AddonDest{0x0381},
+    AddonDest::of(EntryNo{3}, proto::FioIndexByte{0x81}) == AddonDest{0x0381},
     "stock's framing: the 1-based entry number high, the FIO index low"
 );
 static_assert(

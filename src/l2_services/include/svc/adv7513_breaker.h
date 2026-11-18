@@ -17,8 +17,6 @@ class I2cBreaker final : public II2cAdapter {
 public:
     static constexpr std::uint32_t kTripAfter = 3;
 
-    static constexpr std::uint8_t kOpWrite = 0x80;
-
     struct Failure {
         os::I2cAddr addr{};
         bool write = false;
@@ -26,7 +24,7 @@ public:
         OsErrno err{};
 
         [[nodiscard]] constexpr std::uint8_t op_byte() const noexcept {
-            return static_cast<std::uint8_t>(addr.v | (write ? I2cBreaker::kOpWrite : 0u));
+            return addr.op_byte(write);
         }
     };
 

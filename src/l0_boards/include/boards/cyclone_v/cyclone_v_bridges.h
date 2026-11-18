@@ -7,6 +7,7 @@
 #include "infra/error.h"
 #include "hal/board_windows.h"
 #include "hal/bridge_sequencer.h"
+#include "hal/reg_access.h"
 #include "hal/register_window.h"
 #include "hal/taken_window.h"
 #include "infra/seat.h"
@@ -16,6 +17,8 @@ namespace mister::boards::cyclone_v {
 struct SdrCtl {
     enum class Reg : std::uint32_t { FpgaPortRst = 0x5080 };
     static constexpr std::size_t kSize = 0x6000;
+
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::uint32_t kAllPortsEnable = 0x3FFF;
     static constexpr std::uint32_t kAllPortsReset = 0x0000;
 };
@@ -26,6 +29,7 @@ struct RstMgr {
         BrgModReset = 0x1C,
     };
     static constexpr std::size_t kSize = 0x100;
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::uint32_t kOutOfReset = 0x0;
     static constexpr std::uint32_t kInReset = 0x7;
 
@@ -35,12 +39,14 @@ struct RstMgr {
 struct SysMgr {
     enum class Reg : std::uint32_t { FpgaIntfGrpModule = 0x28 };
     static constexpr std::size_t kSize = 0x100;
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::uint32_t kAllOff = 0x0;
 };
 
 struct Nic301 {
     enum class Reg : std::uint32_t { Remap = 0x00 };
     static constexpr std::size_t kSize = 0x100;
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::uint32_t kBridgesVisible = 0x19;
     static constexpr std::uint32_t kBridgesHidden = 0x01;
 };

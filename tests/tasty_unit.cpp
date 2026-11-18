@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "support/check.h"
 #include "support/prelude_stand.h"
+#include "support/unlinked_plat.h"
 #include "support/video_quiet.h"
 
 #include "app/encode_status.h"
@@ -15,6 +16,7 @@
 #include "infra/diag_log.h"
 #include "app/replay_feeder.h"
 #include "app/replay_status.h"
+#include "app/run_policy.h"
 #include "app/ui_request_ring.h"
 #include "app/video_pump.h"
 #include "cores/md5.h"
@@ -87,6 +89,8 @@
 
 #include <minizip/zip.h>
 #include "support/stand_ini.h"
+#include "testing/recording_transport.h"
+#include "testing/step_clock.h"
 
 using namespace mister;
 
@@ -118,7 +122,7 @@ struct FakeReplay final : fw::IReplayPort {
         ++stops;
     }
 
-    app::FrameCount movie_frames() const noexcept override { return app::FrameCount{12}; }
+    app::MovieFrameCount movie_frames() const noexcept override { return app::MovieFrameCount{12}; }
 
     bool active() const noexcept override { return feeding; }
 
@@ -190,7 +194,7 @@ void publish_end(app::ReplayStatusCell& cell, app::ReplayEnd end) {
     const SeatScope rt{SeatTag::RT};
     app::ReplayStatus s{};
     s.end = end;
-    s.movie_frame = app::MovieFrame{3};
+    s.movie_frame = app::MoviePosition{3};
     cell.publish(s);
 }
 
@@ -328,27 +332,24 @@ struct Sess {
     }
 };
 
-struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
+struct VresLink final : mister::testing::RecordingTransport {
 
     proto::Link view{*this};
     std::uint32_t vtime = 0;
 
-    bool ready() const { return true; }
-
-    Ex<hal::CoreIdentity> identify() override { return hal::CoreIdentity{}; }
-
-    hal::CoreCapabilities latch_capabilities() override { return {}; }
-
-    void set_core_reset(bool) override {}
-
-    void select(hal::ChipSelect) override {
+    void select(hal::ChipSelect cs) override {
+        RecordingTransport::select(cs);
         open_ = true;
         first_ = true;
     }
 
-    void deselect() override { open_ = false; }
+    void deselect() override {
+        RecordingTransport::deselect();
+        open_ = false;
+    }
 
-    Ex<hal::SpiWord> transfer(hal::SpiWord w) override {
+protected:
+    hal::SpiWord answer(hal::SpiWord w) override {
         if (!open_)
             return hal::SpiWord{0};
         if (first_) {
@@ -375,26 +376,16 @@ struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
         return hal::SpiWord{in};
     }
 
-    Ex<void> block_write(std::span<const std::uint8_t>) override { return {}; }
-
-    Ex<void> block_read(std::span<std::uint8_t>) override { return {}; }
-
 private:
     bool open_ = false, first_ = true;
     std::uint8_t op_ = 0;
     unsigned cursor_ = 0;
 };
 
-struct ZeroClock final : os::IClock {
-    mister::os::RawMonotonicClock::time_point now() const override {
-        return mister::os::RawMonotonicClock::time_point{std::chrono::nanoseconds{0}};
-    }
-};
-
 struct PumpRig {
     Tmp root{"/tasty_tasty_pump"};
     std::optional<svc::Vfs> vfs{};
-    ZeroClock clock{};
+    mister::testing::StepClock clock{std::chrono::nanoseconds{0}};
     mister::testing::QuietVideoEnv quiet{};
     app::LinkTxChannel<mister::SeatTag::Ui> tx{};
     mister::testing::FakeLinkRouter replies{};
@@ -493,7 +484,7 @@ void test_cli_rec() {
     CHECK(a->record && a->record->view() == "/media/fat/cap");
     CHECK(a->rec.codec == app::RecCodec::Cscd && a->rec.every.count<std::uint16_t>() == 1);
     CHECK(a->rec.motion == app::RecMotion::Auto);
-    CHECK(a->rec.from_frame == app::MovieFrame{-1} && a->rec.to_frame == app::MovieFrame{-1});
+    CHECK(a->rec.from_frame == app::MoviePosition{-1} && a->rec.to_frame == app::MoviePosition{-1});
 }
 
 void test_cli_record_options() {
@@ -509,7 +500,7 @@ void test_cli_record_options() {
     CHECK(a->rec.motion == app::RecMotion::Full);
     CHECK(a->rec.scale == app::RecScale::Half);
     CHECK(a->rec.every.count<std::uint16_t>() == 4);
-    CHECK(a->rec.from_frame == app::MovieFrame{10} && a->rec.to_frame == app::MovieFrame{20});
+    CHECK(a->rec.from_frame == app::MoviePosition{10} && a->rec.to_frame == app::MoviePosition{20});
     CHECK(a->rec.segment_bytes == proto::FileSize{32ull << 20});
     const char* const bad_codec[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "ffv1"};
     const auto bc = fw::parse_tasty_args(std::span<const char* const>(bad_codec));
@@ -608,8 +599,8 @@ void test_session_passes_record_options() {
     x.args.rec.codec = app::RecCodec::Zmbv;
     x.args.rec.motion = app::RecMotion::Full;
     x.args.rec.every = *app::RecEvery::of(3);
-    x.args.rec.from_frame = app::MovieFrame{4};
-    x.args.rec.to_frame = app::MovieFrame{9};
+    x.args.rec.from_frame = app::MoviePosition{4};
+    x.args.rec.to_frame = app::MoviePosition{9};
     x.args.record.emplace();
     (void)x.args.record->assign(fat + "/cap");
     x.s.emplace(x.w, x.args, x.play_run);
@@ -627,7 +618,7 @@ void test_session_passes_record_options() {
     CHECK(got.opt.codec == app::RecCodec::Zmbv);
     CHECK(got.opt.motion == app::RecMotion::Full);
     CHECK(got.opt.every.count<std::uint16_t>() == 3);
-    CHECK(got.opt.from_frame == app::MovieFrame{4} && got.opt.to_frame == app::MovieFrame{9});
+    CHECK(got.opt.from_frame == app::MoviePosition{4} && got.opt.to_frame == app::MoviePosition{9});
     (void)::rmdir(fat.c_str());
     (void)::rmdir(media.c_str());
 }
@@ -1297,6 +1288,38 @@ void test_load_edge_rereads_geometry() {
     CHECK_EQ(r.pump->stats().edges, 1u);
 }
 
+void test_load_edge_sets_name_identity_then_edge() {
+    PumpRig r;
+    CHECK(r.pump.has_value());
+    if (!r.pump)
+        return;
+    app::IdentityLatch ident{};
+    {
+        const SeatScope rt{SeatTag::RT};
+        app::SessionIdentity published{};
+        (void)published.core.assign("NES");
+        (void)published.rbf.assign("NES_RBF");
+        published.setname_same_dir = true;
+        published.rotation = proto::RotationDir::Cw;
+        published.stem = app::RememberedStem::of("NES", {});
+        ident.publish(published);
+    }
+    fw::TastySink sink{*r.pump, infra::OptRef<const app::IdentityLatch>{ident}};
+    {
+        const SeatScope ui{SeatTag::Ui};
+        r.pump->on_pause();
+    }
+    CHECK(r.pump->i2c_held());
+    {
+        const SeatScope ui{SeatTag::Ui};
+        sink.deliver(infra::make<app::Event>(app::Event::CoreLoaded{}, app::Event::Head{}));
+    }
+    CHECK(r.pump->core_name() == "NES");
+    CHECK(r.pump->spd_name() == "NES_RBF");
+    CHECK(r.pump->spd_rotation() == proto::RotationDir::Cw);
+    CHECK(!r.pump->i2c_held());
+}
+
 void test_unhandled_events_are_counted_silently() {
     PumpRig r;
     CHECK(r.pump.has_value());
@@ -1347,7 +1370,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
 
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -1361,7 +1386,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     struct NoTakePlay final : fw::IReplayPort {
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -1375,7 +1402,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     struct NoTakeStop final : fw::IReplayPort {
         bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -1405,7 +1434,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
 
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         std::optional<fw::ReplayRefusal> refusal() const noexcept override { return std::nullopt; }
 
@@ -1419,7 +1450,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
 
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -1433,7 +1466,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
 
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -1447,7 +1482,9 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
 
         void take_stop() noexcept override {}
 
-        app::FrameCount movie_frames() const noexcept override { return app::FrameCount{}; }
+        app::MovieFrameCount movie_frames() const noexcept override {
+            return app::MovieFrameCount{};
+        }
 
         bool active() const noexcept override { return true; }
 
@@ -2617,7 +2654,7 @@ void test_cli_run_flags() {
     CHECK(a.has_value());
     if (!a)
         return;
-    CHECK(a->stop_at == std::optional<app::MovieFrame>{app::MovieFrame{3600}});
+    CHECK(a->stop_at == std::optional<app::MoviePosition>{app::MoviePosition{3600}});
     CHECK(a->linger == std::chrono::seconds{0});
     CHECK(a->strict);
     const char* const dflt[] = {"tasty", "play", "m.fm2", "--rom", "r.nes"};
@@ -2656,13 +2693,13 @@ void test_cli_run_flags() {
 void test_session_play_ask() {
     for (const bool strict : {false, true}) {
         Sess x;
-        x.args.stop_at = app::MovieFrame{3600};
+        x.args.stop_at = app::MoviePosition{3600};
         x.args.phase_us = std::chrono::microseconds{4000};
         x.args.strict = strict;
         x.s.emplace(x.w, x.args, x.play_run);
         to_run(x);
         CHECK_EQ(x.replay.plays, 1u);
-        CHECK(x.replay.last.stop_at == std::optional<app::MovieFrame>{app::MovieFrame{3600}});
+        CHECK(x.replay.last.stop_at == std::optional<app::MoviePosition>{app::MoviePosition{3600}});
         CHECK(
             x.replay.last.phase
             == std::optional<std::chrono::microseconds>{std::chrono::microseconds{4000}}
@@ -2723,7 +2760,9 @@ void test_session_direct_video_force() {
             return;
         const char* ini = "[MiSTer]\ndirect_video=1\nvideo_mode=8\n";
         CHECK(pump.root.put("MiSTer.ini", ini));
-        pump.pump->arm_replay_ini(false);
+        app::RunPolicy policy{};
+        policy.replay_ini = false;
+        pump.pump->apply_run_policy(policy);
         cell.publish(std::uint8_t{0});
         Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.w.video = infra::OptRef{*pump.pump};
@@ -2751,13 +2790,43 @@ void test_session_direct_video_force() {
     }
 }
 
+void test_front_policy_reaches_the_device_block() {
+    const testing::UnlinkedPlat unlinked{"tasty_unit_policy"};
+    CHECK(unlinked.ok());
+    if (!unlinked.ok())
+        return;
+    fw::TastyArgs args{};
+    args.vsync_adjust = app::VsyncAdjust::Match;
+    fw::TastySession::PlayRun run{};
+    fw::ReplayMode mode{args, run};
+    auto front = mode.front(unlinked.plat());
+    CHECK(front != nullptr);
+    if (!front)
+        return;
+    const fw::DeviceBlock::Parts::Frontend df = front->device_front();
+    CHECK(df.policy.force_vsync == app::VsyncAdjust::Match);
+    CHECK(df.policy.replay_ini.has_value() && !*df.policy.replay_ini);
+    CHECK(df.policy.save_root.view() == std::string_view{fw::kTastySaveRoot});
+    CHECK(df.policy.remembered == app::SessionOwner::RememberedFiles::Ignore);
+
+    struct NoStop final : app::IStopSignal {
+        bool stop_requested() const override { return false; }
+    } stop;
+
+    fw::DeviceBlock device{unlinked.plat(), stop, df};
+    CHECK(device.verdict().ok());
+    CHECK(device.video_pump_.vsync_adjust() == app::VsyncAdjust::Match);
+}
+
 void test_strict_rec_start_waits_for_the_ini() {
     PumpRig pump;
     CHECK(pump.pump.has_value());
     if (!pump.pump)
         return;
     CHECK(pump.root.put("MiSTer.ini", "[MiSTer]\ndirect_video=1\nvideo_mode=8\n"));
-    pump.pump->arm_replay_ini(true);
+    app::RunPolicy policy{};
+    policy.replay_ini = true;
+    pump.pump->apply_run_policy(policy);
     xthread::Telemetry<std::uint8_t, SeatTag::Main> cell{};
     Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
     x.w.video = infra::OptRef{*pump.pump};
@@ -2949,7 +3018,7 @@ void publish_running(app::ReplayStatusCell& cell, std::int32_t frame) {
     const SeatScope rt{SeatTag::RT};
     app::ReplayStatus s{};
     s.level = app::ReplayLevel::Running;
-    s.movie_frame = app::MovieFrame{frame};
+    s.movie_frame = app::MoviePosition{frame};
     cell.publish(s);
 }
 
@@ -3205,7 +3274,7 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(t.put("m.fm2", movie));
     fw::TastyArgs a{};
     CHECK(a.movie.assign("m.fm2"));
-    a.lead = app::FrameCount{1000};
+    a.lead = app::MovieFrameCount{1000};
     {
         StderrTo err;
         CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
@@ -3213,14 +3282,14 @@ void test_prepare_play_lead_rom_and_ram() {
         CHECK(text.find("outside") != std::string::npos);
         CHECK(text.find("--lead") != std::string::npos);
     }
-    a.lead = app::FrameCount{-9};
+    a.lead = app::MovieFrameCount{-9};
     {
         StderrTo err;
         CHECK(!fw::TastyPreflight{*vfs}.play_rom(a).has_value());
         CHECK(err.text().find("outside") != std::string::npos);
     }
     CHECK(t.put("r.nes", rom));
-    a.lead = app::FrameCount{-3};
+    a.lead = app::MovieFrameCount{-3};
     CHECK(a.rom.assign(t.p("r.nes")));
     CHECK(fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     a.phase_us = std::chrono::microseconds{0};
@@ -3420,7 +3489,7 @@ void test_prepare_play_names_its_refusal() {
     const std::string rom = nes_rom_bytes();
     CHECK(t.put("m.fm2", nes_movie(std::string_view(rom).substr(16))));
     CHECK(a.movie.assign("m.fm2"));
-    a.lead = app::FrameCount{1000};
+    a.lead = app::MovieFrameCount{1000};
     refused(
         [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
         fw::TastyRefusal::LeadOutOfRange,
@@ -4730,8 +4799,10 @@ int main(int argc, char** argv) {
     test_stop_stale_pid();
     test_rec_start_checks_the_owner();
     test_load_edge_rereads_geometry();
+    test_load_edge_sets_name_identity_then_edge();
     test_unhandled_events_are_counted_silently();
     test_start_waits_for_video_edge();
+    test_front_policy_reaches_the_device_block();
     test_strict_rec_start_waits_for_the_ini();
     test_take_play_refusal();
     test_a_port_that_forgets_a_verb_is_abstract();

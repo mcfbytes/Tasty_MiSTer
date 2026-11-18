@@ -43,6 +43,8 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .make_ladder = &manifests::make_psx_ladder},
     {.profile = manifests::kSnes,
      .make = &manifests::make_snes,
+     .make_loader = &manifests::make_snes_loader,
+     .derives_content = true,
      .make_companion = &manifests::make_msu_companion},
     {.profile = manifests::kSgb,
      .make = &manifests::make_sgb,
@@ -53,14 +55,16 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .derives_content = true},
     {.profile = manifests::kAtariSt,
      .make = &manifests::make_st,
-     .make_ladder = &manifests::make_st_ladder},
+     .make_ladder = &manifests::make_st_ladder,
+     .make_loader = &manifests::make_st_loader},
     {.profile = manifests::kThreeDo,
      .make = &manifests::make_threedo,
      .make_ladder = &manifests::make_threedo_ladder},
     {.profile = manifests::kMegaDrive, .make = &manifests::make_megadrive},
     {.profile = manifests::kN64,
      .make = &manifests::make_n64,
-     .make_loader = &manifests::make_n64_loader},
+     .make_loader = &manifests::make_n64_loader,
+     .make_save_store = &manifests::make_n64_save_store},
     {.profile = manifests::kNeoGeo,
      .make = &manifests::make_neogeo,
      .make_ladder = &manifests::make_neogeo_ladder,
@@ -85,6 +89,18 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .make = &make_arcade,
      .manifest_doc = infra::OptRef<const IManifestDocRole>{kMraRole}},
 });
+
+consteval bool channel_rows_carry_a_store() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.profile.saves_by_channel != (f.make_save_store != nullptr))
+            return false;
+    return true;
+}
+
+static_assert(
+    channel_rows_carry_a_store(),
+    "a saves_by_channel row needs make_save_store, and only such a row has one"
+);
 
 consteval bool kinds_are_the_rows() {
     for (std::size_t i = 0; i < kCoreTable.size(); ++i) {
@@ -186,9 +202,8 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
         && p.start_assets.empty()
         && p.signatures.empty()
         && p.windows.empty()
-        && p.staging.order == StageOrder::None
+        && !p.staging.staged
         && !p.suppresses_mgl
-        && !p.skips_memsz
         && !p.suppress_reset_status_write
         && !p.suppress_analog_followup
         && !p.analog_reshape
@@ -263,7 +278,7 @@ static_assert(manifests::kCdi.block_sector_floor.is_sector(2568));
 
 consteval bool staging_cores_declare_blank_save() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.profile.staging.order == StageOrder::None)
+        if (!f.profile.staging.staged)
             continue;
         if (!f.profile.blank_save.declared() && !f.profile.blank_save.generic_ff)
             return false;
@@ -448,7 +463,7 @@ static_assert(
 
 consteval bool staging_rows_declare_a_ladder() {
     for (const CoreFactory& f : kCoreTable) {
-        const bool staged = f.profile.staging.order != StageOrder::None;
+        const bool staged = f.profile.staging.staged;
         const bool laddered = staged || ladder_rows(f.profile.slots) != 0;
         if (laddered != (f.make_ladder != nullptr))
             return false;
@@ -468,7 +483,7 @@ static_assert(
 consteval bool laddered_rows_declare_one_disc_slot() {
     for (const CoreFactory& f : kCoreTable) {
         const std::size_t discs = disc_rows(f.profile.slots);
-        const bool staged = f.profile.staging.order != StageOrder::None;
+        const bool staged = f.profile.staging.staged;
         if (discs != (staged ? 1u : 0u))
             return false;
         if (discs == 1 && disc_slot_of(f.profile.slots) != f.profile.staging.disc_slot)
@@ -483,9 +498,21 @@ static_assert(
     "staging.disc_slot from it; any other row declares no Disc slot"
 );
 
+consteval bool staged_rows_grant_the_disc_crossing() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.profile.staging.staged && !f.profile.grants.has(Grant::Discs))
+            return false;
+    return true;
+}
+
+static_assert(
+    staged_rows_grant_the_disc_crossing(),
+    "a staged row's core reads HostServices::discs, so its profile must grant Discs"
+);
+
 consteval bool loader_rows_stream() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.make_loader != nullptr && f.profile.file_tx_whole)
+        if (f.make_loader != nullptr && f.profile.no_stream_role)
             return false;
     }
     return true;
@@ -493,7 +520,7 @@ consteval bool loader_rows_stream() {
 
 static_assert(
     loader_rows_stream(),
-    "a row with a MAIN loader answers the stream role: its profile is not file_tx_whole"
+    "a row with a MAIN loader answers the stream role: its profile cannot say no_stream_role"
 );
 
 consteval bool derived_rows_have_a_loader() {
@@ -558,7 +585,7 @@ std::span<const CoreFactory> core_table() {
 ) {
     if (hint == LoadHint::XmlManifest) {
         for (const CoreFactory& f : kCoreTable) {
-            if (f.profile.kind == CoreKind::Arcade)
+            if (f.manifest_doc)
                 return infra::OptRef<const CoreFactory>{f};
         }
         return {};

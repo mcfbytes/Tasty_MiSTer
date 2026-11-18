@@ -136,11 +136,18 @@ constexpr PhysRegion lw_region(const BoardProfile& profile) noexcept {
 }
 
 constexpr const PhysRegion& region(const BoardProfile& profile, RegionId id) noexcept {
-    return profile.regions[static_cast<std::size_t>(id)];
+    return row_of(profile.regions, id);
 }
 
 constexpr os::UioLineSpace doorbell_nodes(const BoardProfile& profile) noexcept {
-    return {.node_prefix = profile.kernel.doorbell_prefix, .lines = profile.f2h_lines};
+    if (profile.f2h_lines == 0u)
+        return {.node_prefix = profile.kernel.doorbell_prefix};
+    return {
+        .node_prefix = profile.kernel.doorbell_prefix,
+        .pool_first = profile.doorbells.first_f2h,
+        .first_node = profile.doorbells.vsync_line.next(),
+        .last_node = os::F2hLine{profile.f2h_lines - 1u}
+    };
 }
 
 inline constexpr const char* kCompatiblePath = "/proc/device-tree/compatible";

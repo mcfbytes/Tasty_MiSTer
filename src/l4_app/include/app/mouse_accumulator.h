@@ -11,7 +11,7 @@
 
 namespace mister::app {
 
-struct MouseDelta {
+struct MouseReport {
     svc::MouseMotion motion{};
     proto::MouseButtons buttons{};
     bool button_edge = false;
@@ -56,8 +56,8 @@ public:
         }
     }
 
-    MouseDelta take() noexcept {
-        MouseDelta d{};
+    MouseReport take() noexcept {
+        MouseReport d{};
         d.motion = svc::MouseMotion{x_.since(wm_x_), y_.since(wm_y_), wheel_.since(wm_w_)};
         d.buttons = buttons_;
         d.button_edge = (edges_ != wm_edges_);

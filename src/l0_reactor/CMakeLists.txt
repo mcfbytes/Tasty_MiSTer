@@ -1,5 +1,4 @@
 add_library(mister_reactor STATIC
-  src/core_notifiers.cpp
   src/executive.cpp
   src/frame_clock.cpp
   src/frame_main.cpp
@@ -15,7 +14,6 @@ target_link_libraries(mister_reactor
 tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/cause_decode.h
   reactor/cause_set.h
-  reactor/core_notifiers.h
   reactor/core_state.h
   reactor/core_token.h
   reactor/executive.h
@@ -26,7 +24,6 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/types.h
   reactor/link_decoder_decl.h
   reactor/notifier.h
-  reactor/notifier_slot.h
   reactor/round_recorder.h
   reactor/round_timer.h
   reactor/round_timing.h
@@ -34,5 +31,7 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/tick.h
   reactor/tick_deadline.h
   reactor/tick_no.h
+  reactor/round_lifecycle.h
+  reactor/service_slot.h
 )
 

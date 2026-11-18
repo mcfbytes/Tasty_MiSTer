@@ -44,7 +44,7 @@ if(TASTY_WITH_HDOSD)
   if(SLINT_COMPILER STREQUAL "download")
     message(FATAL_ERROR "SLINT_COMPILER=download fetches an unpinned binary: name a slint-compiler")
   endif()
-  find_package(Slint 1.18 REQUIRED)
+  find_package(Slint 1.19 REQUIRED)
   if(NOT EXISTS "${TASTY_HDOSD_FONT_DIR}/NotoSans-Regular.ttf"
      OR NOT EXISTS "${TASTY_HDOSD_FONT_DIR}/NotoSans-Bold.ttf")
     message(FATAL_ERROR "the HD OSD needs NotoSans-Regular.ttf and NotoSans-Bold.ttf in TASTY_HDOSD_FONT_DIR "

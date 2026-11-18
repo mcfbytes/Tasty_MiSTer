@@ -15,9 +15,11 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "hal/aperture_region.h"
+#include "hal/fpga_aperture.h"
 #include "hal/fpga_memory.h"
-#include "hal/phys_region.h"
 #include "proto/save_state_decl.h"
+#include "proto/types.h"
 #include "proto/save_state_name.h"
 #include "proto/state_slot.h"
 
@@ -43,7 +45,7 @@ public:
 
         [[nodiscard]] virtual Ex<std::size_t> read_at(
             std::string_view path,
-            std::uint64_t offset,
+            FileOffset at,
             std::span<std::byte> dst
         ) = 0;
 
@@ -74,7 +76,7 @@ public:
     public:
         virtual ~ISlotMap() = default;
 
-        [[nodiscard]] virtual Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) = 0;
+        [[nodiscard]] virtual Ex<hal::FpgaMemory> map(const hal::ApertureRegion& r) = 0;
 
     protected:
         ISlotMap() = default;
@@ -90,7 +92,7 @@ public:
         infra::OptRef<ISaveToast> toast{};
     };
 
-    SaveStateEngine(hal::PhysRegion aperture, const Environment& env) noexcept
+    SaveStateEngine(hal::FpgaAperture aperture, const Environment& env) noexcept
         : aperture_(aperture),
           env_(env) {}
 
@@ -112,7 +114,13 @@ public:
 
     bool window_valid(const SaveStateDecl& ss) const noexcept;
 
-    static hal::PhysRegion region_for(const SaveStateDecl& ss, StateSlot slot);
+    [[nodiscard]] Ex<hal::ApertureRegion> region_for(const SaveStateDecl& ss, StateSlot slot) const;
+
+    [[nodiscard]] static Ex<hal::ApertureRegion> slot_region(
+        const hal::FpgaAperture& aperture,
+        const SaveStateDecl& ss,
+        StateSlot slot
+    );
 
     bool mapped() const noexcept { return mapped_; }
 
@@ -126,7 +134,7 @@ public:
 
     std::uint32_t span_warnings() const noexcept { return span_warnings_; }
 
-    hal::PhysRegion aperture() const noexcept { return aperture_; }
+    hal::FpgaAperture aperture() const noexcept { return aperture_; }
 
 private:
     [[nodiscard]] Ex<void> map_slots(const SaveStateDecl& ss, bool remap);
@@ -134,7 +142,7 @@ private:
     void drop_slots() noexcept;
     std::string path_for(StateSlot slot) const;
 
-    hal::PhysRegion aperture_;
+    hal::FpgaAperture aperture_;
     Environment env_;
     SaveStateDecl window_{};
 

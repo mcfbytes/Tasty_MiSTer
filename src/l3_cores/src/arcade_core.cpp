@@ -89,17 +89,13 @@ std::string_view ArcadeCore::dip_choice(
 Ex<void> ArcadeCore::set_dip(proto::DipRowIndex row, proto::DipChoice choice) {
     TASTY_SEAT_BODY(ArcadeCore);
     if (!row.indexes(switches_.rows)) {
-        return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(row.v)}
-        );
+        return std::unexpected(row.refusal(Errc::slot_range, ERR_SITE()));
     }
     const mra::DipRow& d = row.pick(switches_.rows);
     if (!choice.within(choices_of(d))) {
-        return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(choice.v)}
-        );
+        return std::unexpected(choice.refusal(Errc::slot_range, ERR_SITE()));
     }
-    dip_cur_ = dip_cur_.with(d.field.mask(), choice.pick(d.choices).val);
+    dip_cur_ = dip_cur_.with(d.field.setting(choice.pick(d.choices).val));
     return send_dips_();
 }
 
@@ -117,10 +113,6 @@ Ex<void> ArcadeCore::on_mount(IoIndex slot, const MountedPath& p) {
     return stream_.mount(slot, p);
 }
 
-void ArcadeCore::on_set_pending_file_ext(std::string_view ext) noexcept {
-    stream_.set_pending_ext(ext);
-}
-
 std::uint64_t ArcadeCore::on_last_tx_bytes() const noexcept {
     return stream_.bytes();
 }
@@ -130,7 +122,7 @@ svc::Crc32 ArcadeCore::on_last_tx_crc() const noexcept {
 }
 
 std::unique_ptr<Core> make_arcade(const CoreProfile& p, const CoreGrant& g) {
-    ArcadeDocument doc = read_arcade_document(g.manifest.text, g.manifest.path, g.services.vfs)
+    ArcadeDocument doc = read_arcade_document(g.manifest.text, g.manifest.path, g.vfs)
                              .value_or(ArcadeDocument{});
     return std::make_unique<ArcadeCore>(p, g.services, std::move(doc.facts));
 }

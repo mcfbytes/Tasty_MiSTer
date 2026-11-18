@@ -194,7 +194,7 @@ std::optional<IMovieFormat::DigestSpan> SnesLsmvCodec::rom_digest_span(
     proto::FileSize size
 ) const noexcept {
 
-    return SnesMovieCodec::past_header(size, tail_remainder(size, kCopierGrid));
+    return SnesMovieCodec::past_header(size, proto::kFileStart + tail_remainder(size, kCopierGrid));
 }
 
 }

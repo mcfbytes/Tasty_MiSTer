@@ -11,7 +11,7 @@
 
 #include "infra/byte_view.h"
 #include "infra/decimal_text.h"
-#include "os/types.h"
+#include "os/dbus_wire_types.h"
 
 namespace mister::os {
 namespace {

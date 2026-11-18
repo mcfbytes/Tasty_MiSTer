@@ -91,7 +91,7 @@ std::optional<CmdVerb::TasPlay> parse_tas_play(std::string_view args) {
             const auto l = small_int(*lead);
             if (!l)
                 return std::nullopt;
-            v.lead = FrameCount{*l};
+            v.lead = MovieFrameCount{*l};
         }
     }
     if (!lstrip(args).empty())
@@ -159,9 +159,9 @@ std::optional<CmdVerb::RecStart> parse_rec(std::string_view args) {
             if (!take(bit))
                 return std::nullopt;
             if (key == "from")
-                v.opt.from_frame = MovieFrame{*n};
+                v.opt.from_frame = MoviePosition{*n};
             else
-                v.opt.to_frame = MovieFrame{*n};
+                v.opt.to_frame = MoviePosition{*n};
         } else if (key == "segment") {
             const auto n = parse_rec_size(val);
             if (!n || !rec_segment_ok(*n) || !take(kSeg))

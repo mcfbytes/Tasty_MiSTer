@@ -43,11 +43,14 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/grant_gen.h
   infra/grant_lease.h
   infra/pause_latch.h
+  infra/release_gen.h
+  infra/release_latch.h
   infra/persist.h
   infra/pool_slot.h
   infra/posix_compat.h
   infra/rt_latency.h
   infra/rt_stats.h
+  infra/service_set.h
   infra/service_slot.h
   infra/seat.h
   infra/seat_main.h
@@ -70,5 +73,12 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/kick_policy.h
   infra/wake_flag.h
   infra/wired_end.h
+  infra/decimal_text.h
+  infra/hex_text.h
+  infra/lw_offset_label.h
+  infra/observed.h
+  infra/pause_gen.h
+  infra/polled.h
+  infra/seat_role.h
 )
 

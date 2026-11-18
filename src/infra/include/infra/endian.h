@@ -25,7 +25,9 @@ template <class T>
 template <class T, ByteLike B>
     requires(std::is_trivially_copyable_v<T> && !std::is_same_v<std::remove_cv_t<B>, std::byte>)
 [[nodiscard]] constexpr T load_native(std::span<B, sizeof(T)> b) noexcept {
-    return load_native<T>(byte_cast<const std::byte>(std::span<B, sizeof(T)>(b)));
+    std::array<std::byte, sizeof(T)> raw;
+    std::ranges::transform(b, raw.begin(), [](B x) { return std::byte{x}; });
+    return load_native<T>(std::span<const std::byte, sizeof(T)>(raw));
 }
 
 template <class T>

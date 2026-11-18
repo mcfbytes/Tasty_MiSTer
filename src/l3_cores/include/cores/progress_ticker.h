@@ -31,12 +31,11 @@ public:
             sink_->on_load_progress(Progress{});
     }
 
-    void advance(std::uint64_t offset) noexcept {
-        const proto::FileSize at{offset};
-        if (!sink_ || at < next_at_ || step_ >= kProgressSteps)
+    void advance(proto::FileSize done) noexcept {
+        if (!sink_ || done < next_at_ || step_ >= kProgressSteps)
             return;
         std::uint16_t reached = step_;
-        while (reached < kProgressSteps && at >= per_step_ * std::uint64_t{reached + 1u})
+        while (reached < kProgressSteps && done >= per_step_ * std::uint64_t{reached + 1u})
             ++reached;
         if (reached <= step_)
             return;

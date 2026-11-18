@@ -8,16 +8,14 @@ namespace mister::svc {
 
 namespace {
 
-std::optional<FileSize> cue_byte_pos(const Track& t, Lba at, FileSize s_off = FileSize{}) noexcept {
-    const std::int64_t lba_bytes = static_cast<std::int64_t>(
-        proto::BlockSize{t.sector_size}.position_of(at)
+std::optional<proto::FileOffset> cue_byte_pos(
+    const Track& t,
+    Lba at,
+    FileSize s_off = FileSize{}
+) noexcept {
+    return proto::FileOffset::of_seek(
+        (proto::BlockSize{t.sector_size}.position_of(at) + s_off).seek_offset() - t.offset
     );
-    const std::int64_t pos = lba_bytes
-        - t.offset
-        + static_cast<std::int64_t>(proto::detail::positional_word(s_off));
-    if (pos < 0)
-        return std::nullopt;
-    return FileSize{static_cast<std::uint64_t>(pos)};
 }
 
 }
@@ -30,10 +28,10 @@ Ex<void> FileTableBacking::do_read_payload(
 ) {
     IFile* f = resident_(t.backing);
     if (f == nullptr)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), t.backing.v});
-    const std::optional<FileSize> pos = cue_byte_pos(t, lba, FileSize{s_off});
+        return std::unexpected(t.backing.refusal(Errc::not_found, ERR_SITE()));
+    const std::optional<proto::FileOffset> pos = cue_byte_pos(t, lba, FileSize{s_off});
     if (!pos)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), proto::detail_of(lba)});
+        return std::unexpected(lba.refusal(Errc::bad_format, ERR_SITE()));
     auto rd = f->read_at(*pos, out);
     if (!rd)
         return std::unexpected(rd.error());
@@ -48,7 +46,7 @@ Ex<void> FileTableBacking::do_read_payload(
 void FileTableBacking::advise_first_window(const Track& t0) noexcept {
     if (IFile* const f = resident_(t0.backing)) {
         constexpr FileSize kFirstWindowBytes{1u * 1024u * 1024u};
-        const FileSize pos = cue_byte_pos(t0, t0.start).value_or(FileSize{});
+        const proto::FileOffset pos = cue_byte_pos(t0, t0.start).value_or(proto::kFileStart);
         (void)f->advise(IFile::Access::WillNeed, pos, kFirstWindowBytes);
     }
 }
@@ -57,7 +55,7 @@ void FileTableBacking::advise_ahead(Lba lba, const Track& t, proto::BlockCount s
     IFile* const f = resident_(t.backing);
     if (f == nullptr)
         return;
-    const std::optional<FileSize> pos = cue_byte_pos(t, lba);
+    const std::optional<proto::FileOffset> pos = cue_byte_pos(t, lba);
     if (!pos)
         return;
     const FileSize len{proto::BlockSize{t.sector_size}.length_of(sectors)};

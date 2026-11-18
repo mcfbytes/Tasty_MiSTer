@@ -73,10 +73,10 @@ Ex<void> CdDrive::stage_disc_payload(
     return wire_.bracket_inline(*info, *written, sink);
 }
 
-void CdDrive::set_region(std::uint8_t region) {
+void CdDrive::set_region(proto::RegionCode region) {
     TASTY_SEAT_BODY(CdDrive);
     if (engine_)
-        engine_->set_region(region != 0);
+        engine_->set_region(!region.is_clear());
 }
 
 Ex<void> CdDrive::deferred_reset() {

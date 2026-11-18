@@ -3,7 +3,10 @@
 
 #include <cstdint>
 
-#include "infra/seat.h"
+#include "hal/types.h"
+#include "os/types.h"
+#include "proto/block_line.h"
+#include "proto/irq_binding.h"
 
 namespace mister::proto {
 
@@ -13,6 +16,12 @@ struct DeclaredLine {
     std::uint32_t cause_off = 0;
 
     [[nodiscard]] constexpr bool declared() const noexcept { return pool != 0; }
+
+    [[nodiscard]] constexpr bool agrees(BlockLine owner) const noexcept {
+        return !declared()
+            || (pool == os::to_ordinal(owner.line) + kIrqPoolFirstLine
+                && owner.cause == hal::LwOffset{cause_off});
+    }
 
     [[nodiscard]] static constexpr DeclaredLine of(std::uint32_t w) noexcept {
         return {

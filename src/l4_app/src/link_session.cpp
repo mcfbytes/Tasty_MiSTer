@@ -17,7 +17,6 @@
 #include "app/rumble_players_cell.h"
 
 #include "app/osd_wire.h"
-#include "app/rt_relax_scope.h"
 #include "app/window_job_service.h"
 #include "cores/window_job.h"
 #include "app/ini_parse.h"
@@ -71,7 +70,6 @@ LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
     return LinkBinder::Wiring{
         .exec = parts.exec,
         .state = parts.core_state,
-        .log_lane = parts.log_lane,
         .feeder = infra::OptRef<PcmRingFeeder>{parts.services.feeder},
         .tenant = infra::OptRef<proto::IFioTenant>{parts.services.saves},
     };
@@ -99,7 +97,7 @@ LinkSession::LinkSession(
       mailbox_(parts.services.mailbox),
       disks_(parts.services.disks),
       saves_(parts.services.saves),
-      nvram_(link, parts.vfs, saves_, parts.board_ops.sleeper, parts.log_lane),
+      nvram_(link, parts.vfs, saves_, parts.log_lane),
       window_jobs_(parts.services.window_jobs),
       link_inbox_(parts.link_inbox),
       ui_inbox_(parts.ui_inbox),
@@ -108,14 +106,13 @@ LinkSession::LinkSession(
       router_(parts.router),
       out_{router_},
       sampler_(samples, router_, static_cast<const proto::ISessionLive&>(*this), parts.pin_levels),
-      config_cell_(parts.config_cell),
       identity_record_cell_(parts.identity_record_cell),
       boot_(machine_, fenced_signals_),
-      config_(config_cell_, boot_),
       video_(parts.video),
       rumble_players_(parts.rumble_players),
       osd_(parts.osd),
       osd_mask_decoder_(link, router_, static_cast<const proto::IOsdFocus&>(*this)),
+      osd_mask_cell_(parts.osd_mask_cell),
       ops_(parts.board_ops),
       reboot_(
           RebootAnswer::Wiring{
@@ -125,12 +122,14 @@ LinkSession::LinkSession(
               .storage_life = parts.services.storage_life
           }
       ),
-      switch_park_(parts.main_wake),
+
+      fabric_cell_(parts.fabric_cell),
+      switch_park_(parts.switch_park),
 
       session_(proto::CoreSession::detached(link, fenced_signals_, &binder_.fio_queue())),
       uart_(parts.uart_handoffs),
       log_lane_(parts.log_lane.producer()),
-      ladder_cell_(parts.ladder_cell),
+      diag_ask_(parts.diag_ask),
       cheats_(parts.cheats),
       save_copy_(parts.save_copy),
       clock_(parts.clock),
@@ -161,7 +160,6 @@ LinkSession::LinkSession(
               .link = link,
               .binder = binder_,
               .clock = clock_,
-              .ops = parts.board_ops,
               .cheats = cheats_,
               .bindings = bindings_,
               .link_rx = link_rx_,
@@ -170,6 +168,7 @@ LinkSession::LinkSession(
               .session_tally = tally_,
               .options = options_,
               .log_lane = parts.log_lane,
+              .save_backends = parts.services.save_backends,
               .vfs = parts.vfs,
               .storage_life = parts.services.storage_life,
               .disc_backend = parts.services.disc_backend,
@@ -238,16 +237,12 @@ LinkSession::LinkSession(
               .bindings = bindings_,
               .cheats = cheats_,
               .osd = osd_,
-              .ops = parts.board_ops,
               .slot_bindings = slot_bindings_,
               .tenancy = tenancy_,
               .session_tally = tally_,
               .window_jobs = infra::OptRef{parts.services.window_jobs}
           }
-      ) {
-    if (parts.stdout_routing)
-        enable_stdout_routing();
-}
+      ) {}
 
 LinkSession::~LinkSession() = default;
 
@@ -296,7 +291,7 @@ void LinkSession::take_park_ask_() noexcept {
     const bool was = park_.engaged();
     park_.poll(switch_park_);
     if (!was && park_.engaged())
-        encoder_.drop_pads();
+        release_pads_();
 }
 
 void LinkSession::publish_fabric_() {
@@ -395,9 +390,6 @@ void LinkSession::tick(RoundEntry entry) {
     }
 
     if (park_.asked()) {
-
-        if (binder_.bridge_windows_live())
-            binder_.retry_release();
         const bool torn_down = dropped_gen_ == park_.gen() && encoder_.holds() != holds_at_drop_;
 
         const bool held_back = !torn_down
@@ -436,6 +428,7 @@ Delivered LinkSession::deliver(
     const auto kind = infra::kind_of(op);
     ILinkEncoder::Outcome r = ILinkEncoder::Outcome::Dropped;
     bool spent = false;
+    Delivered::Edge edge = Delivered::Edge::None;
     if (admitted(window_for(kind), ctx)) {
         switch (target_for(kind)) {
             case OpTarget::Wire:
@@ -446,13 +439,22 @@ Delivered LinkSession::deliver(
                 break;
             case OpTarget::Transfer: {
                 const auto d = infra::dispatch<LinkOpRoutes<OpTarget::Transfer>>(op, held_, ctx);
+
+                if (d.edge == Delivered::Edge::DownloadClosed)
+                    osd_mask_decoder_.rearm();
                 r = d.outcome;
                 spent = d.round_spent;
+                edge = d.edge;
                 break;
             }
-            case OpTarget::Mount:
+            case OpTarget::Mount: {
+                const svc::Generation closed = slot_bindings_.save_bracket_gen();
                 r = infra::dispatch<LinkOpRoutes<OpTarget::Mount>>(op, slot_bindings_, ctx);
+
+                if (slot_bindings_.save_bracket_gen() != closed)
+                    osd_mask_decoder_.rearm();
                 break;
+            }
             case OpTarget::Options:
                 r = infra::dispatch<LinkOpRoutes<OpTarget::Options>>(
                     op,
@@ -490,7 +492,7 @@ Delivered LinkSession::deliver(
                 core->status_changed();
         }
     }
-    return Delivered{r, spent};
+    return Delivered{r, spent, edge};
 }
 
 ILinkEncoder::Outcome LinkSession::on(
@@ -536,7 +538,6 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
     mailbox_.forget();
     disks_.forget();
     saves_.forget();
-    RtRelaxScope scope(ops_);
     if (const auto r = detach(); !r) {
         tally_.last_error = r.error();
         fail_machine_();
@@ -555,8 +556,6 @@ ILinkEncoder::Outcome LinkSession::on(
         ++tally_.load_facts_refusals;
         return ILinkEncoder::Outcome::Dropped;
     }
-
-    RtRelaxScope scope(ops_);
 
     const infra::OptRef<const InternedFile> image = ctx.tx.file(a.image);
     if (!current->apply_load_facts(
@@ -605,21 +604,12 @@ ILinkEncoder::Outcome LinkSession::on(
     const infra::OptRef<const BuiltCore> slot = held
         ? infra::OptRef<const BuiltCore>{tenancy_.bay().at(*held)}
         : infra::OptRef<const BuiltCore>{};
-    osd_.bind_rows(slot ? slot->osd_pages : OsdPageRoute::Link);
-    encoder_.bind_pads(
-        slot && slot->pads ? infra::OptRef<const LwPads>{*slot->pads}
-                           : infra::OptRef<const LwPads>{}
+    bind_routes_(
+        slot ? infra::OptRef<const SessionRoutes>{slot->routes}
+             : infra::OptRef<const SessionRoutes>{},
+        slot ? proto::BuildGeneration::of_wire(slot->gen) : proto::BuildGeneration{},
+        made.has_value()
     );
-
-    rows_.bind_status_route(
-        slot ? slot->status_route : StatusRoute::Link,
-        slot ? proto::BuildGeneration::of_wire(slot->gen) : proto::BuildGeneration{}
-    );
-
-    if (made && slot)
-        slot_bindings_.slots().bind_lw_slots(slot->lw_slots);
-
-    rows_.bind_block_poll(made && slot ? slot->block_poll : BlockPollRoute::Link);
     const infra::OptRef<cores::Core> current = tenancy_.core();
 
     if (!out_.push(
@@ -635,7 +625,7 @@ ILinkEncoder::Outcome LinkSession::on(
         ++tally_.core_made_drops;
     if (!made) {
 
-        encoder_.drop_pads();
+        release_pads_();
         (void)binder_.unbind_session();
         tally_.last_error = made.error();
         fail_machine_();
@@ -644,11 +634,29 @@ ILinkEncoder::Outcome LinkSession::on(
     return ILinkEncoder::Outcome::Encoded;
 }
 
+void LinkSession::bind_routes_(
+    infra::OptRef<const SessionRoutes> routes,
+    proto::BuildGeneration gen,
+    bool made
+) noexcept {
+    osd_.bind_rows(routes ? routes->osd : OsdPageRoute::Link);
+    encoder_.bind_pads(
+        routes && routes->pads ? infra::OptRef<const LwPads>{*routes->pads}
+                               : infra::OptRef<const LwPads>{}
+    );
+
+    rows_.bind_status_route(routes ? routes->status : StatusRoute::Link, gen);
+
+    if (made && routes)
+        slot_bindings_.slots().bind_lw_slots(routes->lw_slots);
+
+    rows_.bind_block_poll(made && routes ? routes->block_poll : BlockPollRoute::Link);
+}
+
 ILinkEncoder::Outcome LinkSession::on(
     const proto::LinkOp::SessionUp& a,
     const LinkOpCtx&
 ) noexcept {
-    RtRelaxScope scope(ops_);
     if (const auto r = perform_session_up_(a); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -672,23 +680,9 @@ ILinkEncoder::Outcome LinkSession::on(
 }
 
 ILinkEncoder::Outcome LinkSession::on(
-    const proto::LinkOp::BindDoorbells& a,
-    const LinkOpCtx& ctx
-) noexcept {
-    bindings_.bind_doorbells(a, ctx.tx);
-    return ILinkEncoder::Outcome::Encoded;
-}
-
-ILinkEncoder::Outcome LinkSession::on(
     const proto::LinkOp::BindConfig& a,
     const LinkOpCtx& ctx
 ) noexcept {
-
-    const ConfigPair::Out bound = config_.bind();
-    if (bound.advise)
-        push(Event::SessionAdvisory{.why = *bound.advise});
-    if (bound.dropped)
-        ++tally_.link_op_drops;
     video_.set_key_map(a.conf);
     osd_.bind_rotation(a.osd_rotation);
     if (a.waitmount_exhausted) {
@@ -818,7 +812,7 @@ Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(const BootArgs& args) {
         return std::unexpected(req.error());
     arm_request();
 
-    encoder_.drop_pads();
+    release_pads_();
 
     if (!req->path.empty()) {
         UiRequest::LoadCore sw = boot_.program(*req);
@@ -837,25 +831,13 @@ Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(const BootArgs& args) {
     return std::nullopt;
 }
 
-Ex<void> LinkSession::load_core(const LoadRequest& req) {
-    if (req.policy == ReloadPolicy::ReExec)
-        return boot_.re_exec(req);
+Ex<void> LinkSession::load_core(const LoadRequest&) {
 
     return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
 }
 
-Ex<void> LinkSession::reset_core() {
-
-    if (session_.type() != proto::CoreType::EightBit) {
-        return std::unexpected(
-            Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(session_.type())}
-        );
-    }
-    return session_.pulse_reset();
-}
-
 bool LinkSession::names_park_(proto::BindGeneration g) const noexcept {
-    return pause_gen_of(g) == park_.gen();
+    return g.pause_gen() == park_.gen();
 }
 
 void LinkSession::apply_core_(const proto::LinkOp::ApplyCore& a) {
@@ -913,7 +895,7 @@ void LinkSession::adopt_programmed_core_() {
 Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     if (const auto r = raise_session_(op.rtc); !r) {
 
-        encoder_.drop_pads();
+        release_pads_();
         (void)binder_.unbind_session();
         refuse_start_(r.error());
         fail_machine_();
@@ -939,6 +921,10 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     options_.publish_dip_choices(tenancy_.core());
     options_.publish_option_table(tenancy_.core());
     osd_mask_decoder_.forget(front_end);
+    osd_mask_decoder_.rearm();
+
+    if (osd_mask_cell_)
+        osd_mask_cell_->publish(proto::OsdMask{});
     rows_.arm_session_polls(front_end);
     machine_.close(
         Event::CoreLoaded{
@@ -957,10 +943,9 @@ Ex<ExitReboot> LinkSession::shutdown() {
     struct PublishOnExit {
         LinkSession* self;
 
-        ~PublishOnExit() { self->publish_diag(); }
+        ~PublishOnExit() { self->publish_diag_final(); }
     } publish_on_exit{this};
 
-    nvram_.settle_save_lane(fio_free_());
     const auto d = detach();
 
     if (tenancy_.drop_owed())
@@ -971,13 +956,28 @@ Ex<ExitReboot> LinkSession::shutdown() {
     release_bus();
 
     if (fpga_unconfigured() && ever_running_) {
-        boot_.hold_for_reboot();
+        boot_.hold_core();
         fail_machine_();
         return ExitReboot::Cold;
     }
     if (!d)
         return std::unexpected(d.error());
     return ExitReboot::None;
+}
+
+void LinkSession::hold_core() {
+    TASTY_SEAT_BODY(LinkSession);
+    boot_.hold_core();
+}
+
+bool LinkSession::save_lane_fio_free() noexcept {
+    TASTY_SEAT_BODY(LinkSession);
+    return fio_free_();
+}
+
+bool LinkSession::settle_save_step(bool fio_free) {
+    TASTY_SEAT_BODY(LinkSession);
+    return nvram_.settle_step(fio_free);
 }
 
 void LinkSession::release_bus() noexcept {
@@ -999,6 +999,17 @@ static_assert(
     "the generic profile's drain bound is stock's four-iteration loop"
 );
 
+void LinkSession::drop_routes_() noexcept {
+    encoder_.drop_pads();
+    osd_.bind_rows(OsdPageRoute::Link);
+    rows_.bind_status_route(StatusRoute::Link, proto::BuildGeneration{});
+    rows_.bind_block_poll(BlockPollRoute::Link);
+}
+
+void LinkSession::release_pads_() noexcept {
+    encoder_.drop_pads();
+}
+
 Ex<void> LinkSession::detach() {
 
     const LogInstant t0 = log_now();
@@ -1011,11 +1022,7 @@ Ex<void> LinkSession::detach() {
 
     slot_bindings_.drop_bindings();
 
-    encoder_.drop_pads();
-
-    osd_.bind_rows(OsdPageRoute::Link);
-    rows_.bind_status_route(StatusRoute::Link, proto::BuildGeneration{});
-    rows_.bind_block_poll(BlockPollRoute::Link);
+    drop_routes_();
 
     if (auto r = binder_.unbind_session(); !r)
         return r;
@@ -1070,14 +1077,11 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     cond.starting = start_.on();
     out.link = cond;
     out.core_shutdowns = tenancy_.tally().core_shutdowns;
-    const bool status_lw = rows_.status_route() == StatusRoute::Lw;
-    out.stage_status_change = status_lw ? rows_.axi_status_decoder().last()
-                                        : rows_.status_decoder().last();
-    out.status_reply_refusals = rows_.status_decoder().flush_refusals()
-        + rows_.axi_status_decoder().flush_refusals();
-    out.status_lw = status_lw;
-    out.status_lw_adopts = rows_.axi_status_decoder().adopted();
-    out.status_lw_stale = rows_.axi_status_decoder().stale();
+    out.stage_status_change = rows_.status_decoder().last().nibble();
+    out.status_reply_refusals = rows_.status_decoder().flush_refusals();
+    out.status_lw = rows_.status_route() == StatusRoute::Lw;
+    out.status_lw_adopts = rows_.axi_status_source().adopted();
+    out.status_lw_stale = rows_.axi_status_source().stale();
     out.prefetch_park_timeouts = slot_bindings_.tally().prefetch_park_timeouts;
     out.stale_owner_steps = tally_.stale_owner_steps;
     out.start_answer_drops = start_answer_drops();
@@ -1112,23 +1116,13 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
 
     out.last_error_detail = tally_.last_error.detail;
 
-    const LadderCell lad = ladder_cell_.sample().value;
-    const cores::BootLadder::Report& rep = lad.report;
-    out.ladder_live = lad.live;
-    out.ladder_pc = lad.pc;
-    out.ladder_rungs = rep.rungs;
-    out.ladder_bytes = rep.bytes_downloaded;
-    out.ladder_assets = rep.assets_loaded;
-    out.ladder_bios_found = rep.bios_found;
-    out.ladder_disc_mounted = rep.disc_mounted;
-    out.ladder_save_mounted = rep.save_mounted;
     out.file_tx_count = held_.tally().downloads_closed;
     out.open_saves_mounted = held_.tally().open_saves_mounted;
     out.open_save_refusals = held_.tally().open_save_refusals;
-    const proto::IoIndex download = held_.last_download().value_or(proto::IoIndex{});
+    const proto::FioIndexByte download = held_.last_download().value_or(proto::FioIndexByte{});
     out.file_tx_bytes = held_.last_tx_bytes();
 
-    out.file_tx_index = proto::WideIoIndex::of(download, 0);
+    out.file_tx_index = proto::WideIoIndex::of(download);
 
     const proto::SpiBlockDecoder::Counters& bc = rows_.block_decoder().counters();
     out.blk_rounds = bc.passes;
@@ -1152,23 +1146,24 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.blk_stale = bd.stale_completions;
 }
 
-void LinkSession::publish_diag() noexcept {
+void LinkSession::publish_diag_record() noexcept {
     DiagCounters d{};
     gather_diag(d);
     diag_.publish(d);
 }
 
-DiagCounters LinkSession::diag_counters() const noexcept {
-    return diag_.sample().value;
+void LinkSession::publish_diag() noexcept {
+    if (diag_ask_ && !diag_ask_seen_.take_if_changed(*diag_ask_))
+        return;
+    publish_diag_record();
 }
 
-void LinkSession::publish_doorbell_stats() noexcept {
-    const DoorbellStats d = binder_.doorbell_stats();
+void LinkSession::publish_diag_final() noexcept {
+    publish_diag_record();
+}
 
-    if (d == doorbell_last_)
-        return;
-    doorbell_last_ = d;
-    doorbell_cell_.publish(d);
+DiagCounters LinkSession::diag_counters() const noexcept {
+    return diag_.sample().value;
 }
 
 void LinkSession::poll_osd_mask() {
@@ -1180,7 +1175,10 @@ void LinkSession::poll_osd_mask() {
         return;
     if (const std::optional<bool> edge = rows_.latch_osd_edge())
         on_osd_visibility_edge(*edge);
-    osd_mask_decoder_.service();
+    if (const std::optional<proto::OsdMask> landed = osd_mask_decoder_.service()) {
+        if (osd_mask_cell_)
+            osd_mask_cell_->publish(*landed);
+    }
 }
 
 bool LinkSession::osd_focused() const noexcept {
@@ -1227,21 +1225,8 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
     if (tenancy_.core().has_value()) {
         rows_.bind_block_drain(tenancy_.core());
         std::array<reactor::LinkDecoderDecl, kMaxServices> rows{};
-        const SessionBindings::Doorbells& db = bindings_.doorbells();
-
-        const std::optional<xthread::PoolSlot> held = tenancy_.bay().slot_of(
-            tenancy_.adopted_slot()
-        );
-        if (!held)
-            return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
-        const BuiltCore& built = tenancy_.bay().at(*held);
-        if (auto r = binder_.bind_session(
-                rows_.census_rows(rows, tenancy_.core()),
-                tenancy_.core(),
-                db.table(),
-                db.declared,
-                built.lines
-            );
+        if (auto r = binder_
+                         .bind_session(rows_.census_rows(rows, tenancy_.core()), tenancy_.core());
             !r) {
             return r;
         }

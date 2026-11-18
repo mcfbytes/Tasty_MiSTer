@@ -7,6 +7,7 @@
 #include "infra/seat.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/block_geometry.h"
+#include "proto/slot_attributes.h"
 #include "proto/storage_request.h"
 #include "proto/types.h"
 
@@ -36,6 +37,7 @@ struct SlotRecord {
         bool writable = false;
         bool growable = false;
         bool deferred_create = false;
+        MountClass mount = MountClass::Image;
     };
 
     struct Credit {

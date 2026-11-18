@@ -48,7 +48,7 @@ public:
 
     static constexpr std::uint32_t kAckTicks = 75;
 
-    [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
+    [[nodiscard]] Ex<proto::SessionParams> stream_opening(const StreamAsk& ask) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
     [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return tx_.bytes(); }
@@ -90,17 +90,20 @@ public:
 private:
     struct Status {
 
+        struct Words {
+            hal::SpiWord track_flags;
+            hal::SpiWord fade_volume;
+        };
+
         std::optional<svc::TrackNumber> track{};
         md::CmdFlags flags{};
         std::uint8_t fade = 0;
         std::uint8_t volume = 0;
 
-        [[nodiscard]] static Status of(hal::SpiWord word0, hal::SpiWord word1) noexcept;
+        [[nodiscard]] static Status of(Words w) noexcept;
     };
 
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
-    void on_set_pending_file_ext(std::string_view ext) noexcept override;
-    void on_set_pending_file_path(std::string_view path) noexcept override;
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
         return infra::OptRef<IStreamLoad>{*this};
@@ -146,7 +149,7 @@ private:
     std::uint32_t feed_deferrals_ = 0;
     std::uint32_t play_refusals_ = 0;
     std::uint32_t ack_timeouts_ = 0;
-    proto::IoIndex last_index_{};
+    proto::FioIndexByte last_index_{};
 
     std::optional<svc::TrackNumber> current_track_{};
     bool paused_ = false;

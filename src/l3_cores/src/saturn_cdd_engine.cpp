@@ -29,9 +29,9 @@ void SaturnCddEngine::reset_status_() noexcept {
     stat_.seal();
 }
 
-Ex<void> SaturnCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
+Ex<void> SaturnCddEngine::do_accept(const CdCommandWords& cmd, CdDialectPorts& p) {
 
-    comm_.load_words(words);
+    comm_.load(cmd);
     command_exec_(p.geom);
     return {};
 }
@@ -216,7 +216,7 @@ void SaturnCddEngine::process_(const svc::DiscGeometry& geom) noexcept {
                 idx = 0xA0;
                 q = is_data_(svc::TrackIndex{}, geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x101) {
-                msf = Msf::of_minute(toc.last);
+                msf = toc.last.as_toc_minute();
                 idx = 0xA1;
                 q = is_data_(toc.last.last_index(), geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x102) {

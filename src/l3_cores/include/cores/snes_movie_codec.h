@@ -44,7 +44,7 @@ public:
     static constexpr std::uint32_t kWramBytes = 128 * 1024;
     static constexpr std::uint32_t kAramBytes = 64 * 1024;
 
-    static constexpr std::uint64_t kRomMin = 128 * 1024;
+    static constexpr proto::FileSize kRomMin{128 * 1024};
 
     [[nodiscard]] static constexpr JoyBit joy_bit(Button b) noexcept {
         return JoyBit{static_cast<std::uint8_t>(b)};
@@ -64,7 +64,7 @@ public:
 
     [[nodiscard]] static std::optional<IMovieFormat::DigestSpan> past_header(
         proto::FileSize size,
-        proto::FileSize header
+        proto::FileOffset from
     ) noexcept;
 };
 

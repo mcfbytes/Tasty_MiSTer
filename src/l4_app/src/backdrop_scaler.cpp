@@ -31,6 +31,25 @@ namespace {
 
 }
 
+void BackdropScaler::gather_flat_(
+    std::span<const std::byte> line,
+    DimQ8 dim,
+    const ColumnMap& map,
+    std::span<std::uint16_t> out
+) noexcept {
+    const std::size_t src_w = map.src_w;
+    if (out.size() < src_w) {
+        for (std::size_t x = 0; x < out.size(); ++x)
+            out[x] = pack_dimmed(pixel_at(line, map.cols[x]), dim);
+        return;
+    }
+    packed_src_.resize(src_w);
+    for (std::size_t x = 0; x < src_w; ++x)
+        packed_src_[x] = pack_dimmed(pixel_at(line, x), dim);
+    for (std::size_t x = 0; x < out.size(); ++x)
+        out[x] = packed_src_[map.cols[x]];
+}
+
 void BackdropScaler::open(const HdTheme& theme) noexcept {
     TASTY_SEAT_BODY(BackdropScaler);
     primary_ = hd_pack565(theme.primary);
@@ -160,8 +179,7 @@ void BackdropScaler::scale_target_rows(
         if (sy != packed_sy) {
             packed_sy = sy;
             const auto row = src.from_row(sy);
-            for (std::size_t x = 0; x < w; ++x)
-                target_px_[x] = pack_dimmed(pixel_at(row, target_cols_.cols[x]), dim);
+            gather_flat_(row, dim, target_cols_, target_px_);
         }
         std::ranges::copy(
             target_px_,
@@ -210,6 +228,8 @@ void BackdropScaler::paint_band_(
     ensure_cols_(shown_cols_, src_w, picture, shown);
     ensure_dim_(shown_dim_, shown, game);
     row_px_.resize(static_cast<std::size_t>(shown.w));
+    constexpr std::uint8_t kFlatPercent = 100;
+    const bool flat = shown_dim_.ramp >= kFlatPercent;
     std::optional<PictureRow> packed_sy;
     for (std::int32_t y = dy0; y < dy1; ++y) {
         const PictureRow sy = src.rows.sample_row(
@@ -219,12 +239,16 @@ void BackdropScaler::paint_band_(
         if (sy != packed_sy) {
             packed_sy = sy;
             const auto line = src.from_row(sy);
-            for (std::int32_t x = 0; x < shown.w; ++x) {
-                const auto i = static_cast<std::size_t>(x);
-                row_px_[i] = pack_dimmed(
-                    pixel_at(line, shown_cols_.cols[i]),
-                    shown_dim_.per_col[i]
-                );
+            if (flat) {
+                gather_flat_(line, dim_, shown_cols_, row_px_);
+            } else {
+                for (std::int32_t x = 0; x < shown.w; ++x) {
+                    const auto i = static_cast<std::size_t>(x);
+                    row_px_[i] = pack_dimmed(
+                        pixel_at(line, shown_cols_.cols[i]),
+                        shown_dim_.per_col[i]
+                    );
+                }
             }
         }
         auto* out = dst.row(PlaneRow{y}).subspan(static_cast<std::size_t>(shown.x)).data();

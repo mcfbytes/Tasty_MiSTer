@@ -48,7 +48,7 @@ public:
     template <class Layout>
     [[nodiscard]] Ex<RegisterWindow<Layout>> map(LwOffset rel) const {
         if (!rel.dword_aligned() || !rel.fits(size_, LwExtent::of_layout<Layout>())) {
-            return std::unexpected(rel.refused(Errc::aperture_range, ERR_SITE()));
+            return std::unexpected(rel.refusal(Errc::aperture_range, ERR_SITE()));
         }
         const LwOffset at = off_.plus(rel);
         if (image_.empty())
@@ -74,10 +74,10 @@ private:
         LwExtent size
     ) noexcept {
         if (board_len.empty())
-            return off.refused(Errc::dt_missing, ERR_SITE());
+            return off.refusal(Errc::dt_missing, ERR_SITE());
         const std::optional<LwExtent> board = LwExtent::of_length(board_len);
         if (!board || !size.covers(kMinExtent) || !off.dword_aligned() || !off.fits(*board, size)) {
-            return off.refused(Errc::bad_format, ERR_SITE());
+            return off.refusal(Errc::bad_format, ERR_SITE());
         }
         return std::nullopt;
     }

@@ -12,7 +12,7 @@
 #include "app/save_state_facts.h"
 #include "cores/registry.h"
 #include "cores/save_copy_level.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/inbox.h"
@@ -27,6 +27,7 @@
 #include "proto/save_state_decl.h"
 #include "proto/savestate_engine.h"
 #include "proto/save_primer.h"
+#include "svc/card_writer.h"
 #include "svc/io_coworker.h"
 #include "svc/vfs.h"
 
@@ -78,7 +79,7 @@ public:
         const svc::Vfs& vfs;
         ILoadWindowMap<seat_owner::Io>& map;
         ILoadWindowMap<seat_owner::Ui>& ui_map;
-        hal::PhysRegion aperture;
+        hal::FpgaAperture aperture;
         const os::IClock& clock;
         xthread::WakeFlag& io_wake;
         infra::OptRef<IEventSink> toast{};
@@ -99,6 +100,8 @@ public:
 
     [[nodiscard]] bool maps_slots() const noexcept { return ui_.engine.mapped(); }
 
+    static constexpr svc::LaneClass kLaneClass = svc::LaneClass::Bulk;
+
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
 
@@ -107,11 +110,11 @@ private:
         TASTY_SEAT_MEDIATOR(Ui, Io);
 
     public:
-        explicit Files(const svc::Vfs& vfs) noexcept : vfs_(vfs) {}
+        explicit Files(const svc::Vfs& vfs) noexcept : vfs_(vfs), card_(vfs) {}
 
         [[nodiscard]] Ex<std::size_t> read_at(
             std::string_view path,
-            std::uint64_t offset,
+            proto::FileOffset at,
             std::span<std::byte> dst
         ) override;
         [[nodiscard]] Ex<void> write_all_sync(
@@ -121,6 +124,7 @@ private:
 
     private:
         const svc::Vfs& vfs_;
+        svc::CardWriter card_;
     };
 
     class IoSlotMap final : public proto::SaveStateEngine::ISlotMap {
@@ -129,7 +133,7 @@ private:
     public:
         explicit IoSlotMap(ILoadWindowMap<seat_owner::Io>& map) noexcept : map_(map) {}
 
-        [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) override {
+        [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::ApertureRegion& r) override {
             TASTY_SEAT_BODY(IoSlotMap);
             return map_.map(r);
         }
@@ -144,7 +148,7 @@ private:
     public:
         explicit UiSlotMap(ILoadWindowMap<seat_owner::Ui>& map) noexcept : map_(map) {}
 
-        [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) override {
+        [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::ApertureRegion& r) override {
             TASTY_SEAT_BODY(UiSlotMap);
             return map_.map(r);
         }
@@ -162,6 +166,7 @@ private:
     AskInbox& asks_;
     SaveStateFactsCell& facts_cell_;
     cores::SaveCopyCell& copy_;
+    hal::FpgaAperture aperture_;
     infra::OptRef<IEventSink> toast_;
     Files files_;
     IoSlotMap io_map_;
@@ -171,7 +176,7 @@ private:
     xthread::Telemetry<PrimeAbortLevel, SeatTag::Ui> abort_{};
 
     struct UiHalf {
-        UiHalf(const hal::PhysRegion& aperture, const proto::SaveStateEngine::Environment& env)
+        UiHalf(const hal::FpgaAperture& aperture, const proto::SaveStateEngine::Environment& env)
             : engine(aperture, env) {}
 
         proto::SaveStateEngine engine;

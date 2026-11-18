@@ -31,10 +31,12 @@ namespace mister::app {
 inline constexpr std::size_t kContainerHeaderBytes = 16;
 inline constexpr proto::FileSize kContainerHeader{kContainerHeaderBytes};
 
+inline constexpr proto::FileOffset kPayloadAt = proto::kFileStart + kContainerHeader;
+
 inline constexpr std::size_t kProgramBufferBytes = 64u * 1024u;
 
 struct PayloadWindow {
-    proto::FileSize base{};
+    proto::FileOffset base{};
     proto::FileSize length{};
 };
 

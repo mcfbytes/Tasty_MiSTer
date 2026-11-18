@@ -48,14 +48,14 @@ void DiscStore::publish_(infra::OptRef<const IDiscRules> rules) noexcept {
     }
 }
 
-Ex<std::span<std::uint8_t>> DiscStore::read_at(proto::FileSize at, std::span<std::uint8_t> dst) {
+Ex<std::span<std::uint8_t>> DiscStore::read_at(proto::FileOffset at, std::span<std::uint8_t> dst) {
     TASTY_SEAT_BODY(DiscStore);
     if (!engine_.has_value() || !rules_) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
     const infra::OptRef<const IDiscRules> rules = rules_;
     const proto::BlockSize bs = rules->block_size();
-    proto::Lba lba = proto::end_lba(at, bs);
+    proto::Lba lba = proto::end_lba(at - proto::kFileStart, bs);
 
     const DiscGeometry shape = shape_;
 
@@ -70,7 +70,7 @@ Ex<std::span<std::uint8_t>> DiscStore::read_at(proto::FileSize at, std::span<std
 }
 
 Ex<std::span<const std::uint8_t>> DiscStore::write_at(
-    proto::FileSize,
+    proto::FileOffset,
     std::span<const std::uint8_t>
 ) {
     TASTY_SEAT_BODY(DiscStore);

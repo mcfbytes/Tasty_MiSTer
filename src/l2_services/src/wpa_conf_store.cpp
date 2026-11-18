@@ -48,7 +48,7 @@ struct FileMode {
 constexpr FileMode kFileMode{0600};
 
 [[nodiscard]] std::unexpected<Error> os_error(infra::Errno e) noexcept {
-    return std::unexpected(e.refused(Errc::os, ERR_SITE()));
+    return std::unexpected(e.refusal(Errc::os, ERR_SITE()));
 }
 
 }

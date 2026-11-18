@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <optional>
 
+#include "app/floor_ratio_walk.h"
 #include "app/front_end_pattern.h"
 #include "app/hd_rect.h"
 #include "app/hd_theme.h"
 #include "app/px_plane.h"
+#include "app/ratio.h"
 #include "app/types.h"
 #include "infra/seat.h"
 
@@ -37,21 +39,26 @@ void BandGradientPattern<A>::paint(PxPlane& canvas, HdRect box) const noexcept {
     const std::optional<PxPlane> plane = canvas.sub(on);
     if (!plane)
         return;
-    const std::int32_t span = A == Axis::Horizontal ? on.h : on.w;
-    const std::int32_t shade_span = A == Axis::Horizontal ? on.w : on.h;
-    if (span <= 0 || shade_span <= 0)
+    if (on.w <= 0 || on.h <= 0)
         return;
+
+    constexpr std::int32_t kAlong = A == Axis::Horizontal ? kMaxShade : kRamp;
+    constexpr std::int32_t kDown = A == Axis::Horizontal ? kRamp : kMaxShade;
+    const FloorRatioWalk across = FloorRatioWalk::of(
+        Ratio{.num = Ratio::Term::of(kAlong), .den = Ratio::Term::of(on.w)}
+    );
     for (std::int32_t y = 0; y < on.h; ++y) {
+        const std::int32_t down_q = kDown * y / on.h;
         auto row = plane->row(PlaneRow{y});
         auto px = row.begin();
-        for (std::int32_t x = 0; x < on.w; ++x, ++px) {
-            const std::int32_t pos = A == Axis::Horizontal ? y : x;
-            const std::int32_t shade_at = A == Axis::Horizontal ? x : y;
-            const std::int32_t band = kRamp * pos / span;
+        FloorRatioWalk along = across;
+        for (std::int32_t x = 0; x < on.w; ++x, ++px, along.step()) {
+            const std::int32_t band = A == Axis::Horizontal ? down_q
+                                                            : along.quotient<std::int32_t>();
             const bool inv = (band & 1) != 0;
             const std::int32_t half = band >> 1;
             const std::int32_t base = (inv ? half : kBase - half) + 1;
-            std::int32_t gray = kMaxShade * shade_at / shade_span;
+            std::int32_t gray = A == Axis::Horizontal ? along.quotient<std::int32_t>() : down_q;
             if (inv)
                 gray = kInvert - gray;
             const bool red = (base & kRedBit) != 0;

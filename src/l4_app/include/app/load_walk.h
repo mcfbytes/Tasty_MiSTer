@@ -12,6 +12,7 @@
 #include "app/echo_wait.h"
 #include "app/load_ladder.h"
 #include "app/load_window_map.h"
+#include "app/types.h"
 #include "app/rung.h"
 #include "cores/core_window_decl.h"
 #include "cores/ladder_host.h"
@@ -21,7 +22,7 @@
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -53,7 +54,7 @@ public:
         LoadLadder::Host rung;
         cores::ILadderHost& owner;
         ILoadWindowMap<seat_owner::Main>& map;
-        hal::PhysRegion aperture;
+        hal::FpgaAperture aperture;
         const svc::Vfs& vfs;
         std::chrono::nanoseconds now_ns{};
     };
@@ -61,7 +62,8 @@ public:
     [[nodiscard]] static Ex<LoadWalk> start(
         std::unique_ptr<cores::ILoader> loader,
         const cores::LoadPlan& plan,
-        std::span<const cores::CoreWindowDecl> windows
+        std::span<const cores::CoreWindowDecl> windows,
+        ContentEdge edge = ContentEdge::Content
     );
 
     [[nodiscard]] Pass step(Host& h);
@@ -84,11 +86,13 @@ private:
     LoadWalk(
         std::unique_ptr<cores::ILoader> loader,
         const cores::LoadPlan& plan,
-        std::span<const cores::CoreWindowDecl> windows
+        std::span<const cores::CoreWindowDecl> windows,
+        ContentEdge edge
     ) noexcept
         : loader_(std::move(loader)),
           plan_(plan),
-          windows_(windows) {}
+          windows_(windows),
+          edge_(edge) {}
 
     [[nodiscard]] Pass hold_(Host& h);
     [[nodiscard]] Pass row_step_(Host& h);
@@ -115,6 +119,7 @@ private:
 
     const cores::LoadPlan plan_;
     std::span<const cores::CoreWindowDecl> windows_;
+    ContentEdge edge_ = ContentEdge::Content;
     std::optional<LoadLadder> ladder_;
     std::optional<cores::PayloadPieces> pieces_;
     EchoWait echo_wait_{};

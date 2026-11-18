@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string_view>
 
 #include "cores/core_support.h"
 #include "cores/stream_load_host.h"
@@ -22,14 +21,10 @@ public:
 
     [[nodiscard]] std::uint32_t transfers() const noexcept { return stream_.transfers(); }
 
-    [[nodiscard]] proto::IoIndex last_index() const noexcept { return stream_.last_index(); }
+    [[nodiscard]] proto::FioIndexByte last_index() const noexcept { return stream_.last_index(); }
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
-
-    void on_set_pending_file_ext(std::string_view ext) noexcept override {
-        stream_.set_pending_ext(ext);
-    }
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {
         return stream_.bytes();

@@ -13,6 +13,7 @@
 #include <variant>
 
 #include "app/ini_parse.h"
+#include "app/run_policy.h"
 #include "infra/byte_view.h"
 #include "svc/config.h"
 #include "svc/config_parser.h"
@@ -54,7 +55,7 @@ VideoPump::VideoPump(
       clock_(clock),
       seat_(clock, board, i2c, hdmi_int),
       wire_(VideoWire::Wiring{.link_tx = wiring.link_tx, .replies = wiring.replies}),
-      audio_(vfs, wire_),
+      audio_(vfs, wire_, wiring.writes),
       composer_({wire_, audio_, clock_}),
       video_(
           std::in_place,
@@ -109,16 +110,18 @@ void VideoPump::latch_spec(std::string_view spec) noexcept {
     (void)spec_.assign(spec);
 }
 
-void VideoPump::force_vsync_adjust(VsyncAdjust v) noexcept {
-    if (v == VsyncAdjust::LowLag)
-        v = VsyncAdjust::Off;
-    ini_force_.vsync = v;
-    ini_.vsync_adjust = v;
-}
-
-void VideoPump::arm_replay_ini(bool strict) noexcept {
-    ini_force_.replay = true;
-    ini_force_.strict_direct_video = strict;
+void VideoPump::apply_run_policy(const RunPolicy& policy) noexcept {
+    if (policy.force_vsync) {
+        VsyncAdjust v = *policy.force_vsync;
+        if (v == VsyncAdjust::LowLag)
+            v = VsyncAdjust::Off;
+        ini_force_.vsync = v;
+        ini_.vsync_adjust = v;
+    }
+    if (policy.replay_ini) {
+        ini_force_.replay = true;
+        ini_force_.strict_direct_video = *policy.replay_ini;
+    }
 }
 
 void VideoPump::set_mode_override(std::string_view spec) noexcept {
@@ -147,7 +150,13 @@ bool VideoPump::take_video_mode(std::string_view spec) noexcept {
     return true;
 }
 
-void VideoPump::on_core_loaded(bool front_end) {
+void VideoPump::on_core_loaded(const CoreIdentity& id, bool front_end) {
+    set_core_name(id.core);
+    set_spd_identity(id.home, id.rotation);
+    arm_load_edge(front_end);
+}
+
+void VideoPump::arm_load_edge(bool front_end) {
     const PublishOnExit publish_on_exit{this};
     i2c_held_ = false;
     ++stats_.edges;
@@ -219,10 +228,10 @@ void VideoPump::publish_monitoring() noexcept {
 
     GeometryRecord g{};
     const svc::VideoSample& s = video_->info();
-    g.valid = geo_edges_ != 0u || s.res.v != 0u || s.active.width != 0u;
+    g.valid = geo_edges_ != 0u || !s.res.empty() || s.active.width != 0u;
     g.fb_en = s.fb_en();
     g.rotated = s.rotated();
-    g.res = s.res.v;
+    g.res = s.res;
     g.width = s.active.width;
     g.height = s.active.height;
     g.rate = FrameTicks::plausible(s.vtime);

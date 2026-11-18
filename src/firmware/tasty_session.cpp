@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "app/durable_write.h"
 #include "app/rbf_resolve.h"
 #include "app/replay_status.h"
 #include "app/recorder_control.h"
@@ -23,6 +22,7 @@
 #include "app/identity_latch.h"
 #include "app/link_tx_channel.h"
 #include "app/output_size.h"
+#include "app/session_owner.h"
 #include "cores/registry.h"
 #include "infra/json_out.h"
 #include "infra/json_width.h"
@@ -44,7 +44,7 @@ constexpr std::chrono::milliseconds kStatusPeriod{250};
 
 constexpr unsigned kHideTries = 50;
 
-constexpr app::MovieFrame kResampleFrame{60};
+constexpr app::MoviePosition kResampleFrame{60};
 
 constexpr const char*
     kStatusLineFormat = "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%s,\"frames\":%s,\"rec\":\"%s\","
@@ -70,8 +70,8 @@ template <class Text>
     }
     constexpr infra::JsonWidth play = infra::json_longest(app::kReplayLevelNames);
     constexpr infra::JsonWidth end = infra::json_longest(app::kReplayEndNames);
-    constexpr infra::JsonWidth frame = width_of<decltype(app::MovieFrame::v)>();
-    constexpr infra::JsonWidth frames = width_of<decltype(app::FrameCount::v)>();
+    constexpr infra::JsonWidth frame = width_of<decltype(app::MoviePosition::v)>();
+    constexpr infra::JsonWidth frames = width_of<decltype(app::MovieFrameCount::v)>();
     constexpr infra::JsonWidth rec = infra::json_longest(app::kRecStateNames);
     constexpr infra::JsonWidth rows = width_of<decltype(app::CoreFrameCount::v)>();
     constexpr infra::JsonWidth late = width_of<decltype(app::ReplayStatus::late)>();
@@ -101,7 +101,8 @@ template <class Text>
 TastySession::TastySession(const Wiring& w, const TastyArgs& args, const Run& run) noexcept
     : w_(w),
       args_(args),
-      run_(run) {
+      run_(run),
+      card_(w.vfs) {
     if (!args_.core.empty())
         (void)core_path_.assign(args_.core.view());
     std::string menu = std::string(w_.vfs.root_path()) + "/" + kMenuRbfName;
@@ -164,14 +165,16 @@ bool TastySession::copy_seed_() noexcept {
     const auto sz = in ? (*in)->size() : Ex<svc::FileSize>{std::unexpected(in.error())};
     if (!sz || *sz > kSeedMax)
         return false;
-    std::vector<std::byte> bytes;
-    bytes.resize(static_cast<std::size_t>(sz->v));
-    const auto got = (*in)->read_at(0, bytes);
+    std::vector<std::byte> bytes = sz->zeroed<std::vector<std::byte>>();
+    const auto got = (*in)->read_at(proto::kFileStart, bytes);
     if (!got || *got != bytes.size())
         return false;
-    if (!w_.vfs.ensure_dir(kTastySaveRoot))
+    if (!card_.ensure_dir(kTastySaveRoot))
         return false;
-    return app::durable_write(w_.vfs, std::string(kTastySaveRoot) + "/seed.sav", bytes).has_value();
+    std::string seed(kTastySaveRoot);
+    seed += '/';
+    seed.append(app::SessionOwner::kReplaySeedName);
+    return card_.replace_file(seed, bytes).has_value();
 }
 
 void TastySession::fail_(const char* why) noexcept {
@@ -369,7 +372,7 @@ void TastySession::write_status_(bool force) noexcept {
         say_scale_step(enc.video);
     if (returned && enc.video.scale != app::PictureScale::Half)
         say_scale_return();
-    const app::FrameCount total = w_.replay.movie_frames();
+    const app::MovieFrameCount total = w_.replay.movie_frames();
     const char* end = replay_refused_() ? "refused" : app::replay_end_name(play.end);
     const proto::FieldRep video_scale = proto::printed_field(
         app::picture_scale_digit(enc.video.scale)
@@ -543,8 +546,8 @@ void TastySession::tick() noexcept {
         case Stage::HideOsd:
             break;
         case Stage::SplashMap:
-            stage_ = static_cast<bool>(splash_.map(w_.video_fb)) ? Stage::SplashBlit
-                                                                 : after_splash_();
+            stage_ = w_.video_fb && static_cast<bool>(splash_.map(*w_.video_fb)) ? Stage::SplashBlit
+                                                                                 : after_splash_();
             break;
         case Stage::SplashBlit:
             stage_ = splash_.blit(splash_size_()) ? Stage::SplashShow : after_splash_();

@@ -20,7 +20,7 @@
 #include "app/step_count.h"
 #include "cores/movie_codec.h"
 #include "cores/movie_system.h"
-#include "hal/phys_region.h"
+#include "hal/aperture_region.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -29,6 +29,7 @@
 #include "os/monotonic_clock.h"
 #include "replay_port.h"
 #include "run_exit.h"
+#include "svc/card_writer.h"
 #include "tasty_cli.h"
 #include "tasty_refusal.h"
 #include "tasty_splash.h"
@@ -114,7 +115,7 @@ public:
         RunExitCell& run_exit;
 
         TastyStatusFile& status;
-        hal::PhysRegion video_fb{};
+        std::optional<hal::ApertureRegion> video_fb{};
 
         const xthread::Telemetry<std::uint8_t, SeatTag::Main>& direct_video_ini;
     };
@@ -183,6 +184,7 @@ private:
     Wiring w_;
     TastyArgs args_;
     const Run& run_;
+    svc::CardWriter card_;
     os::MonotonicClock clock_{};
     TastySplash splash_{};
     Stage stage_ = Stage::HideOsd;

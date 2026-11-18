@@ -33,9 +33,9 @@ static_assert(
 
 }
 
-std::optional<MouseFixupRule> find_mouse_fixup(Vid vid, Pid pid) {
+std::optional<MouseFixupRule> find_mouse_fixup(VidPidKey device) {
     for (const MouseFixupRule& r : kMouseFixupRules) {
-        if (r.match.matches(vid, pid))
+        if (r.match.matches(device))
             return r;
     }
     return std::nullopt;

@@ -92,7 +92,8 @@ CompanionWalk::Pass CompanionWalk::load_(Host& h) {
         p.rows[0] = plan_.load->row;
         p.rows[0].source = source_.view();
         p.count = 1;
-        auto w = LoadWalk::start(std::move(loader_), p, windows_);
+
+        auto w = LoadWalk::start(std::move(loader_), p, windows_, ContentEdge::Companion);
         if (!w) {
             pc_ = Pc::After;
             return Pass::Stepped;

@@ -10,11 +10,7 @@
 namespace mister::ui {
 
 [[nodiscard]] constexpr RowKey slot_row_key(proto::FileRowId id) noexcept {
-    constexpr std::uint16_t kMountBit = 0x100u;
-    std::uint16_t bits{id.index.v};
-    if (id.kind == proto::FileRowKind::Mount)
-        bits |= kMountBit;
-    return RowKey::in_space(RowKeySpace::Slot, RowKey::Ordinal{bits});
+    return RowKey::in_space(RowKeySpace::Slot, RowKey::Ordinal{id.keyed_ordinal()});
 }
 
 static_assert(

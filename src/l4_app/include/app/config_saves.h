@@ -16,6 +16,7 @@
 #include "app/link_tx_channel.h"
 #include "app/negotiated_core.h"
 #include "app/owner_tally.h"
+#include "app/ui_request.h"
 #include "infra/counter.h"
 #include "cores/config_codec.h"
 #include "cores/types.h"
@@ -26,6 +27,7 @@
 #include "proto/link_event.h"
 #include "proto/link_op.h"
 #include "proto/status_cell.h"
+#include "svc/card_writer.h"
 
 namespace mister::svc {
 class Vfs;
@@ -55,12 +57,17 @@ public:
     ConfigSaves(const ConfigSaves&) = delete;
     ConfigSaves& operator=(const ConfigSaves&) = delete;
 
-    void save_config(CorrelationTag tag);
-    void save_dips(CorrelationTag tag) noexcept;
-    void save_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept;
+    void on(const UiRequest::SaveConfig& req, const UiRequest::Head& head);
+    void on(const UiRequest::SaveDips& req, const UiRequest::Head& head) noexcept;
+    void on(const UiRequest::SaveCoreConfig& req, const UiRequest::Head& head) noexcept;
+    void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
+    void on(const UiRequest::SetHdLook& req, const UiRequest::Head& head);
 
     [[nodiscard]] SlotLoad load_slot(cores::ConfigSlot slot, CorrelationTag tag);
-    void set_ini_key(std::string_view key, std::string_view value);
+    static constexpr std::string_view kIniOsdStyle{"osd_style"};
+    static constexpr std::string_view kIniAutosave{"autosave"};
+
+    bool set_ini_key(std::string_view key, std::string_view value);
 
     void on_save_bytes(const proto::LinkEvent::SaveBytes& e);
 
@@ -73,7 +80,6 @@ public:
     void order_save_upload_() noexcept;
     [[nodiscard]] bool order_save_ask(
         proto::SaveKind kind,
-        cores::ConfigSlot slot,
         CorrelationTag tag,
         bool gating = false
     ) noexcept;
@@ -105,6 +111,7 @@ private:
     OwnerTally& tally_;
     EventQueue<SeatTag::Main>::Producer owner_events_;
     const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     const proto::StatusCell& status_cell_;
     const NegotiatedCore& negotiated_;
     infra::OptRef<ISleeper> sleeper_;

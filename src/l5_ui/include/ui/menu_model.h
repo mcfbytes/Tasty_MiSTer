@@ -23,9 +23,10 @@
 #include "proto/status_cell.h"
 #include "app/tx_digest_cell.h"
 #include "proto/conf_str.h"
-#include "proto/core_session.h"
+#include "proto/types.h"
 #include "proto/item_probe.h"
 #include "proto/link_op.h"
+#include "proto/save_trigger.h"
 #include "ui/core_cell_mirror.h"
 #include "ui/core_verbs.h"
 #include "ui/hd_focus_memory.h"
@@ -57,6 +58,7 @@ struct Event;
 namespace mister::ui {
 
 class IHdPlan;
+class IndicatorBoard;
 class OsdRenderer;
 struct BuildEnv;
 struct HdPlanInputs;
@@ -196,6 +198,9 @@ public:
     PageId resume_page() const noexcept { return resume_; }
 
     void set_resume_page(PageId p) noexcept { resume_ = p; }
+
+    [[nodiscard]] bool open_indicators(PageContext& ctx, const IndicatorBoard& board);
+    bool close_indicators(PageContext& ctx);
 
     bool popups_visible() const noexcept;
 
@@ -372,6 +377,8 @@ private:
     MenuCoreBinding binding_{};
     bool hd_root_ = false;
     PageId hd_classic_ = PageId::System;
+
+    std::optional<StackDepth> classic_entry_{};
     bool repaint_ = false;
     bool bootcore_armed_ = false;
     HdMask hd_mask_{};

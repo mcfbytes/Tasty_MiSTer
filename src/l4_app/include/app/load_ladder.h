@@ -12,6 +12,7 @@
 #include "app/link_tx_channel.h"
 #include "app/load_key.h"
 #include "app/load_window.h"
+#include "app/types.h"
 #include "app/path_text.h"
 #include "app/rung.h"
 #include "cores/loader.h"
@@ -60,6 +61,8 @@ public:
 
         std::optional<LoadWindow<seat_owner::Main>> mirror{};
 
+        ContentEdge edge = ContentEdge::Content;
+
         PathText save{};
         proto::FileSize save_bytes{};
     };
@@ -80,7 +83,7 @@ public:
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
 
-    [[nodiscard]] std::uint64_t written() const noexcept { return off_; }
+    [[nodiscard]] proto::FileSize written() const noexcept { return off_; }
 
     [[nodiscard]] const cores::ILoader& loader() const noexcept { return *job_.loader; }
 
@@ -114,8 +117,8 @@ private:
     LoadKey key_;
     PathText path_{};
     std::vector<std::uint8_t> buf_;
-    std::uint64_t off_ = 0;
-    std::uint64_t fill_off_ = 0;
+    proto::FileSize off_{};
+    proto::FileSize fill_off_{};
     std::uint64_t extent_ = 0;
     bool facts_pushed_ = false;
     Pc pc_ = Pc::Open;

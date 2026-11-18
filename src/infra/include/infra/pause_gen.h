@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "infra/decimal_text.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -14,6 +15,8 @@ struct PauseGen {
     [[nodiscard]] static constexpr PauseGen none() noexcept { return PauseGen{0}; }
 
     [[nodiscard]] constexpr bool is_none() const noexcept { return v == 0; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr bool operator==(PauseGen, PauseGen) = default;
 };

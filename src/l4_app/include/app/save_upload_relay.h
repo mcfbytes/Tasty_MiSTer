@@ -35,7 +35,8 @@ public:
     using Ask = SaveUploadSlot::Ask;
 
     static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kSavePieceWords;
-    static_assert(kMaxRoundWords <= proto::tightest_round_budget_words());
+
+    static constexpr proto::FioWordCount kCutWords{2};
 
     static constexpr std::uint32_t kActLivenessRounds = 64;
 
@@ -75,6 +76,8 @@ public:
     [[nodiscard]] bool holds_fio() const noexcept override { return rt_.open.has_value(); }
 
     void yield_to_reset() noexcept override;
+
+    static constexpr svc::LaneClass kLaneClass = svc::LaneClass::Bulk;
 
     void serve() noexcept override;
 

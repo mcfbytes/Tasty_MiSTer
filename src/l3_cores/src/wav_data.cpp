@@ -34,20 +34,18 @@ std::uint32_t declared_size(ChunkHeader header) noexcept {
     if (image.size() < kChunkHeaderBytes)
         return refuse(Refusal::kTooSmall, ERR_SITE());
 
-    const auto file_size = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(image.size(), std::numeric_limits<std::uint32_t>::max())
-    );
-    std::uint32_t pos = kPrefixBytes;
-    while (can_read_header(pos, proto::FileSize{file_size})) {
-        const ChunkHeader header = image.subspan(pos).first<kChunkHeaderBytes>();
+    const proto::FileSize file_size = proto::FileSize::of(image).min(kRiffReach);
+    proto::FileOffset pos = proto::kFileStart + kPrefix;
+    while (can_read_header(pos, file_size)) {
+        const ChunkHeader header = pos.skip_in(image).first<kChunkHeaderBytes>();
         const std::uint32_t size = declared_size(header);
         if (is_data_chunk(header))
-            return WavData{pos + kChunkHeaderBytes, size};
+            return WavData{pos + kChunkHeader, size};
 
-        const std::uint64_t next = std::uint64_t{pos} + kChunkHeaderBytes + size;
-        if (next > std::numeric_limits<std::uint32_t>::max())
+        const proto::FileOffset next = pos + kChunkHeader + proto::FileSize{size};
+        if (next > kRiffPositionLimit)
             return refuse(Refusal::kSizeOverflows, ERR_SITE());
-        pos = static_cast<std::uint32_t>(next);
+        pos = next;
     }
     return refuse(Refusal::kNoDataChunk, ERR_SITE());
 }

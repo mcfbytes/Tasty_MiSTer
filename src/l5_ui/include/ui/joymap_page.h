@@ -19,6 +19,10 @@
 #include "ui/joymap_blob.h"
 #include "svc/types.h"
 
+namespace mister::app {
+class UiWriteLane;
+}
+
 namespace mister::ui {
 
 enum class MapScope : std::uint8_t { System, Core };
@@ -41,7 +45,7 @@ class JoyMapPage final : public Page {
 public:
     struct Spec {
         infra::OptRef<const app::JoyMapEnds> ends{};
-        infra::OptRef<const svc::Vfs> files{};
+        infra::OptRef<app::UiWriteLane> writes{};
         bool front_end = false;
         std::string core;
         std::string j_names;

@@ -8,6 +8,7 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/slot_attributes.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -49,7 +50,7 @@ struct StorageRequest {
 
     struct Write {
         static constexpr Kind kKind = Kind::Write;
-        std::uint64_t offset = 0;
+        FileOffset offset{};
         std::uint32_t bytes = 0;
         std::uint8_t pad_[4]{};
     };
@@ -66,7 +67,7 @@ struct StorageRequest {
 
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
-        bool growable = false;
+        MountClass mount = MountClass::Image;
     };
 
     struct Detach {

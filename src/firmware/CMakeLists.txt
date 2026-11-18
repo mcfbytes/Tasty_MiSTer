@@ -8,7 +8,6 @@ add_library(mister_fw_assembly STATIC
   diag_main.cpp
   diag_sampler.cpp
   hub.cpp
-  ladder_scope.cpp
   memory_policy_outcome.cpp
   open_verdict.cpp
   process_main.cpp
@@ -24,7 +23,7 @@ add_library(mister_fw_assembly STATIC
 )
 target_include_directories(mister_fw_assembly PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mister_fw_assembly
-  PUBLIC mister_app mister_cores mister_boards Threads::Threads
+  PUBLIC mister_app mister_app_hd mister_app_recents mister_app_connect mister_cores_tas mister_cores mister_boards Threads::Threads
   PRIVATE tasty_options)
 
 add_library(mister_fw_menu STATIC

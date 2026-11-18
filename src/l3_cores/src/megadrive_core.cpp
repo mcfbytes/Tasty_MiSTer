@@ -16,14 +16,6 @@ Ex<void> MegaDriveCore::do_adopt(const CoreAdopt&) {
     return {};
 }
 
-void MegaDriveCore::on_set_pending_file_ext(std::string_view ext) noexcept {
-    tx_.set_ext(ext);
-}
-
-void MegaDriveCore::on_set_pending_file_path(std::string_view path) noexcept {
-    (void)path_.assign(path);
-}
-
 infra::OptRef<IPcmFeed> MegaDriveCore::feed() noexcept {
     const infra::OptRef<ICoreWindow> w = host().windows.named(
         manifests::kMdPlusWindows[0].region.name
@@ -63,9 +55,10 @@ void MegaDriveCore::retry_feed_(IPcmFeed& fd) noexcept {
     sheet_.answered();
 }
 
-Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
+Ex<proto::SessionParams> MegaDriveCore::stream_opening(const StreamAsk& ask) {
     TASTY_SEAT_BODY(MegaDriveCore);
-    tx_.opened();
+    tx_.opened(ask);
+    (void)path_.assign(ask.path);
     proto::SessionParams params{};
     params.ext = tx_.ext();
     return params;
@@ -87,16 +80,16 @@ Ex<void> MegaDriveCore::on_mount(IoIndex, const MountedPath&) {
     return unimplemented(ERR_SITE());
 }
 
-MegaDriveCore::Status MegaDriveCore::Status::of(hal::SpiWord word0, hal::SpiWord word1) noexcept {
+MegaDriveCore::Status MegaDriveCore::Status::of(Words w) noexcept {
     Status s{};
-    const std::uint8_t track_byte = static_cast<std::uint8_t>(word0.v >> 8);
+    const std::uint8_t track_byte = w.track_flags.high_byte();
 
     if (track_byte != 0)
         s.track = svc::TrackNumber::of(track_byte);
-    s.flags = md::CmdFlags{static_cast<std::uint8_t>(word0.v)};
-    s.fade = static_cast<std::uint8_t>(word1.v >> 8);
+    s.flags = md::CmdFlags{w.track_flags.low_byte()};
+    s.fade = w.fade_volume.high_byte();
 
-    s.volume = static_cast<std::uint8_t>(word1.v);
+    s.volume = w.fade_volume.low_byte();
     return s;
 }
 
@@ -114,14 +107,7 @@ std::optional<MegaDriveCore::Status> MegaDriveCore::read_status_() noexcept {
         return std::nullopt;
     }
     ++status_reads_;
-    return Status::of(*w0, *w1);
-}
-
-namespace {
-
-std::uint8_t wire_track(std::optional<svc::TrackNumber> track) noexcept {
-    return track ? track->v : 0u;
-}
+    return Status::of({.track_flags = *w0, .fade_volume = *w1});
 }
 
 void MegaDriveCore::send_ack_(std::optional<svc::TrackNumber> track, bool playing) noexcept {
@@ -131,10 +117,11 @@ void MegaDriveCore::send_ack_(std::optional<svc::TrackNumber> track, bool playin
         ++wire_faults_;
         return;
     }
-    const std::uint16_t word = static_cast<std::uint16_t>(
-        (static_cast<unsigned>(wire_track(track)) << 8) | (playing ? 1u : 0u)
-    );
-    if (auto r = link.transfer(hal::SpiWord{word}); !r) {
+    constexpr hal::SpiWord kPlaying{1};
+    constexpr hal::SpiWord kPaused{0};
+    const hal::SpiWord base = playing ? kPlaying : kPaused;
+    const hal::SpiWord word = track ? track->in_high_byte(base) : base;
+    if (auto r = link.transfer(word); !r) {
         ++wire_faults_;
         return;
     }
@@ -146,7 +133,7 @@ void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
     if (!s.playing || paused_)
         return;
     hal::ISpiTransport& link = host().link;
-    std::uint16_t read_point = 0;
+    PcmRingPoint read_point{};
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
         const auto rd = link.transfer(hal::SpiWord{kCmdAudio});
@@ -154,8 +141,8 @@ void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
             ++wire_faults_;
             return;
         }
-        read_point = static_cast<std::uint16_t>(rd->v);
-        const auto w = link.transfer(hal::SpiWord{static_cast<std::uint16_t>(s.write_point)});
+        read_point = PcmRingPoint::of(*rd);
+        const auto w = link.transfer(s.write_point.wire_word());
         if (!w) {
             ++wire_faults_;
             return;

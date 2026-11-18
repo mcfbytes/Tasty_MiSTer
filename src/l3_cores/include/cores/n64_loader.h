@@ -49,11 +49,15 @@ public:
           ipl_(vfs, memo) {}
 
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
-    void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
+    void shape(
+        const TransferRow& row,
+        std::span<std::uint8_t> piece,
+        proto::FileOffset at
+    ) override;
     [[nodiscard]] Ex<void> place(
         const TransferRow& row,
         std::span<const std::uint8_t> piece,
-        std::uint64_t off,
+        proto::FileOffset at,
         ICoreWindow& window
     ) override;
     [[nodiscard]] Ex<bool> conclude(const TransferRow& row, ICoreWindow& window) override;

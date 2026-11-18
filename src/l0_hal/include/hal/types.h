@@ -6,9 +6,14 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 
 #include "infra/decimal_text.h"
+#include "infra/endian.h"
+#include "infra/hex_text.h"
 #include "infra/json_out.h"
+#include "infra/lw_offset_label.h"
+#include "os/map_length.h"
 #include "os/types.h"
 
 namespace mister::os {
@@ -26,40 +31,85 @@ struct SpiWord {
         )};
     }
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr std::uint8_t low_byte() const noexcept {
+        return static_cast<std::uint8_t>(v);
+    }
+
+    [[nodiscard]] constexpr std::uint8_t high_byte() const noexcept {
+        constexpr unsigned kHighByteShift = std::numeric_limits<std::uint8_t>::digits;
+        return static_cast<std::uint8_t>(v >> kHighByteShift);
+    }
+
+    [[nodiscard]] constexpr bool any_of(SpiWord mask) const noexcept { return (v & mask.v) != 0u; }
+
+    [[nodiscard]] constexpr bool all_of(SpiWord mask) const noexcept {
+        return (v & mask.v) == mask.v;
+    }
+
+    [[nodiscard]] constexpr SpiWord masked(SpiWord mask) const noexcept {
+        return SpiWord{static_cast<std::uint16_t>(v & mask.v)};
+    }
+
+    [[nodiscard]] constexpr SpiWord with(SpiWord bits) const noexcept {
+        return SpiWord{static_cast<std::uint16_t>(v | bits.v)};
+    }
+
+    [[nodiscard]] constexpr SpiWord without(SpiWord bits) const noexcept {
+        return SpiWord{static_cast<std::uint16_t>(v & ~bits.v)};
+    }
+
+    [[nodiscard]] static constexpr SpiWord all_ones() noexcept {
+        return SpiWord{std::numeric_limits<std::uint16_t>::max()};
+    }
+
+    [[nodiscard]] static constexpr SpiWord load_le(std::span<const std::uint8_t, 2> b) noexcept {
+        return SpiWord{infra::load_le<std::uint16_t>(b)};
+    }
+
+    [[nodiscard]] static constexpr SpiWord load_le(std::span<const std::byte, 2> b) noexcept {
+        return SpiWord{infra::load_le<std::uint16_t>(b)};
+    }
+
+    template <class Decode>
+    [[nodiscard]] constexpr decltype(auto) decoded(Decode&& decode) const noexcept {
+        return decode(v);
+    }
+
+    constexpr void store_le(std::span<std::uint8_t, 2> dst) const noexcept {
+        infra::store_le<std::uint16_t>(dst, v);
+    }
+
+    constexpr void store_le(std::span<std::byte, 2> dst) const noexcept {
+        infra::store_le<std::uint16_t>(dst, v);
+    }
+
+    [[nodiscard]] infra::HexText padded_hex() const noexcept {
+        return infra::HexText::zero_padded(v);
+    }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
     friend constexpr bool operator==(SpiWord, SpiWord) = default;
+
+private:
+    friend struct SpiHalves;
+
+    [[nodiscard]] static constexpr SpiWord from_half(std::uint32_t dword, unsigned shift) noexcept {
+        return SpiWord{static_cast<std::uint16_t>(dword >> shift)};
+    }
+
+    [[nodiscard]] static constexpr std::uint32_t joined(SpiWord low, SpiWord high) noexcept {
+        constexpr unsigned kHalfBits = std::numeric_limits<std::uint16_t>::digits;
+        return static_cast<std::uint32_t>(low.v)
+            | (static_cast<std::uint32_t>(high.v) << kHalfBits);
+    }
 };
 
-struct SpiOutput {
-    static constexpr std::uint32_t kData = 0x0000'FFFFu;
-
-    std::uint32_t v = 0;
-
-    [[nodiscard]] constexpr SpiOutput with(SpiOutput bits) const noexcept {
-        return SpiOutput{v | bits.v};
-    }
-
-    [[nodiscard]] constexpr SpiOutput without(SpiOutput bits) const noexcept {
-        return SpiOutput{v & ~bits.v};
-    }
-
-    [[nodiscard]] constexpr bool has(SpiOutput bits) const noexcept {
-        return (v & bits.v) == bits.v;
-    }
-
-    [[nodiscard]] constexpr SpiOutput with_data(SpiWord word) const noexcept {
-        return SpiOutput{(v & ~kData) | word.v};
-    }
-
-    [[nodiscard]] constexpr SpiWord data() const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(v & kData)};
-    }
-
-    friend constexpr bool operator==(SpiOutput, SpiOutput) = default;
-};
+static_assert(sizeof(SpiWord) == 2);
 
 struct ButtonMask {
     std::uint16_t v = 0;
@@ -96,6 +146,10 @@ struct GpiWord {
         return ButtonMask{static_cast<std::uint16_t>(field(kGpiButtonsField))};
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
     friend constexpr bool operator==(GpiWord, GpiWord) = default;
 };
 
@@ -121,10 +175,6 @@ private:
     }
     friend struct SectorBlock;
 };
-
-[[nodiscard]] constexpr std::uint32_t detail_of(GpiWord w) noexcept {
-    return w.v;
-}
 
 static_assert(sizeof(GpiWord) == 4);
 
@@ -179,7 +229,15 @@ struct LwOffset {
         return LwOffset{v - origin.v};
     }
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr os::PhysAddr address_in(os::PhysAddr bridge) const noexcept {
+        return bridge.advanced(v);
+    }
+
+    [[nodiscard]] constexpr infra::LwOffsetLabel as_log_label() const noexcept {
+        return infra::LwOffsetLabel{v};
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
@@ -195,8 +253,36 @@ constexpr LwOffset LwExtent::from_origin() const noexcept {
     return LwOffset{v};
 }
 
+struct FpgaAperture;
+
 struct FabricAddr {
     std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr std::optional<os::PhysAddr> physical_in(
+        const FpgaAperture& aperture
+    ) const noexcept;
+
+    [[nodiscard]] static constexpr std::optional<FabricAddr> of(os::PhysAddr a) noexcept {
+        if (a.v > std::numeric_limits<std::uint32_t>::max())
+            return std::nullopt;
+        return FabricAddr{static_cast<std::uint32_t>(a.v)};
+    }
+
+    [[nodiscard]] constexpr FabricAddr advanced(std::uint32_t bytes) const noexcept {
+        return FabricAddr{v + bytes};
+    }
+
+    [[nodiscard]] constexpr os::PhysAddr folded_into(
+        os::PhysAddr base,
+        std::uint32_t mask
+    ) const noexcept {
+        return base.folded(v, mask);
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
     friend constexpr bool operator==(FabricAddr, FabricAddr) = default;
     friend constexpr auto operator<=>(FabricAddr, FabricAddr) = default;
 };
@@ -220,8 +306,7 @@ enum class Width : std::uint8_t { Byte = 0, Word = 1 };
 }
 
 [[nodiscard]] constexpr std::size_t words(Width w, std::size_t bytes) noexcept {
-    const std::size_t b = word_bytes(w);
-    return (bytes + b - 1u) / b;
+    return w == Width::Word ? (bytes + 1u) / 2u : bytes;
 }
 
 using SchedPolicy = os::SchedPolicy;
@@ -241,7 +326,22 @@ struct FrameSeq {
 };
 
 struct WordOffset {
+    static constexpr std::size_t kWordBytes = 4;
+
     std::size_t v = 0;
+
+    [[nodiscard]] constexpr bool fits_in(std::size_t region_bytes) const noexcept {
+        return region_bytes >= kWordBytes && v <= (region_bytes - kWordBytes) / kWordBytes;
+    }
+
+    [[nodiscard]] constexpr os::MapLength byte_offset() const noexcept {
+        return os::MapLength{v * kWordBytes};
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, static_cast<std::uint32_t>(v)};
+    }
+
     friend constexpr bool operator==(WordOffset, WordOffset) = default;
     friend constexpr auto operator<=>(WordOffset, WordOffset) = default;
 };

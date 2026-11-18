@@ -10,7 +10,6 @@
 
 #include "cores/config_slots.h"
 #include "cores/core_support.h"
-#include "cores/file_tx.h"
 #include "cores/mounted_path.h"
 #include "cores/option_row_view.h"
 #include "cores/option_rows.h"
@@ -22,6 +21,8 @@
 #include "cores/st_option_row.h"
 #include "cores/st_options.h"
 #include "cores/st_sysctrl.h"
+#include "cores/stream_load.h"
+#include "cores/stream_load_host.h"
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
@@ -50,23 +51,22 @@ class StCore final : public Core,
                      public ISectorKick,
                      public ISlotMount,
                      public IConfigSlots,
-                     public IOptionRows {
+                     public IOptionRows,
+                     public IStreamLoad {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
     StCore(const CoreProfile& p, const HostServices& h);
 
     static constexpr IoIndex kClearIndex{3};
-    static constexpr proto::WideIoIndex kTosLargeIndex{0};
-    static constexpr proto::WideIoIndex kTosSmallIndex{1};
-    static constexpr proto::WideIoIndex kCartIndex{2};
 
-    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
     static constexpr std::uint32_t kClearBytes = 16u * 1024u;
-    static constexpr std::size_t kCartBytes = 128u * 1024u;
-    static constexpr std::size_t kCartBufferBytes = kCartBytes + 4u;
-    static constexpr std::uint64_t kTosLargeBytes = 256u * 1024u;
-    static constexpr std::uint64_t kTosSmallBytes = 192u * 1024u;
+
+    static constexpr proto::FioWordCount kClearPieceWords{1024};
+    static_assert(
+        kClearBytes % kClearPieceWords.bytes_at(hal::Width::Word) == 0,
+        "the clear is a whole number of pieces"
+    );
 
     static constexpr std::size_t kPathBytes = st_cfg::kPathBytes;
     static constexpr std::size_t kAcsiTargets = StConfig::kAcsiTargets;
@@ -92,6 +92,9 @@ public:
     [[nodiscard]] OptionRowView option_view(proto::OptionRowIndex row) noexcept override;
     [[nodiscard]] Ex<void> set_option(proto::OptionRowIndex row, proto::FieldValue choice) override;
 
+    [[nodiscard]] Ex<proto::SessionParams> stream_opening(const StreamAsk& ask) override;
+    void stream_closed(const StreamLoadEnd& end) noexcept override;
+
     [[nodiscard]] Ex<void> set_system_ctrl(std::uint32_t ctrl);
     [[nodiscard]] Ex<void> set_ext_ctrl(std::uint32_t ext);
 
@@ -105,9 +108,7 @@ public:
 
     [[nodiscard]] std::uint32_t warm_resets() const noexcept { return warm_resets_; }
 
-    [[nodiscard]] std::uint32_t tos_refusals() const noexcept { return tos_refusals_; }
-
-    [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return bytes_sent_; }
+    [[nodiscard]] std::uint32_t no_tos_refusals() const noexcept { return no_tos_refusals_; }
 
     [[nodiscard]] bool acsi_bound(AcsiTarget target) const noexcept;
 
@@ -120,7 +121,6 @@ public:
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
-    [[nodiscard]] Ex<void> on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) override;
     [[nodiscard]] Ex<void> on_apply_load_facts(
         std::span<const std::uint8_t> facts,
         std::string_view
@@ -142,25 +142,24 @@ private:
         return infra::OptRef<IOptionRows>{*this};
     }
 
-    void on_set_pending_file_ext(std::string_view ext) noexcept override;
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{*this};
+    }
 
-    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
+    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {
+        return stream_.bytes();
+    }
 
     [[nodiscard]] Ex<void> push_control_();
     [[nodiscard]] Ex<void> update_sysctrl_(st_ctrl::CtrlWord ctrl);
 
     void store_sysctrl_(st_ctrl::CtrlWord ctrl) noexcept;
 
-    [[nodiscard]] Ex<void> clear_low_ram_();
-    [[nodiscard]] Ex<void> tx_tos_(std::span<const std::uint8_t> bytes, std::string_view ext);
-
-    [[nodiscard]] Ex<void> tx_cart_from_(std::span<const std::uint8_t> image);
-    [[nodiscard]] Ex<void> tx_cart_(std::span<const std::uint8_t> rom);
     [[nodiscard]] Ex<void> insert_disk_(st_ctrl::StSlot slot, std::string_view path);
 
     [[nodiscard]] Ex<void> eject_hdd_(AcsiTarget target);
     [[nodiscard]] Ex<void> eject_all_();
-    [[nodiscard]] std::uint32_t word_(WordId w) const noexcept;
+    [[nodiscard]] st_ctrl::CtrlWord word_(WordId w) const noexcept;
     [[nodiscard]] Ex<void> push_word_(WordId w, st_ctrl::CtrlWord v);
 
     [[nodiscard]] StOptionRow::Facts facts_() const noexcept;
@@ -178,13 +177,13 @@ private:
     infra::IndexedArray<AcsiBind, kAcsiTargets, AcsiTarget> acsi_{};
     std::array<FixedStr<kPathBytes, StrFit::Clip>, 2> floppy_img_{};
     char view_text_[kOptionTextChars + 1]{};
-    FixedStr<8, StrFit::Clip> ext_{};
+
+    StreamLoadHost stream_;
 
     std::uint32_t control_pushes_ = 0;
     std::uint32_t cold_resets_ = 0;
     std::uint32_t warm_resets_ = 0;
-    std::uint32_t tos_refusals_ = 0;
-    std::uint64_t bytes_sent_ = 0;
+    std::uint32_t no_tos_refusals_ = 0;
 };
 
 }

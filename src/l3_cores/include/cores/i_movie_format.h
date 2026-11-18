@@ -30,13 +30,13 @@ struct MovieArchiveFormat;
 class IMovieFormat {
 public:
     struct DigestSpan {
-        proto::FileSize offset{};
+        proto::FileOffset offset{};
         proto::FileSize length{};
     };
 
     static constexpr std::size_t kRomHead = 16;
 
-    static constexpr std::uint64_t kRomMax = 4u << 20;
+    static constexpr proto::FileSize kRomMax{4u << 20};
 
     struct KeyValue {
         std::string_view key;

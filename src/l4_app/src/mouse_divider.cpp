@@ -12,7 +12,7 @@ constexpr std::chrono::milliseconds kMouseDivider{15};
 }
 
 std::optional<MouseDivider::Packet> MouseDivider::flush() noexcept {
-    const MouseDelta md = acc_.take();
+    const MouseReport md = acc_.take();
     carry_.dx += md.motion.dx;
     carry_.dy += md.motion.dy;
     carry_.wheel += md.motion.wheel;

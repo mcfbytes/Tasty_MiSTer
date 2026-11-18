@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "ui/draw_classic.h"
-#include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
@@ -47,19 +46,19 @@ bool blank_text(std::string_view t) noexcept {
 }
 
 RowCount ConfigSlotsPage::slot_count() const noexcept {
-    return table_ != nullptr ? RowCount{table_->count} : RowCount{};
+    return table_ != nullptr ? RowCount::of(table_->count) : RowCount{};
 }
 
 bool ConfigSlotsPage::selectable(cores::ConfigSlot slot) const noexcept {
-    if (slot.v >= slot_count().v)
+    if (!slot_count().contains(app::row_of(slot)))
         return false;
-    if (mode_ == Mode::Save || slot.v == 0)
+    if (mode_ == Mode::Save || slot == cores::kStartupSlot)
         return true;
     return table_->exists.has(slot);
 }
 
 SlotChoice ConfigSlotsPage::choice_of(RowIndex at) const noexcept {
-    if (at.v >= slot_count().v)
+    if (!slot_count().contains(at))
         return SlotChoice{};
     return SlotChoice{config_slot_of(at)};
 }
@@ -96,7 +95,7 @@ std::optional<cores::ConfigSlot> ConfigSlotsPage::slot_at(OsdRow row) const noex
         return std::nullopt;
 
     const RowCount at = row_index_of(row) - row_index_of(kOtherFirstRow) + kOneRow;
-    if (at.v >= slot_count().v)
+    if (at >= slot_count())
         return std::nullopt;
     return config_slot_of(row_after(at));
 }
@@ -109,7 +108,7 @@ bool ConfigSlotsPage::row_stippled(OsdRow at) const noexcept {
 std::string ConfigSlotsPage::row_text(OsdRow at) const {
     TASTY_SEAT_BODY(ConfigSlotsPage);
     const RowCount rows = osd_height();
-    if (rows.v == 0)
+    if (rows.empty())
         return {};
     if (at == kStartupHeaderRow)
         return kStartupHeader;
@@ -123,7 +122,7 @@ std::string ConfigSlotsPage::row_text(OsdRow at) const {
 
     if (!selectable(*slot))
         return "  ";
-    return std::string{"  "} + std::string(table_->preview[slot->v].view());
+    return std::string{"  "} + std::string(table_->preview[*slot].view());
 }
 
 bool ConfigSlotsPage::walk(PageWalk& out) const {

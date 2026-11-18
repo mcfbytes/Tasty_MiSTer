@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/connect_slot_plan.h"
 
+#include <utility>
+
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
 #include "ui/connect_port.h"
@@ -73,8 +75,7 @@ Transition ConnectSlotPlan::ask(
     spec.choices = choices;
     spec.host = infra::OptRef<IConfirmHost>{static_cast<IConfirmHost&>(*this)};
     spec.initial = initial;
-    (void)ctx_.launches.confirm->arm(spec);
-    return replace ? Transition::replace(PageId::Confirm) : Transition::push(PageId::Confirm);
+    return ctx_.launches.confirm->open(PageId::Confirm, spec, replace);
 }
 
 Transition ConnectSlotPlan::request_text(
@@ -88,14 +89,12 @@ Transition ConnectSlotPlan::request_text(
         return Transition{};
     }
     asked_ = slot;
-    (void)ctx_.launches.entry->arm(
-        TextEntryRequest{
-            .kind = kind,
-            .title = title,
-            .host = infra::OptRef<ITextEntryHost>{static_cast<ITextEntryHost&>(*this)}
-        }
-    );
-    return replace ? Transition::replace(PageId::TextEntry) : Transition::push(PageId::TextEntry);
+    TextEntryRequest req{
+        .kind = kind,
+        .title = title,
+        .host = infra::OptRef<ITextEntryHost>{static_cast<ITextEntryHost&>(*this)}
+    };
+    return ctx_.launches.entry->open(PageId::TextEntry, std::move(req), replace);
 }
 
 Transition ConnectSlotPlan::on_confirm(RowIndex choice) {

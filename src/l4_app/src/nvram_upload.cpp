@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/nvram_upload.h"
 
-#include <chrono>
-
 #include "app/config_rel.h"
 #include "app/log_clock.h"
 #include "app/save_upload_relay.h"
@@ -30,18 +28,15 @@ bool NvramUpload::saves_drained() const noexcept {
     return saves_.drained();
 }
 
-constexpr unsigned kSaveSettleTries = 8192;
-
-void NvramUpload::settle_save_lane(bool fio_free) {
+bool NvramUpload::settle_step(bool fio_free) {
     TASTY_SEAT_BODY(NvramUpload);
+    if (saves_.settled())
+        return false;
 
-    for (unsigned i = 0; i < kSaveSettleTries && !saves_.settled(); ++i) {
-
-        if (!fio_free && !saves_.holds_fio())
-            break;
-        saves_.service_rt(proto::SpiFioQueue::kUnbudgeted, fio_free);
-        sleep_ms(sleeper_, std::chrono::milliseconds{1});
-    }
+    if (!fio_free && !saves_.holds_fio())
+        return false;
+    saves_.service_rt(proto::SpiFioQueue::kUnbudgeted, fio_free);
+    return true;
 }
 
 Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up) {

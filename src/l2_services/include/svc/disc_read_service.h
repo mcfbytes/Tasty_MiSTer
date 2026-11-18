@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "infra/counter.h"
+#include "infra/error.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -82,6 +83,8 @@ public:
     [[nodiscard]] std::uint32_t reads() const noexcept { return reads_.get(); }
 
     [[nodiscard]] std::uint32_t read_errors() const noexcept { return read_errors_.get(); }
+
+    [[nodiscard]] std::optional<Error> last_read_fault() const noexcept { return last_read_fault_; }
 
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
@@ -167,6 +170,7 @@ private:
 
     std::array<std::optional<DiscAsk>, kDiscReadDepth> inflight_{};
     Generation gen_{};
+    std::optional<Error> last_read_fault_{};
     xthread::Counter not_resident_, stale_drops_, refusals_, reads_, read_errors_, evictions_;
 };
 

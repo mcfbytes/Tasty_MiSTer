@@ -29,7 +29,7 @@ constexpr DirEntryFacts kFacts{
 
 }
 
-[[nodiscard]] Ex<SysBlockDecl> find_sys_block(
+[[nodiscard]] Ex<SysBlockDeclLookup> find_sys_block(
     const SysDirectoryImage& dir,
     hal::LwExtent window
 ) noexcept {
@@ -39,26 +39,34 @@ constexpr DirEntryFacts kFacts{
 
     const IrqOrdinal ordinal = e->word(SysWord::Ordinal).irq_ordinal();
     if (ordinal < IrqOrdinal{kIrqPoolFirstLine} || ordinal > IrqOrdinal{kIrqOrdinalMax}) {
-        return std::unexpected(ordinal.refused(Errc::slot_range, ERR_SITE()));
+        return std::unexpected(ordinal.refusal(Errc::slot_range, ERR_SITE()));
     }
 
     const CauseTag tag = e->word(SysWord::Tag).cause_tag();
     if (tag != CauseTag{reactor::cause_word::kSys}) {
-        return std::unexpected(tag.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(tag.refusal(Errc::bad_format, ERR_SITE()));
     }
     const CauseBits causes = e->word(SysWord::Causes).cause_bits();
     if (!causes.holds(CauseBits{hal::SysBlock::kCauseStatus})) {
-        return std::unexpected(causes.refused(Errc::not_found, ERR_SITE()));
+        return std::unexpected(causes.refusal(Errc::not_found, ERR_SITE()));
     }
-    return SysBlockDecl{
-        .offset = e->offset(),
-        .size = e->size(),
-        .line = ordinal.line_after(IrqOrdinal{kIrqPoolFirstLine}),
-        .cause = e->word(SysWord::Cause).lw_offset(),
-        .tag = tag,
-        .causes = causes,
-        .line_decl = e->line()
+    return SysBlockDeclLookup{
+        .block =
+            SysBlockDecl{
+                .offset = e->offset(),
+                .size = e->size(),
+                .line =
+                    BlockLine{
+                        .line = ordinal.line_after(IrqOrdinal{kIrqPoolFirstLine}),
+                        .cause = e->word(SysWord::Cause).lw_offset()
+                    },
+                .tag = tag,
+                .causes = causes
+            },
+        .declared = e->line()
     };
 }
+
+static_assert(!CarriesOpBitmap<SysWord>, "a SYS entry declares no ops bitmap");
 
 }

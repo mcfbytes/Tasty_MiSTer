@@ -3,9 +3,9 @@
 
 namespace mister::cores {
 
-Ex<proto::SessionParams> StreamLoadHost::stream_opening(IoIndex) {
+Ex<proto::SessionParams> StreamLoadHost::stream_opening(const StreamAsk& ask) {
     TASTY_SEAT_BODY(StreamLoadHost);
-    tx_.opened();
+    tx_.opened(ask);
     proto::SessionParams params{};
     params.ext = tx_.ext();
     return params;

@@ -39,10 +39,7 @@ public:
     static constexpr SaveRow kCartRow{0};
     static constexpr std::size_t kPathChars = SavePath::kCapacity;
 
-    explicit SaveChannel(
-        const svc::Vfs& vfs,
-        infra::OptRef<xthread::WakeFlag> activity = {}
-    ) noexcept;
+    explicit SaveChannel(infra::OptRef<svc::IStorageBackend> store) noexcept;
     SaveChannel(const SaveChannel&) = delete;
     SaveChannel& operator=(const SaveChannel&) = delete;
 
@@ -66,12 +63,10 @@ public:
 
     [[nodiscard]] std::uint32_t open_failures() const noexcept { return open_failures_; }
 
-    [[nodiscard]] SaveChannelStore& store() noexcept { return io_; }
-
     [[nodiscard]] Ex<Mount> mount_at(SaveRow row);
 
     [[nodiscard]] infra::OptRef<const MountPlan> mount_plan() const noexcept override;
-    [[nodiscard]] svc::IStorageBackend& backend() noexcept override;
+    [[nodiscard]] infra::OptRef<svc::IStorageBackend> backend() noexcept override;
 
     [[nodiscard]] std::span<const std::byte> compose_order(
         SaveRow row,
@@ -106,7 +101,7 @@ private:
     infra::IndexedArray<SaveOrder, kMaxSaveRows, SaveRow> orders_{};
     SavePlan plan_{};
     SaveAttach::Planned outbox_{};
-    SaveChannelStore io_;
+    infra::OptRef<svc::IStorageBackend> store_port_;
 };
 
 }

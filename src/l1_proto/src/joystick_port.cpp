@@ -9,7 +9,7 @@ namespace {
 constexpr JoyMask kDirections{kJoyRight | kJoyLeft | kJoyDown | kJoyUp};
 
 std::unexpected<Error> bad_player(PlayerIndex player, infra::ErrorSite site) noexcept {
-    return std::unexpected(Error{Errc::slot_range, site, player.v});
+    return std::unexpected(player.refusal(Errc::slot_range, site));
 }
 
 }
@@ -22,12 +22,11 @@ Ex<void> JoystickPort::push_digital(
 ) {
     if (!prev_.find(player))
         return bad_player(player, ERR_SITE());
-    const std::uint8_t port = swapped(player.v);
 
     if (map.beyond_low_half())
         use32_ = true;
 
-    const UioOp opcode = digital_opcode(port);
+    const UioOp opcode = digital_opcode(wire_port(player));
 
     if (auto e = pads.digital(opcode, map); !e)
         return e;
@@ -83,15 +82,10 @@ Ex<void> JoystickPort::push_spinner(ILinkPadEncoder& pads, PlayerIndex player, s
     );
 }
 
-Ex<bool> JoystickPort::submit(
-    ILinkPadEncoder& pads,
-    PlayerIndex player,
-    JoyMask buttons,
-    JoyMask autofire
-) {
+Ex<bool> JoystickPort::submit(ILinkPadEncoder& pads, PlayerIndex player, PadMasks masks) {
     if (!prev_.find(player))
         return bad_player(player, ERR_SITE());
-    const JoyMask composed = buttons.with(autofire);
+    const JoyMask composed = masks.composed();
 
     const bool new_dir = composed.with(prev_[player]).any(kDirections);
 

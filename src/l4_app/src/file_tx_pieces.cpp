@@ -14,9 +14,9 @@ namespace {
 
 struct RestPlace {
     proto::FileSize whole{};
-    proto::FileSize offset{};
+    proto::FileOffset offset{};
 
-    [[nodiscard]] static RestPlace at_end(proto::FileSize whole, proto::FileSize at) noexcept {
+    [[nodiscard]] static RestPlace at_end(proto::FileSize whole, proto::FileOffset at) noexcept {
         return RestPlace{whole, at};
     }
 };
@@ -27,16 +27,18 @@ enum Refusal : std::uint32_t { kBadTotal, kBadPath, kPastEnd };
 
 Ex<FileTxPieces> FileTxPieces::start(
     std::unique_ptr<svc::IFile> file,
-    std::uint64_t total,
+    proto::FileSize total,
     proto::WideIoIndex wire_index,
     std::string_view path,
+    FileTxStamp stamp,
     std::unique_ptr<cores::ILoader> loader,
     const cores::TransferRow& row
 ) {
-    if (file == nullptr || total == 0 || total > std::numeric_limits<std::uint32_t>::max()) {
+    constexpr proto::FileSize kMaxOpTotal{std::numeric_limits<std::uint32_t>::max()};
+    if (file == nullptr || total.empty() || total > kMaxOpTotal) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kBadTotal});
     }
-    FileTxPieces p(std::move(file), total, wire_index, std::move(loader), row);
+    FileTxPieces p(std::move(file), total, wire_index, stamp, std::move(loader), row);
     if (!p.path_.assign(path))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kBadPath});
     return p;
@@ -44,19 +46,19 @@ Ex<FileTxPieces> FileTxPieces::start(
 
 Ex<FileTxPieces> FileTxPieces::resume(
     std::unique_ptr<svc::IFile> file,
-    std::uint64_t total,
+    proto::FileSize total,
     proto::WideIoIndex wire_index,
     std::string_view path,
-    std::uint64_t from,
+    proto::FileOffset from,
     svc::Crc32 crc
 ) {
-    if (from > total)
+    if (from > proto::kFileStart + total)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kPastEnd});
     auto p = start(std::move(file), total, wire_index, path);
     if (!p)
         return p;
     p->sent_ = from;
-    p->keyed_to_ = total;
+    p->keyed_to_ = proto::kFileStart + total;
     p->crc_ = crc;
     p->pieces_ = 1;
     p->facts_sent_ = false;
@@ -89,15 +91,13 @@ bool FileTxPieces::ready(
     return !(slab_full_at_ && inbox.ring().popped() == *slab_full_at_);
 }
 
-bool FileTxPieces::stage_() {
-    const auto n = static_cast<std::size_t>(
-        std::min<std::uint64_t>(InternedFile::kPieceBytes, total_ - sent_)
-    );
-    std::vector<std::uint8_t> buf(n);
+bool FileTxPieces::stage_(const proto::FileSize piece) {
+    const proto::FileSize n = piece.min(sent_.remaining_in(total_));
+    std::vector<std::uint8_t> buf = n.zeroed<std::vector<std::uint8_t>>();
     std::size_t got = 0;
-    while (got < n) {
+    while (proto::FileSize{got} < n) {
         auto r = file_->read_at(
-            sent_ + got,
+            sent_ + proto::FileSize{got},
             std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(got))
         );
         if (!r || *r == 0)
@@ -106,13 +106,13 @@ bool FileTxPieces::stage_() {
     }
     if (loader_ != nullptr) {
         loader_->shape(row_, buf, sent_);
-        if (sent_ + n == total_ && !loader_->finish({}))
+        if (sent_ + n == proto::kFileStart + total_ && !loader_->finish({}))
             return false;
     }
 
     if (sent_ + n > keyed_to_) {
         key_.feed(
-            std::span<const std::uint8_t>(buf).subspan(static_cast<std::size_t>(keyed_to_ - sent_))
+            std::span<const std::uint8_t>(buf).subspan((keyed_to_ - sent_).file_word<std::size_t>())
         );
         keyed_to_ = sent_ + n;
     }
@@ -123,7 +123,8 @@ bool FileTxPieces::stage_() {
 FileTxPieces::Pass FileTxPieces::step(
     LinkTxChannel<SeatTag::Main>& inbox,
     const FileTxLevelCell& level,
-    proto::ActKey act
+    proto::ActKey act,
+    hal::Width width
 ) {
     TASTY_SEAT_BODY(FileTxPieces);
     using Phase = proto::LinkOp::FileTxPhase;
@@ -139,19 +140,22 @@ FileTxPieces::Pass FileTxPieces::step(
         const Outstanding o = *outstanding_;
         outstanding_.reset();
         if (ans->held_act == o.act) {
-            if (loader_ != nullptr || ans->held_bytes > o.bytes)
+            if (loader_ != nullptr || proto::FileSize{ans->held_bytes} > o.bytes)
                 return fail_(inbox);
-            sent_ = o.from + ans->held_bytes;
+            sent_ = o.from + proto::FileSize{ans->held_bytes};
             ++rewinds_;
         } else if (!ans->stream_served) {
             return fail_(inbox);
         }
     }
 
-    if (!staged_ && !stage_())
+    if (!width_)
+        width_ = width;
+
+    if (!staged_ && !stage_(piece_bytes(*width_)))
         return fail_(inbox);
-    const std::uint64_t n = staged_->bytes.size();
-    const bool last = sent_ + n == total_;
+    const proto::FileSize n = proto::FileSize::of(std::span<const std::uint8_t>(staged_->bytes));
+    const bool last = sent_ + n == proto::kFileStart + total_;
     const Phase phase = pieces_ == 0 ? (last ? Phase::Whole : Phase::Open)
                                      : (last ? Phase::Close : Phase::Piece);
 
@@ -163,15 +167,18 @@ FileTxPieces::Pass FileTxPieces::step(
         facts_sent_ = true;
     }
 
-    const RestPlace rest = n == 0
-        ? RestPlace::at_end(proto::FileSize{total_}, proto::FileSize{sent_})
-        : RestPlace{};
+    const RestPlace rest = n.empty() ? RestPlace::at_end(total_, sent_) : RestPlace{};
     const svc::Crc32 crc = last ? crc_.value_or(key_.value()) : svc::Crc32{};
 
     staged_->ext = infra::extension(path_.view());
     staged_->path = path_.view();
     staged_->crc = crc;
     staged_->piece = {.whole = rest.whole, .offset = rest.offset};
+
+    if (last) {
+        staged_->save = stamp_.save;
+        staged_->edge = stamp_.edge;
+    }
 
     auto id = inbox.intern_file(std::move(*staged_));
     if (!id) {
@@ -189,7 +196,7 @@ FileTxPieces::Pass FileTxPieces::step(
         .wire_index = wire_index_.fio_byte(),
         .phase = phase,
         .file = *id,
-        .total = static_cast<std::uint32_t>(total_),
+        .total = total_.file_word<std::uint32_t>(),
         .act = act
     };
     (void)inbox.push(op);
@@ -201,6 +208,7 @@ FileTxPieces::Pass FileTxPieces::step(
             .from = sent_,
             .crc = crc,
             .shaped = loader_ != nullptr,
+            .stamped = stamp_.any(),
             .remounts_saves = facts_sent_
         };
     } else {
@@ -222,7 +230,7 @@ FileTxPieces::Pass FileTxPieces::cut_(LinkTxChannel<SeatTag::Main>& inbox) {
     const proto::LinkOp::FileTx op{
         .wire_index = wire_index_.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::Close,
-        .total = static_cast<std::uint32_t>(total_)
+        .total = total_.file_word<std::uint32_t>()
     };
     if (!inbox.push(op))
         return Pass::Waiting;
@@ -242,7 +250,7 @@ Rung::Pass FileTxPieces::step(const RungEdges& edges, cores::ILadderHost& owner)
     TASTY_SEAT_BODY(FileTxPieces);
     if (!ready(edges.inbox, edges.level))
         return Rung::Pass::Waiting;
-    switch (step(edges.inbox, edges.level, owner.next_generation())) {
+    switch (step(edges.inbox, edges.level, owner.next_generation(), owner.link_width())) {
         case Pass::Sent:
             return Rung::Pass::Moved;
         case Pass::Waiting:

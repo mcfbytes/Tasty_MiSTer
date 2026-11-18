@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 
-#include "cores/cd_speed_index.h"
+#include "cores/cd_speed_count.h"
+#include "infra/indexed_array.h"
 
 namespace mister::cores {
 
@@ -18,7 +20,7 @@ struct CdTickPeriods {
     std::chrono::microseconds stream;
 
     std::chrono::microseconds caller;
-    std::uint8_t speeds;
+    CdSpeedCount speeds;
 
     std::array<std::chrono::microseconds, kMaxSpeeds> speed{};
 
@@ -28,13 +30,15 @@ struct CdTickPeriods {
     ) const noexcept {
         if (!active)
             return idle;
-        if (speeds == 0)
+        if (speeds.empty())
             return stream;
-        const std::size_t live = speeds < kMaxSpeeds ? speeds : kMaxSpeeds;
-        const std::size_t bounded = speed_index.v < live ? speed_index.v : live - 1;
-        const std::chrono::microseconds override_period = speed[bounded];
+        const CdSpeedCount live = std::min(speeds, kMaxSpeedCount);
+        const CdSpeedIndex bounded = live.clamp(speed_index);
+        const std::chrono::microseconds override_period = infra::at_index(speed, bounded);
         return override_period == std::chrono::microseconds::zero() ? stream : override_period;
     }
 };
+
+static_assert(kMaxSpeedCount == CdSpeedCount{CdTickPeriods::kMaxSpeeds});
 
 }

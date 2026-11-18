@@ -28,7 +28,7 @@ std::string read_remembered_path(
     if (!f)
         return {};
     std::array<std::byte, kRememberedBlob> blob{};
-    auto n = (*f)->read_at(0, blob);
+    auto n = (*f)->read_at(proto::kFileStart, blob);
     if (!n || *n == 0)
         return {};
     return std::string{infra::text_until_nul(std::span{blob})};

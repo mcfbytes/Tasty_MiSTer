@@ -12,6 +12,7 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/types.h"
+#include "hal/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "os/clock.h"
@@ -48,15 +49,13 @@ private:
         Op op = Op::Refused;
         HeadLba target{};
         SectorCount blocks{};
-        [[nodiscard]] static CddCommand of(std::span<const std::uint16_t, kWords> words) noexcept;
+        static constexpr std::size_t kBytes = kWords * sizeof(hal::SpiWord);
+        [[nodiscard]] static CddCommand of(std::span<const std::uint8_t, kBytes> bytes) noexcept;
     };
 
     enum class State : std::uint8_t { Idle, Open, Read, Pause, Stop };
 
-    [[nodiscard]] Ex<void> do_accept(
-        std::span<const std::uint16_t> words,
-        CdDialectPorts& p
-    ) override;
+    [[nodiscard]] Ex<void> do_accept(const CdCommandWords& cmd, CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override;
     void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept override;

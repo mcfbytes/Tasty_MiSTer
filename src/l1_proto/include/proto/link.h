@@ -23,10 +23,11 @@ public:
     Link(const Link&) = delete;
     Link& operator=(const Link&) = delete;
 
-    [[nodiscard]] Ex<std::uint16_t> command(hal::ChipSelect cs, std::uint16_t op);
-    [[nodiscard]] Ex<std::uint16_t> command(FrameSel sel, std::uint16_t op);
+    [[nodiscard]] Ex<std::uint16_t> command(LinkSel sel, hal::SpiWord op);
 
-    [[nodiscard]] Ex<std::uint16_t> command(LinkRoute route, std::uint16_t op);
+    [[nodiscard]] Ex<std::uint16_t> command(LinkSel sel, std::uint16_t op) {
+        return command(sel, hal::SpiWord{op});
+    }
 
     [[nodiscard]] Ex<std::uint16_t> command(UioOp op);
 

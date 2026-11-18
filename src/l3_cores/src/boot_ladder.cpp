@@ -69,6 +69,7 @@ std::string strip_disc_word(std::string path, std::span<const std::string_view> 
 BootLadder::BootLadder(const CoreProfile& profile, const LadderContext& ctx)
     : profile_(profile),
       vfs_(ctx.vfs),
+      card_(ctx.vfs),
       host_(ctx.host),
       clock_(ctx.clock) {
     switch (ctx.kind()) {
@@ -261,7 +262,7 @@ bool BootLadder::group_gates(BootGroup group) const {
 Ex<std::string> BootLadder::save_root_() {
     std::string root = "saves/";
     root.append(profile_.name);
-    if (auto r = vfs_.ensure_dir(root); !r)
+    if (auto r = card_.ensure_dir(root); !r)
         return std::unexpected(r.error());
     return root;
 }
@@ -499,10 +500,6 @@ bool BootLadder::order_reset() {
 
 bool BootLadder::order_disc_payload(const proto::LinkOp::StageDiscPayload& facts) {
     return host_.order(facts);
-}
-
-bool BootLadder::order_empty_bracket(WideIoIndex dest) {
-    return host_.order(proto::LinkOp::StagePayload{.dest = dest});
 }
 
 bool BootLadder::order_set_index(WideIoIndex dest) {

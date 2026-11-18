@@ -10,8 +10,14 @@
 
 namespace mister::hal {
 
-Ex<ScalerBuffers> ScalerBuffers::map(const PhysRegion& scaler_out) {
-    auto m = FpgaMemory::map_aperture(span_of(scaler_out), os::MmioRegion::Access::ReadOnly);
+Ex<ScalerBuffers> ScalerBuffers::map(
+    const FpgaAperture& aperture,
+    const ApertureRegion& scaler_out
+) {
+    const auto span = span_of(aperture, scaler_out);
+    if (!span)
+        return std::unexpected(span.error());
+    auto m = FpgaMemory::map_aperture(*span, os::MmioRegion::Access::ReadOnly);
     if (!m)
         return std::unexpected(m.error());
     return ScalerBuffers{std::move(*m)};
@@ -46,40 +52,52 @@ void copy_wide(std::span<std::byte> dst, std::span<const std::byte> src) noexcep
     std::byte* out = dst.data();
     const std::byte* in = src.data();
     std::size_t n = src.size();
-#if defined(__arm__) && defined(__ARM_FP)
-
     constexpr std::size_t kBlock = 128;
     constexpr std::uintptr_t kAlign = 8;
-    const std::uintptr_t out_addr = reinterpret_cast<std::uintptr_t>(out);
-    const std::uintptr_t in_addr = reinterpret_cast<std::uintptr_t>(in);
-    if (((out_addr | in_addr) & (kAlign - 1)) == 0) {
-        std::size_t blocks = n / kBlock;
-        n -= blocks * kBlock;
-        while (blocks-- != 0) {
-            __asm__ volatile("vldmia %[s]!, {d0-d15}\n\t"
-                             "vstmia %[d]!, {d0-d15}\n\t"
-                             : [s] "+r"(in), [d] "+r"(out)
-                             :
-                             : "d0",
-                               "d1",
-                               "d2",
-                               "d3",
-                               "d4",
-                               "d5",
-                               "d6",
-                               "d7",
-                               "d8",
-                               "d9",
-                               "d10",
-                               "d11",
-                               "d12",
-                               "d13",
-                               "d14",
-                               "d15",
-                               "memory");
+    const auto out_addr = reinterpret_cast<std::uintptr_t>(out);
+    const auto in_addr = reinterpret_cast<std::uintptr_t>(in);
+
+    if (((out_addr ^ in_addr) & (kAlign - 1)) == 0) {
+        const std::size_t head = (kAlign - (out_addr & (kAlign - 1))) & (kAlign - 1);
+        if (n >= head + kBlock) {
+            std::memcpy(out, in, head);
+            out += head;
+            in += head;
+            n -= head;
+            std::size_t blocks = n / kBlock;
+            n -= blocks * kBlock;
+#if defined(__arm__) && defined(__ARM_FP)
+
+            while (blocks-- != 0) {
+                __asm__ volatile("vldmia %[s]!, {d0-d15}\n\t"
+                                 "vstmia %[d]!, {d0-d15}\n\t"
+                                 : [s] "+r"(in), [d] "+r"(out)
+                                 :
+                                 : "d0",
+                                   "d1",
+                                   "d2",
+                                   "d3",
+                                   "d4",
+                                   "d5",
+                                   "d6",
+                                   "d7",
+                                   "d8",
+                                   "d9",
+                                   "d10",
+                                   "d11",
+                                   "d12",
+                                   "d13",
+                                   "d14",
+                                   "d15",
+                                   "memory");
+            }
+#else
+            std::memcpy(out, in, blocks * kBlock);
+            out += blocks * kBlock;
+            in += blocks * kBlock;
+#endif
         }
     }
-#endif
     std::memcpy(out, in, n);
 }
 

@@ -51,21 +51,14 @@ struct FabricRegion {
     return true;
 }
 
-[[nodiscard]] constexpr Ex<PhysRegion> resolve_load_region(
-    const PhysRegion& aperture,
-    os::PhysAddr addr,
-    std::uint64_t len
-) {
-    if (aperture.len == 0)
+[[nodiscard]] constexpr Ex<ApertureRegion> FpgaAperture::region_of(const FabricRegion& row) const {
+    const auto at = translate(row.offset);
+    if (!at)
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
-    if (len == 0)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    const std::uint64_t base = aperture.phys.v;
-    const std::uint64_t extent = aperture.len;
-    if (addr.v < base || !span_fits(addr.v - base, len, extent)) {
-        return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), os::low32(addr)});
+    if (!fabric_row_fits(row, *this)) {
+        return std::unexpected(at->refusal(Errc::aperture_range, ERR_SITE()));
     }
-    return PhysRegion{addr, static_cast<std::size_t>(len), "load-window"};
+    return ApertureRegion{PhysRegion{*at, row.len, row.name}};
 }
 
 }

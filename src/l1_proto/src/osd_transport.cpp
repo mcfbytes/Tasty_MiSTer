@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "proto/link_sel.h"
 #include "proto/osd_opcodes.h"
 
 namespace mister::proto {
@@ -13,95 +14,91 @@ constexpr std::uint16_t kModeMask = 0x0A;
 
 }
 
-hal::ChipSelect OsdTransport::chip_select() const noexcept {
+LinkSel OsdTransport::sel() const noexcept {
     switch (target_) {
         case OsdTarget::Vga:
-            return hal::ChipSelect::OsdVga;
+            return LinkSel::OsdVga;
         case OsdTarget::Hdmi:
-            return hal::ChipSelect::OsdHdmi;
+            return LinkSel::OsdHdmi;
         case OsdTarget::All:
             break;
     }
-    return hal::ChipSelect::Osd;
+    return LinkSel::Osd;
 }
 
-Ex<void> OsdTransport::command(proto::Link& link, std::uint16_t cmd) {
-    if (auto r = link.command(chip_select(), cmd); !r)
+Ex<void> OsdTransport::command(ILinkFrame& frame, std::uint16_t cmd) {
+    if (auto r = frame.begin(sel(), hal::SpiWord{cmd}); !r)
         return std::unexpected(r.error());
-    link.close();
-    return {};
+    return frame.end();
 }
 
-Ex<void> OsdTransport::flush_row(proto::Link& link, OsdRow r, std::span<const std::uint8_t> bytes) {
+Ex<void> OsdTransport::flush_row(ILinkFrame& frame, OsdRow r, std::span<const std::uint8_t> bytes) {
     if (!OsdSurface::kMaxRows.covers(r)) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.v});
+        return std::unexpected(r.refusal(Errc::slot_range, ERR_SITE()));
     }
     if (bytes.size() != OsdSurface::kRowBytes) {
-        return std::unexpected(OsdRowBytes::of(bytes).refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(OsdRowBytes::of(bytes).refusal(Errc::bad_format, ERR_SITE()));
     }
 
     const auto cmd = osd_word(OsdOp::Write, r.wire_word());
-    if (auto e = link.command(chip_select(), cmd); !e)
+    if (auto e = frame.begin(sel(), hal::SpiWord{cmd}); !e)
         return std::unexpected(e.error());
     for (const std::uint8_t b : bytes) {
-        if (auto e = link.write_byte(b); !e)
+        if (auto e = frame.word(b); !e)
             return e;
     }
-    link.close();
-    return {};
+    return frame.end();
 }
 
-Ex<void> OsdTransport::set_visible(proto::Link& link, bool visible) {
-    return visible ? enable(link, OsdMode::DisableKeyboard)
-                   : command(link, osd_word(OsdOp::Disable, 0));
+Ex<void> OsdTransport::set_visible(ILinkFrame& frame, bool visible) {
+    return visible ? enable(frame, OsdMode::DisableKeyboard)
+                   : command(frame, osd_word(OsdOp::Disable, 0));
 }
 
-Ex<void> OsdTransport::enable(proto::Link& link, OsdMode mode) {
+Ex<void> OsdTransport::enable(ILinkFrame& frame, OsdMode mode) {
 
     const auto bits = static_cast<std::uint16_t>(mode);
     const auto m = static_cast<std::uint16_t>(bits & kModeMask);
-    return command(link, osd_word(OsdOp::Enable, m));
+    return command(frame, osd_word(OsdOp::Enable, m));
 }
 
-Ex<void> OsdTransport::enable_info(proto::Link& link, InfoWindow window) {
+Ex<void> OsdTransport::enable_info(ILinkFrame& frame, InfoWindow window) {
 
-    if (auto e = link.command(chip_select(), osd_word(OsdOp::EnableInfo, 0)); !e) {
+    if (auto e = frame.begin(sel(), hal::SpiWord{osd_word(OsdOp::EnableInfo, 0)}); !e) {
         return std::unexpected(e.error());
     }
     for (const std::uint16_t word : window.wire_words()) {
-        if (auto e = link.word(word); !e)
+        if (auto e = frame.word(word); !e)
             return e;
     }
-    link.close();
-    return {};
+    return frame.end();
 }
 
-Ex<void> OsdTransport::set_rotation(proto::Link& link, OsdRotation rotate) {
+Ex<void> OsdTransport::set_rotation(ILinkFrame& frame, OsdRotation rotate) {
 
-    if (auto e = link.command(chip_select(), osd_word(OsdOp::Disable, 0)); !e) {
+    if (auto e = frame.begin(sel(), hal::SpiWord{osd_word(OsdOp::Disable, 0)}); !e) {
         return std::unexpected(e.error());
     }
     constexpr unsigned kDummyWords = 4;
     for (unsigned i = 0; i < kDummyWords; ++i) {
-        if (auto e = link.word(0); !e)
+        if (auto e = frame.word(0); !e)
             return e;
     }
 
     for (const std::uint16_t word : rotation_words(rotate)) {
-        if (auto e = link.word(word); !e)
+        if (auto e = frame.word(word); !e)
             return e;
     }
-    link.close();
-    return {};
+    return frame.end();
 }
 
-Ex<void> OsdTransport::menu_ctl(proto::Link& link, bool enable_menu) {
+Ex<void> OsdTransport::menu_ctl(ILinkFrame& frame, bool enable_menu) {
 
     if (!enable_menu)
-        return command(link, osd_word(OsdOp::Disable, 0));
-    if (auto e = command(link, osd_word(OsdOp::WriteLatch, 0)); !e)
+        return command(frame, osd_word(OsdOp::Disable, 0));
+    if (auto e = command(frame, osd_word(OsdOp::WriteLatch, 0)); !e)
         return e;
-    return command(link, osd_word(OsdOp::Enable, 0));
+    return command(frame, osd_word(OsdOp::Enable, 0));
 }
 
 }

@@ -102,7 +102,10 @@ bool readable(const svc::ArchiveEntry& e) noexcept {
     std::string out(static_cast<std::size_t>(e.size), '\0');
     std::size_t done = 0;
     while (done < out.size()) {
-        const auto got = (*f)->read_at(done, std::as_writable_bytes(std::span(out).subspan(done)));
+        const auto got = (*f)->read_at(
+            proto::kFileStart + proto::FileSize{done},
+            std::as_writable_bytes(std::span(out).subspan(done))
+        );
         if (!got)
             return lower(got.error());
         if (*got == 0)
@@ -152,45 +155,25 @@ public:
         return std::unique_ptr<svc::IFile>(std::move(text));
     }
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        if (bad_)
-            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
-        std::size_t done = 0;
-        if (off < head_.size()) {
-            const auto n = static_cast<std::size_t>(
-                std::min<std::uint64_t>(dst.size(), head_.size() - off)
-            );
-            std::copy_n(infra::text_bytes(head_).data() + off, n, dst.data());
-            done = n;
-        }
-        if (done == dst.size())
-            return done;
-        const std::uint64_t at = off + done - head_.size() + base_;
-        if (at >= member_size_)
-            return done;
-        const auto got = log_->read_at(at, dst.subspan(done));
-        if (!got)
-            return lower(got.error());
-        account_(at, std::span<const std::byte>(dst.subspan(done, *got)));
-        if (!crc_ok_()) {
-            bad_ = true;
-            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
-        }
-        return done + *got;
+    [[nodiscard]] Ex<std::size_t> read_at(
+        proto::FileOffset pos,
+        std::span<std::byte> dst
+    ) override {
+        return text_at_(pos, dst);
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
     [[nodiscard]] Ex<svc::FileSize> size() const override {
-        return svc::FileSize{head_.size() + (member_size_ - base_)};
+        return svc::FileSize{head_.size()} + (member_size_ - base_);
     }
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
-        return log_->advise(a, 0, 0);
+    [[nodiscard]] Ex<void> advise(Access a, proto::FileOffset, svc::FileSize) override {
+        return log_->advise(a, proto::kFileStart, svc::FileSize{});
     }
 
 private:
@@ -203,43 +186,76 @@ private:
         : archive_(std::move(archive)),
           head_(std::move(head)),
           log_(std::move(log)),
-          member_size_(entry.size),
+          member_size_{entry.size},
           crc_want_(entry.crc) {}
+
+    [[nodiscard]] Ex<std::size_t> text_at_(proto::FileOffset pos, std::span<std::byte> dst) {
+        if (bad_)
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
+        const svc::FileSize head{head_.size()};
+        std::size_t done = 0;
+        if (head.holds(pos)) {
+            const auto rest = pos.skip_in(infra::text_bytes(head_));
+            const std::size_t n = std::min(dst.size(), rest.size());
+            std::copy_n(rest.data(), n, dst.data());
+            done = n;
+        }
+        if (done == dst.size())
+            return done;
+        const proto::FileOffset here = pos + svc::FileSize{done};
+        const proto::FileOffset at = proto::kFileStart
+            + (here - (proto::kFileStart + head))
+            + base_;
+        if (!member_size_.holds(at))
+            return done;
+        const auto got = log_->read_at(at, dst.subspan(done));
+        if (!got)
+            return lower(got.error());
+        account_(at, std::span<const std::byte>(dst.subspan(done, *got)));
+        if (!crc_ok_()) {
+            bad_ = true;
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
+        }
+        return done + *got;
+    }
 
     [[nodiscard]] Ex<void> prime_() {
         std::array<std::byte, 3> b{};
-        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(3, member_size_));
-        const auto got = log_->read_at(0, std::span(b).first(want));
+        const std::span<std::byte> all{b};
+        const std::span<std::byte> first = member_size_.min(svc::FileSize::of(all)).first_of(all);
+        const auto got = log_->read_at(proto::kFileStart, first);
         if (!got)
             return lower(got.error());
-        if (*got != want)
+        if (*got != first.size())
             return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
-        account_(0, std::span<const std::byte>(b).first(want));
+        account_(proto::kFileStart, std::span<const std::byte>(first));
         if (!crc_ok_())
             return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
-        if (want == 3 && infra::as_text(std::span(b).first(3)) == kBom)
-            base_ = 3;
+        if (first.size() == all.size() && infra::as_text(first) == kBom)
+            base_ = svc::FileSize::of(all);
         return {};
     }
 
-    void account_(std::uint64_t at, std::span<const std::byte> b) noexcept {
-        if (at > crc_pos_ || at + b.size() <= crc_pos_)
+    void account_(proto::FileOffset at, std::span<const std::byte> b) noexcept {
+        if (at > crc_pos_ || at + svc::FileSize::of(b) <= crc_pos_)
             return;
-        b = b.subspan(static_cast<std::size_t>(crc_pos_ - at));
+        b = (crc_pos_ - at).skip_in(b);
         crc_ = svc::crc32_extend(crc_, infra::byte_cast<const std::uint8_t>(b));
-        crc_pos_ += b.size();
+        crc_pos_ += svc::FileSize::of(b);
     }
 
-    bool crc_ok_() const noexcept { return crc_pos_ != member_size_ || crc_ == crc_want_; }
+    bool crc_ok_() const noexcept {
+        return crc_pos_ != proto::kFileStart + member_size_ || crc_ == crc_want_;
+    }
 
     std::unique_ptr<svc::IArchive> archive_;
     std::string head_;
     std::unique_ptr<svc::IFile> log_;
-    std::uint64_t member_size_ = 0;
-    std::uint64_t base_ = 0;
+    svc::FileSize member_size_{};
+    svc::FileSize base_{};
     svc::Crc32 crc_want_{};
     svc::Crc32 crc_{};
-    std::uint64_t crc_pos_ = 0;
+    proto::FileOffset crc_pos_{};
     bool bad_ = false;
 };
 

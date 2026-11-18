@@ -11,6 +11,23 @@
 
 namespace mister::proto {
 
+struct ResidentBytes {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr ResidentBytes of(std::size_t got) noexcept {
+        return ResidentBytes{static_cast<std::uint32_t>(got)};
+    }
+
+    [[nodiscard]] static constexpr ResidentBytes staging() noexcept {
+        return ResidentBytes{kBlockStagingBytes};
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    friend constexpr bool operator==(ResidentBytes, ResidentBytes) = default;
+    friend constexpr auto operator<=>(ResidentBytes, ResidentBytes) = default;
+};
+
 struct ResidentWindow {
     enum class Source : std::uint8_t { Image, Substitute };
 
@@ -29,13 +46,13 @@ struct ResidentWindow {
 
     Lba base{};
     BlockSize block_size{};
-    BlockSize valid{};
+    ResidentBytes valid{};
     Source source = Source::Image;
 
     [[nodiscard]] static constexpr ResidentWindow image(
         Lba base,
         BlockSize geometry,
-        BlockSize valid
+        ResidentBytes valid
     ) noexcept {
         return ResidentWindow{
             .base = base,
@@ -49,24 +66,22 @@ struct ResidentWindow {
         return ResidentWindow{.source = Source::Substitute};
     }
 
-    [[nodiscard]] constexpr bool covers(
-        Lba lba,
-        BlockCount blocks,
-        BlockCount capacity
-    ) const noexcept {
-        return lba >= base && blocks <= capacity && (lba - base) <= (capacity - blocks);
+    [[nodiscard]] constexpr bool covers(const Ask& ask, BlockCount capacity) const noexcept {
+        return ask.lba >= base
+            && ask.blocks <= capacity
+            && (ask.lba - base) <= (capacity - ask.blocks);
     }
 
     [[nodiscard]] Hit hit(const Ask& ask, std::span<const std::uint8_t> bytes) const noexcept {
         if (source == Source::Substitute) {
             return Hit{.is = Hit::Is::Substitute};
         }
-        if (valid.v == 0)
+        if (valid.empty())
             return Hit{};
         if (ask.geometry && *ask.geometry != block_size)
             return Hit{};
         const BlockCount capacity = block_size.blocks_in(FileSize{kBlockStagingBytes});
-        if (!covers(ask.lba, ask.blocks, capacity))
+        if (!covers(ask, capacity))
             return Hit{};
         const std::size_t offset = block_size.offset_of(ask.lba - base);
         const std::size_t length = block_size.length_of(ask.blocks);

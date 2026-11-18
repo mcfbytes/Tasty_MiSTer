@@ -22,15 +22,14 @@ public:
     SpiFrame& operator=(const SpiFrame&) = delete;
 
     using ILinkFrame::begin;
-    [[nodiscard]] Ex<void> begin(FrameSel sel, std::uint16_t op) override;
-    [[nodiscard]] Ex<void> begin(LinkRoute route, std::uint16_t op) override;
+
+    using ILinkFrame::word;
+    [[nodiscard]] Ex<void> begin(LinkSel sel, hal::SpiWord op) override;
     [[nodiscard]] Ex<void> word(std::uint16_t w) override;
     [[nodiscard]] Ex<void> end() override;
     [[nodiscard]] std::optional<std::uint16_t> opcode_reply() const noexcept override;
 
-    [[nodiscard]] Ex<std::uint16_t> open(hal::ChipSelect cs, std::uint16_t op);
-    [[nodiscard]] Ex<std::uint16_t> open(FrameSel sel, std::uint16_t op);
-    [[nodiscard]] Ex<std::uint16_t> open(LinkRoute route, std::uint16_t op);
+    [[nodiscard]] Ex<std::uint16_t> open(LinkSel sel, hal::SpiWord op);
 
     [[nodiscard]] Ex<std::uint16_t> beat(std::uint16_t w);
 
@@ -41,6 +40,7 @@ public:
     [[nodiscard]] hal::Width width() const noexcept { return link_.width(); }
 
 private:
+    [[nodiscard]] Ex<std::uint16_t> open_raw_(hal::ChipSelect cs, hal::SpiWord op);
     void close_() noexcept;
 
     hal::ISpiTransport& link_;

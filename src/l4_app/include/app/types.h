@@ -16,6 +16,7 @@
 #include "app/percents.h"
 #include "app/play_refusal.h"
 #include "app/ratio.h"
+#include "cores/config_slot_count.h"
 #include "cores/types.h"
 #include "hal/types.h"
 #include "infra/affine.h"
@@ -56,6 +57,8 @@ struct RowExtent {
     friend constexpr bool operator==(RowExtent, RowExtent) = default;
 };
 
+struct RowIndex;
+
 struct RowCount {
     std::uint32_t v = 0;
     using affine_count = RowCount;
@@ -69,7 +72,24 @@ struct RowCount {
         return RowCount{n.v};
     }
 
+    [[nodiscard]] static constexpr RowCount of(cores::ConfigSlotCount n) noexcept {
+        return RowCount{n.v};
+    }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
+    [[nodiscard]] constexpr bool contains(RowIndex i) const noexcept;
+
+    [[nodiscard]] constexpr proto::IoIndex next_io_index() const noexcept {
+        return proto::IoIndex{static_cast<std::uint8_t>(v + 1u)};
+    }
+
+    template <class Rows>
+    [[nodiscard]] Rows sized_table() const {
+        Rows rows;
+        rows.resize(size());
+        return rows;
+    }
 
     [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
         return infra::DecimalText{v};
@@ -106,9 +126,19 @@ struct RowIndex {
 
     [[nodiscard]] constexpr RowIndex next() const noexcept { return RowIndex{v + 1u}; }
 
+    template <class E>
+        requires std::is_enum_v<E>
+    [[nodiscard]] constexpr E enumerator() const noexcept {
+        return static_cast<E>(v);
+    }
+
     friend constexpr bool operator==(RowIndex, RowIndex) = default;
     friend constexpr auto operator<=>(RowIndex, RowIndex) = default;
 };
+
+constexpr bool RowCount::contains(RowIndex i) const noexcept {
+    return i.v < v;
+}
 
 [[nodiscard]] constexpr RowIndex row_after(RowCount count) noexcept {
     return RowIndex{count.v};
@@ -189,6 +219,10 @@ struct PixelIndex {
     return cores::ConfigSlot{static_cast<std::uint8_t>(i.v)};
 }
 
+[[nodiscard]] constexpr RowIndex row_of(cores::ConfigSlot slot) noexcept {
+    return RowIndex{slot.v};
+}
+
 static_assert(sizeof(RowCount) == 4);
 static_assert(sizeof(RowIndex) == 4);
 
@@ -198,6 +232,7 @@ enum class ContentEdge : std::uint8_t {
     Content = 0,
     Silent = 1,
     ChainEnd = 2,
+    Companion = 3,
 };
 
 struct Rgb888 {
@@ -322,11 +357,11 @@ struct ControlGeneration {
     }
 };
 
-struct FrameCount {
+struct MovieFrameCount {
     std::int32_t v = 0;
-    using affine_count = FrameCount;
+    using affine_count = MovieFrameCount;
 
-    [[nodiscard]] constexpr bool multiple_of(FrameCount stride) const noexcept {
+    [[nodiscard]] constexpr bool multiple_of(MovieFrameCount stride) const noexcept {
         return v % stride.v == 0;
     }
 
@@ -338,23 +373,23 @@ struct FrameCount {
         return cores::ReplayLead{v};
     }
 
-    [[nodiscard]] static constexpr FrameCount of(cores::ReplayLead lead) noexcept {
-        return FrameCount{lead.frames()};
+    [[nodiscard]] static constexpr MovieFrameCount of(cores::ReplayLead lead) noexcept {
+        return MovieFrameCount{lead.frames()};
     }
 
-    friend constexpr bool operator==(FrameCount, FrameCount) = default;
-    friend constexpr auto operator<=>(FrameCount, FrameCount) = default;
+    friend constexpr bool operator==(MovieFrameCount, MovieFrameCount) = default;
+    friend constexpr auto operator<=>(MovieFrameCount, MovieFrameCount) = default;
 };
 
 struct LeadRefusal {
     std::uint32_t v = 0;
 
-    [[nodiscard]] static constexpr LeadRefusal of(FrameCount lead) noexcept {
+    [[nodiscard]] static constexpr LeadRefusal of(MovieFrameCount lead) noexcept {
         return LeadRefusal{static_cast<std::uint32_t>(lead.v)};
     }
 
     [[nodiscard]] static constexpr LeadRefusal of(cores::ReplayLead lead) noexcept {
-        return of(FrameCount{lead.frames()});
+        return of(MovieFrameCount{lead.frames()});
     }
 
     [[nodiscard]] constexpr PlayRefusal refused(PlayRefusal::Why why) const noexcept {
@@ -364,9 +399,9 @@ struct LeadRefusal {
     friend constexpr bool operator==(LeadRefusal, LeadRefusal) = default;
 };
 
-struct MovieFrame {
+struct MoviePosition {
     std::int32_t v = 0;
-    using affine_count = FrameCount;
+    using affine_count = MovieFrameCount;
 
     [[nodiscard]] constexpr std::uint32_t to_wire() const noexcept {
         return static_cast<std::uint32_t>(v);
@@ -376,14 +411,14 @@ struct MovieFrame {
         return infra::DecimalText{v};
     }
 
-    friend constexpr bool operator==(MovieFrame, MovieFrame) = default;
-    friend constexpr auto operator<=>(MovieFrame, MovieFrame) = default;
+    friend constexpr bool operator==(MoviePosition, MoviePosition) = default;
+    friend constexpr auto operator<=>(MoviePosition, MoviePosition) = default;
 };
 
-inline constexpr MovieFrame kNoMovieFrame{-1};
+inline constexpr MoviePosition kNoMovieFrame{-1};
 
-[[nodiscard]] constexpr MovieFrame movie_frame_from_wire(std::uint32_t wire) noexcept {
-    return MovieFrame{static_cast<std::int32_t>(wire)};
+[[nodiscard]] constexpr MoviePosition movie_frame_from_wire(std::uint32_t wire) noexcept {
+    return MoviePosition{static_cast<std::int32_t>(wire)};
 }
 
 struct CoreFrameCount {
@@ -433,16 +468,16 @@ struct MovieSpan {
 struct ArmLead {
     std::int16_t v = 0;
 
-    [[nodiscard]] static constexpr std::optional<ArmLead> of(FrameCount lead) noexcept {
-        constexpr FrameCount kArmLeadMin{std::numeric_limits<std::int16_t>::min()};
-        constexpr FrameCount kArmLeadMax{std::numeric_limits<std::int16_t>::max()};
+    [[nodiscard]] static constexpr std::optional<ArmLead> of(MovieFrameCount lead) noexcept {
+        constexpr MovieFrameCount kArmLeadMin{std::numeric_limits<std::int16_t>::min()};
+        constexpr MovieFrameCount kArmLeadMax{std::numeric_limits<std::int16_t>::max()};
         if (lead < kArmLeadMin || lead > kArmLeadMax)
             return std::nullopt;
         return ArmLead{static_cast<std::int16_t>(lead.v)};
     }
 
     [[nodiscard]] static constexpr std::optional<ArmLead> of(cores::ReplayLead lead) noexcept {
-        return of(FrameCount{lead.frames()});
+        return of(MovieFrameCount{lead.frames()});
     }
 
     [[nodiscard]] constexpr MovieSpan movie_span() const noexcept { return MovieSpan{v}; }
@@ -454,8 +489,8 @@ struct WideMovieFrame {
     std::int64_t v = 0;
     using affine_count = MovieSpan;
 
-    [[nodiscard]] constexpr MovieFrame narrowed() const noexcept {
-        return MovieFrame{static_cast<std::int32_t>(v)};
+    [[nodiscard]] constexpr MoviePosition narrowed() const noexcept {
+        return MoviePosition{static_cast<std::int32_t>(v)};
     }
 
     friend constexpr bool operator==(WideMovieFrame, WideMovieFrame) = default;
@@ -479,7 +514,7 @@ struct WideMovieFrame {
 
 inline constexpr WideMovieFrame kNoWideMovieFrame{-1};
 
-[[nodiscard]] constexpr WideMovieFrame wide_frame(MovieFrame f) noexcept {
+[[nodiscard]] constexpr WideMovieFrame wide_frame(MoviePosition f) noexcept {
     return WideMovieFrame{f.v};
 }
 
@@ -572,6 +607,18 @@ struct WideCoreFrame {
 
     [[nodiscard]] constexpr bool on_every(std::uint32_t every) const noexcept {
         return number() % every == 0;
+    }
+
+    [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
+        return infra::DecimalText{number()};
+    }
+
+    friend constexpr void json_field(
+        infra::JsonOut& o,
+        infra::JsonName key,
+        WideCoreFrame f
+    ) noexcept {
+        o.field(key, f.number());
     }
 
     friend constexpr bool operator==(WideCoreFrame, WideCoreFrame) = default;
@@ -758,6 +805,10 @@ struct FrameWordCount {
 
     [[nodiscard]] constexpr bool exceeds(FrameWordCount bound) const noexcept {
         return v > bound.v;
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
     }
 
     friend constexpr bool operator==(FrameWordCount, FrameWordCount) = default;

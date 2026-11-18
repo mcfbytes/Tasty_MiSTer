@@ -38,6 +38,7 @@ constexpr RequestName kRequestNames[] = {
     {app::UiRequest::Kind::SdramDetected, "SdramDetected"},
     {app::UiRequest::Kind::SetHdLook, "SetHdLook"},
     {app::UiRequest::Kind::SwitchIni, "SwitchIni"},
+    {app::UiRequest::Kind::SetAutosave, "SetAutosave"},
 };
 
 consteval bool request_names_are_ordinal() {
@@ -142,12 +143,12 @@ void EventTrace::write_(
     const auto lost = main_lane ? main_->losses().of(k) : rt_->losses().of(k);
     log_.appendf(
         "{\"t\":\"ev\",\"k\":\"%s\",%s"
-        "\"site\":%u,\"tag\":%u,\"depth\":%u,\"lost\":%u,"
+        "\"site\":%u,\"tag\":%s,\"depth\":%u,\"lost\":%u,"
         "\"suppressed\":%u,\"seq\":%u}",
         name,
         fields,
         static_cast<unsigned>(h.site),
-        static_cast<unsigned>(h.tag.v),
+        h.tag.text().c_str(),
         depth,
         static_cast<unsigned>(lost),
         static_cast<unsigned>(suppressed_),

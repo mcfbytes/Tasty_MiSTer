@@ -62,7 +62,7 @@ constexpr DirEntryFacts kFacts{
 
 }
 
-[[nodiscard]] Ex<SectorBlockDecl> find_sector_block(
+[[nodiscard]] Ex<SectorBlockDeclLookup> find_sector_block(
     const SysDirectoryImage& dir,
     hal::LwExtent window
 ) noexcept {
@@ -88,10 +88,10 @@ constexpr DirEntryFacts kFacts{
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), s.frame_words});
     }
     SectorBlockDecl out = s;
-    out.line_decl = e->line();
     out.version = e->version();
+
     if (out.version.is_base_minor())
-        return out;
+        return SectorBlockDeclLookup{.block = out, .declared = e->line()};
     for (std::size_t c = 0; c < SectorBlockDecl::kCards; ++c) {
         const DirWord card = e->word(kCardWords[c].shape);
         out.cards[c] = SectorBlockDecl::Card{
@@ -104,10 +104,12 @@ constexpr DirEntryFacts kFacts{
         };
 
         if (out.cards[c].declared() && !out.cards[c].slot.in_block_slots()) {
-            return std::unexpected(Error{Errc::slot_range, ERR_SITE(), out.cards[c].slot.detail()});
+            return std::unexpected(out.cards[c].slot.refusal(Errc::slot_range, ERR_SITE()));
         }
     }
-    return out;
+    return SectorBlockDeclLookup{.block = out, .declared = e->line()};
 }
+
+static_assert(!CarriesOpBitmap<SectorWord>, "a SECTOR entry declares no ops bitmap");
 
 }

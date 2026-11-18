@@ -8,7 +8,12 @@
 
 namespace mister::proto {
 
-Ex<void> SavePrimer::begin(const Env& env, const SaveTarget& target, const SaveStateDecl& ss) {
+Ex<void> SavePrimer::begin(
+    const Env& env,
+    const SaveTarget& target,
+    const SaveStateDecl& ss,
+    const hal::FpgaAperture& aperture
+) {
     end();
     load_failures_ = 0;
     const std::optional<SaveStateName> name = SaveStateName::of(target);
@@ -20,7 +25,10 @@ Ex<void> SavePrimer::begin(const Env& env, const SaveTarget& target, const SaveS
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), ss.size});
     }
     for (const StateSlot slot : kStateSlots) {
-        auto m = env.map.map(SaveStateEngine::region_for(ss, slot));
+        auto region = SaveStateEngine::slot_region(aperture, ss, slot);
+        if (!region)
+            continue;
+        auto m = env.map.map(*region);
         if (!m) {
             end();
             return std::unexpected(m.error());
@@ -29,10 +37,15 @@ Ex<void> SavePrimer::begin(const Env& env, const SaveTarget& target, const SaveS
     }
     base_ = *name;
     window_ = ss;
-    slot_ = kStateSlots.front();
     loading_ = false;
     file_slot_.reset();
     off_ = 0;
+    for (const StateSlot slot : kStateSlots) {
+        if (!regions_[slot])
+            continue;
+        slot_ = slot;
+        break;
+    }
     return {};
 }
 
@@ -64,6 +77,8 @@ Ex<bool> SavePrimer::step(const Env& env) {
     if (load_step_(env, mem)) {
         mem.store_release(SaveStateEngine::kCounterWord, SaveStateEngine::kSentinel);
         slot_ = slot_->next();
+        while (slot_ && !regions_[*slot_])
+            slot_ = slot_->next();
         loading_ = false;
         off_ = 0;
     }
@@ -74,11 +89,11 @@ bool SavePrimer::load_step_(const Env& env, hal::FpgaMemory& mem) {
     const std::size_t len = static_cast<std::size_t>(window_.size);
     const std::size_t n = std::min(kStepBytes, len - off_);
     const std::string path = file_slot_ ? base_.path(*file_slot_) : base_.stock_path();
-    auto r = env.files.read_at(path, off_, mem.view(off_, n));
+    auto r = env.files.read_at(path, proto::kFileStart + proto::FileSize{off_}, mem.view(off_, n));
     if (!r && r.error().code == Errc::not_found && off_ == 0 && file_slot_ == kStateSlots.front()) {
 
         file_slot_.reset();
-        r = env.files.read_at(base_.stock_path(), 0, mem.view(0, n));
+        r = env.files.read_at(base_.stock_path(), proto::kFileStart, mem.view(0, n));
     }
     if (!r) {
 

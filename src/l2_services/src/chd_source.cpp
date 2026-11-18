@@ -37,7 +37,7 @@ struct CoreFileBinding {
 
     core_file cf{};
     IFile* file;
-    std::uint64_t pos = 0;
+    proto::FileOffset pos = proto::kFileStart;
     proto::FileSize size;
 };
 
@@ -57,7 +57,7 @@ std::size_t cf_fread(void* dst, std::size_t elem, std::size_t count, core_file* 
     );
     if (!rd)
         return 0;
-    b->pos += *rd;
+    b->pos += proto::FileSize{*rd};
     return *rd / elem;
 }
 
@@ -69,13 +69,13 @@ int cf_fseek(core_file* f, std::int64_t off, int whence) {
     auto* b = static_cast<CoreFileBinding*>(f->argp);
     std::int64_t base = 0;
     if (whence == SEEK_CUR)
-        base = static_cast<std::int64_t>(b->pos);
+        base = b->pos.seek_offset();
     else if (whence == SEEK_END)
-        base = static_cast<std::int64_t>(b->size.v);
-    const std::int64_t next = base + off;
-    if (next < 0)
+        base = (proto::kFileStart + b->size).seek_offset();
+    const auto next = proto::FileOffset::of_seek(base + off);
+    if (!next)
         return -1;
-    b->pos = static_cast<std::uint64_t>(next);
+    b->pos = *next;
     return 0;
 }
 

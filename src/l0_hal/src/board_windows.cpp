@@ -110,8 +110,8 @@ Ex<Mailbox> BoardWindows::take_mailbox() {
     return Mailbox{MailboxRegs{*gpo, *gpi}, *timing, std::move(*claim)};
 }
 
-template <reg::Access A>
-Ex<reg::Reg<A>> BoardWindows::mailbox_reg(FactField field) const {
+template <class Layout>
+Ex<BlockView<Layout>> BoardWindows::mailbox_reg(FactField field) const {
     const Fact<std::uint32_t>& offset = field == FactField::MailboxGpoOffset
         ? profile_->mailbox_gpo_offset
         : profile_->mailbox_gpi_offset;
@@ -119,24 +119,21 @@ Ex<reg::Reg<A>> BoardWindows::mailbox_reg(FactField field) const {
     if (!fact)
         return std::unexpected(fact.error());
     const std::uint32_t off = *fact;
-    auto base = lead_of(
-        profile_->mailbox_window,
-        static_cast<std::size_t>(off) + sizeof(std::uint32_t)
-    );
+    auto base = lead_of(profile_->mailbox_window, static_cast<std::size_t>(off) + Layout::kSize);
     if (!base)
         return std::unexpected(base.error());
-    auto r = base->at<A>(off);
+    auto r = base->template view<Layout>(off);
     if (!r)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
     return *r;
 }
 
-Ex<reg::Reg<reg::WO>> BoardWindows::mailbox_gpo() const {
-    return mailbox_reg<reg::WO>(FactField::MailboxGpoOffset);
+Ex<BlockView<GpoBlock>> BoardWindows::mailbox_gpo() const {
+    return mailbox_reg<GpoBlock>(FactField::MailboxGpoOffset);
 }
 
-Ex<reg::Reg<reg::RO>> BoardWindows::mailbox_gpi() const {
-    return mailbox_reg<reg::RO>(FactField::MailboxGpiOffset);
+Ex<BlockView<GpiBlock>> BoardWindows::mailbox_gpi() const {
+    return mailbox_reg<GpiBlock>(FactField::MailboxGpiOffset);
 }
 
 }

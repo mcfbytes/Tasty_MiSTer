@@ -83,7 +83,11 @@ public:
     }
 
     template <class R>
-        requires(affine::Affine<R> && std::integral<decltype(R::v)>)
+        requires(
+            affine::Affine<R>
+            && std::integral<decltype(R::v)>
+            && !requires(JsonOut& o, JsonName k, R r) { json_field(o, k, r); }
+        )
     constexpr void field(JsonName key, R r) noexcept {
         const auto [number] = r;
         field(key, number);

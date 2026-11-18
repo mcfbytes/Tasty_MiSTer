@@ -11,7 +11,6 @@ namespace mister::proto {
 
 namespace {
 
-constexpr std::uint8_t kButtonMask = 0x07;
 constexpr std::uint8_t kAlwaysSet = 0x08;
 constexpr std::uint8_t kXSign = 0x10;
 constexpr std::uint8_t kYSign = 0x20;
@@ -25,16 +24,12 @@ constexpr std::uint8_t kExtentMax = 255;
 constexpr std::uint8_t kOverflowByte = 1;
 constexpr unsigned kWheelShift = 8;
 
-constexpr std::uint16_t kMidButtonBits = 0x0F00;
-constexpr unsigned kMidButtonShift = 5;
-constexpr std::uint16_t kRightButtonBits = 0x0100;
-constexpr unsigned kRightButtonShift = 1;
-
 }
 
 Ps2Mouse::Packet Ps2Mouse::Packet::of(MouseDelta delta, MouseButtons buttons) noexcept {
     const auto [dx, dy, wheel] = delta;
-    std::uint8_t flags = static_cast<std::uint8_t>((buttons.v & kButtonMask) | kAlwaysSet);
+    const MouseButtons::Ps2PacketBits bits = buttons.ps2_packet_bits();
+    std::uint8_t flags = static_cast<std::uint8_t>(bits.flags | kAlwaysSet);
 
     std::uint8_t bx = 0;
     if (dx < 0)
@@ -70,18 +65,8 @@ Ps2Mouse::Packet Ps2Mouse::Packet::of(MouseDelta delta, MouseButtons buttons) no
         static_cast<std::uint16_t>(flags)
         | static_cast<std::uint16_t>((static_cast<std::uint16_t>(w) & kWheelMask) << kWheelShift)
     );
-    p.word1 = static_cast<std::uint16_t>(
-        static_cast<std::uint16_t>(bx)
-        | static_cast<std::uint16_t>(
-            (static_cast<unsigned>(buttons.v) << kMidButtonShift) & kMidButtonBits
-        )
-    );
-    p.word2 = static_cast<std::uint16_t>(
-        static_cast<std::uint16_t>(by)
-        | static_cast<std::uint16_t>(
-            (static_cast<unsigned>(buttons.v) << kRightButtonShift) & kRightButtonBits
-        )
-    );
+    p.word1 = static_cast<std::uint16_t>(static_cast<std::uint16_t>(bx) | bits.word1);
+    p.word2 = static_cast<std::uint16_t>(static_cast<std::uint16_t>(by) | bits.word2);
     return p;
 }
 
@@ -115,7 +100,7 @@ std::optional<Ps2Frame> Ps2Mouse::next_frame() noexcept {
     return std::nullopt;
 }
 
-void Ps2Mouse::accept_control(std::uint16_t word1) {
+void Ps2Mouse::accept_control(Ps2ControlWord word1) {
     port_.accept(word1, [this](std::uint8_t byte) { decode_control(byte); });
 }
 

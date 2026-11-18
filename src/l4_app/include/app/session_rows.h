@@ -24,6 +24,7 @@
 #include "proto/spi_identify_decoder.h"
 #include "proto/spi_status_decoder.h"
 #include "proto/status_cell.h"
+#include "proto/status_decoder.h"
 #include "proto/status_snapshot.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_params.h"
@@ -113,12 +114,12 @@ public:
 
     [[nodiscard]] const proto::StatusCell& status_cell() const noexcept { return status_cell_; }
 
-    [[nodiscard]] const proto::SpiStatusDecoder& status_decoder() const noexcept {
+    [[nodiscard]] const proto::StatusDecoder& status_decoder() const noexcept {
         return status_decoder_;
     }
 
-    [[nodiscard]] const proto::AxiStatusDecoder& axi_status_decoder() const noexcept {
-        return axi_status_decoder_;
+    [[nodiscard]] const proto::AxiStatusSource& axi_status_source() const noexcept {
+        return axi_status_source_;
     }
 
     [[nodiscard]] StatusRoute status_route() const noexcept { return status_route_; }
@@ -161,10 +162,10 @@ private:
 
     proto::SpiIdentifyDecoder identify_decoder_;
     proto::DecoderRow<proto::SpiIdentifyDecoder> identify_row_{identify_decoder_};
-    proto::SpiStatusDecoder status_decoder_;
-    proto::DecoderRow<proto::SpiStatusDecoder> status_row_{status_decoder_};
-    proto::AxiStatusDecoder axi_status_decoder_;
-    proto::DecoderRow<proto::AxiStatusDecoder> axi_status_row_{axi_status_decoder_};
+    proto::StatusDecoder status_decoder_;
+    proto::DecoderRow<proto::StatusDecoder> status_row_{status_decoder_};
+    proto::SpiStatusSource spi_status_source_;
+    proto::AxiStatusSource axi_status_source_;
     infra::OptRef<const proto::StatusSnapshotCell> status_lw_{};
     StatusRoute status_route_ = StatusRoute::Link;
     proto::SpiConfStrDecoder conf_str_decoder_;

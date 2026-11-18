@@ -36,21 +36,21 @@ namespace {
     if (!sz)
         return std::unexpected(sz.error());
     const auto role = cores::manifest_doc_role();
-    const std::uint64_t kDocMax = role ? role->doc_max() : 0;
-    if (sz->v == 0 || sz->v > kDocMax) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), sz->detail()});
+    const proto::FileSize doc_max{role ? role->doc_max() : 0};
+    if (sz->empty() || *sz > doc_max) {
+        return std::unexpected(sz->refusal(Errc::bad_format, ERR_SITE()));
     }
-    std::string doc(sz->file_word<std::size_t>(), '\0');
-    std::size_t got = 0;
-    while (got < doc.size()) {
-        auto r = (*f)->read_at(got, std::as_writable_bytes(std::span<char>(doc).subspan(got)));
+    std::string doc = sz->zeroed<std::string>();
+    proto::FileOffset at = proto::kFileStart;
+    while (sz->holds(at)) {
+        auto r = (*f)->read_at(at, std::as_writable_bytes(at.skip_in(std::span<char>(doc))));
         if (!r)
             return std::unexpected(r.error());
         if (*r == 0)
             break;
-        got += *r;
+        at += proto::FileSize{*r};
     }
-    doc.resize(got);
+    doc.resize((at - proto::kFileStart).file_word<std::size_t>());
     return doc;
 }
 

@@ -9,6 +9,7 @@
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "proto/link_pad_encoder.h"
+#include "proto/pad_masks.h"
 #include "proto/stick_pos.h"
 #include "proto/types.h"
 #include "infra/seat.h"
@@ -98,12 +99,7 @@ public:
         std::int8_t delta
     );
 
-    [[nodiscard]] Ex<bool> submit(
-        ILinkPadEncoder& pads,
-        PlayerIndex player,
-        JoyMask buttons,
-        JoyMask autofire
-    );
+    [[nodiscard]] Ex<bool> submit(ILinkPadEncoder& pads, PlayerIndex player, PadMasks masks);
 
     [[nodiscard]] Ex<bool> release(ILinkPadEncoder& pads, PlayerIndex player, JoyMask composed);
 
@@ -118,14 +114,16 @@ public:
             m = JoyMask{};
     }
 
-    static constexpr std::uint8_t stick_index(PlayerIndex p) noexcept { return p.v; }
+    static constexpr std::uint8_t stick_index(PlayerIndex p) noexcept {
+        return p.stick_wire_index();
+    }
 
     static constexpr std::uint8_t paddle_index(PlayerIndex p) noexcept {
-        return static_cast<std::uint8_t>((static_cast<unsigned>(p.v) << 4u) | 0x0Fu);
+        return p.paddle_wire_index();
     }
 
     static constexpr std::uint8_t spinner_index(PlayerIndex p) noexcept {
-        return static_cast<std::uint8_t>((static_cast<unsigned>(p.v) << 4u) | 0x8Fu);
+        return p.spinner_wire_index();
     }
 
     [[nodiscard]] static Ex<std::uint8_t> paddle_scale(
@@ -145,11 +143,11 @@ public:
     }
 
     PlayerIndex wire_port(PlayerIndex player) const noexcept {
-        return PlayerIndex{swapped(player.v)};
+        return wire_.joyswap ? player.joyswapped() : player;
     }
 
-    static constexpr UioOp digital_opcode(std::uint8_t port) noexcept {
-        return kDigitalOpcode[port];
+    static constexpr UioOp digital_opcode(PlayerIndex port) noexcept {
+        return infra::at_index(kDigitalOpcode, port);
     }
 
     bool wide() const noexcept { return use32_; }

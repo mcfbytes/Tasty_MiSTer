@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "app/lw_block_endpoint.h"
-#include "app/lw_line.h"
+#include "app/block_line.h"
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "hal/fpga_memory.h"
@@ -79,17 +79,17 @@ private:
 
     struct Card {
 
-        std::uint8_t slot = 0;
+        proto::SlotIndex slot{};
         proto::BlockSize bytes{};
         std::optional<hal::FpgaMemory> image{};
 
         [[nodiscard]] bool is_bound() const noexcept { return !bytes.empty(); }
 
-        [[nodiscard]] std::uint64_t offset_of(proto::Lba lba) const noexcept {
-            return bytes.position_of(lba);
+        [[nodiscard]] proto::FileSize image_bytes_before(proto::Lba lba) const noexcept {
+            return bytes.position_of(lba) - proto::kFileStart;
         }
 
-        [[nodiscard]] proto::SlotIndex save_slot() const noexcept { return proto::SlotIndex{slot}; }
+        [[nodiscard]] proto::SlotIndex save_slot() const noexcept { return slot; }
     };
 
     struct SaveState {
@@ -159,7 +159,7 @@ private:
     svc::DiscReadService::GeomCell::Reader geom_rd_{};
     std::optional<svc::DiscGeometry> disc_{std::in_place};
     std::optional<hal::WindowPort<hal::SectorBlock, seat_owner::Io>> block_{};
-    LwLine line_{};
+    BlockLine<seat_owner::Io> line_{};
     bool recheck_ = false;
     proto::Lba ahead_from_{};
     std::size_t ahead_done_ = kReadAhead;

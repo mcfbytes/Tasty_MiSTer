@@ -8,6 +8,7 @@
 #include <span>
 
 #include "infra/byte_offset.h"
+#include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "infra/slot_stride.h"
@@ -50,6 +51,10 @@ struct PoolSlot {
     template <class T, std::size_t M>
     [[nodiscard]] constexpr T& pick(T (&table)[M]) const noexcept {
         return table[v];
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, static_cast<std::uint32_t>(v)};
     }
 
     friend constexpr bool operator==(PoolSlot, PoolSlot) = default;

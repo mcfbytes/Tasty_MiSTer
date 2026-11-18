@@ -15,17 +15,17 @@ bool RawDiskImage::writable() const noexcept {
     return writable_;
 }
 
-Ex<std::size_t> RawDiskImage::read_at(std::uint64_t off, std::span<std::byte> dst) {
+Ex<std::size_t> RawDiskImage::read_at(proto::FileOffset at, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(RawDiskImage);
-    return file_->read_at(off, dst);
+    return file_->read_at(at, dst);
 }
 
-Ex<std::size_t> RawDiskImage::write_at(std::uint64_t off, std::span<const std::byte> src) {
+Ex<std::size_t> RawDiskImage::write_at(proto::FileOffset at, std::span<const std::byte> src) {
     TASTY_SEAT_BODY(RawDiskImage);
     if (!writable_) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
-    auto n = file_->write_at(off, src);
+    auto n = file_->write_at(at, src);
     if (!n)
         return n;
     if (auto f = file_->flush(); !f)

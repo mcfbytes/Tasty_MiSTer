@@ -14,7 +14,7 @@ class DevMemWindowMap final : public ILoadWindowMap<Owner> {
     TASTY_SEAT_FROM(Owner);
 
 public:
-    [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) override;
+    [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::ApertureRegion& r) override;
 };
 
 extern template class DevMemWindowMap<seat_owner::Main>;

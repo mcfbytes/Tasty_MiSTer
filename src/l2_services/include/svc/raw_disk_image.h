@@ -24,9 +24,9 @@ public:
 
     [[nodiscard]] FileSize size() const noexcept override;
     [[nodiscard]] bool writable() const noexcept override;
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override;
+    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override;
     [[nodiscard]] Ex<std::size_t> write_at(
-        std::uint64_t off,
+        proto::FileOffset at,
         std::span<const std::byte> src
     ) override;
 

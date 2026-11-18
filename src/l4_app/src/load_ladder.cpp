@@ -114,7 +114,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
         pc_ = job_.total != 0 ? Pc::Chunk : Pc::Fill;
         return Pass::Stepped;
     }
-    auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total});
+    auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total}, {}, 0, job_.edge);
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
     const proto::LinkOp::FileTx op{
@@ -148,12 +148,12 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
     const cores::TransferRow& row = job_.row;
 
     const std::size_t cap = std::min(buf_.size(), InternedFile::kPieceBytes / row.stride);
-    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(cap, job_.total - off_));
-    const std::span<std::uint8_t> piece(buf_.data(), n);
+    const proto::FileSize chunk = (proto::FileSize{job_.total} - off_).min(proto::FileSize{cap});
+    const std::span<std::uint8_t> piece(buf_.data(), chunk.file_word<std::size_t>());
     std::size_t got = 0;
-    while (got < n) {
+    while (got < piece.size()) {
         auto r = job_.file->read_at(
-            row.file_offset + off_ + got,
+            row.file_offset + off_ + proto::FileSize{got},
             std::as_writable_bytes(piece.subspan(got))
         );
         if (!r || *r == 0)
@@ -162,31 +162,30 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
     }
     key_.feed(piece);
     if (row.shaped)
-        job_.loader->shape(row, piece, off_);
+        job_.loader->shape(row, piece, proto::kFileStart + off_);
     if (row.placed) {
-        if (!job_.loader->place(row, piece, off_, window_))
+        if (!job_.loader->place(row, piece, proto::kFileStart + off_, window_))
             return cut_(h);
     } else {
         const Ex<std::size_t> placed = row.stride == 1
-            ? window_.write(static_cast<std::size_t>(off_), std::as_bytes(piece))
+            ? window_.write(off_.file_word<std::size_t>(), std::as_bytes(piece))
             : window_.write_lanes(
-                  row.spread_at(proto::FileSize{off_}).file_word<std::size_t>() + 2u * row.lane,
+                  row.spread_bytes(off_).file_word<std::size_t>() + 2u * row.lane,
                   std::as_bytes(piece),
                   row.stride
               );
         if (!placed)
             return cut_(h);
-        if (job_.mirror
-            && !job_.mirror->write(static_cast<std::size_t>(off_), std::as_bytes(piece)))
+        if (job_.mirror && !job_.mirror->write(off_.file_word<std::size_t>(), std::as_bytes(piece)))
             return cut_(h);
     }
-    off_ += n;
+    off_ += chunk;
     progress_(h, false);
-    if (off_ == job_.total) {
+    if (off_ == proto::FileSize{job_.total}) {
         if (row.placed) {
             pc_ = Pc::Conclude;
         } else {
-            const bool more = proto::FileSize{extent_} > row.spread_at(proto::FileSize{off_});
+            const bool more = proto::FileSize{extent_} > row.spread_bytes(off_);
             pc_ = more ? Pc::Fill : Pc::Finish;
         }
     }
@@ -194,26 +193,22 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
 }
 
 LoadLadder::Pass LoadLadder::fill_(Host& h) {
-    const std::uint64_t from = job_.row.spread_bytes(proto::FileSize{job_.total})
-                                   .file_word<std::size_t>();
-    if (fill_off_ < from)
-        fill_off_ = from;
-    if (fill_off_ >= extent_) {
+    const proto::FileSize extent{extent_};
+    fill_off_ = std::max(fill_off_, job_.row.spread_bytes(proto::FileSize{job_.total}));
+    if (fill_off_ >= extent) {
         pc_ = Pc::Finish;
         return Pass::Stepped;
     }
-    const auto n = static_cast<std::size_t>(
-        std::min<std::uint64_t>(buf_.size(), extent_ - fill_off_)
-    );
-    std::fill_n(buf_.begin(), n, job_.row.fill);
-    const std::span<const std::uint8_t> tail(buf_.data(), n);
-    if (!window_.write(static_cast<std::size_t>(fill_off_), std::as_bytes(tail)))
+    const proto::FileSize piece = (extent - fill_off_).min(proto::FileSize{buf_.size()});
+    const std::span<std::uint8_t> tail(buf_.data(), piece.file_word<std::size_t>());
+    std::ranges::fill(tail, job_.row.fill);
+    if (!window_.write(fill_off_.file_word<std::size_t>(), std::as_bytes(tail)))
         return cut_(h);
     if (job_.mirror
-        && !job_.mirror->write(static_cast<std::size_t>(fill_off_), std::as_bytes(tail))) {
+        && !job_.mirror->write(fill_off_.file_word<std::size_t>(), std::as_bytes(tail))) {
         return cut_(h);
     }
-    fill_off_ += n;
+    fill_off_ += piece;
     return Pass::Stepped;
 }
 
@@ -282,7 +277,13 @@ LoadLadder::Pass LoadLadder::mount_(Host& h) {
 LoadLadder::Pass LoadLadder::close_(Host& h) {
     if (job_.row.bracket == cores::RowBracket::None)
         return notify_(h);
-    auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total}, key_.value());
+    auto id = h.inbox.intern_file_path(
+        path_.view(),
+        proto::FileSize{job_.total},
+        key_.value(),
+        0,
+        job_.edge
+    );
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
 
@@ -353,7 +354,9 @@ void LoadLadder::progress_(Host& h, bool edge) noexcept {
     std::uint16_t max = 0;
     if (!edge) {
         max = cores::kProgressSteps;
-        cur = static_cast<std::uint16_t>(off_ * cores::kProgressSteps / job_.total);
+        cur = static_cast<std::uint16_t>(
+            off_.file_word<std::uint64_t>() * cores::kProgressSteps / job_.total
+        );
     }
     h.events.push(
         Event::ProgressUpdate{.progress = {.done = cur, .total = max}},

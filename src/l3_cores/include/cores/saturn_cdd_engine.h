@@ -83,10 +83,7 @@ private:
     using RingPhase = SaturnCddFrame::RingPhase;
     using Opcode = SaturnCddFrame::Opcode;
 
-    [[nodiscard]] Ex<void> do_accept(
-        std::span<const std::uint16_t> words,
-        CdDialectPorts& p
-    ) override;
+    [[nodiscard]] Ex<void> do_accept(const CdCommandWords& cmd, CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
 
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override { return {}; }

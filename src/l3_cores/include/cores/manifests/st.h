@@ -19,6 +19,11 @@
 #include "svc/disk_codec.h"
 #include "svc/disk_format_row.h"
 
+namespace mister::cores {
+class ILoader;
+struct LoaderContext;
+}
+
 namespace mister::cores::manifests {
 
 extern const CoreProfile kAtariSt;
@@ -303,15 +308,18 @@ inline constexpr CoreProfile kAtariSt{
     .disk_formats = kAtariStDiskFormats,
     .option_rows = kStOptionRows,
     .option_pages = kStOptionPages,
-    .file_tx_whole = true,
 
     .reset = {.button_reacts = true, .action_reacts = true, .ladders = true, .restore_boots = true},
 
     .config_codec = infra::OptRef<const IConfigCodec>{kStConfigCodec},
+
+    .grants = {Grant::Disk},
 };
 
 std::unique_ptr<Core> make_st(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<BootLadder> make_st_ladder(const CoreProfile& p, const LadderContext& ctx);
+
+std::unique_ptr<ILoader> make_st_loader(const LoaderContext& ctx);
 
 }

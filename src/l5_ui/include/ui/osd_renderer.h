@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "proto/osd_surface.h"
@@ -98,6 +99,8 @@ public:
     );
     void key_value(OsdRow row, std::string_view name, std::string_view value);
     void glyph(OsdRow row, unsigned col, Glyph g);
+
+    void columns(OsdRow row, std::span<const std::uint8_t> bytes);
     void box(OsdRow top, OsdRow bottom);
     void bar(OsdRow row, unsigned col, std::uint32_t value, std::uint32_t max, unsigned width);
 

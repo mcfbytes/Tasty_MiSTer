@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/reg_access.h"
+
 namespace mister::hal {
 
 struct UioRegFile {
@@ -13,12 +15,15 @@ struct UioRegFile {
     enum class UioIndex : std::uint8_t {};
     static constexpr std::size_t kSize = 0x40000;
 
-    [[nodiscard]] static constexpr std::uint32_t offset_of(UioOp op, UioIndex idx) noexcept {
-        return (static_cast<std::uint32_t>(op) << 10) | (static_cast<std::uint32_t>(idx) << 2);
-    }
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
 
-    static constexpr Reg at(UioOp op, UioIndex idx) noexcept {
-        return static_cast<Reg>(offset_of(op, idx));
+    enum Bits : std::uint32_t { kOpShift = 10, kIndexShift = 2 };
+
+    [[nodiscard]] static constexpr Reg at(UioOp op, UioIndex idx) noexcept {
+        return static_cast<Reg>(
+            (static_cast<std::uint32_t>(op) << kOpShift)
+            | (static_cast<std::uint32_t>(idx) << kIndexShift)
+        );
     }
 };
 

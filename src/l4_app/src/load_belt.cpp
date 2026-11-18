@@ -278,7 +278,11 @@ void LoadBelt::close_pieces_(Rung::Pass pass, Host& host) {
             ++tally_.files_loaded;
             host.content_loaded();
         }
-        host.last_piece_sent(*pieces_);
+
+        FileTxPieces done = std::move(*pieces_);
+        pieces_.reset();
+        host.last_piece_sent(done);
+        return;
     } else if (pass == Rung::Pass::Failed) {
         ++tally_.files_failed;
     } else {

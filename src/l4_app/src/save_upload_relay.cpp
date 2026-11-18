@@ -115,8 +115,8 @@ void SaveUploadRelay::start_() noexcept {
     rt_.width = link_.width();
     const Ask::Start s{
         .size = rt_.order.image.size,
-        .index = rt_.order.image.index.v,
-        .word_bytes = cores::WireWordBytes::of(rt_.width)
+        .index = rt_.order.image.index,
+        .width = rt_.width
     };
     l->ask = infra::make<Ask>(s, head_());
     l->act = {};
@@ -205,7 +205,7 @@ bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l) noexcept {
 
 void SaveUploadRelay::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
-    while (Job job = chan_.take()) {
+    if (Job job = chan_.take()) {
         infra::dispatch<infra::AllRouted>(job->ask, *this, job);
         job.complete();
     }
@@ -214,8 +214,8 @@ void SaveUploadRelay::serve() noexcept {
 void SaveUploadRelay::on(const Ask::Start& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
     io_.serving = h;
-    const cores::SaveImage image{.index = proto::WideIoIndex{a.index}, .size = a.size};
-    job->act = io_.servant->start(image, job->rel.view(), a.word_bytes);
+    const cores::SaveImage image{.index = a.index, .size = a.size};
+    job->act = io_.servant->start(image, job->rel.view(), a.width);
 }
 
 void SaveUploadRelay::on(const Ask::Resume&, const RelayStamp& h, Job& job) noexcept {

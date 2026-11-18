@@ -68,6 +68,9 @@ public:
     [[nodiscard]] Ex<bool> drain_pending(ICdLink& link);
 
 private:
+    static constexpr std::size_t kSubOpcodeWord = 6;
+    static_assert(kSubOpcodeWord < PceCommand::kWords);
+
     enum class Status : std::uint16_t { Good = 0, CheckCondition = 1 };
 
     [[nodiscard]] static constexpr std::uint16_t word_of(Status s) noexcept {
@@ -99,10 +102,7 @@ private:
         HeadLba subc_lba{-1};
     };
 
-    [[nodiscard]] Ex<void> do_accept(
-        std::span<const std::uint16_t> words,
-        CdDialectPorts& p
-    ) override;
+    [[nodiscard]] Ex<void> do_accept(const CdCommandWords& cmd, CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts& p) override;
     void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept override;

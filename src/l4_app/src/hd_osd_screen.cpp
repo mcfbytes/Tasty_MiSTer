@@ -38,37 +38,32 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
 void HdOsdScreen::retry_drop_() noexcept {
     if (!drop_owed_)
         return;
-    if (w_.fb.raised()) {
+    if (!owns_()) {
+
         drop_owed_ = false;
-        ours_ = false;
         shown_.reset();
         sync_console_();
         return;
     }
-    if (!w_.fb.drop())
+    if (!w_.fb.drop(*lease_))
         return;
-    ours_ = false;
     drop_owed_ = false;
     shown_.reset();
     sync_console_();
 }
 
 void HdOsdScreen::close_() noexcept {
-    if (open_) {
-        open_ = false;
+    if (phase_ != Phase::Closed)
         publish_ask_(false);
-    }
+    phase_ = Phase::Closed;
     badge_ = HdOsdStatus::Badge::Unknown;
     slots_ = {};
     reraise_owed_ = false;
     owed_.reset();
-    covers_ = false;
-    intends_ = false;
-    if (!ours_) {
+    if (!owns_()) {
         drop_owed_ = false;
         shown_.reset();
-    } else if (w_.fb.drop()) {
-        ours_ = false;
+    } else if (w_.fb.drop(*lease_)) {
         drop_owed_ = false;
         shown_.reset();
     } else {
@@ -80,12 +75,12 @@ void HdOsdScreen::close_() noexcept {
 }
 
 void HdOsdScreen::sync_console_() noexcept {
-    if (ours_) {
+    if (owns_()) {
         capture_console_();
     } else {
         release_console_();
     }
-    if (!open_ && !guarded_vt_)
+    if (phase_ == Phase::Closed && !guarded_vt_)
         show_cursor_();
 }
 
@@ -142,8 +137,7 @@ bool HdOsdScreen::try_open_() noexcept {
     out_ = out;
     applies_seen_ = w_.stats.sample().value.applies;
     epoch_ = epoch_.next();
-    open_ = true;
-    intends_ = true;
+    phase_ = Phase::Intends;
     hide_cursor_();
     publish_ask_(true);
     return true;
@@ -152,14 +146,13 @@ bool HdOsdScreen::try_open_() noexcept {
 bool HdOsdScreen::reraise_() noexcept {
     if (!shown_)
         return false;
-    const auto raised = w_.fb.raise_view((*shown_)->view);
-    if (w_.fb.raised())
-        ours_ = true;
+    const auto raised = w_.fb.raise_view(FbTenant::HdOsd, (*shown_)->view);
+    if (raised)
+        lease_ = *raised;
     sync_console_();
     if (!raised)
         return false;
-    covers_ = true;
-    intends_ = true;
+    phase_ = Phase::Covers;
     return true;
 }
 
@@ -169,8 +162,7 @@ void HdOsdScreen::on_applies_() noexcept {
         return;
     const OutputSize out = w_.output.output_size();
     const bool sized = !(out == out_);
-    covers_ = false;
-    intends_ = false;
+    phase_ = Phase::Open;
     applies_seen_ = applies;
     if (!sized) {
         publish_ask_(true);
@@ -198,17 +190,16 @@ void HdOsdScreen::raise_job_(HdFlipChannel::Job job) noexcept {
         owed_ = std::move(job);
         return;
     }
-    const auto raised = w_.fb.raise_view(job->view);
-    if (w_.fb.raised())
-        ours_ = true;
+    const auto raised = w_.fb.raise_view(FbTenant::HdOsd, job->view);
+    if (raised)
+        lease_ = *raised;
     if (!raised) {
         owed_ = std::move(job);
         sync_console_();
         return;
     }
     drop_owed_ = false;
-    covers_ = true;
-    intends_ = true;
+    phase_ = Phase::Covers;
     shown_ = std::move(job);
     sync_console_();
 }
@@ -263,13 +254,13 @@ void HdOsdScreen::tick(
     page_ = page ? *page : PageDescription{};
     badge_ = badge;
     slots_ = slots;
-    if (open_ && w_.fb.held()) {
+    if (phase_ != Phase::Closed && w_.fb.held()) {
         close_();
         return;
     }
-    if (open_)
+    if (phase_ != Phase::Closed)
         on_applies_();
-    if (!open_) {
+    if (phase_ == Phase::Closed) {
         if (available())
             (void)try_open_();
     } else if (
@@ -284,20 +275,25 @@ void HdOsdScreen::tick(
     ) {
         publish_ask_(true);
     }
-    if (open_)
+    if (phase_ != Phase::Closed)
         take_jobs_();
     if (reraise_owed_)
         reraise_owed_ = !reraise_();
 }
 
+bool HdOsdScreen::owns_() const noexcept {
+    TASTY_SEAT_BODY(HdOsdScreen);
+    return lease_ && w_.fb.holds(*lease_);
+}
+
 bool HdOsdScreen::intends_hdmi() const noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
-    return intends_ && shows_ == HdOsdShows::Menu;
+    return phase_ >= Phase::Intends && shows_ == HdOsdShows::Menu;
 }
 
 bool HdOsdScreen::covers_hdmi() const noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
-    return covers_;
+    return phase_ == Phase::Covers;
 }
 
 void HdOsdScreen::release_console() noexcept {
@@ -312,7 +308,7 @@ bool HdOsdScreen::available() const noexcept {
         return false;
     if (w_.fb.held())
         return false;
-    return !w_.fb.raised() || ours_;
+    return !w_.fb.raised() || owns_();
 }
 
 std::uint32_t HdOsdScreen::stale_drops() const noexcept {

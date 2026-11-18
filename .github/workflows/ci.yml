@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/toolchains/armv7-eabihf--glibc--stable-2026.08-1/opt/slint
-          key: slint-1.18.1-${{ hashFiles('src/tools/build-static-slint.sh', 'src/tools/slint/*.patch', 'cmake/arm-linux-gnueabihf-static.cmake') }}
+          key: slint-1.19.0-${{ hashFiles('src/tools/build-static-slint.sh', 'src/tools/slint/*.patch', 'cmake/arm-linux-gnueabihf-static.cmake') }}
       - name: Static Slint (build)
         if: steps.slint.outputs.cache-hit != 'true'
         run: src/tools/build-static-slint.sh

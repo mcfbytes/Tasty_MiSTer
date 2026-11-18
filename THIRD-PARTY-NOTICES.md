@@ -5,7 +5,7 @@ own code is GPL-3.0-or-later (`LICENSE`).
 
 | component | version | licence | where |
 |---|---|---|---|
-| Slint (C++ runtime, software renderer) | 1.18.1, patched | GPL-3.0-only (one of Slint's three licences) | see "Slint" below |
+| Slint (C++ runtime, software renderer) | 1.19.0, patched | GPL-3.0-only (one of Slint's three licences) | see "Slint" below |
 | Rust crates under Slint | see the list | MIT, Apache-2.0, BSD, Zlib, and others | `licenses/slint-crates.md` |
 | Rust standard library (core, alloc, std, compiler_builtins) | 1.97.0 | MIT OR Apache-2.0 | `licenses/rust-LICENSE-MIT.txt`, `licenses/rust-LICENSE-APACHE.txt`, `licenses/rust-COPYRIGHT.txt` |
 | Noto Sans Regular and Bold | 2.015 | OFL-1.1 | `licenses/NotoSans-OFL.txt` |
@@ -29,16 +29,16 @@ Slint is used under the GNU GPL, version 3 (`GPL-3.0-only`), one of the three li
 under (`licenses/Slint-LICENSE.md`). The GPL's text is this repository's `LICENSE`. The binary
 links a modified Slint. Its complete corresponding source is:
 
-- Slint 1.18.1's release source, https://github.com/slint-ui/slint/archive/v1.18.1/slint-1.18.1.tar.gz
+- Slint 1.19.0's release source, https://github.com/slint-ui/slint/archive/v1.19.0/slint-1.19.0.tar.gz
   (SHA-256 in `src/tools/build-static-slint.sh`);
 - patches 0001-0003, from the MiSTer Linux image's Slint package:
-  https://github.com/mcfbytes/Buildroot_MiSTer/tree/1e774eefd15e25b536176f5393894308d2b72a78/package/slint
+  https://github.com/mcfbytes/Buildroot_MiSTer/tree/eae07567a1349037fed4f723bec145c55ca9025a/package/slint
   (an ARGB8888 software-renderer target, a caller-driven animation clock, fontconfig loaded at run time);
 - patches 0004-0005 in `src/tools/slint/` (fontconfig left out entirely, and the complex-script
   line-breaking dictionaries left out);
 - the build itself, `src/tools/build-static-slint.sh`, applying them in that order.
 
-The C++ for the `.slint` files is generated at build time by the Slint 1.18.1 release's `slint-compiler` (fetched
+The C++ for the `.slint` files is generated at build time by the Slint 1.19.0 release's `slint-compiler` (fetched
 by SHA-256 in the same script); the generated code is part of this repository's build, not of Slint.
 
 The Rust crates it is built from are listed, with their licence texts, in `licenses/slint-crates.md`

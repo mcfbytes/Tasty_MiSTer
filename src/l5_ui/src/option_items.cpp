@@ -11,6 +11,7 @@
 #include "app/romset_alias_reader.h"
 #include "app/session_identity.h"
 #include "infra/ascii.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "ui/arc_label.h"
 #include "ui/cycle_value.h"
@@ -53,11 +54,9 @@ std::string dip_row_label() {
 
 constexpr unsigned kFirstValueField = 2;
 
-constexpr std::uint8_t kSubmenuDigitFirst = 1;
-constexpr std::uint8_t kSubmenuDigitLast = 9;
-
 const proto::Item& source_item(const OptionItem::Source& in) {
-    return in.table->items()[in.item.v];
+    const auto rows = in.table->table();
+    return rows[in.item];
 }
 
 std::string_view field(const OptionItem::Source& in, unsigned n) {
@@ -96,16 +95,19 @@ public:
     explicit SlotLabels(const std::vector<std::string>& v) noexcept : values_(&v) {}
 
     bool has_label(proto::FieldValue v) const noexcept override {
-        const std::size_t i = v.v;
-        return i < values_->size() && !(*values_)[i].empty();
+        return count_().holds(v) && !infra::at_index(*values_, v).empty();
     }
 
     std::string_view label(proto::FieldValue v) const noexcept {
-        const std::size_t i = v.v;
-        return i < values_->size() ? std::string_view{(*values_)[i]} : std::string_view{};
+        return count_().holds(v) ? std::string_view{infra::at_index(*values_, v)}
+                                 : std::string_view{};
     }
 
 private:
+    [[nodiscard]] proto::FieldCount count_() const noexcept {
+        return proto::FieldCount::of(values_->size());
+    }
+
     const std::vector<std::string>* values_;
 };
 
@@ -127,7 +129,7 @@ OptionItem::Carry plain_label(OptionItem& it, const OptionItem::Source& in) {
 }
 
 proto::IoIndex io_index_after(RowCount taken) noexcept {
-    return proto::IoIndex{static_cast<std::uint8_t>(taken.size() + 1u)};
+    return taken.next_io_index();
 }
 
 OptionItem::Carry build_slot(
@@ -243,10 +245,7 @@ Transition OptionItem::step(CycleDir dir, proto::FieldValue value, IOptionHost& 
 
 OptionItem::Carry PageItem::on_build(const Source& in, const BuildEnv&) {
 
-    const std::uint8_t n = source_item(in).declared_page.v;
-    target_page = proto::SubmenuNo{
-        (n >= kSubmenuDigitFirst && n <= kSubmenuDigitLast) ? n : std::uint8_t{0}
-    };
+    target_page = source_item(in).declared_page.digit_page_or_root();
     return plain_label(*this, in);
 }
 

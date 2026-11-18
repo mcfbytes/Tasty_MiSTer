@@ -20,14 +20,18 @@ inline constexpr std::string_view kFdEnv = "ZAPAROO_SCANOUT_FD";
 
 inline constexpr std::uint16_t kMagic = 0x5A52;
 inline constexpr std::size_t kHeaderBytes = 8;
+inline constexpr std::size_t kMagicAt = 0, kTagAt = 2, kOpcodeAt = 4, kCountAt = 6;
+static_assert(kCountAt + sizeof(std::uint16_t) == kHeaderBytes);
 inline constexpr std::size_t kMaxPacketBytes = 32;
 
 struct Command {
-    std::uint16_t opcode;
+    hal::SpiWord opcode;
     std::uint8_t words;
 };
 
-inline constexpr auto kCommands = std::to_array<Command>({{0x57, 12}, {0x59, 6}, {0x5B, 11}});
+inline constexpr auto kCommands = std::to_array<Command>(
+    {{hal::SpiWord{0x57}, 12}, {hal::SpiWord{0x59}, 6}, {hal::SpiWord{0x5B}, 11}}
+);
 
 [[nodiscard]] std::optional<UioBurst> decode(std::span<const std::byte> packet) noexcept;
 

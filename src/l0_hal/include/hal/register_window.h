@@ -9,6 +9,7 @@
 #include "infra/error.h"
 #include "hal/axi.h"
 #include "hal/phys_region.h"
+#include "hal/reg_access.h"
 #include "hal/reg_block.h"
 #include "hal/reg_lend.h"
 #include "hal/reg_word.h"
@@ -25,13 +26,6 @@ class RegisterWindow {
 
 public:
     using Reg = typename Layout::Reg;
-
-    [[nodiscard]] static Ex<RegisterWindow> map_phys(os::PhysAddr phys) {
-        auto m = detail::map_registers(phys, Layout::kSize);
-        if (!m)
-            return std::unexpected(m.error());
-        return RegisterWindow(std::move(m->pages), m->lead);
-    }
 
     static RegisterWindow borrow(volatile void* base, std::size_t len) {
         if (base == nullptr || len < Layout::kSize) {
@@ -59,11 +53,21 @@ public:
     RegisterWindow& operator=(const RegisterWindow&) = delete;
     ~RegisterWindow() = default;
 
-    std::uint32_t read(Reg r) const { return detail::regs_read(base_, offset_of(r)); }
+    std::uint32_t read(Reg r) const
+        requires(readable(Layout::kAccess))
+    {
+        return detail::regs_read(base_, offset_of(r));
+    }
 
-    void write(Reg r, std::uint32_t v) { detail::regs_write(base_, offset_of(r), v); }
+    void write(Reg r, std::uint32_t v)
+        requires(writable(Layout::kAccess))
+    {
+        detail::regs_write(base_, offset_of(r), v);
+    }
 
-    void write(Reg r, RegWord w) {
+    void write(Reg r, RegWord w)
+        requires(writable(Layout::kAccess))
+    {
         w.emit([this, r](auto bits) { write(r, bits); });
     }
 
@@ -121,15 +125,6 @@ public:
         if (base_ == nullptr)
             return reg::Lend{};
         return reg::Lend(static_cast<volatile std::byte*>(base_), Layout::kSize);
-    }
-
-    template <reg::Access A, std::uint32_t Off>
-    [[nodiscard]] reg::Reg<A> field(reg::Field<A, Off>) const {
-        static_assert(Off <= Layout::kSize - 4u, "the field lies inside the layout");
-        if (base_ == nullptr) {
-            fatal(Error{Errc::mmap_failed, ERR_SITE(), Off}, "RegisterWindow: unmapped");
-        }
-        return reg::Reg<A>(static_cast<volatile std::uint32_t*>(detail::regs_advance(base_, Off)));
     }
 
 private:

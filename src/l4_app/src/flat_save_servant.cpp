@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <cstring>
 
-#include "app/durable_write.h"
-
 namespace mister::app {
 
 namespace {
@@ -16,12 +14,12 @@ namespace {
 
 }
 
-FlatSaveServant::FlatSaveServant(const svc::Vfs& vfs) : vfs_(vfs), image_(kImageCap) {}
+FlatSaveServant::FlatSaveServant(const svc::Vfs& vfs) : card_(vfs), image_(kImageCap) {}
 
 proto::SaveAct FlatSaveServant::start(
     const cores::SaveImage& image,
     std::string_view rel,
-    cores::WireWordBytes word
+    hal::Width word
 ) noexcept {
     TASTY_SEAT_BODY(FlatSaveServant);
     phase_ = Phase::Idle;
@@ -33,7 +31,7 @@ proto::SaveAct FlatSaveServant::start(
     at_ = 0;
     asked_ = 0;
 
-    piece_ = static_cast<std::uint16_t>(word.scale(proto::kSavePieceWords));
+    piece_ = static_cast<std::uint16_t>(hal::word_bytes(word) * proto::kSavePieceWords);
     phase_ = Phase::Opening;
     return proto::SaveAct{.kind = proto::SaveAct::Kind::Open, .index = index_};
 }
@@ -54,8 +52,7 @@ proto::SaveAct FlatSaveServant::resume(
             return next_read_();
         case Phase::Closing: {
             phase_ = Phase::Idle;
-            const auto r = durable_write(
-                vfs_,
+            const auto r = card_.replace_file(
                 rel_.view(),
                 std::span<const std::byte>(image_.data(), size_)
             );

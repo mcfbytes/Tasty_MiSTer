@@ -389,7 +389,7 @@ void FrameCopier::watch_step_() noexcept {
 
 void FrameCopier::note_replay_(const ReplayStatus& r) noexcept {
 
-    if (r.level != ReplayLevel::Running || r.movie_frame < MovieFrame{})
+    if (r.level != ReplayLevel::Running || r.movie_frame < MoviePosition{})
         gen_.covers_zero = true;
 }
 
@@ -598,7 +598,7 @@ bool FrameCopier::open_armed_(
     std::int64_t now
 ) noexcept {
 
-    if (!cell || cell->movie_frame < MovieFrame{})
+    if (!cell || cell->movie_frame < MoviePosition{})
         return false;
     const WideMovieFrame last_field = wide_frame(s.movie_frame) + MovieSpan{fields} - MovieSpan{1};
     if (last_field < WideMovieFrame{})

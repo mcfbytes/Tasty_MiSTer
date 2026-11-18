@@ -49,7 +49,6 @@ struct LinkOp {
         ApplyCore,
         AbortSwitch,
         BindIdentity,
-        BindDoorbells,
         BindJoy,
         JoyRelease,
         SaveUpload,
@@ -77,6 +76,7 @@ struct LinkOp {
         AttachSave,
         DetachSave,
         MenuCtl,
+        PlainDownload,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -155,7 +155,7 @@ struct LinkOp {
         bool manual = false;
         FileId path{};
         bool sends_index = false;
-        std::uint8_t index_word = 0;
+        FioIndexByte index_word{};
         ActKey act_gen{};
     };
 
@@ -171,7 +171,7 @@ struct LinkOp {
 
     struct FileTx {
         static constexpr Kind kKind = Kind::FileTx;
-        std::uint8_t wire_index = 0;
+        FioIndexByte wire_index{};
         FileTxPhase phase = FileTxPhase::Whole;
         FileId file{};
         std::uint32_t total = 0;
@@ -246,13 +246,6 @@ struct LinkOp {
         std::uint8_t pad_{};
     };
 
-    struct BindDoorbells {
-        static constexpr Kind kKind = Kind::BindDoorbells;
-        TxSlabId table{};
-        std::uint8_t declared = 0;
-        std::uint8_t rows = 0;
-    };
-
     struct BindJoy {
         static constexpr Kind kKind = Kind::BindJoy;
         bool joyswap = false;
@@ -275,8 +268,7 @@ struct LinkOp {
     struct SaveAsk {
         static constexpr Kind kKind = Kind::SaveAsk;
         SaveKind which{};
-        std::uint8_t slot = 0;
-        std::uint8_t pad_[2]{};
+        std::uint8_t pad_[3]{};
         CorrelationTag tag{};
     };
 
@@ -439,6 +431,14 @@ struct LinkOp {
         bool enable = false;
     };
 
+    struct PlainDownload {
+        static constexpr Kind kKind = Kind::PlainDownload;
+        FileId payload{};
+        WideIoIndex dest{};
+        StagePhase phase = StagePhase::Whole;
+        hal::Width framing{};
+    };
+
     using Alternatives = std::tuple<
         HoldReset,
         ReleaseReset,
@@ -459,7 +459,6 @@ struct LinkOp {
         ApplyCore,
         AbortSwitch,
         BindIdentity,
-        BindDoorbells,
         BindJoy,
         JoyRelease,
         SaveUpload,
@@ -486,7 +485,8 @@ struct LinkOp {
         MailboxWrite,
         AttachSave,
         DetachSave,
-        MenuCtl>;
+        MenuCtl,
+        PlainDownload>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(std::uint32_t) std::array<std::byte, kStore> store{};

@@ -4,9 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 
-#include "hal/phys_region.h"
+#include "hal/aperture_region.h"
 #include "hal/reg_lend.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -21,7 +22,7 @@ namespace mister::app {
 struct SectorCard {
     proto::SlotIndex slot{};
     std::uint16_t frame_words = 0;
-    hal::PhysRegion image{};
+    std::optional<hal::ApertureRegion> image{};
 };
 
 struct SectorGrant {

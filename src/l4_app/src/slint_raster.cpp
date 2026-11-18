@@ -2,11 +2,13 @@
 #include "app/slint_raster.h"
 
 #include "infra/decimal_text.h"
+#include "infra/fixed_str.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/persist.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -21,7 +23,9 @@
 #include "app/hd_help.h"
 #include "app/hd_metrics.h"
 #include "app/hd_panel_plan.h"
+#include "app/hd_status_slots.h"
 #include "app/hd_theme.h"
+#include "app/slint_ordinals.h"
 #include "infra/seat.h"
 
 #if defined(__GNUC__)
@@ -115,14 +119,34 @@ Plat*& shared_platform() {
     return out;
 }
 
-[[nodiscard]] constexpr std::string_view status_text(HdStatusSlots slots) noexcept {
-    if (slots.bluetooth && slots.rt)
-        return "BT  RT";
-    if (slots.bluetooth)
-        return "BT";
-    if (slots.rt)
-        return "RT";
-    return {};
+using StatusText = FixedStr<kHdStatusLineWidth.size() + 1, StrFit::Clip>;
+
+struct StatusSlotTag {
+    bool HdStatusSlots::* lit;
+    std::string_view tag;
+};
+
+constexpr std::array<StatusSlotTag, 2> kStatusSlotTags{{
+    {&HdStatusSlots::bluetooth, kHdBluetoothTag},
+    {&HdStatusSlots::rt, kHdRtTag},
+}};
+
+[[nodiscard]] StatusText status_text(const HdStatusSlots& slots) noexcept {
+    StatusText out{};
+    const auto add = [&out](std::string_view tag) {
+        if (!out.empty())
+            (void)out.append(kHdStatusTagGap);
+        (void)out.append(tag);
+    };
+    for (const StatusSlotTag& slot : kStatusSlotTags) {
+        if (slots.*slot.lit)
+            add(slot.tag);
+    }
+    for (const HdIndicatorTag& row : kHdIndicatorTags) {
+        if (slots.indicators.has(row.id))
+            add(row.tag);
+    }
+    return out;
 }
 
 [[nodiscard]] MenuRow hub_row(const PageDescription::Hub& hub, std::size_t i) {
@@ -536,7 +560,7 @@ struct SlintRasterOf<C>::Impl {
             scene->badge = badge.badge;
         }
         if (scene->status_slots != badge.slots) {
-            (*scene->ui)->set_status_text(shared(status_text(badge.slots)));
+            (*scene->ui)->set_status_text(shared(status_text(badge.slots).view()));
             scene->status_slots = badge.slots;
         }
     }

@@ -15,6 +15,8 @@
 
 namespace mister::svc::detail {
 
+static_assert(sizeof(::off_t) == sizeof(std::int64_t), "_FILE_OFFSET_BITS=64: warnings.cmake");
+
 PosixFile::PosixFile(
     UniqueFd fd,
     FileKind kind,
@@ -34,14 +36,14 @@ PosixFile::~PosixFile() {
         ::unlink(path_.c_str());
 }
 
-Ex<std::size_t> PosixFile::read_at(std::uint64_t off, std::span<std::byte> dst) {
+Ex<std::size_t> PosixFile::read_at(proto::FileOffset at, std::span<std::byte> dst) {
     std::size_t done = 0;
     while (done < dst.size()) {
         const ::ssize_t n = ::pread(
             fd_.get(),
             dst.data() + done,
             dst.size() - done,
-            static_cast<::off_t>(off + done)
+            (at + proto::FileSize{done}).seek_offset()
         );
         if (n < 0) {
             if (errno == EINTR)
@@ -56,14 +58,14 @@ Ex<std::size_t> PosixFile::read_at(std::uint64_t off, std::span<std::byte> dst) 
     return done;
 }
 
-Ex<std::size_t> PosixFile::write_at(std::uint64_t off, std::span<const std::byte> src) {
+Ex<std::size_t> PosixFile::write_at(proto::FileOffset at, std::span<const std::byte> src) {
     std::size_t done = 0;
     while (done < src.size()) {
         const ::ssize_t n = ::pwrite(
             fd_.get(),
             src.data() + done,
             src.size() - done,
-            static_cast<::off_t>(off + done)
+            (at + proto::FileSize{done}).seek_offset()
         );
         if (n < 0) {
             if (errno == EINTR)
@@ -102,14 +104,9 @@ Ex<void> PosixFile::flush() {
     return {};
 }
 
-Ex<void> PosixFile::advise(Access a, std::uint64_t off, std::uint64_t len) {
+Ex<void> PosixFile::advise(Access a, proto::FileOffset at, FileSize len) {
     const int advice = (a == Access::Sequential) ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED;
-    const int rc = ::posix_fadvise(
-        fd_.get(),
-        static_cast<::off_t>(off),
-        static_cast<::off_t>(len),
-        advice
-    );
+    const int rc = ::posix_fadvise(fd_.get(), at.seek_offset(), len.file_word<::off_t>(), advice);
     if (rc != 0)
         return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), rc));
     return {};

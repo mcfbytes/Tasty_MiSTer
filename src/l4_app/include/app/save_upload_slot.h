@@ -9,11 +9,11 @@
 
 #include "app/config_rel.h"
 #include "app/relay_stamp.h"
+#include "hal/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/save_act.h"
-#include "cores/wire_word.h"
 
 namespace mister::app {
 
@@ -31,8 +31,8 @@ struct SaveUploadSlot {
         struct Start {
             static constexpr Kind kKind = Kind::Start;
             std::uint32_t size = 0;
-            std::uint16_t index = 0;
-            cores::WireWordBytes word_bytes{};
+            proto::WideIoIndex index{};
+            hal::Width width = hal::Width::Byte;
             std::uint8_t pad_{};
         };
 

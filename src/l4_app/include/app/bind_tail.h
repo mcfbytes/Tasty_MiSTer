@@ -3,8 +3,6 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
-#include <span>
 #include <string_view>
 
 #include "app/board_ops.h"
@@ -12,7 +10,6 @@
 #include "app/mra_facts.h"
 #include "app/owner_tally.h"
 #include "app/session_bindings.h"
-#include "hal/types.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
@@ -43,11 +40,6 @@ public:
           sleeper_(sleeper) {}
 
     [[nodiscard]] bool identity(const proto::ConfStr& conf);
-    void doorbells(
-        const proto::ConfStr& conf,
-        std::span<const proto::AxiLwDecl> lw,
-        std::optional<hal::LwOffset> owned
-    );
     void joy(std::string_view core_name) noexcept;
     void facts(const MraFacts& facts) noexcept;
     void uart(std::string_view core_name, const proto::ConfStr* conf);

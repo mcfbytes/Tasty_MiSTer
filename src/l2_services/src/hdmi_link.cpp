@@ -64,7 +64,7 @@ Ex<void> HdmiLink::settle_and_publish(adv7513::Adv7513Bus& bus) {
         return err(st.error().code, ERR_SITE(), st.error().detail);
     if (!st->sink_present())
         return {};
-    ++hpd_gen_.v;
+    hpd_gen_ = hpd_gen_.next();
     return {};
 }
 
@@ -78,7 +78,7 @@ Ex<void> HdmiLink::request_power(adv7513::Adv7513Bus& bus, bool on) {
 
     if (init_owed_)
         return settle_and_publish(bus);
-    ++audio_gen_.v;
+    audio_gen_ = audio_gen_.next();
     return {};
 }
 

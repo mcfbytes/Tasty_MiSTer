@@ -19,7 +19,7 @@ public:
     StoresBlock(const BootParts& plat, app::CheatBlobCell& blob, app::UiWriteLane& writes)
         : recents_{plat.vfs, writes, false},
           played_{plat.vfs, writes},
-          names_{plat.vfs, app::NameConfig::card_cid_path(plat.kernel.sd_block)},
+          names_{plat.vfs, writes, app::NameConfig::card_cid_path(plat.kernel.sd_block)},
           cheats_{plat.vfs, blob} {}
 
     StoresBlock(const StoresBlock&) = delete;

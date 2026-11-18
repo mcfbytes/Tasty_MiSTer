@@ -58,7 +58,8 @@ void HdRenderer::begin() noexcept {
     up_ = true;
     st_ = {};
     st_.fps = pacer_.fps();
-    st_.slots_uio = slots_ && slots_->uio_bound();
+    if (slots_)
+        st_.slots_map = slots_->mapping();
     st_.scaler_uio = scaler_uio_;
     if (raster_() || sampler_) {
         scaler_.open(theme_);
@@ -384,7 +385,11 @@ void HdRenderer::paint_canvas_() noexcept {
     if (!dark)
         pattern->paint(canvas, box);
     logo_.paint(canvas, box, ask_.idle, logo_knobs_, std::chrono::nanoseconds{now_ns_()});
-    curtain(canvas, box, ask_.idle);
+
+    const HdRect lit = !dark
+        ? box
+        : (ask_.idle == FrontEndIdle::DarkLogo ? logo_.dark_box().intersect(box) : HdRect{});
+    curtain(canvas, lit, ask_.idle);
 }
 
 void HdRenderer::load_wallpaper_() noexcept {
@@ -499,7 +504,7 @@ void HdRenderer::draw_() noexcept {
                 ready = true;
             }
             if (ready)
-                slots_->handoff();
+                handoff_();
         }
         if (ready)
             drawn_ = PanelDrawn{
@@ -592,6 +597,13 @@ void HdRenderer::panel_step_(const HdLayout& layout, PxPlane panel, bool asked) 
         deadline_ = true;
 }
 
+void HdRenderer::handoff_() noexcept {
+    const std::uint64_t t0 = now_ns_();
+    if (!slots_->scanout_handoff())
+        st_.flush_fails.add();
+    st_.flush_us.note(span_us(t0, now_ns_()));
+}
+
 PixelCount HdRenderer::in_place_px_() const noexcept {
 
     return ask_.surface.size().area().quarter();
@@ -629,7 +641,7 @@ bool HdRenderer::spills_(const HdDirty& dirty, const HdLayout& layout) const noe
 
 void HdRenderer::place_(HdFlipHolds::Instant at, bool wrote) noexcept {
     if (copy_stale_(at) || wrote)
-        slots_->handoff();
+        handoff_();
     if (const auto sent = holds_->last_sent(); pending_ && sent && !cards_stale_(*sent))
         visible_(now_ns_(), false);
 }
@@ -708,7 +720,7 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
                 return true;
             (void)ledger_.take(t, HdDirtyLedger::Region::Game);
             holds_->set_gen(t, canvas_gen_);
-            slots_->handoff();
+            handoff_();
             st_.copy_us.note(span_us(0, copy_ns_));
             copy_ns_ = 0;
             return true;

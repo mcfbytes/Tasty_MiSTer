@@ -49,20 +49,17 @@ std::uint32_t InputEmitter::pad_facts_held() const noexcept {
 }
 
 std::uint32_t InputEmitter::link_words_bound(PlayerIndex player) const noexcept {
-    const std::uint8_t port = joy_.wire_port(player).v;
     const proto::JoystickWire& w = joy_.wire();
     const bool follow_up = w.analog_capable && !w.suppress_analog_followup && w.joy_transl == 1;
-    return route().link_words(proto::JoystickPort::digital_opcode(port), follow_up);
+    return route().link_words(
+        proto::JoystickPort::digital_opcode(joy_.wire_port(player)),
+        follow_up
+    );
 }
 
-Ex<bool> InputEmitter::submit(
-    proto::ILinkFrame& frame,
-    PlayerIndex player,
-    JoyMask buttons,
-    JoyMask autofire
-) {
+Ex<bool> InputEmitter::submit(proto::ILinkFrame& frame, PlayerIndex player, proto::PadMasks masks) {
     framed_.over(frame);
-    return joy_.submit(route(), player, buttons, autofire);
+    return joy_.submit(route(), player, masks);
 }
 
 Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, JoyMask composed) {
@@ -72,6 +69,10 @@ Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, Joy
 
 JoyMask InputEmitter::PlayerMasks::composed() const noexcept {
     return joy_.with(autofire_);
+}
+
+proto::PadMasks InputEmitter::PlayerMasks::pad() const noexcept {
+    return proto::PadMasks{joy_, autofire_};
 }
 
 void InputEmitter::set_joy_mask(PlayerIndex player, JoyMask mask) noexcept {
@@ -99,7 +100,7 @@ Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool loca
 
     if (local_walk) {
         for (const PlayerIndex p : kPlayers) {
-            auto sent = submit(frame, p, masks_[p].joy(), masks_[p].autofire());
+            auto sent = submit(frame, p, masks_[p].pad());
             if (!sent)
                 return std::unexpected(sent.error());
             if (*sent)
@@ -131,8 +132,8 @@ Ex<bool> InputEmitter::push_paddle(
     std::int32_t raw,
     const AxisCal& cal
 ) {
-    if (player.v >= kMaxPlayers) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
+    if (!masks_.find(player)) {
+        return std::unexpected(player.refusal(Errc::slot_range, ERR_SITE()));
     }
 
     auto byte = proto::JoystickPort::paddle_scale(raw, cal.min, cal.max);
@@ -153,8 +154,8 @@ Ex<bool> InputEmitter::push_spinner(
     PlayerIndex player,
     std::int32_t delta
 ) {
-    if (player.v >= kMaxPlayers) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
+    if (!masks_.find(player)) {
+        return std::unexpected(player.refusal(Errc::slot_range, ERR_SITE()));
     }
     const std::int8_t clamped = proto::JoystickPort::spinner_clamp(delta);
     framed_.over(frame);

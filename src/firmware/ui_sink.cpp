@@ -63,12 +63,8 @@ void UiSink::stamp_core_identity(bool front_end) {
     const std::optional<app::SessionIdentity> id = w_.identity.copy();
     if (!id) {
         ++corename_failures_;
-        w_.video.set_core_name(std::string_view{});
-        w_.video.set_spd_identity(std::string_view{}, proto::RotationDir::None);
         return;
     }
-    w_.video.set_core_name(id->core.view());
-    w_.video.set_spd_identity(app::home_name(*id), id->rotation);
     if (w_.title.has_value()) {
 
         FixedStr<kTitleCap, StrFit::Clip> title;
@@ -123,10 +119,12 @@ void UiSink::on(const app::Event::CoreLoaded& a, const app::Event::Head& h) {
 
     stamp_core_identity(a.front_end);
     w_.mgl.on_core_loaded(h.tag, a.mgl_capable);
-    w_.video.on_core_loaded(a.front_end);
+
+    const std::optional<app::SessionIdentity> latched = w_.identity.copy();
+    w_.video.on_core_loaded(app::CoreIdentity::of(latched), a.front_end);
     {
 
-        const app::SessionIdentity cid = w_.identity.copy().value_or(app::SessionIdentity{});
+        const app::SessionIdentity cid = latched.value_or(app::SessionIdentity{});
 
         app::CoreInputFacts f{};
         (void)f.core.assign(cid.core.view());

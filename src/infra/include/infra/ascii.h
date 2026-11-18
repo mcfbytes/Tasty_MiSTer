@@ -17,6 +17,8 @@ struct ByteCount {
         return ByteCount{static_cast<std::size_t>(bytes)};
     }
 
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
     struct Indices {
         std::size_t v = 0;
 

@@ -22,23 +22,12 @@ namespace {
 
 constexpr unsigned kHexNibbleBits = 4;
 constexpr unsigned kHexDigitMask = 0xFu;
-constexpr std::size_t kHexDigits16 = 4;
 constexpr std::size_t kHexDigits32 = 8;
 
 }
 
 namespace rules {
 namespace {
-
-std::string hex4(std::uint16_t v) {
-    static constexpr char kDigits[] = "0123456789abcdef";
-    std::string out;
-    for (int shift = static_cast<int>((kHexDigits16 - 1) * kHexNibbleBits); shift >= 0;
-         shift -= static_cast<int>(kHexNibbleBits)) {
-        out.push_back(kDigits[(static_cast<unsigned>(v) >> shift) & kHexDigitMask]);
-    }
-    return out;
-}
 
 std::string hex8(std::uint32_t v) {
     static constexpr char kDigits[] = "0123456789abcdef";
@@ -57,9 +46,9 @@ std::string dec(std::uint32_t v) {
 }
 
 std::string vid_pid(Vid vid, Pid pid) {
-    std::string s = hex4(vid.v);
+    std::string s{vid.padded_text().c_str()};
     s.push_back('_');
-    s += hex4(pid.v);
+    s += pid.padded_text().c_str();
     return s;
 }
 
@@ -114,10 +103,10 @@ constexpr auto kIdstrUniqRules = std::to_array<IdstrUniqRule>({
 constexpr Vid kControllaVid{0x1209};
 constexpr Pid kControllaPids[] = {Pid{0xFACE}, Pid{0xFACA}};
 
-constexpr unsigned kTeensyPidHigh = 0x04;
+constexpr std::uint8_t kTeensyPidHigh = 0x04;
 
 constexpr bool is_teensy_pid(Pid pid) noexcept {
-    return (pid.v >> 8) == kTeensyPidHigh;
+    return pid.has_high_byte(kTeensyPidHigh);
 }
 
 constexpr bool wants_uniq_suffix(Vid vid, Pid pid) noexcept {
@@ -295,7 +284,7 @@ void make_unique(FactsSpan slots, const DeviceMatch& match) {
         std::size_t idx = slots.size();
         std::optional<unsigned> next;
         for (std::size_t i = 0; i < slots.size(); ++i) {
-            if (!match.matches(slots[i]->id.vid, slots[i]->id.pid))
+            if (!match.matches(slots[i]->id.key()))
                 continue;
             const std::optional<unsigned> num = event_number(slots[i]->devname);
             if (!num || (last && *num <= *last))
@@ -364,12 +353,12 @@ MergeStats fixup_mouse_nodes(FactsSpan slots, const SpinnerPolicy& spin) {
             ++st.mouse_fixups;
 
             if (slots[i]->quirk == QuirkId::None) {
-                if (spin.claims(slots[i]->id.vid, slots[i]->id.pid)) {
+                if (spin.claims(slots[i]->id.key())) {
                     slots[i]->quirk = QuirkId::Mssp;
                     slots[i]->bind = static_cast<unsigned>(i);
                     slots[i]->spinner_prediv = 1;
                 }
-                if (const auto fx = find_mouse_fixup(slots[i]->id.vid, slots[i]->id.pid)) {
+                if (const auto fx = find_mouse_fixup(slots[i]->id.key())) {
                     slots[i]->quirk = fx->quirk;
                     slots[i]->bind = static_cast<unsigned>(i);
                     slots[i]->spinner_prediv = 3;

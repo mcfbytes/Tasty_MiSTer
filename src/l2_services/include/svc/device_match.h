@@ -5,6 +5,7 @@
 
 #include "svc/spinner_policy.h"
 #include "svc/types.h"
+#include "svc/vid_pid_key.h"
 
 namespace mister::svc {
 
@@ -19,14 +20,14 @@ struct DeviceMatch {
     Pid pid;
     MatchArity arity;
 
-    constexpr bool matches(Vid v, Pid p) const {
+    constexpr bool matches(VidPidKey device) const {
         switch (arity) {
             case MatchArity::VidOnly:
-                return v == vid;
+                return device.vid() == vid;
             case MatchArity::VidAndPid:
-                return v == vid && p == pid;
+                return device.vid() == vid && device.pid() == pid;
             case MatchArity::VidNotPid:
-                return v == vid && p != pid;
+                return device.vid() == vid && device.pid() != pid;
         }
         return false;
     }

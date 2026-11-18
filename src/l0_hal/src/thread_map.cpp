@@ -31,11 +31,7 @@ void adopt_placement(const ThreadMap& m, SeatTag seat) noexcept {
 
     if (t_map == nullptr)
         return unimplemented(ERR_SITE());
-    ::cpu_set_t set;
-    CPU_ZERO(&set);
-    const unsigned hi = max_cpu(*t_map).v;
-    for (unsigned c = 0; c <= hi; ++c)
-        CPU_SET(c, &set);
+    const ::cpu_set_t set = os::cpu_set_through(max_cpu(*t_map));
     return apply_self_affinity(set);
 }
 

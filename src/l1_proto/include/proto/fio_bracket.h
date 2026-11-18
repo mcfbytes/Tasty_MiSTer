@@ -31,7 +31,7 @@ public:
         hal::SpiWord mode
     );
 
-    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, IoIndex index);
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, FioIndexByte index);
     [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, WideIoIndex index);
     [[nodiscard]] static Ex<void> send_file_info(ILinkFrame& frame, std::string_view ext);
 

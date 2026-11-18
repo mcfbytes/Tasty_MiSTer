@@ -56,6 +56,8 @@ void MailboxRelay::service_rt(
     }
     if (!polling_ || !proto::well_formed(frame))
         return;
+
+    round_words_ = proto::FioWordCount{frame.words};
     proto::MailboxFrame f{};
     bool moved = true;
     {
@@ -67,6 +69,8 @@ void MailboxRelay::service_rt(
         }
         f.w[0] = *op;
         moved = !last_head_ || f.w[0] != *last_head_;
+        if (!moved)
+            round_words_ = proto::FioWordCount{1u};
         for (std::uint8_t i = 1; i < frame.words && moved; ++i) {
             const auto r = link.read();
             if (!r) {

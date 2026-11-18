@@ -6,6 +6,7 @@
 #include <charconv>
 
 #include "infra/ascii.h"
+#include "infra/message_sum.h"
 
 namespace mister::proto {
 
@@ -34,38 +35,36 @@ constexpr std::string_view kAxiToken = "AXI:";
     return out;
 }
 
-struct CauseToken {
-    reactor::Cause cause;
+struct IrqClassToken {
+    IrqClass kind;
     std::string_view token;
 };
 
-constexpr std::array<CauseToken, 4> kCauseTokens{{
-    {reactor::Cause::Blk, "BLK"},
-    {reactor::Cause::Fifo, "FIFO"},
-    {reactor::Cause::Ring, "RING"},
-    {reactor::Cause::CoreTick, "TICK"},
+constexpr std::array<IrqClassToken, infra::ordinal(IrqClass::kCount)> kIrqClassTokens{{
+    {IrqClass::Blk, "BLK"},
+    {IrqClass::Fifo, "FIFO"},
+    {IrqClass::Ring, "RING"},
+    {IrqClass::CoreTick, "TICK"},
 }};
 
-consteval bool cause_rows_join() noexcept {
-    for (std::size_t i = 0; i < kCauseTokens.size(); ++i) {
-        if (kCauseTokens[i].token.empty())
+consteval bool irq_class_rows_join() noexcept {
+    for (std::size_t i = 0; i < kIrqClassTokens.size(); ++i) {
+        if (kIrqClassTokens[i].token.empty())
             return false;
-        for (std::size_t j = i + 1; j < kCauseTokens.size(); ++j) {
-            if (kCauseTokens[i].cause == kCauseTokens[j].cause)
-                return false;
-            if (kCauseTokens[i].token == kCauseTokens[j].token)
+        for (std::size_t j = i + 1; j < kIrqClassTokens.size(); ++j) {
+            if (kIrqClassTokens[i].token == kIrqClassTokens[j].token)
                 return false;
         }
     }
-    return true;
+    return infra::rows_are_ordinal(kIrqClassTokens);
 }
 
-static_assert(cause_rows_join(), "IRQ class tokens: one row per declarable cause");
+static_assert(irq_class_rows_join(), "IRQ class tokens: one row per IrqClass, in order");
 
-std::optional<reactor::Cause> cause_from(std::string_view name) {
-    for (const CauseToken& row : kCauseTokens) {
+std::optional<IrqClass> irq_class_from(std::string_view name) {
+    for (const IrqClassToken& row : kIrqClassTokens) {
         if (row.token == name)
-            return row.cause;
+            return row.kind;
     }
     return std::nullopt;
 }
@@ -171,7 +170,7 @@ Ex<std::string_view> ConfStrCaps::try_irq(std::string_view rest) {
     if (eq == std::string_view::npos) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultNoEquals});
     }
-    const auto klass = cause_from(body.substr(0, eq));
+    const auto klass = irq_class_from(body.substr(0, eq));
     std::string_view tail = body.substr(eq + 1);
     std::string_view line_s = tail;
     std::uint32_t cause_base = 0;
@@ -247,7 +246,7 @@ void ConfStrCaps::carry_unknown(std::string_view run) {
     caps_.push_back({Capability::Kind::Unknown, std::string(run)});
 }
 
-std::optional<os::UioLine> ConfStrCaps::irq_line_for(reactor::Cause klass) const {
+std::optional<os::UioLine> ConfStrCaps::irq_line_for(IrqClass klass) const {
     for (const IrqBinding& b : irq_) {
         if (b.klass == klass)
             return b.line;

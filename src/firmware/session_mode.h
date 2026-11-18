@@ -36,7 +36,6 @@ class SaveStateAttach;
 class ScanoutRelay;
 class SessionOwner;
 class IUiRoundPort;
-class UiWriteLane;
 }
 
 namespace mister::fw {
@@ -64,7 +63,6 @@ public:
             infra::OptRef<app::LauncherScreen> launcher_screen{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};
-            infra::OptRef<app::UiWriteLane> ui_writes{};
 
             app::VerdictSinks verdicts{};
             infra::OptRef<const app::UiPageCell> ui_pages{};
@@ -170,7 +168,7 @@ public:
     virtual void disarm_stop_signals() noexcept = 0;
     virtual void storage_ready(svc::Vfs& vfs) = 0;
 
-    [[nodiscard]] virtual Ex<void> before_boot(app::LinkSession& session) = 0;
+    [[nodiscard]] virtual Ex<void> before_boot(app::SessionOwner& owner) = 0;
 
     [[nodiscard]] virtual infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner& owner

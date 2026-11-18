@@ -23,6 +23,7 @@ public:
     bool remembers_focus() const noexcept override;
     ConnectDemand connect_demand() const override;
     void on_focus_moved() override;
+    void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     bool holds_pairing() const override;
 
     bool slot_shown(SlotId slot) const override;
@@ -37,6 +38,7 @@ private:
     PairStart start_;
     bool show_all_ = false;
     std::optional<svc::PromptGen> entry_gen_{};
+    std::optional<svc::PromptGen> shown_gen_{};
 };
 
 }

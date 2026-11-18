@@ -11,8 +11,8 @@
 
 namespace mister::proto {
 
-enum class StandardItem : std::uint8_t { PauseOnOsd, kCount };
-enum class ItemShape : std::uint8_t { Toggle };
+enum class StandardItem : std::uint8_t { PauseOnOsd, SaveRow, kCount };
+enum class ItemShape : std::uint8_t { Toggle, Trigger };
 
 inline constexpr std::size_t kMaxStandardSpellings = 4;
 
@@ -28,7 +28,14 @@ inline constexpr std::array<StandardItemRow, std::to_underlying(StandardItem::kC
         {StandardItem::PauseOnOsd,
          {"pause when osd open", "osd pause", "pause on osd", "pause core on osd"},
          ItemShape::Toggle},
+        {StandardItem::SaveRow,
+         {"save backup ram", "save memory cards", "save memory card", "save backup"},
+         ItemShape::Trigger},
     }};
+
+[[nodiscard]] constexpr const StandardItemRow& standard_row_of(StandardItem item) noexcept {
+    return kStandardItemRows[std::to_underlying(item)];
+}
 
 namespace detail {
 

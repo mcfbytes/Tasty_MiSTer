@@ -68,7 +68,7 @@ std::uint32_t TastySplash::pixel(std::uint32_t x, std::uint32_t y) noexcept {
     return kArgbFg;
 }
 
-Ex<void> TastySplash::map(const hal::PhysRegion& fb) noexcept {
+Ex<void> TastySplash::map(const hal::ApertureRegion& fb) noexcept {
     TASTY_SEAT_BODY(TastySplash);
     if (fb_)
         return {};
@@ -88,7 +88,7 @@ bool TastySplash::blit(app::OutputSize out) noexcept {
         return false;
     const app::RowBytes stride = size.stride_bytes(pixel_bytes);
     const std::size_t need = app::kFramebufferPageBytes + app::rows_span(stride, size.rows);
-    if (fb_region_.len == 0 || need > fb_region_.len)
+    if (!fb_region_ || need > fb_region_->region().len)
         return false;
     auto view = fb_->view(0, need);
     const std::span<std::byte> px = view.subspan(app::kFramebufferPageBytes);
@@ -154,14 +154,14 @@ bool TastySplash::blit(app::OutputSize out) noexcept {
 
 Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept {
     TASTY_SEAT_BODY(TastySplash);
+    if (!fb_region_)
+        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), 0});
     const app::PictureSize size = app::PictureSize::of(out);
-    const std::uint32_t addr = static_cast<std::uint32_t>(
-        fb_region_.phys.v + app::kFramebufferPageBytes
-    );
+    const auto halves = fb_region_->region().phys.advanced(app::kFramebufferPageBytes).low_halves();
     const std::array<std::uint16_t, 10> words{
         kFbEnWord,
-        static_cast<std::uint16_t>(addr),
-        static_cast<std::uint16_t>(addr >> 16),
+        halves[0],
+        halves[1],
         size.width.wire_word(),
         size.rows.wire_word(),
         0,

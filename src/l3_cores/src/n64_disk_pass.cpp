@@ -47,7 +47,7 @@ Ex<bool> DiskPass::conclude(ICoreWindow& window) {
 }
 
 Ex<bool> DiskPass::load_ram_step_(ICoreWindow& window) {
-    const proto::FileSize total{map_.ram_bytes()};
+    const proto::FileSize total = map_.ram_bytes();
     if (!ram_checked) {
         ram_checked = true;
         if (total.empty() || ram_path_.empty() || !vfs_.file_exists(ram_path_.view()))
@@ -60,13 +60,13 @@ Ex<bool> DiskPass::load_ram_step_(ICoreWindow& window) {
         if (!size || *size != total)
             return false;
         ram_file_ = std::move(*f);
-        ram_off = proto::FileSize{};
+        ram_off = proto::kFileStart;
     }
     if (!ram_file_)
         return false;
 
     const proto::FileSize staged = proto::FileSize::of(std::span<std::uint8_t>(ram_buf));
-    const std::span<std::uint8_t> piece = total.after_header(ram_off).min(staged).first_of(
+    const std::span<std::uint8_t> piece = ram_off.remaining_in(total).min(staged).first_of(
         std::span<std::uint8_t>(ram_buf)
     );
     if (auto r = svc::read_exact(*ram_file_, ram_off, std::as_writable_bytes(piece)); !r) {
@@ -75,8 +75,8 @@ Ex<bool> DiskPass::load_ram_step_(ICoreWindow& window) {
     }
     Ex<void> placed{};
     map_.for_each_ram_run(
-        ram_off.file_word<std::uint64_t>(),
-        piece.size(),
+        ram_off,
+        proto::FileSize::of(piece),
         [&](n64dd::FlatOffset flat, std::size_t at, std::size_t n) {
             if (!placed)
                 return;
@@ -87,8 +87,8 @@ Ex<bool> DiskPass::load_ram_step_(ICoreWindow& window) {
     );
     if (!placed)
         return std::unexpected(placed.error());
-    ram_off = ram_off.advance(proto::FileSize::of(piece));
-    if (ram_off < total)
+    ram_off += proto::FileSize::of(piece);
+    if (total.holds(ram_off))
         return true;
     ram_loaded = total;
     ram_file_.reset();

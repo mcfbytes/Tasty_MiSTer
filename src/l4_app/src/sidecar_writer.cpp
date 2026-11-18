@@ -96,8 +96,8 @@ void SidecarWriter::on(const SidecarMsg::Row& row, const SidecarMsg::Head& head)
     const int len = std::snprintf(
         line,
         sizeof line,
-        "%" PRIu64 "\t%s\t%" PRId64 "\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-        row.stamp.core_frame.number(),
+        "%s\t%s\t%" PRId64 "\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+        row.stamp.core_frame.text().c_str(),
         row.stamp.header_ctr.text().c_str(),
         row.stamp.capture_ns,
         dup_reason_name(row.stamp.dup),

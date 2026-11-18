@@ -112,9 +112,10 @@ public:
         std::string_view path,
         proto::FileSize size,
         svc::Crc32 crc = {},
-        std::uint32_t aux = 0
+        std::uint32_t aux = 0,
+        ContentEdge edge = ContentEdge::Content
     ) {
-        return files_.intern_path(path, size, crc, aux);
+        return files_.intern_path(path, size, crc, aux, edge);
     }
 
     [[nodiscard]] Ex<proto::FileId> intern_empty_file(FileIntern&& file) {

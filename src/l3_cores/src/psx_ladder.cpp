@@ -90,7 +90,7 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
         return 0;
 
     std::uint8_t buf[1024];
-    auto rd = sbi->read_at(0, infra::byte_cast<std::byte>(std::span(buf)));
+    auto rd = sbi->read_at(proto::kFileStart, infra::byte_cast<std::byte>(std::span(buf)));
     if (!rd || *rd == 0)
         return 0;
     const std::size_t sz = *rd;

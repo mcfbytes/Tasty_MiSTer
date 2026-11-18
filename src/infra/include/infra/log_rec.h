@@ -8,7 +8,9 @@
 #include <tuple>
 
 #include "infra/error.h"
+#include "infra/lw_offset_label.h"
 #include "infra/message_sum.h"
+#include "infra/pause_gen.h"
 #include "infra/rt_stats.h"
 #include "infra/seat.h"
 
@@ -115,7 +117,7 @@ struct LogRec {
 
     struct DoorbellBound {
         static constexpr Kind kKind = Kind::DoorbellBound;
-        std::uint32_t cause_base = 0;
+        infra::LwOffsetLabel cause_base{};
         std::uint8_t klass = 0;
         std::uint8_t line = 0;
         std::uint8_t pad_[2]{};
@@ -130,7 +132,7 @@ struct LogRec {
 
     struct PhaseTolerated {
         static constexpr Kind kKind = Kind::PhaseTolerated;
-        std::uint32_t gen = 0;
+        xthread::PauseGen gen{};
         std::uint8_t phase = 0;
         std::uint8_t under = 0;
         std::uint8_t stimulus = 0;
@@ -139,11 +141,11 @@ struct LogRec {
 
     struct ConfStrArrived {
         static constexpr Kind kKind = Kind::ConfStrArrived;
-        std::uint16_t bind_gen = 0;
+        xthread::PauseGen bind_gen{};
         std::uint8_t phase = 0;
         std::uint8_t under = 0;
         bool awaited = false;
-        std::uint8_t pad_[3]{};
+        std::uint8_t pad_[1]{};
     };
 
     using Alternatives = std::tuple<

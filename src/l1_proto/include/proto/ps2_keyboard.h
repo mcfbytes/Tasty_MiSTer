@@ -40,7 +40,7 @@ public:
 
     [[nodiscard]] std::optional<Ps2Frame> next_frame() noexcept;
 
-    void accept_control(std::uint16_t word0);
+    void accept_control(Ps2ControlWord word0);
 
     void end_control() noexcept;
 

@@ -144,7 +144,7 @@ void InputService::maybe_assign_slot(InputDevice& dev) {
     const DeviceReport& r = dev.report();
     bool claim = false;
     for (std::size_t i = 0; i < r.keys.count() && !claim; ++i) {
-        const KeyEdge& e = r.keys.at(i);
+        const KeyEvent& e = r.keys.at(i);
         if (!e.pressed || e.code.is_key())
             continue;
         claim = dev.matches_sys_button(e.code);

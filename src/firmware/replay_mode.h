@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include "app/replay_feeder.h"
+#include "app/run_policy.h"
 #include "boot_parts.h"
 #include "device_block.h"
 #include "infra/error.h"
@@ -86,7 +87,7 @@ public:
 
     void storage_ready(svc::Vfs&) override {}
 
-    [[nodiscard]] Ex<void> before_boot(app::LinkSession&) override { return {}; }
+    [[nodiscard]] Ex<void> before_boot(app::SessionOwner&) override { return {}; }
 
     [[nodiscard]] infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner&
@@ -127,7 +128,7 @@ private:
         app::ReplayFeeder& f;
         bool take_play(const app::ReplayFeeder::Play& play) noexcept override;
         void take_stop() noexcept override;
-        [[nodiscard]] app::FrameCount movie_frames() const noexcept override;
+        [[nodiscard]] app::MovieFrameCount movie_frames() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
         [[nodiscard]] std::optional<ReplayRefusal> refusal() const noexcept override;
         [[nodiscard]] SettingNo settings_set() const noexcept override;
@@ -138,7 +139,11 @@ private:
         TASTY_SEAT_EXEMPT(boot);
 
     public:
-        [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept override { return {}; }
+        explicit NoFront(app::RunPolicy policy) noexcept : policy_(policy) {}
+
+        [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept override {
+            return DeviceBlock::Parts::Frontend{.policy = policy_};
+        }
 
         [[nodiscard]] infra::OptRef<app::ScanoutRelay> scanout() noexcept override { return {}; }
 
@@ -148,6 +153,9 @@ private:
         ) override;
 
         void latch(DeviceBlock&, ThreadAssembly::SeatMains&) noexcept override {}
+
+    private:
+        app::RunPolicy policy_;
     };
 
     class Sink final : public Face {

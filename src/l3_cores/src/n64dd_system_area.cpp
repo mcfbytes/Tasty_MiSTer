@@ -43,9 +43,8 @@ using Block = std::array<std::uint8_t, kZone0BlockBytes>;
 [[nodiscard]] Ex<bool> read_disk_id(svc::IFile& f, Block& b, SystemArea& out) {
     bool valid = false;
     for (const std::uint32_t lba : {15u, 14u}) {
-        const proto::FileSize at = proto::byte_offset(
-            proto::Lba{lba},
-            proto::BlockSize{kZone0BlockBytes}
+        const proto::FileOffset at = proto::BlockSize{kZone0BlockBytes}.position_of(
+            proto::Lba{lba}
         );
         if (!svc::read_exact(f, at, std::as_writable_bytes(std::span(b))))
             continue;
@@ -100,9 +99,8 @@ std::string_view root_ipl_name(Region region) noexcept {
         out.bad_lba.reset();
         bool found = false;
         for (const std::uint8_t blk : pass.blocks) {
-            const proto::FileSize at = proto::byte_offset(
-                proto::Lba{blk},
-                proto::BlockSize{kZone0BlockBytes}
+            const proto::FileOffset at = proto::BlockSize{kZone0BlockBytes}.position_of(
+                proto::Lba{blk}
             );
             if (auto r = svc::read_exact(file, at, std::as_writable_bytes(std::span(b))); !r) {
                 return std::unexpected(r.error());
@@ -136,7 +134,7 @@ std::string_view root_ipl_name(Region region) noexcept {
         if (pass.dev) {
             out.region = Region::Development;
         } else if (
-            svc::read_exact(file, proto::FileSize{}, std::as_writable_bytes(std::span(sig)))
+            svc::read_exact(file, proto::kFileStart, std::as_writable_bytes(std::span(sig)))
         ) {
             if (signature_is(sig, kRetailJpnSig))
                 out.region = Region::Japan;

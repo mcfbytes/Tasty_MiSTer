@@ -18,16 +18,17 @@
 #include "os/ui_vt_console.h"
 
 namespace mister::os {
+
+bool VtNumber::activate_on(int console_fd) const noexcept {
+    return ::ioctl(console_fd, VT_ACTIVATE, static_cast<int>(v)) == 0;
+}
+
 namespace {
 
 constexpr const char* kConsole = "/dev/tty0";
 
 UniqueFd open_rw(const char* path) noexcept {
     return UniqueFd{::open(path, O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK)};
-}
-
-[[nodiscard]] constexpr int vt_arg(VtNumber vt) noexcept {
-    return static_cast<int>(vt.v);
 }
 
 UniqueFd open_vt(VtNumber vt) noexcept {
@@ -60,7 +61,7 @@ std::optional<VtNumber> active_op() noexcept {
     const UniqueFd fd = open_rw(kConsole);
     if (!fd.valid())
         return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
-    if (::ioctl(fd.get(), VT_ACTIVATE, vt_arg(vt)) != 0)
+    if (!vt.activate_on(fd.get()))
         return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     return {};
 }

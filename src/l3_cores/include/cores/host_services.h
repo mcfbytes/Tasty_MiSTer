@@ -7,9 +7,9 @@
 #include "infra/wake_flag.h"
 
 namespace mister::svc {
-class Vfs;
 class ChdPrefetch;
 class DiscReadService;
+class IStorageBackend;
 }
 
 namespace mister::hal {
@@ -35,7 +35,6 @@ class IDiskPort;
 class IMailboxPort;
 
 struct HostServices {
-    const svc::Vfs& vfs;
     hal::ISpiTransport& link;
 
     const os::IClock& clock;
@@ -57,6 +56,8 @@ struct HostServices {
 
     infra::OptRef<hal::DiskLamp> lamp{};
     infra::OptRef<xthread::WakeFlag> disk_activity{};
+
+    infra::OptRef<svc::IStorageBackend> save_store{};
 };
 
 }

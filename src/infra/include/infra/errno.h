@@ -18,7 +18,7 @@ struct Errno {
         o.field(key, e.v);
     }
 
-    [[nodiscard]] constexpr Error refused(Errc errc, ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc errc, ErrorSite at) const noexcept {
         return Error{errc, at, static_cast<std::uint32_t>(v)};
     }
 

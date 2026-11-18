@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores::n64dd {
 
@@ -44,35 +46,35 @@ public:
 
     [[nodiscard]] std::span<const Step> steps() const noexcept { return {steps_.data(), count_}; }
 
-    [[nodiscard]] std::uint32_t ram_bytes() const noexcept {
-        return ram_ok_ ? infra::at_index(kRamBytes, disk_type_) : 0;
+    [[nodiscard]] proto::FileSize ram_bytes() const noexcept {
+        return proto::FileSize{ram_ok_ ? infra::at_index(kRamBytes, disk_type_) : 0u};
     }
 
     [[nodiscard]] DiskType disk_type() const noexcept { return disk_type_; }
 
     template <class Fn>
-    void for_each_ram_run(std::uint64_t ram_off, std::uint64_t len, Fn&& fn) const {
-        const std::uint64_t total = ram_bytes();
-        if (!ram_ok_ || len == 0 || ram_off >= total)
+    void for_each_ram_run(proto::FileOffset from, proto::FileSize len, Fn&& fn) const {
+        const proto::FileSize total = ram_bytes();
+        if (!ram_ok_ || len.empty() || !total.holds(from))
             return;
-        const std::uint64_t end = ram_off + len < total ? ram_off + len : total;
-        std::uint64_t at = ram_off;
-        for (std::size_t k = ram_index_at_(ram_off); k < ram_count_ && at < end; ++k) {
+        const proto::FileOffset end = std::min(from + len, proto::kFileStart + total);
+        proto::FileOffset at = from;
+        for (std::size_t k = ram_index_at_(from); k < ram_count_ && at < end; ++k) {
             const RamRun& run = ram_runs_[k];
             const Step& s = steps_[run.step];
-            const std::uint64_t base = run.base;
+            const proto::FileSize sector{s.zone_bytes};
             for (std::uint32_t sec = 0; sec < kSectorsPerBlock && at < end; ++sec) {
-                const std::uint64_t lo = base + std::uint64_t{sec} * s.zone_bytes;
-                const std::uint64_t hi = lo + s.zone_bytes;
+                const proto::FileOffset lo = run.start() + sector * std::uint64_t{sec};
+                const proto::FileOffset hi = lo + sector;
                 if (hi <= at)
                     continue;
-                const std::uint64_t to = hi < end ? hi : end;
+                const proto::FileOffset to = std::min(hi, end);
                 const FlatOffset run_off = s.where.sector_offset(sec).advanced_by(
-                    static_cast<std::uint32_t>(at - lo)
+                    (at - lo).file_word<std::uint32_t>()
                 );
                 fn(run_off,
-                   static_cast<std::size_t>(at - ram_off),
-                   static_cast<std::size_t>(to - at));
+                   (at - from).file_word<std::size_t>(),
+                   (to - at).file_word<std::size_t>());
                 at = to;
             }
         }
@@ -82,9 +84,13 @@ private:
     struct RamRun {
         std::uint32_t base = 0;
         std::uint16_t step = 0;
+
+        [[nodiscard]] constexpr proto::FileOffset start() const noexcept {
+            return proto::kFileStart + proto::FileSize{base};
+        }
     };
 
-    [[nodiscard]] std::size_t ram_index_at_(std::uint64_t ram_off) const noexcept;
+    [[nodiscard]] std::size_t ram_index_at_(proto::FileOffset at) const noexcept;
 
     std::array<Step, kMaxSteps> steps_{};
     std::array<RamRun, kLbaCount> ram_runs_{};

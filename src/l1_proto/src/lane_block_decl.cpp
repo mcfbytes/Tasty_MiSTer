@@ -26,6 +26,9 @@ constexpr DirEntryFacts kFacts{
 
 }
 
+template <>
+inline constexpr bool kHasOpBitmap<LaneOp> = true;
+
 [[nodiscard]] Ex<LaneBlockDecl> find_lane_block(
     const SysDirectoryImage& dir,
     hal::LwExtent window
@@ -38,7 +41,6 @@ constexpr DirEntryFacts kFacts{
     out.caps = e->word(LaneOp::Caps).caps();
     out.fifo_depth = e->word(LaneOp::Fifo).high16();
     out.strobe_gap = e->word(LaneOp::Fifo).low16();
-    out.line_decl = e->line();
     return out;
 }
 

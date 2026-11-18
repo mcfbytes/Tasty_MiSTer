@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
+
 #include "app/info_origin.h"
+#include "app/info_plane.h"
 #include "app/session_identity.h"
 #include "infra/fixed_str.h"
 #include "proto/types.h"
@@ -20,6 +23,10 @@ struct SessionFacts {
     bool in_hd_tree = false;
 
     proto::OsdRow info_origin{app::kInfoOriginY};
+
+    std::optional<app::InfoPlane> info_plane{};
+
+    bool autosave = false;
 
     [[nodiscard]] bool shows_hd_switch() const noexcept { return hd_switchable && !in_hd_tree; }
 };

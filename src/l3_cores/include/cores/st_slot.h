@@ -45,6 +45,10 @@ struct StSlot {
         return is_floppy() || acsi_target().has_value();
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
+    }
+
     friend constexpr bool operator==(StSlot, StSlot) = default;
 };
 

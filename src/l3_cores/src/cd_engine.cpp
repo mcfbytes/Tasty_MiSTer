@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 
+#include "cores/cd_command_words.h"
 #include "cores/cd_dialect_facts.h"
 #include "cores/cd_dialect_ports.h"
 #include "cores/pce_scsi_engine.h"
@@ -91,18 +92,18 @@ bool CdEngine::on_command_edge(std::uint8_t req) noexcept {
     return true;
 }
 
-Ex<void> CdEngine::accept_command(std::span<const std::uint16_t> words, CdDialectPorts& p) {
+Ex<void> CdEngine::accept_command(const CdCommandWords& cmd, CdDialectPorts& p) {
     if (!command_wanted_) {
 
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
     command_wanted_ = false;
-    if (words.size() != command_word_count()) {
+    if (cmd.count != command_word_count()) {
         return std::unexpected(
-            Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
+            Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(cmd.count)}
         );
     }
-    return do_accept(words, p);
+    return do_accept(cmd, p);
 }
 
 Ex<void> CdEngine::on_tick(CdDialectPorts& p) {

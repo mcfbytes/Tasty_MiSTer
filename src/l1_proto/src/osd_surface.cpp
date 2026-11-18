@@ -10,14 +10,14 @@ namespace mister::proto {
 
 std::span<std::uint8_t> OsdSurface::row(OsdRow r) {
     if (!kMaxRows.covers(r)) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), r.v}, "osd row");
+        fatal(r.refusal(Errc::slot_range, ERR_SITE()), "osd row");
     }
     return std::span<std::uint8_t>(row_cell(ui_.rows, r).data(), kRowBytes);
 }
 
 std::span<const std::uint8_t> OsdSurface::row(OsdRow r) const {
     if (!kMaxRows.covers(r)) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), r.v}, "osd row");
+        fatal(r.refusal(Errc::slot_range, ERR_SITE()), "osd row");
     }
     return std::span<const std::uint8_t>(row_cell(ui_.rows, r).data(), kRowBytes);
 }

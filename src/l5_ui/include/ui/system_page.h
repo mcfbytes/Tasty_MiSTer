@@ -12,19 +12,15 @@
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "ui/confirm_host.h"
-#include "ui/core_pick_host.h"
-#include "ui/menu_model.h"
+#include "ui/cores_entry.h"
 #include "ui/page.h"
-#include "ui/page_launches.h"
-#include "ui/script_pick_host.h"
+#include "ui/page_context.h"
+#include "ui/scripts_entry.h"
 #include "ui/system_facts.h"
 #include "svc/types.h"
 
 namespace mister::app {
 class ICmdVerbSink;
-class NameConfig;
-class RecentsStore;
 class UiRequestRing;
 }
 
@@ -44,8 +40,9 @@ enum class SystemItem : std::uint8_t {
     Help = 5,
     SaveSettings = 6,
     Reboot = 7,
-    UseHd = 8,
-    Exit = 9,
+    Autosave = 8,
+    UseHd = 9,
+    Exit = 10,
 
     kCount,
 };
@@ -61,6 +58,7 @@ inline constexpr infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> kSy
         SystemItem::Help,
         SystemItem::SaveSettings,
         SystemItem::Reboot,
+        SystemItem::Autosave,
         SystemItem::UseHd,
         SystemItem::Exit
     };
@@ -94,13 +92,22 @@ consteval bool system_items_are_dense() {
 
 static_assert(system_items_are_dense());
 
-class SystemPage final : public Page, private IConfirmHost {
+inline constexpr std::string_view kAutosaveLabel = "Auto-save to SD";
+inline constexpr std::string_view kAutosaveOn = "On";
+inline constexpr std::string_view kAutosaveOff = "Off";
+
+[[nodiscard]] constexpr std::string_view autosave_word(bool on) noexcept {
+    return on ? kAutosaveOn : kAutosaveOff;
+}
+
+class SystemPage final : public Page {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
     explicit SystemPage(const SystemFacts& f, const SessionFacts& s) noexcept
         : facts_(f),
-          session_(s) {}
+          session_(s),
+          scripts_(s) {}
 
     PageId id() const override {
         TASTY_SEAT_BODY(SystemPage);
@@ -143,43 +150,30 @@ public:
 
     Transition open_root_child(PageContext&) override;
 
-    Transition open_scripts(PageContext&);
-
     void on_facts(const SystemFacts& f, const SessionFacts& s) override {
         TASTY_SEAT_BODY(SystemPage);
         facts_ = f;
         session_ = s;
+        scripts_.on_facts(s);
     }
 
     svc::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(SystemPage);
-        return refusals_.sum(script_pick_.refusals()).sum(core_pick_.refusals());
+        return refusals_.sum(scripts_.refusals()).sum(cores_.refusals());
     }
 
 private:
-    infra::OptRef<BrowserLaunch> browser_() const noexcept {
-        return launches_ ? launches_->browser : infra::OptRef<BrowserLaunch>{};
-    }
-
     bool item_selected(SystemItem it) const noexcept { return sel_ == system_row_of(it); }
 
     template <class Visit>
     void for_each_row(Visit&& visit) const;
 
-    Transition open_scripts_confirm();
-
-    bool arm_scripts_browser_();
-    Transition open_core_browser(bool recents_first);
+    Transition open_scripts_();
+    Transition open_cores_(bool recents_first);
     Transition reboot_release(const UiEvent& ev);
     Transition use_hd_();
+    Transition toggle_autosave_();
     [[nodiscard]] bool ask_reboot_();
-
-    Transition on_cancel() override {
-        TASTY_SEAT_BODY(SystemPage);
-        return Transition::pop();
-    }
-
-    Transition on_confirm(RowIndex choice) override;
 
     SystemFacts facts_{};
     SessionFacts session_{};
@@ -189,14 +183,11 @@ private:
 
     RebootHold reboot_{};
 
-    infra::OptRef<PageLaunches> launches_{};
-    infra::OptRef<const IBrowseSource> storage_{};
+    infra::OptRef<PageContext> ctx_{};
     infra::OptRef<app::ICmdVerbSink> route_{};
     infra::OptRef<app::UiRequestRing> ui_requests_{};
-    infra::OptRef<app::RecentsStore> recents_{};
-    infra::OptRef<app::NameConfig> names_{};
-    ScriptPickHost script_pick_{};
-    CorePickHost core_pick_{};
+    ScriptsEntry scripts_;
+    CoresEntry cores_{};
 };
 
 std::unique_ptr<SystemPage> make_system_page(const SystemFacts& facts, const SessionFacts& session);

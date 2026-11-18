@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 
@@ -39,26 +40,34 @@ void BandFadePattern<A>::paint(PxPlane& canvas, HdRect box) const noexcept {
     const std::int32_t size = span / kRamp;
     if (size <= 0)
         return;
-    for (std::int32_t y = 0; y < on.h; ++y) {
-        auto row = plane->row(PlaneRow{y});
-        auto px = row.begin();
-        for (std::int32_t x = 0; x < on.w; ++x, ++px) {
-            const std::int32_t pos = A == Axis::Horizontal ? y : x;
-            const std::int32_t base = kRamp * pos / span + 1;
+    std::int32_t pos = 0;
+    const auto pixel_here = [&] {
+        const std::int32_t base = kRamp * pos / span + 1;
 
-            const std::int32_t first = ((base - 1) * span + kRamp - 1) / kRamp;
-            const std::int32_t left = size - (pos - first);
-            const std::int32_t step = left > 0 ? left : 0;
-            const std::int32_t gray = kMaxGray * step / size;
-            const bool red = (base & kRedBit) != 0;
-            const bool green = (base & kGreenBit) != 0;
-            const bool blue = (base & kBlueBit) != 0;
-            *px = hd_pack565(rgb_from_channels(
-                ColorChannel::of(red ? gray : 0),
-                ColorChannel::of(green ? gray : 0),
-                ColorChannel::of(blue ? gray : 0)
-            ));
-        }
+        const std::int32_t first = ((base - 1) * span + kRamp - 1) / kRamp;
+        const std::int32_t left = size - (pos - first);
+        const std::int32_t step = left > 0 ? left : 0;
+        const std::int32_t gray = kMaxGray * step / size;
+        const bool red = (base & kRedBit) != 0;
+        const bool green = (base & kGreenBit) != 0;
+        const bool blue = (base & kBlueBit) != 0;
+        return hd_pack565(rgb_from_channels(
+            ColorChannel::of(red ? gray : 0),
+            ColorChannel::of(green ? gray : 0),
+            ColorChannel::of(blue ? gray : 0)
+        ));
+    };
+
+    if constexpr (A == Axis::Horizontal) {
+        for (pos = 0; pos < on.h; ++pos)
+            std::fill_n(plane->row(PlaneRow{pos}).begin(), on.w, pixel_here());
+    } else {
+        const auto first_row = plane->row(PlaneRow{0}).begin();
+        auto px = first_row;
+        for (pos = 0; pos < on.w; ++pos, ++px)
+            *px = pixel_here();
+        for (std::int32_t y = 1; y < on.h; ++y)
+            std::copy_n(first_row, on.w, plane->row(PlaneRow{y}).begin());
     }
 }
 

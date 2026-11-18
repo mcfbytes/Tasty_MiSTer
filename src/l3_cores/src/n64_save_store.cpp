@@ -3,13 +3,11 @@
 
 #include <algorithm>
 #include <cstring>
-#include <optional>
 #include <utility>
 
 #include "cores/n64_cpak.h"
 #include "cores/n64_save_attach.h"
 #include "cores/n64_save_layout_key.h"
-#include "infra/path_parts.h"
 
 namespace mister::cores::n64 {
 
@@ -18,6 +16,7 @@ SaveChannelStore::SaveChannelStore(
     infra::OptRef<xthread::WakeFlag> activity
 ) noexcept
     : vfs_(vfs),
+      card_(vfs),
       activity_(activity) {}
 
 bool SaveChannelStore::all_blank_(std::span<const std::uint8_t> image) const noexcept {
@@ -95,10 +94,8 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
         return false;
     const std::size_t sz = o.bytes;
     const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(sz, end - o.offset));
-    auto got = (*f)->read_at(
-        o.offset,
-        std::as_writable_bytes(std::span<std::uint8_t>(blank_, want))
-    );
+    const proto::FileOffset from{o.offset};
+    auto got = (*f)->read_at(from, std::as_writable_bytes(std::span<std::uint8_t>(blank_, want)));
     if (!got || *got == 0 || all_blank_(std::span<const std::uint8_t>(blank_, sz)))
         return false;
     if (plan_.rows[o.row].byteswap)
@@ -110,27 +107,10 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
 }
 
 Ex<void> SaveChannelStore::create_(const SaveOrder& o, std::size_t bytes) {
-    const std::string_view rel = o.path.view();
-    if (const auto dir = infra::nested_dir(rel); dir) {
-        if (auto r = vfs_.ensure_dir(*dir); !r)
-            return r;
-    }
-    tmp_.clear();
-    if (!tmp_.assign(rel) || !tmp_.append(".tmp")) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
-    auto f = vfs_.open(tmp_.view(), svc::OpenMode::Truncate);
-    if (!f)
-        return std::unexpected(f.error());
     const std::span<const std::byte> image = std::as_bytes(
         std::span<const std::uint8_t>(blank_, bytes)
     );
-    if (auto r = svc::write_all(**f, proto::FileSize{}, image); !r)
-        return r;
-    if (auto r = (*f)->flush(); !r)
-        return r;
-    f->reset();
-    if (auto r = vfs_.replace(tmp_.view(), rel); !r)
+    if (auto r = card_.replace_file(o.path.view(), image); !r)
         return r;
     ++creates_;
     return {};
@@ -145,21 +125,21 @@ Ex<proto::FileSize> SaveChannelStore::open_extent(
     release(slot);
     const auto attach = SaveAttach::decode(order.view());
     if (!attach)
-        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), slot.detail()});
+        return std::unexpected(slot.refusal(Errc::mount_failed, ERR_SITE()));
     const SaveOrder& o = attach->order;
 
     if (o.bytes > kMaxPartitionBytes)
-        return std::unexpected(o.row.refused(Errc::mount_failed, ERR_SITE()));
+        return std::unexpected(o.row.refusal(Errc::mount_failed, ERR_SITE()));
     const auto part = parts_.find(o.row);
     if (!part)
-        return std::unexpected(o.row.refused(Errc::slot_range, ERR_SITE()));
+        return std::unexpected(o.row.refusal(Errc::slot_range, ERR_SITE()));
     part->claim(slot);
 
     part->close();
     if (attach->plan)
         adopt_(*attach->plan);
     if (o.path.view().empty()) {
-        return std::unexpected(o.row.refused(Errc::mount_failed, ERR_SITE()));
+        return std::unexpected(o.row.refusal(Errc::mount_failed, ERR_SITE()));
     }
     if (o.create != CreateImage::Never && !vfs_.file_exists(o.path.view())) {
         auto n = render_(o);
@@ -168,7 +148,7 @@ Ex<proto::FileSize> SaveChannelStore::open_extent(
         if (auto r = create_(o, *n); !r)
             return std::unexpected(r.error());
     }
-    return part->open(vfs_, o.path.view());
+    return part->open(card_, o.path.view());
 }
 
 void SaveChannelStore::release(proto::SlotIndex slot) noexcept {
@@ -180,10 +160,10 @@ void SaveChannelStore::release(proto::SlotIndex slot) noexcept {
 }
 
 Ex<proto::FileSize> SaveChannelStore::OpenPartition::open(
-    const svc::Vfs& vfs,
+    svc::CardWriter& card,
     std::string_view path
 ) {
-    auto f = vfs.open(path, svc::OpenMode::ReadWrite);
+    auto f = card.open(path, svc::OpenMode::ReadWrite);
     if (!f)
         return std::unexpected(f.error());
     auto size = (*f)->size();
@@ -195,11 +175,11 @@ Ex<proto::FileSize> SaveChannelStore::OpenPartition::open(
 }
 
 Ex<std::span<std::uint8_t>> SaveChannelStore::read_at(
-    proto::FileSize at,
+    proto::FileOffset at,
     std::span<std::uint8_t> dst
 ) {
     TASTY_SEAT_BODY(SaveChannelStore);
-    const std::uint64_t offset = at.file_word<std::uint64_t>();
+    const std::uint64_t offset = (at - proto::kFileStart).file_word<std::uint64_t>();
     if (layout_.count.none()) {
         ++stray_;
         return dst.first(0);
@@ -220,7 +200,8 @@ Ex<std::span<std::uint8_t>> SaveChannelStore::read_at(
                 activity_->request();
             noted = true;
         }
-        auto got = f->read_at(hit->rest.offset, std::as_writable_bytes(dst.subspan(done, want)));
+        const proto::FileOffset row_at{hit->rest.offset};
+        auto got = f->read_at(row_at, std::as_writable_bytes(dst.subspan(done, want)));
         if (!got)
             break;
         if (plan_.rows[hit->row].byteswap) {
@@ -235,11 +216,11 @@ Ex<std::span<std::uint8_t>> SaveChannelStore::read_at(
 }
 
 Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
-    proto::FileSize at,
+    proto::FileOffset at,
     std::span<const std::uint8_t> src
 ) {
     TASTY_SEAT_BODY(SaveChannelStore);
-    const std::uint64_t offset = at.file_word<std::uint64_t>();
+    const std::uint64_t offset = (at - proto::kFileStart).file_word<std::uint64_t>();
     if (layout_.count.none()) {
         ++stray_;
         return src.first(0);
@@ -247,7 +228,7 @@ Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
 
     if (auto head = layout_.locate(offset); head
         && parts_[head->row].is_open()
-        && !parts_[head->row].on_disk().holds_offset(head->rest.offset)) {
+        && !parts_[head->row].on_disk().holds(proto::FileOffset{head->rest.offset})) {
         ++clamped_;
         return src;
     }
@@ -264,7 +245,8 @@ Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
         if (!f)
             break;
 
-        const std::size_t fits = part.on_disk().clamp_write(hit->rest.offset, want);
+        const proto::FileOffset row_at{hit->rest.offset};
+        const std::size_t fits = part.on_disk().clamp_write(row_at, want);
         if (fits != want)
             ++clamped_;
         if (fits == 0) {
@@ -283,7 +265,7 @@ Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
         }
 
         auto existing = f->read_at(
-            hit->rest.offset,
+            row_at,
             std::as_writable_bytes(std::span<std::uint8_t>(compare_, fits))
         );
         if (existing && *existing == fits && std::memcmp(compare_, scratch_, fits) == 0) {
@@ -291,10 +273,7 @@ Ex<std::span<const std::uint8_t>> SaveChannelStore::write_at(
             done += want;
             continue;
         }
-        auto n = f->write_at(
-            hit->rest.offset,
-            std::as_bytes(std::span<const std::uint8_t>(scratch_, fits))
-        );
+        auto n = f->write_at(row_at, std::as_bytes(std::span<const std::uint8_t>(scratch_, fits)));
         if (!n || *n != fits)
             break;
 

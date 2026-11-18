@@ -200,7 +200,7 @@ std::optional<IMovieFormat::DigestSpan> NesBk2Codec::rom_digest_span(
     const proto::FileSize skip = copier_header(size);
     if (size <= skip)
         return std::nullopt;
-    return span_past(size, skip);
+    return span_past(size, proto::kFileStart + skip);
 }
 
 Ex<IMovieFormat::DigestSource> NesBk2Codec::digest_source(
@@ -214,14 +214,17 @@ Ex<IMovieFormat::DigestSource> NesBk2Codec::digest_source(
     if (!f)
         return std::unexpected(f.error());
     std::array<std::uint8_t, kRomHead> head{};
-    const auto got = (*f)->read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(head)));
+    const auto got = (*f)->read_at(
+        proto::kFileStart,
+        std::as_writable_bytes(std::span<std::uint8_t>(head))
+    );
     if (!got)
         return std::unexpected(got.error());
-    if (src->span.offset != proto::FileSize{} || *got != kRomHead || !is_ines(head))
+    if (src->span.offset != proto::kFileStart || *got != kRomHead || !is_ines(head))
         return src;
     const auto canon = ines1_header(head);
     src->span = DigestSpan{
-        .offset = proto::FileSize{kRomHead},
+        .offset = proto::kFileStart + proto::FileSize{kRomHead},
         .length = src->span.length - proto::FileSize{kRomHead}
     };
     src->prefix.assign(head.begin(), head.end());

@@ -63,6 +63,9 @@ struct OwnerTally {
 
     xthread::Counter ini_write_failures{};
 
+    xthread::Counter autosave_probe_refusals{};
+    xthread::Counter autosave_probes_ordered{};
+
     xthread::Counter ini_switch_absent{};
 
     std::uint32_t memsz_unmeasured = 0;
@@ -73,8 +76,6 @@ struct OwnerTally {
     std::uint32_t identities_fail = 0;
 
     std::uint32_t identity_intern_refusals = 0;
-
-    std::uint32_t doorbell_intern_refusals = 0;
 
     svc::Tally uart_intern_refusals{};
 

@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "browse_rules.h"
+#include "infra/errno.h"
 #include "infra/unique_fd.h"
 #include "os/block_device.h"
 #include "posix_file.h"
@@ -143,7 +144,7 @@ int open_flags(OpenMode m) {
 
 Ex<std::unique_ptr<IFile>> hinted_whole(Ex<std::unique_ptr<IFile>> f) {
     if (f)
-        (void)(*f)->advise(IFile::Access::Sequential, 0, 0);
+        (void)(*f)->advise(IFile::Access::Sequential, proto::kFileStart, FileSize{});
     return f;
 }
 
@@ -249,10 +250,16 @@ Ex<std::string> Vfs::resolve(std::string_view rel, const SearchPolicy& policy) c
 }
 
 Ex<std::unique_ptr<IFile>> Vfs::open(std::string_view path, OpenMode mode) const {
+    if (!opens_read_only(mode))
+        return std::unexpected(read_only_refusal(mode, ERR_SITE()));
     auto f = open_backend_(path, mode);
     if (mode == OpenMode::ReadWhole)
         return hinted_whole(std::move(f));
     return f;
+}
+
+Ex<std::unique_ptr<IFile>> Vfs::open_write_(std::string_view path, OpenMode mode) const {
+    return open_backend_(path, mode);
 }
 
 Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mode) const {
@@ -263,6 +270,10 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
             return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
         }
         return memory_->open(full);
+    }
+    if (memory_ != nullptr) {
+        if (auto no = memory_->refusal(full, MemoryMounts::IoVerb::Open))
+            return std::unexpected(*no);
     }
 
     const asset_name::ZipSplit zs = asset_name::zip_split(full);
@@ -310,9 +321,12 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
     }
 
     const bool unlink_at_close = (kind == detail::FileKind::Shm) && mode_creates(mode);
-    return std::unique_ptr<IFile>(
+    std::unique_ptr<IFile> file(
         new detail::PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, full, unlink_at_close)
     );
+    if (memory_ != nullptr)
+        return memory_->observed(full, std::move(file));
+    return file;
 }
 
 Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc) const {
@@ -348,6 +362,14 @@ bool Vfs::dir_exists(std::string_view path) const noexcept {
 
 bool Vfs::file_exists(std::string_view path) const noexcept {
     return path_is_regular(compose(root_path_, path));
+}
+
+Vfs::NameKind Vfs::name_kind(std::string_view path) const noexcept {
+    const std::string full = compose(root_path_, path);
+    struct ::stat st{};
+    if (::lstat(full.c_str(), &st) != 0)
+        return errno == ENOENT ? NameKind::Absent : NameKind::Other;
+    return S_ISREG(st.st_mode) ? NameKind::PlainFile : NameKind::Other;
 }
 
 Ex<std::chrono::sys_seconds> Vfs::modified(std::string_view path) const {
@@ -444,7 +466,7 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
     return out;
 }
 
-Ex<void> Vfs::ensure_dir(std::string_view rel) const {
+Ex<void> Vfs::ensure_dir_(std::string_view rel) const {
     const std::string full = compose(root_path_, rel);
 
     std::string cur;
@@ -474,6 +496,24 @@ Ex<void> Vfs::ensure_dir(std::string_view rel) const {
         }
     }
     return {};
+}
+
+Ex<void> Vfs::replace_(const RenameFiles& names) const {
+    return durable_.replace(names.tmp, names.dest);
+}
+
+void Vfs::sync_parent_dir_(std::string_view path) const noexcept {
+    durable_.sync_parent_dir(path);
+}
+
+Ex<void> Vfs::remove_(std::string_view rel) const {
+    const std::string full = compose(root_path_, rel);
+    if (::unlink(full.c_str()) == 0)
+        return {};
+    const int e = errno;
+    if (e == ENOENT)
+        return {};
+    return std::unexpected(infra::Errno{e}.refusal(Errc::os, ERR_SITE()));
 }
 
 Vfs::DurabilityLog Vfs::durability_log() noexcept {

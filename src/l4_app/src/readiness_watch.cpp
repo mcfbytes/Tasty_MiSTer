@@ -3,7 +3,7 @@
 
 namespace mister::app {
 
-std::optional<ReadinessWatch::Reboot> ReadinessWatch::watch_readiness(SwitchView sw, Host& host) {
+std::optional<ReadinessWatch::End> ReadinessWatch::watch_readiness(SwitchView sw, Host& host) {
     TASTY_SEAT_BODY(ReadinessWatch);
 
     if (!recovering_ && fabric_unconfigured()) {
@@ -39,7 +39,7 @@ bool ReadinessWatch::fabric_unconfigured() const noexcept {
     return programmer_.bridges_down() && !load_ok_;
 }
 
-std::optional<ReadinessWatch::Reboot> ReadinessWatch::recover_session_(SwitchView sw, Host& host) {
+std::optional<ReadinessWatch::End> ReadinessWatch::recover_session_(SwitchView sw, Host& host) {
 
     host.fabric_suspect();
 
@@ -58,16 +58,13 @@ std::optional<ReadinessWatch::Reboot> ReadinessWatch::recover_session_(SwitchVie
     return probe_for_recovery_(sw, host);
 }
 
-std::optional<ReadinessWatch::Reboot> ReadinessWatch::probe_for_recovery_(
-    SwitchView sw,
-    Host& host
-) {
+std::optional<ReadinessWatch::End> ReadinessWatch::probe_for_recovery_(SwitchView sw, Host& host) {
     if (fabric_configured()) {
 
         recovering_ = false;
         if (!sw.standing)
             (void)host.ask_recovery_switch();
-        return std::nullopt;
+        return Recovered{};
     }
     recover_polls_cell_.publish(++tally_.recover_polls);
     ++recover_tries_;

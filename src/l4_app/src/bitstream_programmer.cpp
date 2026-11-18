@@ -23,7 +23,7 @@ namespace mister::app {
     if (fsz < kContainerHeader
         || hdr.size() < kContainerHeaderBytes
         || std::memcmp(hdr.data(), kMagic, sizeof(kMagic)) != 0) {
-        return PayloadWindow{proto::FileSize{}, fsz};
+        return PayloadWindow{proto::kFileStart, fsz};
     }
     const auto word = infra::load_le<std::uint32_t>(
         hdr.subspan<kDeclaredAt, sizeof(std::uint32_t)>()
@@ -32,14 +32,14 @@ namespace mister::app {
     if (declared > fsz - kContainerHeader) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), word});
     }
-    return PayloadWindow{kContainerHeader, declared};
+    return PayloadWindow{kPayloadAt, declared};
 }
 
 [[nodiscard]] Ex<PayloadWindow> read_payload_window(svc::IFile& f, proto::FileSize size) {
     if (size < kContainerHeader)
-        return PayloadWindow{proto::FileSize{}, size};
+        return PayloadWindow{proto::kFileStart, size};
     std::array<std::byte, kContainerHeaderBytes> hdr{};
-    if (auto r = stream_read(f, proto::FileSize{}, std::span<std::byte>(hdr)); !r) {
+    if (auto r = stream_read(f, proto::kFileStart, std::span<std::byte>(hdr)); !r) {
         return std::unexpected(r.error());
     }
     return container_window(std::span<const std::byte>(hdr), size);
@@ -79,15 +79,14 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
 
     for (proto::FileSize pos{}; pos < win->length;) {
         const auto left = std::min(win->length - pos, proto::FileSize{chunk_bytes_});
-        const auto n = static_cast<std::size_t>(left.v);
-        if (auto r = stream_read(*src->f, win->base + pos, std::span<std::byte>(buf_.data(), n));
-            !r) {
+        const std::span<std::byte> chunk = left.first_of(std::span<std::byte>(buf_));
+        if (auto r = stream_read(*src->f, win->base + pos, chunk); !r) {
             return std::unexpected(r.error());
         }
-        if (auto r = programmer_->program_chunk(std::span<const std::byte>(buf_.data(), n)); !r) {
+        if (auto r = programmer_->program_chunk(chunk); !r) {
             return std::unexpected(r.error());
         }
-        pos += proto::FileSize{n};
+        pos += proto::FileSize::of(chunk);
     }
 
     if (auto r = programmer_->drive_to_rest(programmer_->program_end()); !r) {

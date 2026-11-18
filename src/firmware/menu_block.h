@@ -3,6 +3,7 @@
 
 #include "app/hps_framebuffer.h"
 #include "app/launcher_screen.h"
+#include "app/map_save_verdict.h"
 #include "app/mgl_pump.h"
 #include "app/save_state_attach.h"
 #include "boot_parts.h"
@@ -54,9 +55,9 @@ private:
     const os::IClock& clock_;
     const char* diag_path_;
     ui::EventTrace trace_;
-
-    app::UiWriteLane ui_writes_;
     StoresBlock stores_;
+
+    app::MapSaveVerdict map_saves_;
     app::MglPump mgl_pump_;
     app::HpsFramebuffer hps_fb_;
     ui::VfsBrowseSource browse_source_;

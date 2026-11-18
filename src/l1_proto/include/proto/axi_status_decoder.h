@@ -2,53 +2,41 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "proto/core_session.h"
-#include "proto/session_live.h"
-#include "proto/status_cell.h"
+#include "hal/sys_block.h"
+#include "proto/build_generation.h"
+#include "proto/status_change.h"
 #include "proto/status_snapshot.h"
+#include "proto/status_source.h"
 #include "proto/status_word.h"
 
 namespace mister::proto {
 
-class AxiStatusDecoder {
+class AxiStatusSource final : public IStatusSource {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    AxiStatusDecoder(CoreSession& session, StatusCell& cell, const ISessionLive& live) noexcept
-        : session_(session),
-          cell_(cell),
-          live_(live) {}
-
     void bind(infra::OptRef<const StatusSnapshotCell> src, BuildGeneration gen) noexcept;
 
-    void service() noexcept;
-
-    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
-
-    [[nodiscard]] std::uint8_t last() const noexcept { return last_; }
-
-    [[nodiscard]] std::uint32_t flush_refusals() const noexcept { return flush_refusals_; }
+    [[nodiscard]] std::optional<StatusChange> take(
+        StatusChange held,
+        StatusWord& words
+    ) noexcept override;
 
     [[nodiscard]] std::uint32_t adopted() const noexcept { return adopted_; }
 
     [[nodiscard]] std::uint32_t stale() const noexcept { return stale_; }
 
 private:
-    CoreSession& session_;
-    StatusCell& cell_;
-    const ISessionLive& live_;
     infra::OptRef<const StatusSnapshotCell> src_{};
     StatusSnapshotCell::Reader reader_{};
     BuildGeneration gen_{};
-    std::uint8_t last_ = 0;
-    std::uint32_t flush_refusals_ = 0;
     std::uint32_t adopted_ = 0;
     std::uint32_t stale_ = 0;
     StatusSnapshot scratch_{};
-    StatusWord published_{};
 };
 
 }

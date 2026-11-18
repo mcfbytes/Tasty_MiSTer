@@ -162,10 +162,7 @@ private:
         SectorCount scan_offset{};
     };
 
-    [[nodiscard]] Ex<void> do_accept(
-        std::span<const std::uint16_t> words,
-        CdDialectPorts& p
-    ) override;
+    [[nodiscard]] Ex<void> do_accept(const CdCommandWords& cmd, CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts& p) override;
     void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept override;
@@ -192,9 +189,7 @@ private:
 
     [[nodiscard]] CdEngineStats do_stats() const noexcept override { return stats_; }
 
-    [[nodiscard]] CdSpeedIndex do_speed_index() const noexcept override {
-        return CdSpeedIndex{speed_index_};
-    }
+    [[nodiscard]] CdSpeedIndex do_speed_index() const noexcept override { return speed_index_; }
 
     [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> send_sector_(CdDialectPorts& p);
@@ -221,7 +216,7 @@ private:
     std::array<std::uint8_t, kSubcodeStageBytes> sub_buf_{};
     Cdd st_{};
 
-    std::uint8_t speed_index_ = 0;
+    CdSpeedIndex speed_index_{};
 };
 
 }

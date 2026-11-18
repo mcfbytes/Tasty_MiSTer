@@ -116,8 +116,7 @@ Transition HdAskRow::select() {
     ask.choices = kYesNo;
     ask.host = infra::opt_ref_of(static_cast<IConfirmHost*>(this));
     ask.initial = spec_.initial;
-    spec_.confirm->pending = ask;
-    return Transition::push(PageId::Confirm);
+    return spec_.confirm->open(PageId::Confirm, ask);
 }
 
 Transition HdAskRow::on_confirm(RowIndex choice) {

@@ -7,8 +7,9 @@
 #include "infra/error.h"
 #include "hal/spi_transport.h"
 #include "proto/info_window.h"
+#include "proto/link_frame.h"
+#include "proto/link_sel.h"
 #include "proto/osd_surface.h"
-#include "proto/link.h"
 #include "proto/osd_rotation.h"
 #include "proto/osd_target.h"
 #include "proto/types.h"
@@ -27,20 +28,20 @@ class OsdTransport {
 
 public:
     [[nodiscard]] Ex<void> flush_row(
-        proto::Link& link,
+        ILinkFrame& frame,
         OsdRow r,
         std::span<const std::uint8_t> bytes
     );
 
-    [[nodiscard]] Ex<void> set_visible(proto::Link& link, bool visible);
+    [[nodiscard]] Ex<void> set_visible(ILinkFrame& frame, bool visible);
 
-    [[nodiscard]] Ex<void> enable(proto::Link& link, OsdMode mode);
+    [[nodiscard]] Ex<void> enable(ILinkFrame& frame, OsdMode mode);
 
-    [[nodiscard]] Ex<void> enable_info(proto::Link& link, InfoWindow window);
+    [[nodiscard]] Ex<void> enable_info(ILinkFrame& frame, InfoWindow window);
 
-    [[nodiscard]] Ex<void> set_rotation(proto::Link& link, OsdRotation rotate);
+    [[nodiscard]] Ex<void> set_rotation(ILinkFrame& frame, OsdRotation rotate);
 
-    [[nodiscard]] Ex<void> menu_ctl(proto::Link& link, bool enable_menu);
+    [[nodiscard]] Ex<void> menu_ctl(ILinkFrame& frame, bool enable_menu);
 
     [[nodiscard]] Ex<void> set_target(OsdTarget t) noexcept {
         target_ = t;
@@ -52,8 +53,8 @@ public:
     std::uint32_t unrouted_selects() const noexcept { return unrouted_selects_; }
 
 private:
-    [[nodiscard]] hal::ChipSelect chip_select() const noexcept;
-    [[nodiscard]] Ex<void> command(proto::Link& link, std::uint16_t cmd);
+    [[nodiscard]] LinkSel sel() const noexcept;
+    [[nodiscard]] Ex<void> command(ILinkFrame& frame, std::uint16_t cmd);
 
     OsdTarget target_ = OsdTarget::All;
     std::uint32_t unrouted_selects_ = 0;

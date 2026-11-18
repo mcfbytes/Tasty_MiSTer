@@ -78,7 +78,7 @@ void LauncherKeyBridge::sync_(svc::EvdevCode code) noexcept {
 }
 
 void LauncherKeyBridge::inject_(svc::EvdevCode code, bool down) noexcept {
-    out_.key(code.v, down);
+    code.inject_into(out_, down);
 }
 
 void LauncherKeyBridge::key(svc::EvdevCode code, bool down) noexcept {

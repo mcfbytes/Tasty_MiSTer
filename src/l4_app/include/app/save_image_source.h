@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -14,9 +13,7 @@
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/image_source.h"
-#include "svc/file_slot_backend.h"
 #include "svc/slot_path.h"
-#include "svc/vfs.h"
 
 namespace mister::app {
 
@@ -31,8 +28,6 @@ public:
     }
 
     enum class Attach : std::uint8_t { Detached, Attaching, Attached, Detaching };
-
-    explicit SaveImageSource(const svc::Vfs& vfs) noexcept;
 
     [[nodiscard]] bool bind(
         proto::SlotIndex slot,
@@ -64,8 +59,6 @@ public:
 
     void mark(proto::SlotIndex slot, Attach state) noexcept;
 
-    [[nodiscard]] infra::OptRef<svc::IStorageBackend> backend(proto::SlotIndex slot) noexcept;
-
     [[nodiscard]] std::span<const std::byte> order(proto::SlotIndex slot) const noexcept;
 
 private:
@@ -83,8 +76,6 @@ private:
     infra::OptRef<const Binding> find(proto::SlotIndex slot) const;
 
     infra::IndexedArray<Binding, kSlots, proto::SlotIndex> bindings_{};
-
-    std::array<svc::FileSlotBackend, kSlots> backends_;
 };
 
 }

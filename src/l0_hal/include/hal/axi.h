@@ -4,9 +4,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "infra/error.h"
 #include "os/mmio_region.h"
@@ -16,6 +16,8 @@
 #include "os/types.h"
 
 namespace mister::hal {
+
+enum class ApertureSide : std::uint8_t { Inside, Below };
 
 namespace regions {
 
@@ -37,14 +39,11 @@ inline constexpr PhysRegion kX86Mem{os::PhysAddr{0x3000'0000u}, kLenUnsourced, "
 
 inline constexpr PhysRegion kA2065Flat{os::PhysAddr{0x1FF0'0000u}, 0x0001'0000u, "a2065-flat"};
 
-inline constexpr PhysRegion kSaturnCdBuf{os::PhysAddr{0x3100'0000u}, 0x0000'4000u, "saturn-cd-buf"};
-
 inline constexpr std::array<PhysRegion, kRegionCount> kCatalog{
     kMinimigShare,
     kX86Share,
     kX86Mem,
     kA2065Flat,
-    kSaturnCdBuf,
     kVideoFb,
     kScalerOut,
 };
@@ -68,6 +67,15 @@ static_assert(
     "duplicate resolves the wrong row in a by-name window lookup"
 );
 
+inline constexpr std::array<ApertureSide, kRegionCount> kSide{
+    ApertureSide::Inside,
+    ApertureSide::Inside,
+    ApertureSide::Inside,
+    ApertureSide::Below,
+    ApertureSide::Inside,
+    ApertureSide::Inside,
+};
+
 inline constexpr std::array<PhysRegion, kRegionCount> kUnsourced = [] {
     std::array<PhysRegion, kRegionCount> r{};
     for (std::size_t i = 0; i < kRegionCount; ++i) {
@@ -89,18 +97,6 @@ constexpr bool regions_well_formed(std::span<const PhysRegion> r) noexcept {
     return true;
 }
 
-constexpr std::optional<PhysRegion> declared_region(
-    std::span<const PhysRegion> r,
-    RegionId id
-) noexcept {
-    if (r.size() != kRegionCount)
-        return std::nullopt;
-    const PhysRegion& p = r[static_cast<std::size_t>(id)];
-    if (p.len == regions::kLenUnsourced)
-        return std::nullopt;
-    return p;
-}
-
 inline constexpr os::PhysAddr kLwBridgeBase{0xFF20'0000u};
 inline constexpr std::size_t kLwBridgeSize = 0x0020'0000u;
 
@@ -108,7 +104,7 @@ inline constexpr os::PhysAddr kFpgaMemBase{0x2000'0000u};
 inline constexpr std::uint32_t kFpgaMemMask = 0x1FFF'FFFFu;
 
 constexpr os::PhysAddr fpga_mem(FabricAddr addr) noexcept {
-    return os::PhysAddr{kFpgaMemBase.v | (addr.v & kFpgaMemMask)};
+    return addr.folded_into(kFpgaMemBase, kFpgaMemMask);
 }
 
 namespace detail {

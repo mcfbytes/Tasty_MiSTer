@@ -12,6 +12,7 @@
 #include <variant>
 
 #include "infra/error.h"
+#include "infra/pause_gen.h"
 #include "infra/seat.h"
 #include "os/deadline.h"
 #include "proto/types.h"
@@ -201,10 +202,6 @@ enum class Stimulus : std::uint8_t {
     BridgeEnded,
     ReadyLost,
     ProbeOk,
-    ProbeOkUnasked,
-    ProbeOkRefused,
-    ProbeOkAwaiting,
-    ProbeOkBuilding,
     ProbeExhausted,
     Reboot,
     RebootQuiesced,
@@ -214,13 +211,13 @@ enum class Stimulus : std::uint8_t {
 inline constexpr std::size_t kStimuli = static_cast<std::size_t>(Stimulus::kCount);
 
 inline constexpr auto kStimulusNames = std::to_array<std::string_view>(
-    {"LoadCore",        "FrontEnd",         "RecoveryAsk",    "ParkPushed",     "ParkComplete",
-     "PauseExpired",    "ProgramOk",        "ProgramFailed",  "BootLoad",       "BootApply",
-     "BootAdopt",       "IdentityMatched",  "IdentitySpent",  "AcceptRefused",  "ConfStrRefused",
-     "ConfStrAccepted", "ConfStrUnawaited", "MakeRefused",    "CoreRefused",    "CoreMade",
-     "ManifestFailed",  "SessionUp",        "StartRefused",   "BoundExpired",   "BridgeEnded",
-     "ReadyLost",       "ProbeOk",          "ProbeOkUnasked", "ProbeOkRefused", "ProbeOkAwaiting",
-     "ProbeOkBuilding", "ProbeExhausted",   "Reboot",         "RebootQuiesced", "PauseWedged"}
+    {"LoadCore",        "FrontEnd",         "RecoveryAsk",    "ParkPushed",    "ParkComplete",
+     "PauseExpired",    "ProgramOk",        "ProgramFailed",  "BootLoad",      "BootApply",
+     "BootAdopt",       "IdentityMatched",  "IdentitySpent",  "AcceptRefused", "ConfStrRefused",
+     "ConfStrAccepted", "ConfStrUnawaited", "MakeRefused",    "CoreRefused",   "CoreMade",
+     "ManifestFailed",  "SessionUp",        "StartRefused",   "BoundExpired",  "BridgeEnded",
+     "ReadyLost",       "ProbeOk",          "ProbeExhausted", "Reboot",        "RebootQuiesced",
+     "PauseWedged"}
 );
 static_assert(kStimulusNames.size() == kStimuli);
 
@@ -258,6 +255,7 @@ struct Row {
     Stimulus on;
     std::optional<PhaseKind> to;
     Origin origin;
+    bool dissolves = false;
 };
 
 inline constexpr std::optional<PhaseKind> kHold = std::nullopt;
@@ -434,20 +432,8 @@ inline constexpr auto kTransitions = [] {
          kHold,
          O::Refusal},
 
-        {of({K::Recovering}), S::ProbeOk, K::Parking, O::Tree},
+        {of({K::Recovering}), S::ProbeOk, kHold, O::Tree, true},
         {all_but(of({K::Recovering})), S::ProbeOk, kHold, O::Refusal},
-
-        {of({K::Recovering}), S::ProbeOkUnasked, K::Idle, O::Tree},
-        {all_but(of({K::Recovering})), S::ProbeOkUnasked, kHold, O::Refusal},
-
-        {of({K::Recovering}), S::ProbeOkRefused, K::Refused, O::Tree},
-        {all_but(of({K::Recovering})), S::ProbeOkRefused, kHold, O::Refusal},
-
-        {of({K::Recovering}), S::ProbeOkAwaiting, K::AwaitConfStr, O::Tree},
-        {all_but(of({K::Recovering})), S::ProbeOkAwaiting, kHold, O::Refusal},
-
-        {of({K::Recovering}), S::ProbeOkBuilding, K::Building, O::Tree},
-        {all_but(of({K::Recovering})), S::ProbeOkBuilding, kHold, O::Refusal},
 
         {of({K::Recovering}), S::ProbeExhausted, K::Rebooting, O::Design},
         {rb, S::ProbeExhausted, K::Rebooting, O::Tolerance},
@@ -507,6 +493,7 @@ struct Facts {
     std::optional<os::Deadline> bound{};
     bool front_end = false;
     bool by_bridge = false;
+    bool standing = false;
 };
 
 template <class T>
@@ -704,10 +691,6 @@ struct Step {
     using S = Stimulus;
     return on == S::ReadyLost
         || on == S::ProbeOk
-        || on == S::ProbeOkUnasked
-        || on == S::ProbeOkRefused
-        || on == S::ProbeOkAwaiting
-        || on == S::ProbeOkBuilding
         || on == S::ProbeExhausted
         || on == S::Reboot
         || on == S::RebootQuiesced;
@@ -723,8 +706,23 @@ struct Step {
     return stage_of(next);
 }
 
+[[nodiscard]] constexpr Arm dissolved(const Stage& under, const Facts& f) noexcept {
+    using K = PhaseKind;
+    if (f.standing)
+        return make(K::Parking, f);
+    if (std::get_if<Refused>(&under) != nullptr || std::get_if<AwaitConfStr>(&under) != nullptr)
+        return arm_of_stage(under);
+    if (const auto* b = std::get_if<Building>(&under); b != nullptr && b->bound)
+        return arm_of_stage(under);
+    return make(K::Idle, f);
+}
+
 [[nodiscard]] constexpr Step advance(const Arm& now, Stimulus s, const Facts& f) noexcept {
     Step step = take_row(now, s, f);
+    if (kTransitions[step.row].dissolves) {
+        step.next = dissolved(stage_of(now), f);
+        return step;
+    }
     const bool moves = kind(now) >= PhaseKind::Recovering
         && kTransitions[step.row].origin != Origin::Refusal;
     const Stage stage = moves ? stage_after(stage_of(now), s, f) : stage_of(now);
@@ -754,9 +752,12 @@ static_assert(
     return with_under(make(o, f), under);
 }
 
-[[nodiscard]] consteval bool overlay_moves_stage_by_rows(std::size_t pair) {
+enum class Standing : bool { Free, Held };
+
+[[nodiscard]] consteval bool overlay_moves_stage_by_rows(std::size_t pair, Standing held) {
+    const bool standing = held == Standing::Held;
     const PhaseKind o = pair < kStages ? PhaseKind::Recovering : PhaseKind::Rebooting;
-    const Facts f{.gen = proto::BindGeneration{1}, .loaded = true};
+    const Facts f{.gen = proto::BindGeneration{1}, .loaded = true, .standing = standing};
     Facts own = f;
     own.gen = proto::BindGeneration{2};
     const Stage stage = stage_of(make(static_cast<PhaseKind>(pair % kStages), own));
@@ -765,12 +766,24 @@ static_assert(
         const auto on = static_cast<Stimulus>(i);
         const Step step = advance(over(o, stage, f), on, f);
         const Row& r = kTransitions[step.row];
+        if (r.dissolves) {
+
+            if (o != PhaseKind::Recovering || on != Stimulus::ProbeOk)
+                return false;
+            const bool restores = was == PhaseKind::Refused
+                || was == PhaseKind::AwaitConfStr
+                || (was == PhaseKind::Building && bound_of(stage).has_value());
+            const PhaseKind want = standing ? PhaseKind::Parking : restores ? was : PhaseKind::Idle;
+            if (kind(step.next) != want)
+                return false;
+            if (!standing && restores && gen_of(step.next) != gen_of(arm_of_stage(stage)))
+                return false;
+            continue;
+        }
         const bool still = kind(step.next) >= PhaseKind::Recovering;
         const PhaseKind now = kind(stage_of(step.next));
         if (overlay_own(on)) {
-            if (still ? now != was : kind(step.next) != r.to.value_or(o))
-                return false;
-            if (!still && now == was && gen_of(step.next) != gen_of(arm_of_stage(stage)))
+            if (!still || now != was)
                 return false;
             continue;
         }
@@ -789,11 +802,14 @@ static_assert(
     return true;
 }
 
-template <std::size_t Pair>
-inline constexpr bool kOverlayMovesByRows = overlay_moves_stage_by_rows(Pair);
+template <std::size_t Pair, Standing Held>
+inline constexpr bool kOverlayMovesByRows = overlay_moves_stage_by_rows(Pair, Held);
 static_assert(
     []<std::size_t... P>(std::index_sequence<P...>) {
-        return (kOverlayMovesByRows<P> && ...);
+        return (
+            (kOverlayMovesByRows<P, Standing::Free> && kOverlayMovesByRows<P, Standing::Held>)
+            && ...
+        );
     }(std::make_index_sequence<2 * kStages>{}),
     "under an overlay a stage moves by its own row, the overlay's own edges leave it be, "
     "and a refusal of the visible arm moves no stage"
@@ -831,6 +847,10 @@ struct SwitchPhase {
         PhaseKind at = PhaseKind::Idle;
         PhaseKind under = PhaseKind::Idle;
         std::optional<proto::BindGeneration> gen{};
+
+        [[nodiscard]] constexpr xthread::PauseGen pause_gen() const noexcept {
+            return gen ? gen->pause_gen() : xthread::PauseGen::none();
+        }
     };
 
     constexpr Taken take(Stimulus on, const Facts& f) noexcept {
@@ -858,6 +878,8 @@ struct SwitchPhase {
     }
 
     [[nodiscard]] constexpr Stage stage() const noexcept { return stage_of(now); }
+
+    [[nodiscard]] constexpr bool is(PhaseKind k) const noexcept { return kind(now) == k; }
 
     template <class T>
     [[nodiscard]] constexpr const T* in_stage() const noexcept {

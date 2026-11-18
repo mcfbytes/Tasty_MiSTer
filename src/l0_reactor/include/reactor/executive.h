@@ -20,8 +20,6 @@
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "reactor/core_state.h"
-#include "reactor/notifier.h"
-#include "reactor/notifier_slot.h"
 #include "reactor/round_timer.h"
 #include "reactor/service_slot.h"
 #include "reactor/tick_deadline.h"
@@ -30,21 +28,6 @@
 #include "infra/seat.h"
 
 namespace mister::reactor {
-
-inline constexpr std::uint64_t kSilenceSlackPeriods = 1;
-inline constexpr std::uint64_t kSilenceRounds = 2;
-
-constexpr bool raise_is_recent(
-    std::chrono::milliseconds now,
-    std::chrono::milliseconds last,
-    std::chrono::milliseconds period
-) noexcept {
-    return (now - last) <= period * static_cast<std::int64_t>(1u + kSilenceSlackPeriods);
-}
-
-constexpr bool raise_is_recent_rounds(std::uint64_t now_round, std::uint64_t last_round) noexcept {
-    return (now_round - last_round) <= kSilenceRounds;
-}
 
 class Executive {
     TASTY_SEAT_RESIDENT(RT);
@@ -62,10 +45,6 @@ public:
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats);
 
     [[nodiscard]] Ex<void> bind(std::span<const LinkDecoderDecl> services, CoreState& state);
-
-    [[nodiscard]] Ex<NotifierSlot> add_notifier(Notifier n);
-
-    [[nodiscard]] Ex<void> remove_notifier(NotifierSlot slot);
 
     [[nodiscard]] Ex<void> add_fd(int fd);
 
@@ -111,26 +90,6 @@ public:
 
     int epoll_fd() const noexcept { return epfd_.get(); }
 
-    std::size_t notifier_count() const noexcept { return notifier_count_; }
-
-    CauseSet delivered_causes() const noexcept { return delivered_; }
-
-    CauseSet carried_causes() const noexcept;
-
-    std::uint32_t doorbell_fallbacks() const noexcept { return fallbacks_total_; }
-
-    std::uint32_t doorbell_retirements() const noexcept { return retirements_total_; }
-
-    std::uint32_t row_fallbacks(ServiceSlot row) const noexcept {
-        const auto state = rows_.find(row);
-        return state ? state->fallbacks : 0u;
-    }
-
-    std::uint32_t row_retirements(ServiceSlot row) const noexcept {
-        const auto state = rows_.find(row);
-        return state ? state->retirements : 0u;
-    }
-
     static constexpr std::uint8_t kClaimStreakMax = 4;
 
     std::uint32_t claim_yields() const noexcept { return claim_yields_; }
@@ -146,100 +105,36 @@ private:
     Executive(xthread::RtStats& stats, const Wiring& wiring)
         : stats_(stats),
           log_lane_(wiring.log_lane),
-          round_timer_(wiring.round_timer) {
-        for (auto& t : last_raise_)
-            t = RaiseStamp{};
-    }
-
-    static constexpr TickNo kNeverRaised = kNeverTick;
+          round_timer_(wiring.round_timer) {}
 
     [[nodiscard]] ServiceSlot live_end() const noexcept {
         const std::optional<ServiceSlot> end = ServiceSlot::of(service_count_);
         return end.value_or(ServiceSlot{});
     }
 
-    void dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns);
-    bool notifier_carries(const LinkDecoderDecl& s) const noexcept;
     void service_round(bool swept, std::int64_t wake_ns);
     void run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment seg);
-    void recompute_delivered() noexcept;
-
-    void recompute_raise(Cause c) noexcept;
 
     xthread::RtStats& stats_;
     xthread::RtLatency latency_{};
     UniqueFd epfd_;
     xthread::WakeFlag wake_;
 
-    struct RaiseStamp {
-        TASTY_SEAT_RESIDENT(RT);
-        TickNo ms = kNeverRaised;
-        std::uint64_t round = 0;
-    };
-
-    class Line {
-        TASTY_SEAT_RESIDENT(RT);
-
-    public:
-        [[nodiscard]] bool bound() const noexcept { return notifier_.has_value(); }
-
-        void bind(Notifier n) noexcept {
-            notifier_ = std::move(n);
-            clear_evidence_();
-        }
-
-        void unbind() noexcept {
-            notifier_.reset();
-            clear_evidence_();
-        }
-
-        [[nodiscard]] Notifier& notifier() noexcept { return *notifier_; }
-
-        [[nodiscard]] const Notifier& notifier() const noexcept { return *notifier_; }
-
-        [[nodiscard]] bool delivers(Cause c) const noexcept {
-            return notifier_.has_value() && notifier_->delivers().has(c);
-        }
-
-        [[nodiscard]] bool has_evidence() const noexcept { return stamp_.ms != kNeverRaised; }
-
-        void raised(const RaiseStamp& at) noexcept { stamp_ = at; }
-
-        [[nodiscard]] const RaiseStamp& stamp() const noexcept { return stamp_; }
-
-    private:
-        void clear_evidence_() noexcept { stamp_ = RaiseStamp{}; }
-
-        std::optional<Notifier> notifier_{};
-        RaiseStamp stamp_{};
-    };
-
     struct RowState {
         TASTY_SEAT_RESIDENT(RT);
         TickNo next_due{};
-        bool carried = false;
-        std::uint32_t fallbacks = 0;
-        std::uint32_t retirements = 0;
         std::uint8_t claim_streak = 0;
     };
-
-    std::size_t notifier_count_ = 0;
-    CauseSet delivered_;
-
-    RaiseStamp last_raise_[static_cast<std::size_t>(Cause::kCount)] = {};
 
     infra::IndexedArray<LinkDecoderDecl, kMaxServices, ServiceSlot> services_{};
     infra::IndexedArray<RowState, kMaxServices, ServiceSlot> rows_{};
     std::uint32_t claim_yields_ = 0;
-    std::uint32_t fallbacks_total_ = 0;
-    std::uint32_t retirements_total_ = 0;
     std::size_t service_count_ = 0;
     infra::OptRef<CoreState> core_state_;
     int borrowed_[kMaxBorrowedFds] = {};
 
     std::size_t borrowed_count_ = 0;
     TickNo tick_count_{};
-    std::uint64_t round_count_ = 0;
     TickDeadline tick_ = TickDeadline::held();
     bool tick_held_ = false;
     std::optional<xthread::LogLane::Producer> log_lane_;
@@ -258,8 +153,6 @@ private:
     std::uint32_t caller_pass_refusals_ = 0;
 
     xthread::WakeFlag::Cursor stop_seen_;
-
-    infra::IndexedArray<Line, kMaxLines, NotifierSlot> lines_{};
 };
 
 }

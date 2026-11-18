@@ -73,7 +73,7 @@ public:
         const proto::LinkOp::StageDiscPayload&,
         proto::IImageSink& sink
     );
-    void set_region(std::uint8_t region);
+    void set_region(proto::RegionCode region);
     [[nodiscard]] Ex<void> deferred_reset();
 
 private:

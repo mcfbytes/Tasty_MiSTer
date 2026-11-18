@@ -17,8 +17,8 @@ void PollReader::arm(bool declared, BindGeneration gen) noexcept {
     if (keeps_mirror(row)) {
 
         for (std::uint8_t p = 0; p < row.params; ++p) {
-            if (mirror_[p] != 0 && push_(row.shape, p, 0))
-                mirror_[p] = 0;
+            if (mirror_[p] != hal::SpiWord{} && push_(row.shape, p, hal::SpiWord{}))
+                mirror_[p] = hal::SpiWord{};
         }
     }
     armed_ = declared;
@@ -48,13 +48,13 @@ void PollReader::issue_(const PollShapeRow& row) noexcept {
         if (issued.has(proto::PollParam::of(p))) {
             beat_(row, p);
         } else {
-            mirror_[p] = 0;
+            mirror_[p] = hal::SpiWord{};
         }
     }
 }
 
 void PollReader::beat_(const PollShapeRow& row, std::uint8_t param) noexcept {
-    std::uint16_t word = 0;
+    hal::SpiWord word{};
     {
         hal::Selected cs(link_, hal::ChipSelect::Io);
         ++polls_;
@@ -63,16 +63,16 @@ void PollReader::beat_(const PollShapeRow& row, std::uint8_t param) noexcept {
             ++errors_;
             return;
         }
-        word = r->v;
+        word = *r;
     }
-    if (!guard_passes(row, word, mirror_[param]))
+    if (!guard_passes(row, PollReply{.word = word, .mirror = mirror_[param]}))
         return;
 
     if (push_(row.shape, param, word) && keeps_mirror(row))
         mirror_[param] = word;
 }
 
-bool PollReader::push_(PollShape shape, std::uint8_t param, std::uint16_t word) noexcept {
+bool PollReader::push_(PollShape shape, std::uint8_t param, hal::SpiWord word) noexcept {
     if (!out_.push(
             LinkEvent::PolledWord{.shape = shape, .param = param, .word = word, .bind_gen = gen_}
         )) {

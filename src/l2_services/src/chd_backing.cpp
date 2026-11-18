@@ -25,7 +25,7 @@ std::optional<ChdUnit> chd_sector_pos(const Track& t, Lba lba) noexcept {
 Ex<void> ChdBacking::attach(ChdHandles handles) {
     const ChdGeometry geo = handles.primary->geometry();
     if (geo.hunk_extent() == 0 || geo.hunk_bytes < geo.unit_bytes.extent(proto::BlockCount{1})) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
+        return std::unexpected(geo.hunk_bytes.refusal(Errc::bad_format, ERR_SITE()));
     }
 
     if (geo.unit_bytes != proto::BlockSize{kFullFrameBytes}) {
@@ -92,7 +92,7 @@ Ex<void> ChdBacking::do_read_payload(
 ) {
     const std::optional<ChdUnit> chd_lba = chd_sector_pos(t, lba);
     if (!chd_lba)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
+        return std::unexpected(lba.refusal(Errc::bad_format, ERR_SITE()));
     const HunkIndex hunk = geo_.hunk_of(*chd_lba);
     auto h = load_hunk(hunk);
     if (!h)
@@ -118,7 +118,7 @@ Ex<std::span<std::byte>> ChdBacking::read_subcode(
 ) {
     const std::optional<ChdUnit> chd_lba = chd_sector_pos(t, lba);
     if (!chd_lba)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
+        return std::unexpected(lba.refusal(Errc::bad_format, ERR_SITE()));
     auto h = load_hunk(geo_.hunk_of(*chd_lba));
     if (!h)
         return std::unexpected(h.error());
@@ -138,7 +138,8 @@ Ex<std::span<std::byte>> ChdBacking::read_subcode(
 
 void ChdBacking::advise_first_window(IFile& primary) noexcept {
     const HunkCount depth = prefetch_depth_ != HunkCount{} ? prefetch_depth_ : kPrefetchMinHunks;
-    (void)primary.advise(IFile::Access::WillNeed, 0, geo_.extent_of(depth));
+    (void)
+        primary.advise(IFile::Access::WillNeed, proto::kFileStart, FileSize{geo_.extent_of(depth)});
 }
 
 }

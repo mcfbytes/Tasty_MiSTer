@@ -12,6 +12,7 @@
 #include "infra/opt_ref.h"
 #include "infra/json_out.h"
 #include "record_ctx.h"
+#include "svc/io_pass.h"
 
 namespace mister::fw {
 
@@ -48,6 +49,9 @@ struct BayView {
     std::uint32_t status_lw_adopts = 0;
     std::uint32_t status_lw_stale = 0;
     std::uint32_t poll_retirements = 0;
+    svc::IoPassMicros io_pass_max{};
+    svc::IoPassMicros io_pass_p99{};
+    svc::IoPassCount io_pass_bulk_run_max{};
 };
 
 constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
@@ -117,6 +121,9 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("stad", v.status_lw_adopts);
     o.field("ststale", v.status_lw_stale);
     o.field("blkret", v.poll_retirements);
+    o.field("iopmax", v.io_pass_max.count());
+    o.field("iop99", v.io_pass_p99.count());
+    o.field("iobdef", v.io_pass_bulk_run_max);
 }
 
 struct BayRecord {
@@ -129,6 +136,7 @@ struct BayRecord {
     infra::OptRef<const app::SectorLeaseCell> sector_lease{};
     infra::OptRef<const app::OsdLeaseCell> osd_lease{};
     infra::OptRef<const app::SysLeaseCell> sys_lease{};
+    infra::OptRef<const svc::IoPassCell> io_pass{};
 
     [[nodiscard]] std::optional<View> sample(const RecordCtx& ctx) const noexcept {
         const app::BayCounts c = counts.sample().value;
@@ -141,6 +149,7 @@ struct BayRecord {
                                                           : xthread::GrantGen{};
         const xthread::GrantGen sys_lease_gen = sys_lease ? sys_lease->sample().value
                                                           : xthread::GrantGen{};
+        const svc::IoPass io_pass_seen = io_pass ? io_pass->sample().value : svc::IoPass{};
         return View{
             .builds = c.builds,
             .bay_full = c.bay_full,
@@ -173,7 +182,10 @@ struct BayRecord {
             .status_lw = ctx.dc.status_lw,
             .status_lw_adopts = ctx.dc.status_lw_adopts,
             .status_lw_stale = ctx.dc.status_lw_stale,
-            .poll_retirements = c.poll_retirements
+            .poll_retirements = c.poll_retirements,
+            .io_pass_max = io_pass_seen.max_micros(),
+            .io_pass_p99 = io_pass_seen.p99(),
+            .io_pass_bulk_run_max = io_pass_seen.bulk_run_max
         };
     }
 };

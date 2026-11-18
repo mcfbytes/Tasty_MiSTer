@@ -22,6 +22,7 @@
 #include "proto/ps2_frame.h"
 #include "proto/ps2_wire.h"
 #include "proto/osd_transport.h"
+#include "proto/spi_frame.h"
 #include "proto/status_register.h"
 #include "svc/input_emitter.h"
 
@@ -97,7 +98,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
         return ILinkEncoder::Outcome::Dropped;
     }
     proto::OsdTransport osd;
-    proto::Link link{link_};
+    proto::SpiFrame frame{link_};
     const proto::OsdRow row = a.row;
     Ex<void> flushed;
     if (a.bytes == proto::TxSlabId{}) {
@@ -106,13 +107,13 @@ ILinkEncoder::Outcome SpiEncoder::on(
             return ILinkEncoder::Outcome::Dropped;
         }
         flushed = osd.flush_row(
-            link,
+            frame,
             row,
             std::span<const std::uint8_t>(sampled.b, sizeof sampled.b)
         );
     } else {
         const auto bytes = ctx.tx.bytes(a.bytes);
-        flushed = osd.flush_row(link, row, bytes);
+        flushed = osd.flush_row(frame, row, bytes);
     }
     if (!flushed) {
         return ILinkEncoder::Outcome::Dropped;
@@ -125,7 +126,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyEmit& a, const Link
     if (a.player >= kPlayerLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const auto r = em_.submit(frame_, a.player, a.mask, a.autofire);
+    const auto r = em_.submit(frame_, a.player, proto::PadMasks{a.mask, a.autofire});
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }

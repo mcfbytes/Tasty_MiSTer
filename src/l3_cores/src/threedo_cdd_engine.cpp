@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "cd_core_detail.h"
+#include "cores/cd_command_words.h"
 #include "cores/cd_head_prime.h"
 #include "cores/cd_msf.h"
 #include "infra/byte_view.h"
@@ -25,16 +26,10 @@ constexpr std::size_t kInfoTailOffset = 1024;
 }
 
 ThreeDoCddEngine::CddCommand ThreeDoCddEngine::CddCommand::of(
-    std::span<const std::uint16_t, kWords> words
+    std::span<const std::uint8_t, kBytes> bytes
 ) noexcept {
-
-    const auto byte = [words](std::size_t at) noexcept {
-        const std::uint16_t word = words[at / 2];
-        return static_cast<std::uint8_t>(at % 2 == 0 ? word & 0xFF : word >> 8);
-    };
-
     CddCommand out;
-    switch (byte(0)) {
+    switch (bytes[0]) {
         case static_cast<std::uint8_t>(Op::Nop):
             out.op = Op::Nop;
             break;
@@ -48,19 +43,21 @@ ThreeDoCddEngine::CddCommand ThreeDoCddEngine::CddCommand::of(
             break;
     }
 
-    const std::uint32_t raw = (std::uint32_t{byte(1)} << 16)
-        | (std::uint32_t{byte(2)} << 8)
-        | std::uint32_t{byte(3)};
-    out.target = byte(4) != 0 ? HeadLba::of(proto::Lba{raw})
-                              : HeadLba::of(svc::Msf{byte(1), byte(2), byte(3)});
+    const std::uint32_t raw = (std::uint32_t{bytes[1]} << 16)
+        | (std::uint32_t{bytes[2]} << 8)
+        | std::uint32_t{bytes[3]};
+    out.target = bytes[4] != 0 ? HeadLba::of(proto::Lba{raw})
+                               : HeadLba::of(svc::Msf{bytes[1], bytes[2], bytes[3]});
     out.blocks = SectorCount::of(
-        proto::BlockCount{(std::uint32_t{byte(5)} << 8) | std::uint32_t{byte(6)}}
+        proto::BlockCount{(std::uint32_t{bytes[5]} << 8) | std::uint32_t{bytes[6]}}
     );
     return out;
 }
 
-Ex<void> ThreeDoCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
-    command_exec_(CddCommand::of(words.first<CddCommand::kWords>()), p.geom);
+Ex<void> ThreeDoCddEngine::do_accept(const CdCommandWords& cmd, CdDialectPorts& p) {
+    std::array<std::uint8_t, CddCommand::kBytes> b{};
+    cmd.store_le(b);
+    command_exec_(CddCommand::of(b), p.geom);
     return {};
 }
 
@@ -224,7 +221,7 @@ Ex<void> ThreeDoCddEngine::build_disc_info(
     constexpr std::size_t kTrackByte = 3;
     b[1] = kDiscDaOrCdrom;
     b[2] = 0x01;
-    b[kTrackByte] = toc.last.v;
+    toc.last.store_byte(bytes.subspan(kTrackByte).first<1>());
     b[4] = static_cast<std::uint8_t>(end.m);
     b[5] = static_cast<std::uint8_t>(end.s);
     b[6] = static_cast<std::uint8_t>(end.f);
@@ -238,7 +235,7 @@ Ex<void> ThreeDoCddEngine::build_disc_info(
         const bool cdda = lead_out || toc.at(row).type == svc::TrackType::Cdda;
         const Msf m = msf_of(start + kPregapSectors);
         b[offs + 2] = cdda ? 0x00 : 0x04;
-        b[offs + kTrackByte] = row.number().v;
+        row.number().store_byte(bytes.subspan(offs + kTrackByte).first<1>());
         b[offs + 5] = static_cast<std::uint8_t>(m.m);
         b[offs + 6] = static_cast<std::uint8_t>(m.s);
         b[offs + 7] = static_cast<std::uint8_t>(m.f);

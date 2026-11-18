@@ -28,8 +28,6 @@ public:
 
     bool move_strip(Direction d, MenuMask run) noexcept;
 
-    bool selectable(RowIndex i) const noexcept;
-
 private:
     MenuMask mask_{};
     RowIndex index_{};

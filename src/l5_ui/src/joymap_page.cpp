@@ -13,9 +13,12 @@
 
 #include "app/identity_latch.h"
 #include "app/page_description.h"
+#include "app/ui_write_lane.h"
+#include "app/verdict_sinks.h"
 #include "infra/endian.h"
 #include "svc/button_map.h"
-#include "svc/vfs.h"
+#include "svc/device_identity.h"
+#include "svc/map_store.h"
 #include "ui/draw_classic.h"
 #include "ui/navigator.h"
 #include "ui/osd_renderer.h"
@@ -49,7 +52,7 @@ constexpr std::size_t kDpad = 4;
 constexpr std::size_t kMaxNames = 28;
 static_assert(kDpad + kMaxNames <= JoyMapBlob::kWords, "every prompt's word is a blob word");
 
-static_assert(kFullOsdRows.v <= kMaxPageRows, "the classic rows must fit the walk's row table");
+static_assert(kFullOsdRows <= kMaxPageRowCount, "the classic rows must fit the walk's row table");
 
 constexpr int kPromptColumns = 30;
 
@@ -207,13 +210,12 @@ Transition JoyMapPage::finish(bool save) {
         wizard_.cancel();
         return Transition::pop();
     }
-    if (!lock_ || !spec_.files || lock_->id_clipped) {
+    if (!lock_ || !spec_.writes || lock_->id_clipped) {
 
         if (lock_)
             refusals_.add();
         return Transition::pop();
     }
-    const svc::MapStore store{*spec_.files};
     svc::ButtonMap map;
     map.kind = svc::MapKind::Joystick;
     map.blob.resize(blob_.words().size() * sizeof(std::uint32_t));
@@ -226,11 +228,15 @@ Transition JoyMapPage::finish(bool save) {
     id.unique_filenames = lock_->unique_filenames;
     const std::string_view core = scope_ == MapScope::System ? std::string_view{}
                                                              : std::string_view{spec_.core};
-    if (store.save(core, id, map, lock_->mod)) {
-        saved_ = true;
+    const auto encoded = svc::MapStore::encode(core, id, map, lock_->mod);
 
-        spec_.ends->hotplug.request();
-        spec_.ends->input_ctrl.kick();
+    if (encoded
+        && spec_.writes->arm(
+            app::UiWriteLane::Target{.rel = encoded->rel, .retire = encoded->retire},
+            encoded->bytes,
+            app::VerdictSink::Maps
+        )) {
+        saved_ = true;
     } else {
         refusals_.add();
     }

@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "infra/decimal_text.h"
+
 namespace mister::svc {
 
 struct ResWord {
@@ -13,6 +15,10 @@ struct ResWord {
     [[nodiscard]] constexpr bool interlaced() const noexcept { return (v & kInterlacedBit) != 0; }
 
     [[nodiscard]] constexpr bool rotated() const noexcept { return (v & kRotatedBit) != 0; }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr bool operator==(ResWord, ResWord) = default;
 };

@@ -21,7 +21,6 @@
 #include "ui/page_row.h"
 #include "ui/page_walk.h"
 #include "ui/key_decoder.h"
-#include "ui/menu_model.h"
 #include "ui/navigator.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"
@@ -172,20 +171,24 @@ std::string hd_date_value(const std::string& datecode) {
 char browser_ascii_key(proto::KeyCode code) noexcept {
     if (code.is_release())
         return 0;
-    const std::uint32_t k = svc::EvdevCode::of(code).v;
-    if (k >= KEY_1 && k <= KEY_9)
-        return static_cast<char>('1' + (k - KEY_1));
-    if (k == KEY_0)
+    const svc::EvdevCode k = svc::EvdevCode::of(code);
+    constexpr svc::EvdevRun kDigits{svc::EvdevCode{KEY_1}, svc::EvdevCode{KEY_9}};
+    constexpr svc::EvdevRun kRow1Keys{svc::EvdevCode{KEY_Q}, svc::EvdevCode{KEY_P}};
+    constexpr svc::EvdevRun kRow2Keys{svc::EvdevCode{KEY_A}, svc::EvdevCode{KEY_L}};
+    constexpr svc::EvdevRun kRow3Keys{svc::EvdevCode{KEY_Z}, svc::EvdevCode{KEY_M}};
+    if (const auto i = kDigits.place_of(k))
+        return static_cast<char>('1' + *i);
+    if (k == svc::EvdevCode{KEY_0})
         return '0';
     constexpr const char* kRow1 = "QWERTYUIOP";
     constexpr const char* kRow2 = "ASDFGHJKL";
     constexpr const char* kRow3 = "ZXCVBNM";
-    if (k >= KEY_Q && k <= KEY_P)
-        return kRow1[k - KEY_Q];
-    if (k >= KEY_A && k <= KEY_L)
-        return kRow2[k - KEY_A];
-    if (k >= KEY_Z && k <= KEY_M)
-        return kRow3[k - KEY_Z];
+    if (const auto i = kRow1Keys.place_of(k))
+        return kRow1[*i];
+    if (const auto i = kRow2Keys.place_of(k))
+        return kRow2[*i];
+    if (const auto i = kRow3Keys.place_of(k))
+        return kRow3[*i];
     return 0;
 }
 

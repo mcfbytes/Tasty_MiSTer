@@ -36,6 +36,7 @@ class OsdWire;
 class ReplayGate;
 class CoreFrameCounter;
 class ScanoutRelay;
+class RoundBudget;
 
 class RtMain final : public xthread::SeatMain<RtMain> {
     TASTY_SEAT_RESIDENT(RT);
@@ -116,20 +117,6 @@ public:
     static constexpr unsigned kInputOpBudget = 2 * 6;
 
 private:
-    class FioRoundBudget final {
-    public:
-        explicit constexpr FioRoundBudget(proto::FioWordCount whole) noexcept : left_(whole) {}
-
-        constexpr void spend(proto::FioWordCount words) noexcept {
-            left_ = left_.saturating_sub(words);
-        }
-
-        [[nodiscard]] constexpr proto::FioWordCount remaining() const noexcept { return left_; }
-
-    private:
-        proto::FioWordCount left_;
-    };
-
     class OpRoundBudget final {
     public:
         explicit constexpr OpRoundBudget(unsigned ops) noexcept : ops_left_(ops) {}
@@ -149,7 +136,7 @@ private:
         bool windows_closed
     ) noexcept;
 
-    bool drain_fio_() noexcept;
+    bool drain_fio_(RoundBudget& budget) noexcept;
 
     void replay_step_() noexcept;
 
@@ -162,6 +149,8 @@ private:
     [[nodiscard]] CoreEdgeSeq core_edge_seq_() const noexcept;
     [[nodiscard]] bool session_live_() const noexcept;
     [[nodiscard]] bool wire_held_() const noexcept;
+
+    [[nodiscard]] bool dat_window_held_() const noexcept;
 
     [[nodiscard]] bool transfer_holds_() const noexcept;
 

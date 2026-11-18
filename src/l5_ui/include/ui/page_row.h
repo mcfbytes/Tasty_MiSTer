@@ -17,6 +17,8 @@ inline constexpr std::size_t kClassicRowCap = 40;
 
 inline constexpr std::uint8_t kMaxPageRows = 32;
 
+inline constexpr app::RowCount kMaxPageRowCount{kMaxPageRows};
+
 struct PageRow {
     struct Classic {
         FixedStr<kClassicRowCap, StrFit::Clip> text{};
@@ -33,6 +35,10 @@ struct PageRow {
     bool legend = false;
 };
 
+static_assert(
+    kMaxPageRowCount == app::RowCount{kMaxPageRows},
+    "the typed row cap is the page's own extent"
+);
 static_assert(std::is_trivially_copyable_v<PageRow>);
 static_assert(kMaxPageRows >= 30);
 static_assert(sizeof(PageRow) <= 256);

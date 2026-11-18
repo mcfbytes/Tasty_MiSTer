@@ -33,17 +33,17 @@ Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFile& 
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
 
     if (!negotiated_.in_scope(r.scope))
-        return std::unexpected(Error{Errc::stale, ERR_SITE(), r.scope.gen.v});
+        return std::unexpected(r.scope.gen.refusal(Errc::stale, ERR_SITE()));
     const auto row = negotiated_.conf_str()->menu_pick(r.item, r.index);
     if (!row)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.item.v});
+        return std::unexpected(r.item.refusal(Errc::slot_range, ERR_SITE()));
     return *row;
 }
 
 Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFileByDigit& r) {
 
     if (negotiated_.conf_str() && !negotiated_.in_scope(r.scope))
-        return std::unexpected(Error{Errc::stale, ERR_SITE(), r.scope.gen.v});
+        return std::unexpected(r.scope.gen.refusal(Errc::stale, ERR_SITE()));
     const proto::FileSlotHit hit = negotiated_.conf_str()
         ? negotiated_.conf_str()->file_slots().load(r.digit)
         : proto::FileSlotHit{};
@@ -234,9 +234,21 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         sz = std::move(made_size);
     }
 
+    const bool cut = *sz > FileTxPieces::piece_bytes(negotiated_.link_width());
     const bool quiet = !req.whole && no_mount_in_flight_();
-    if (*sz > proto::FileSize{InternedFile::kPieceBytes} && quiet && streams_files_()) {
-        auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path);
+    if (cut && quiet && streams_files_()) {
+
+        auto p = FileTxPieces::start(
+            std::move(*f),
+            *sz,
+            req.slot,
+            path,
+            FileTxStamp{
+                .save = req.save,
+                .edge = req.edge,
+                .companion = req.load_addr == hal::FabricAddr{}
+            }
+        );
         if (!p) {
             ++owner_tally_.files_failed;
             return {};
@@ -407,10 +419,10 @@ BeltOrders ContentPick::step_watch() {
     if (!w.cut_on_hold && w.file) {
         auto p = FileTxPieces::resume(
             std::move(w.file),
-            w.total,
+            proto::FileSize{w.total},
             w.wire_index,
             w.path.view(),
-            w.from + l.held_bytes,
+            w.from + proto::FileSize{l.held_bytes},
             w.crc
         );
         if (p) {
@@ -438,11 +450,11 @@ void ContentPick::watch_last_piece(FileTxPieces& pieces) {
     ContentWatch w{
         .act = l.act,
         .file = pieces.take_file(),
-        .total = pieces.total(),
+        .total = pieces.total().file_word<std::uint64_t>(),
         .crc = l.crc,
         .wire_index = pieces.wire_index(),
         .from = l.from,
-        .cut_on_hold = l.shaped
+        .cut_on_hold = l.shaped || l.stamped
     };
     if (!w.path.assign(pieces.path()))
         w.file.reset();
@@ -512,7 +524,7 @@ ContentPick::Armed ContentPick::arm_loader(
         if (plain)
             return {};
     }
-    auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path, std::move(loader), r);
+    auto p = FileTxPieces::start(std::move(*f), *sz, req.slot, path, {}, std::move(loader), r);
     if (!p) {
         ++owner_tally_.files_failed;
         return Armed{.taken = true};
@@ -622,7 +634,7 @@ template ContentPick::Out ContentPick::load_file(
 );
 
 bool ContentPick::streams_files_() const {
-    return !negotiated_.loaded_profile().file_tx_whole;
+    return !negotiated_.loaded_profile().no_stream_role;
 }
 
 bool ContentPick::no_mount_in_flight_() const noexcept {

@@ -21,6 +21,7 @@
 #include "infra/wake_flag.h"
 #include "infra/seat.h"
 #include "proto/disk_act.h"
+#include "svc/card_writer.h"
 #include "svc/disk_format_row.h"
 #include "svc/disk_image.h"
 
@@ -199,7 +200,7 @@ private:
 
     [[nodiscard]] static svc::IDiskImage& image_of_(const Slot& slot) noexcept;
 
-    [[nodiscard]] static constexpr std::uint64_t image_offset(proto::Lba lba) noexcept {
+    [[nodiscard]] static constexpr proto::FileOffset image_offset(proto::Lba lba) noexcept {
         return kBlock.position_of(lba);
     }
 
@@ -207,6 +208,7 @@ private:
     [[nodiscard]] proto::DiskAct next_act_(std::span<std::byte, proto::kDiskActBytes> bytes);
 
     infra::OptRef<const svc::Vfs> vfs_;
+    std::optional<svc::CardWriter> card_;
     infra::OptRef<xthread::WakeFlag> activity_;
     std::span<const svc::DiskFormatRow> formats_;
     infra::IndexedArray<Slot, kTargets, AcsiTarget> slot_{};

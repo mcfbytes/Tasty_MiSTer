@@ -56,6 +56,14 @@ proto::StorageStatus status_of(Errc e) noexcept {
     return proto::StorageStatus::Refused;
 }
 
+[[nodiscard]] Error refusal(Errc code, infra::ErrorSite at) noexcept {
+    return Error{code, at, 0};
+}
+
+[[nodiscard]] StorageService::Outcome from(Error e) noexcept {
+    return StorageService::Outcome{status_of(e.code), e};
+}
+
 }
 
 namespace {
@@ -63,8 +71,8 @@ namespace {
 using Req = proto::StorageRequest;
 using Cmp = proto::StorageCompletion;
 
-Cmp::Head answer_head(const Req::Head& h, proto::StorageStatus st) noexcept {
-    return Cmp::Head{h.seq, h.slot, st, {}};
+Cmp::Head answer_head(const Req::Head& h, const StorageService::Outcome& o) noexcept {
+    return Cmp::Head{h.seq, h.slot, o.status, {}, o.fault};
 }
 
 enum class Stamp : std::uint8_t {
@@ -140,23 +148,23 @@ infra::OptRef<IStorageBackend> StorageService::live_(
 
 void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Fetch c{};
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     if (!w.arena) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else if (const auto live = live_(h.slot, w); !live) {
 
         w.arena->window = proto::ResidentWindow::substitute();
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<std::uint8_t> whole = w.arena->bytes;
-        auto n = b.read_at(proto::byte_offset(a.base, a.block_size), whole);
+        auto n = b.read_at(a.block_size.position_of(a.base), whole);
         const ISaveFilesOnIo::Save& save = io_.slots[h.slot].save();
         const proto::SaveSlotRule rule = proto::SaveSlotRule::at_mount(
             save.extent.has_value(),
             save.extent.value_or(proto::FileSize{}),
-            save.growable
+            save.mount
         );
 
         if (!n && n.error().code == Errc::not_found && rule.deferred_create) {
@@ -164,42 +172,39 @@ void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexce
             w.arena->window = proto::ResidentWindow::image(
                 a.base,
                 a.block_size,
-                proto::BlockSize{proto::kBlockStagingBytes}
+                proto::ResidentBytes::staging()
             );
         } else if (n) {
 
             const std::size_t got = n->size();
             if (got < whole.size())
                 std::memset(whole.data() + got, 0, whole.size() - got);
-            w.arena->window = got > 0 ? proto::ResidentWindow::image(
-                                            a.base,
-                                            a.block_size,
-                                            proto::BlockSize{static_cast<std::uint32_t>(got)}
-                                        )
-                                      : proto::ResidentWindow::substitute();
+            w.arena->window = got > 0
+                ? proto::ResidentWindow::image(a.base, a.block_size, proto::ResidentBytes::of(got))
+                : proto::ResidentWindow::substitute();
         } else {
             w.arena->window = proto::ResidentWindow::substitute();
-            st = status_of(n.error().code);
+            o = from(n.error());
         }
     }
-    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::ReadAhead& a, const Req::Head& h, Work& w) noexcept {
     Cmp::ReadAhead c{};
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     if (!w.arena) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else if (const auto live = live_(h.slot, w); !live) {
 
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<std::uint8_t> whole = w.arena->bytes;
-        auto n = b.read_at(proto::byte_offset(a.base, a.block_size), whole);
+        auto n = b.read_at(a.block_size.position_of(a.base), whole);
         if (!n) {
-            st = status_of(n.error().code);
+            o = from(n.error());
         } else {
             const std::size_t got = n->size();
             if (got < whole.size())
@@ -208,45 +213,45 @@ void StorageService::on(const Req::ReadAhead& a, const Req::Head& h, Work& w) no
                 w.arena->window = proto::ResidentWindow::image(
                     a.base,
                     a.block_size,
-                    proto::BlockSize{static_cast<std::uint32_t>(got)}
+                    proto::ResidentBytes::of(got)
                 );
         }
     }
-    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Write c{};
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     if (!w.arena) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else if (const auto live = live_(h.slot, w); !live) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.arena->bytes;
         const std::span<const std::uint8_t> want = clamped_extent(whole, a.bytes);
-        auto n = b.write_at(proto::FileSize{a.offset}, want);
+        auto n = b.write_at(a.offset, want);
         if (!n) {
-            st = status_of(n.error().code);
+            o = from(n.error());
         } else if (n->size() != want.size()) {
 
-            st = proto::StorageStatus::ShortWrite;
+            o = from(proto::FileSize::of(*n).refusal(Errc::short_write, ERR_SITE()));
         } else {
-            c.end = proto::FileSize{a.offset + n->size()};
+            c.end = a.offset + proto::FileSize::of(*n) - proto::kFileStart;
         }
     }
-    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Create c{};
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     if (!w.arena) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else if (const auto live = live_(h.slot, w); !live) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
@@ -257,71 +262,74 @@ void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexc
             c.size = *e;
             c.bytes = static_cast<std::uint32_t>(ask.size());
         } else {
-            st = status_of(e.error().code);
+            o = from(e.error());
         }
     }
-    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::Flush&, const Req::Head& h, Work& w) noexcept {
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     if (const auto live = live_(h.slot, w); !live) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         if (auto e = b.flush(); !e)
-            st = status_of(e.error().code);
+            o = from(e.error());
     }
-    finish_(st, w, infra::make<Cmp>(Cmp::Flush{}, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(Cmp::Flush{}, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Attach c{};
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     const auto served = io_.slots.find(h.slot);
     if (!served || !w.backend) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else {
         served->serve(w.gen);
-        auto e = w.backend->open_extent(h.slot, w.hand->order);
+
+        auto e = a.mount == proto::MountClass::Save
+            ? w.backend->open_save_extent(h.slot, w.hand->order)
+            : w.backend->open_extent(h.slot, w.hand->order);
         if (e) {
-            c.size = e->v;
+            c.size = *e;
         } else {
-            st = status_of(e.error().code);
+            o = from(e.error());
         }
-        served->attached(w.backend, e ? std::optional{*e} : std::nullopt, a.growable, w.blank);
+        served->attached(w.backend, e ? std::optional{*e} : std::nullopt, a.mount, w.blank);
     }
-    finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
 }
 
 void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcept {
-    proto::StorageStatus st = proto::StorageStatus::Ok;
+    Outcome o{};
     const auto served = io_.slots.find(h.slot);
     if (!served) {
-        st = proto::StorageStatus::Refused;
+        o = from(refusal(Errc::contract, ERR_SITE()));
     } else {
 
         served->serve(w.gen);
 
         if (w.backend) {
             if (auto e = w.backend->flush(); !e)
-                st = status_of(e.error().code);
+                o = from(e.error());
         }
 
         if (w.backend)
             w.backend->release(h.slot);
         served->detached();
     }
-    finish_(st, w, infra::make<Cmp>(Cmp::Detach{}, answer_head(h, st)));
+    finish_(o, w, infra::make<Cmp>(Cmp::Detach{}, answer_head(h, o)));
 }
 
 void StorageService::misrouted(const Req&, Work&) noexcept {
     request_misrouted_.add();
 }
 
-void StorageService::finish_(proto::StorageStatus st, Work& w, const Cmp& c) noexcept {
-    if (st != proto::StorageStatus::Ok)
+void StorageService::finish_(const Outcome& o, Work& w, const Cmp& c) noexcept {
+    if (o.status != proto::StorageStatus::Ok)
         errors_.add();
     w.answer = c;
     w.performed = true;

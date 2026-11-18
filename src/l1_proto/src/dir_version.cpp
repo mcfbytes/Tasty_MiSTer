@@ -13,7 +13,7 @@ DirVersion DirVersion::of_wire(std::uint32_t word) noexcept {
     return out;
 }
 
-Error DirVersion::refused(Errc why, infra::ErrorSite at) const noexcept {
+Error DirVersion::refusal(Errc why, infra::ErrorSite at) const noexcept {
     return Error{why, at, v};
 }
 

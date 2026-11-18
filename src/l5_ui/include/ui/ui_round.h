@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+#include "app/autosave_cells.h"
+#include "app/autosave_knobs.h"
 #include "app/conf_str_cell.h"
 #include "app/idle_knobs.h"
 #include "app/ini_cell.h"
@@ -17,16 +19,19 @@
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
 #include "app/raw_key_edge.h"
+#include "app/save_director_status.h"
 #include "app/ui_page_record.h"
 #include "app/ui_pass_work.h"
 #include "app/ui_round_port.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
+#include "ui/autosave_clock.h"
 #include "ui/browser_launch.h"
 #include "ui/confirm_launch.h"
 #include "ui/text_entry_launch.h"
 #include "ui/front_end_background.h"
 #include "ui/front_end_idle_clock.h"
+#include "ui/indicator_board.h"
 #include "ui/key_decoder.h"
 #include "ui/menu_model.h"
 #include "ui/navigator.h"
@@ -69,6 +74,11 @@ public:
 
         infra::OptRef<const app::VideoPump> video{};
         infra::OptRef<const app::HpsFramebuffer> fb{};
+
+        infra::OptRef<const app::AutosaveKnobsCell> autosave{};
+        infra::OptRef<const app::SaveDirectorCell> save_director{};
+
+        infra::OptRef<app::MenuFocusCell> menu_focus{};
     };
 
     struct InputEnds {
@@ -102,7 +112,10 @@ public:
           writes_(w.writes),
           idle_(w.idle),
           ini_(w.ini),
-          front_end_(w.idle) {
+          front_end_(w.idle),
+          autosave_(w.autosave),
+          save_director_(w.save_director),
+          menu_focus_(w.menu_focus) {
         ctx_.keys = infra::OptRef<KeyDecoder>{decoder_};
         ctx_.clock = infra::OptRef<const os::IClock>{clock};
         ctx_.launches.browser = infra::OptRef<BrowserLaunch>{launch_};
@@ -128,6 +141,10 @@ public:
     }
 
     void tick(app::UiPassWork work = {}) { publish_edges_(compose_(work)); }
+
+    IndicatorBoard& board() noexcept { return board_; }
+
+    const IndicatorBoard& board() const noexcept { return board_; }
 
     MenuModel& model() noexcept { return model_; }
 
@@ -209,6 +226,12 @@ private:
     void publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show);
     void publish_page_record();
 
+    [[nodiscard]] bool host_board_(std::chrono::nanoseconds now);
+
+    void tick_autosave_(std::chrono::nanoseconds now);
+
+    [[nodiscard]] std::optional<app::InfoPlane> info_plane_() const noexcept;
+
     struct PublishOnExit {
 
         TASTY_SEAT_RESIDENT(Ui);
@@ -285,6 +308,7 @@ private:
     bool user_release_pending_ = false;
 
     MenuModel& model_;
+    IndicatorBoard board_{};
     OsdRenderer renderer_;
     KeyDecoder decoder_;
     BrowserLaunch launch_{};
@@ -333,6 +357,13 @@ private:
     FrontEndBackground front_end_;
 
     FrontEndIdleClock idle_clock_{};
+
+    infra::OptRef<const app::AutosaveKnobsCell> autosave_{};
+    infra::OptRef<const app::SaveDirectorCell> save_director_{};
+
+    infra::OptRef<app::MenuFocusCell> menu_focus_{};
+    std::optional<bool> last_menu_focus_{};
+    AutosaveClock autosave_clock_{};
 };
 
 }

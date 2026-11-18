@@ -6,6 +6,7 @@
 #include "app/frame_ticks.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "svc/res_word.h"
 
 namespace mister::app {
 
@@ -14,7 +15,7 @@ struct VideoGeometryRecord {
     bool fb_en = false;
 
     bool rotated = false;
-    std::uint16_t res = 0;
+    svc::ResWord res{};
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     FrameTicks rate{};

@@ -53,9 +53,7 @@ Transition RecentRow::select() {
     TASTY_SEAT_BODY(RecentRow);
     if (!launch_.asks_first(record_))
         return launch_.launch(record_);
-    if (!launch_.ask(*this, title_, ask_body_))
-        return Transition{};
-    return Transition::push(PageId::Confirm);
+    return launch_.ask(*this, title_, ask_body_);
 }
 
 Transition RecentRow::on_confirm(RowIndex choice) {

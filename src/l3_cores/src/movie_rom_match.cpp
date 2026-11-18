@@ -73,7 +73,7 @@ MovieRomMatch::Digested MovieRomMatch::digest_file(
     for (std::size_t i = 0; i < alts.size(); ++i)
         alts[i].update(std::span<const std::uint8_t>(src.alt_prefixes[i]));
     std::array<std::uint8_t, kDigestChunk.file_word<std::size_t>()> buf{};
-    proto::FileSize off = src.span.offset;
+    proto::FileOffset off = src.span.offset;
     proto::FileSize left = src.span.length;
     while (!left.empty()) {
         const std::size_t n = kDigestChunk.min(left).file_word<std::size_t>();

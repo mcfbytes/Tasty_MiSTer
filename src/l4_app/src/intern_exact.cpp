@@ -21,14 +21,14 @@ bool read_whole(const svc::Vfs& vfs, std::string_view rel, std::span<std::uint8_
     if (!f)
         return false;
     auto sz = (*f)->size();
-    if (!sz || sz->v != out.size())
+    if (!sz || *sz != proto::FileSize::of(out))
         return false;
-    std::size_t off = 0;
-    while (off < out.size()) {
-        auto n = (*f)->read_at(off, std::as_writable_bytes(out.subspan(off)));
+    proto::FileOffset at = proto::kFileStart;
+    while (sz->holds(at)) {
+        auto n = (*f)->read_at(at, std::as_writable_bytes(at.skip_in(out)));
         if (!n || *n == 0)
             return false;
-        off += *n;
+        at += proto::FileSize{*n};
     }
     return true;
 }

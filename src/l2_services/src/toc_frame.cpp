@@ -29,6 +29,10 @@ struct FrameWriter {
     void u32(xthread::ByteOffset off, std::uint32_t v) noexcept {
         infra::store_le<std::uint32_t>(off.slice_of<sizeof(v)>(std::span(bytes)), v);
     }
+
+    void lba(xthread::ByteOffset off, Lba v) noexcept {
+        v.store_le32(off.slice_of<sizeof(std::uint32_t)>(std::span(bytes)));
+    }
 };
 
 }
@@ -48,14 +52,14 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
     constexpr std::size_t kRowOffMsf = 8;
     constexpr std::uint16_t kMetaResetBit = 0x4u;
     constexpr unsigned kAudioFlagShift = 16;
-    constexpr std::uint32_t kInclusiveEnd = 1;
+    constexpr proto::BlockCount kInclusiveEnd{1};
     constexpr std::uint32_t kFrameTracks = kTocFrameTracks;
 
     FrameWriter w;
 
     const TrackCount last = std::min(toc.last, TrackCount{kFrameTracks});
     w.u32(xthread::ByteOffset{0}, last.bcd_over_binary_word());
-    w.u32(xthread::ByteOffset{kOffDiscEnd}, toc.end.v);
+    w.lba(xthread::ByteOffset{kOffDiscEnd}, toc.end);
     w.u32(xthread::ByteOffset{kOffDiscEndMsf}, msf_word(toc.end));
     w.u16(kOffLibcrypt, meta.libcrypt_mask);
     std::uint16_t md = std::to_underlying(meta.region);
@@ -68,8 +72,8 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
         const xthread::ByteOffset base = xthread::ByteOffset{kHeaderBytes}
             + i.row_offset(xthread::SlotStride{kRowBytes});
         const Lba start_sent = (i != TrackIndex{}) ? t.start : Lba{};
-        w.u32(base, start_sent.v);
-        w.u32(base + xthread::ByteOffset{kRowOffEnd}, t.end.v - kInclusiveEnd);
+        w.lba(base, start_sent);
+        w.lba(base + xthread::ByteOffset{kRowOffEnd}, t.end - kInclusiveEnd);
         std::uint32_t bcd = msf_word(start_sent + t.pregap);
         if (t.type == TrackType::Cdda)
             bcd |= 1u << kAudioFlagShift;

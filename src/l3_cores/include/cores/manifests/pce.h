@@ -45,7 +45,7 @@ inline constexpr CdTickPeriods kPceCdTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{16'000},
     .caller = std::chrono::microseconds{13'000},
-    .speeds = 0,
+    .speeds = CdSpeedCount{},
     .speed = {},
 };
 
@@ -145,7 +145,7 @@ inline constexpr svc::BlankSaveSpec kPceCdBlankSave{
 };
 
 inline constexpr StagingPolicy kPceCdStaging{
-    .order = StageOrder::PceCd,
+    .staged = true,
     .reset_pulse_us = 100'000,
     .disc_slot = disc_slot_of(kPceCdSlots),
     .save = SaveMountPolicy{
@@ -168,6 +168,8 @@ inline constexpr CoreProfile kPceCd{
     .image_rows_no_zip = true,
     .cheats = {.cd_dir_suffix = "CD", .cd_asset_layout = true, .reset_on_remount = true},
     .reset = {.toggle_reacts = true, .button_reacts = true},
+
+    .grants = {Grant::Lamp, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_pcecd(const CoreProfile& p, const CoreGrant& g);

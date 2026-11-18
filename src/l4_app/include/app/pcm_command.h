@@ -10,6 +10,7 @@
 #include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -21,7 +22,7 @@ struct PcmCommand {
 
     struct Play {
         static constexpr Kind kKind = Kind::Play;
-        std::uint8_t track = 0;
+        svc::TrackNumber track{};
         bool loop = false;
     };
 

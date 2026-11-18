@@ -27,17 +27,13 @@ Ex<void> VideoWire::stage(const StagedFrame& f, proto::BindGeneration core) {
     if (const auto mode = infra::as<StagedFrame::Mode>(f)) {
         if (mode->m.count.is_empty() || mode->m.count.exceeds(kModeWordLimit)) {
             staged_rejected_.add();
-            return std::unexpected(
-                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(mode->m.count.v)}
-            );
+            return std::unexpected(mode->m.count.refusal(Errc::slot_range, ERR_SITE()));
         }
     }
     if (const auto chunk = infra::as<StagedFrame::CoeffChunk>(f)) {
         if (chunk->count.exceeds(kChunkWordLimit)) {
             staged_rejected_.add();
-            return std::unexpected(
-                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(chunk->count.v)}
-            );
+            return std::unexpected(chunk->count.refusal(Errc::slot_range, ERR_SITE()));
         }
     }
 

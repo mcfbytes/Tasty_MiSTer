@@ -47,8 +47,15 @@ void NegotiatedCore::forget() noexcept {
     TASTY_SEAT_BODY(NegotiatedCore);
 
     conf_str_.reset();
+    save_probe_.reset();
     pending_ram_image_ = {};
     core_live_ = false;
+}
+
+bool NegotiatedCore::save_probe_usable(proto::OsdMask m) const noexcept {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    return save_probe_
+        && (save_probe_->row.self_gated || conf_str_->save_trigger_usable(save_probe_->trigger, m));
 }
 
 void NegotiatedCore::note_build(std::string_view built_from) {

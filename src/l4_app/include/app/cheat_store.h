@@ -13,6 +13,7 @@
 #include "app/cheat_record.h"
 #include "app/cheat_row.h"
 #include "app/tx_digest_cell.h"
+#include "app/types.h"
 #include "cores/cheat_lookup.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -39,7 +40,7 @@ public:
 
     void close() noexcept;
 
-    [[nodiscard]] Ex<bool> toggle(std::size_t i);
+    [[nodiscard]] Ex<bool> toggle(RowIndex i);
 
     [[nodiscard]] std::size_t count() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
@@ -56,7 +57,7 @@ public:
         return geom_.unit;
     }
 
-    [[nodiscard]] CheatRow row(std::size_t i) const noexcept;
+    [[nodiscard]] CheatRow row(RowIndex i) const noexcept;
     [[nodiscard]] std::span<const std::uint8_t> blob() const noexcept;
 
     [[nodiscard]] std::string_view archive() const noexcept {
@@ -80,6 +81,7 @@ public:
     }
 
 private:
+    [[nodiscard]] bool in_range_(RowIndex i) const noexcept;
     void reset_() noexcept;
     void sort_() noexcept;
     void publish_() noexcept;

@@ -118,7 +118,7 @@ constexpr std::array<SettingRule, 22> kRules{{
 }};
 
 constexpr proto::BitField kSystemTypeField{proto::StatusBit{39}, 2};
-constexpr std::uint64_t kCueMax = 64 * 1024;
+constexpr proto::FileSize kCueMax{64 * 1024};
 constexpr WideIoIndex kBiosDest{0xC0};
 
 }
@@ -406,10 +406,13 @@ Ex<IMovieFormat::DigestSource> PsxBk2Format::digest_source(
     const auto size = (*cue)->size();
     if (!size)
         return std::unexpected(size.error());
-    if (*size > proto::FileSize{kCueMax})
+    if (*size > kCueMax)
         return std::unexpected(movie_refusal(CR::Disk, ERR_SITE()));
-    std::string text(static_cast<std::size_t>(size->v), '\0');
-    const auto got = (*cue)->read_at(0, std::as_writable_bytes(std::span<char>(text)));
+    std::string text = size->zeroed<std::string>();
+    const auto got = (*cue)->read_at(
+        proto::kFileStart,
+        std::as_writable_bytes(std::span<char>(text))
+    );
     if (!got)
         return std::unexpected(got.error());
     text.resize(*got);

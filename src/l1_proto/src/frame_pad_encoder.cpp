@@ -6,14 +6,15 @@ namespace mister::proto {
 Ex<void> FramePadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(FramePadEncoder);
     if (!frame_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), proto::word(opcode).v});
+        return std::unexpected(proto::word(opcode).refusal(Errc::not_found, ERR_SITE()));
     ILinkFrame& frame = *frame_;
     if (auto e = frame.begin(opcode); !e)
         return e;
-    if (auto e = frame.word(static_cast<std::uint16_t>(map.v)); !e)
+    const hal::SpiHalves halves = map.halves();
+    if (auto e = frame.word(halves.low); !e)
         return e;
 
-    if (auto e = frame.word(static_cast<std::uint16_t>(map.v >> 16)); !e)
+    if (auto e = frame.word(halves.high); !e)
         return e;
     return frame.end();
 }
@@ -21,7 +22,7 @@ Ex<void> FramePadEncoder::digital(UioOp opcode, JoyMask map) {
 Ex<void> FramePadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(FramePadEncoder);
     if (!frame_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), proto::word(opcode).v});
+        return std::unexpected(proto::word(opcode).refusal(Errc::not_found, ERR_SITE()));
     ILinkFrame& frame = *frame_;
     if (auto e = frame.begin(opcode); !e)
         return e;

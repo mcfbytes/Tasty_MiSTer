@@ -9,7 +9,6 @@
 #include <limits>
 #include <string>
 
-#include "app/core_builder.h"
 #include "app/front_end_status.h"
 #include "app/intern_exact.h"
 #include "app/link_tx_reader.h"
@@ -88,31 +87,6 @@ bool BindTail::identity(const proto::ConfStr& conf) {
             .declares_info = conf.declares_info()
         })
     );
-}
-
-void BindTail::doorbells(
-    const proto::ConfStr& conf,
-    std::span<const proto::AxiLwDecl> lw,
-    std::optional<hal::LwOffset> owned
-) {
-    TASTY_SEAT_BODY(BindTail);
-
-    const CoreBuilder::RtRows rt = CoreBuilder::rt_rows(conf.irq_bindings(), lw, owned);
-    proto::LinkOp::BindDoorbells op{.declared = rt.declared.wire_byte()};
-
-    if (!rt.count.empty()) {
-        std::array<std::uint8_t, kLinkTxSlabBytes> packed{};
-        const std::size_t bytes = rt.count.bytes_of<proto::IrqBinding>();
-        std::memcpy(packed.data(), rt.rows.data(), bytes);
-        const auto id = inbox_.intern(std::span<const std::uint8_t>(packed.data(), bytes));
-        if (id) {
-            op.table = *id;
-            op.rows = rt.count.wire_byte();
-        } else {
-            ++tally_.doorbell_intern_refusals;
-        }
-    }
-    (void)push_gating(inbox_, tally_, sleeper_, infra::make<proto::LinkOp>(op));
 }
 
 void BindTail::joy(std::string_view core_name) noexcept {

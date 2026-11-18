@@ -209,14 +209,16 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
 
     for (const Probe& p : kProbes) {
 
-        constexpr std::uint64_t kFirstDescriptorSector = 16;
+        constexpr proto::Lba kFirstDescriptorSector{16};
         constexpr std::size_t kRawHeaderMode1 = 16;
         constexpr std::size_t kRawHeaderMode2 = 24;
-        std::uint64_t seek = kFirstDescriptorSector * p.sector_size;
+        proto::FileOffset seek = proto::BlockSize{p.sector_size}.position_of(
+            kFirstDescriptorSector
+        );
         if (p.sector_size == kRawFrameBytes && !p.mode2)
-            seek += kRawHeaderMode1;
+            seek += FileSize{kRawHeaderMode1};
         if (p.mode2)
-            seek += kRawHeaderMode2;
+            seek += FileSize{kRawHeaderMode2};
 
         std::byte pvd[kUserDataBytes]{};
         auto rd = (*f)->read_at(seek, std::span<std::byte>(pvd, sizeof(pvd)));
@@ -383,13 +385,13 @@ Ex<std::span<std::byte>> DiscEngine::read_form(
 
     const auto ti = source_track(lba);
     if (!ti)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
+        return std::unexpected(lba.refusal(Errc::not_found, ERR_SITE()));
     const Track& t = toc_.at(*ti);
 
     const std::uint32_t ss = t.sector_size;
     if (ss == 0) {
 
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ti->v});
+        return std::unexpected(ti->refusal(Errc::bad_format, ERR_SITE()));
     }
     const std::optional<FormShape> shape = shape_of(form, ss, t.type);
     if (!shape) {
@@ -525,7 +527,7 @@ Ex<std::span<std::byte>> DiscEngine::read_subcode(Lba lba, std::span<std::byte> 
 
         const auto ti = source_track(lba);
         if (!ti)
-            return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
+            return std::unexpected(lba.refusal(Errc::not_found, ERR_SITE()));
         got = chd_.read_subcode(lba, toc_.at(*ti), dst);
     }
 
@@ -570,8 +572,8 @@ void DiscEngine::open_sub_or_cdg_(std::string_view cue_path) {
         sub_shaper_ = std::make_unique<RwInterleaver>();
 }
 
-SeekTime DiscEngine::seek_time(Lba from_lba, Lba to_lba) const {
-    return svc::seek_time(from_lba, to_lba);
+SeekTime DiscEngine::seek_time(SeekSpan span) const {
+    return svc::seek_time(span);
 }
 
 void DiscEngine::advise_ahead(Lba lba) noexcept {

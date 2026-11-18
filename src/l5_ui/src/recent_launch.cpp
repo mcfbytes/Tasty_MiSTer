@@ -8,6 +8,7 @@
 #include "app/mgl.h"
 #include "app/session_identity.h"
 #include "infra/ascii.h"
+#include "infra/indexed_array.h"
 #include "proto/types.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
@@ -24,8 +25,8 @@ namespace {
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 
 static_assert(
-    kYesNo[RecentLaunch::row_of(RecentLaunch::YesNo::Yes).v] == "Yes"
-    && kYesNo[RecentLaunch::row_of(RecentLaunch::YesNo::No).v] == "No"
+    infra::at_index(kYesNo, RecentLaunch::row_of(RecentLaunch::YesNo::Yes)) == "Yes"
+    && infra::at_index(kYesNo, RecentLaunch::row_of(RecentLaunch::YesNo::No)) == "No"
 );
 
 std::optional<app::Mgl> document_of(const app::RecentGames::Record& r) {
@@ -99,7 +100,7 @@ Transition RecentLaunch::launch(const app::RecentGames::Record& r) {
     return Transition::close_all();
 }
 
-bool RecentLaunch::ask(
+Transition RecentLaunch::ask(
     IConfirmHost& host,
     std::string_view title,
     std::span<const std::string_view> body
@@ -107,7 +108,7 @@ bool RecentLaunch::ask(
     TASTY_SEAT_BODY(RecentLaunch);
     if (!ctx_.launches.confirm) {
         refusals_.add();
-        return false;
+        return Transition{};
     }
     ConfirmPage::Spec spec{};
     spec.title = title;
@@ -115,8 +116,7 @@ bool RecentLaunch::ask(
     spec.choices = kYesNo;
     spec.host = infra::OptRef<IConfirmHost>{host};
     spec.initial = row_of(YesNo::No);
-    ctx_.launches.confirm->pending = spec;
-    return true;
+    return ctx_.launches.confirm->open(PageId::Confirm, spec);
 }
 
 svc::Tally RecentLaunch::refusals() const noexcept {

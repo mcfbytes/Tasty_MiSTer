@@ -18,7 +18,10 @@ Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap) {
         const std::size_t want = static_cast<std::size_t>(
             std::min<std::uint64_t>(chunk.size(), cap - out.size())
         );
-        auto n = file.read_at(out.size(), std::span<std::byte>(chunk.data(), want));
+        auto n = file.read_at(
+            proto::kFileStart + proto::FileSize{out.size()},
+            std::span<std::byte>(chunk.data(), want)
+        );
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0)
@@ -36,14 +39,15 @@ Ex<std::vector<std::byte>> read_bounded(const Vfs& vfs, std::string_view path, s
 }
 
 std::span<std::byte> read_bounded_partial(IFile& file, std::span<std::byte> dst) {
-    std::size_t got = 0;
-    while (got < dst.size()) {
-        auto n = file.read_at(got, dst.subspan(got));
+    proto::FileOffset at = proto::kFileStart;
+    const proto::FileSize room = proto::FileSize::of(dst);
+    while (room.holds(at)) {
+        auto n = file.read_at(at, at.skip_in(dst));
         if (!n || *n == 0)
             break;
-        got += *n;
+        at += proto::FileSize{*n};
     }
-    return dst.first(got);
+    return (at - proto::kFileStart).first_of(dst);
 }
 
 }

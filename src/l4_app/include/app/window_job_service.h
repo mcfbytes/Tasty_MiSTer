@@ -15,7 +15,7 @@
 #include "infra/opt_ref.h"
 #include "infra/polled.h"
 #include "infra/seat.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "proto/reset_edge.h"
 #include "proto/types.h"
 #include "svc/io_coworker.h"
@@ -43,7 +43,7 @@ public:
     WindowJobService(
         const svc::Vfs& vfs,
         ILoadWindowMap<seat_owner::Io>& map,
-        hal::PhysRegion aperture
+        hal::FpgaAperture aperture
     ) noexcept
         : vfs_(&vfs),
           map_(&map),
@@ -53,7 +53,7 @@ public:
     WindowJobService(
         const svc::Vfs& vfs,
         ILoadWindowMap<seat_owner::Io>& map,
-        hal::PhysRegion aperture,
+        hal::FpgaAperture aperture,
         xthread::WakeFlag& io_wake
     ) noexcept
         : vfs_(&vfs),
@@ -91,6 +91,8 @@ public:
 
     [[nodiscard]] std::uint32_t flushes() const noexcept { return rt_.flushes.get(); }
 
+    static constexpr svc::LaneClass kLaneClass = svc::LaneClass::Bulk;
+
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
 
@@ -121,7 +123,7 @@ private:
 
     const svc::Vfs* vfs_;
     ILoadWindowMap<seat_owner::Io>* map_;
-    hal::PhysRegion aperture_;
+    hal::FpgaAperture aperture_;
     Rt rt_{};
     Chan chan_;
     Io io_{};

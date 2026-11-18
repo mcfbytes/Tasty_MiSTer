@@ -18,7 +18,7 @@ namespace {
 }
 
 [[nodiscard]] Error errno_at(infra::Errno err) noexcept {
-    return err.refused(Errc::os, ERR_SITE());
+    return err.refusal(Errc::os, ERR_SITE());
 }
 
 [[nodiscard]] UniqueFd open_stream() noexcept {

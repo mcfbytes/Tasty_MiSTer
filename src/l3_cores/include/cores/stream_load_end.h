@@ -9,7 +9,7 @@
 namespace mister::cores {
 
 struct StreamLoadEnd {
-    proto::IoIndex index{};
+    proto::FioIndexByte index{};
     proto::FileSize bytes{};
     svc::Crc32 crc{};
     bool ok = false;

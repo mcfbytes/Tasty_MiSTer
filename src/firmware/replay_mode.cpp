@@ -15,6 +15,7 @@
 
 #include "app/session_owner.h"
 #include "hal/axi.h"
+#include "hal/board_regions.h"
 #include "hal/region_id.h"
 #include "hal/thread_map.h"
 #include "infra/persist.h"
@@ -25,6 +26,7 @@
 #include "report.h"
 #include "svc/vfs.h"
 #include "tasty_owner_lock.h"
+#include "tasty_paths.h"
 #include "tasty_pid_file.h"
 #include "tasty_preflight.h"
 #include "tasty_record.h"
@@ -34,6 +36,12 @@
 namespace mister::fw {
 
 namespace {
+
+std::optional<hal::ApertureRegion> framebuffer_region(
+    std::span<const hal::PhysRegion> rows
+) noexcept {
+    return hal::BoardRegions::aperture_region(rows, hal::RegionId::VideoFb);
+}
 
 inline constexpr std::size_t kFatalStackBytes = 32 * 1024;
 #if !defined(__GLIBC__)
@@ -50,6 +58,15 @@ public:
 };
 
 const TastyVoice kTastyVoice{};
+
+[[nodiscard]] app::RunPolicy replay_policy(const TastyArgs& args) noexcept {
+    app::RunPolicy policy{};
+    policy.force_vsync = args.vsync_adjust;
+    policy.replay_ini = args.strict;
+    (void)policy.save_root.assign(kTastySaveRoot);
+    policy.remembered = app::SessionOwner::RememberedFiles::Ignore;
+    return policy;
+}
 
 }
 
@@ -244,7 +261,7 @@ int ReplayMode::exit_status(const Ex<void>& ran) const noexcept {
 }
 
 std::unique_ptr<SessionMode::Front> ReplayMode::front(const BootParts&) {
-    return std::make_unique<NoFront>();
+    return std::make_unique<NoFront>(replay_policy(args_));
 }
 
 std::unique_ptr<SessionMode::Face> ReplayMode::NoFront::face(
@@ -289,19 +306,11 @@ ReplayMode::Owner::Owner(
            .stop = ProcessStandup::stop_latch(),
            .run_exit = run_exit,
            .status = status,
-           .video_fb = hal::declared_region(plat.regions, hal::RegionId::VideoFb)
-                           .value_or(hal::PhysRegion{}),
+           .video_fb = framebuffer_region(plat.regions),
            .direct_video_ini = device.owner_.direct_video_ini_cell()},
           args,
           run
-      } {
-
-    device.video_pump_.force_vsync_adjust(args.vsync_adjust);
-    device.video_pump_.arm_replay_ini(args.strict);
-    device.owner_.arm_replay_ini(args.strict);
-    device.owner_.set_replay_save_root(kTastySaveRoot);
-    device.owner_.set_remembered_files(app::SessionOwner::RememberedFiles::Ignore);
-}
+      } {}
 
 bool ReplayMode::FeederReplay::take_play(const app::ReplayFeeder::Play& play) noexcept {
     TASTY_SEAT_BODY(FeederReplay);
@@ -314,7 +323,7 @@ void ReplayMode::FeederReplay::take_stop() noexcept {
     (void)f.take_stop();
 }
 
-app::FrameCount ReplayMode::FeederReplay::movie_frames() const noexcept {
+app::MovieFrameCount ReplayMode::FeederReplay::movie_frames() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
     return f.movie_frames();
 }

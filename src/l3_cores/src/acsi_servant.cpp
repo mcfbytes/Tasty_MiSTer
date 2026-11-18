@@ -67,8 +67,8 @@ struct AcsiState {
     }
 };
 
-constexpr std::uint16_t wire_opcode(DmaOp op) noexcept {
-    return static_cast<std::uint16_t>(op);
+constexpr hal::SpiWord wire_opcode(DmaOp op) noexcept {
+    return hal::SpiWord{static_cast<std::uint16_t>(op)};
 }
 
 constexpr std::uint16_t signal_word(ScsiStatus status) noexcept {
@@ -102,6 +102,8 @@ AcsiServant::AcsiServant(
     : vfs_(vfs),
       activity_(activity),
       formats_(formats) {
+    if (vfs_)
+        card_.emplace(*vfs_);
     (void)serial_.assign(serial);
 }
 
@@ -112,7 +114,7 @@ Ex<void> AcsiServant::bind_target(
 ) noexcept {
     const auto found = slot_.find(t);
     if (!found)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), t.v});
+        return std::unexpected(t.refusal(Errc::slot_range, ERR_SITE()));
     Slot& slot = *found;
     slot.image.borrow(img);
     (void)slot.name.assign(img ? name : std::string_view{});
@@ -131,9 +133,9 @@ MountState AcsiServant::bind(proto::DiskUnit unit, std::string_view path) noexce
     (void)bind_target(target, {}, {});
     if (path.empty())
         return MountState::Done;
-    if (!vfs_)
+    if (!vfs_ || !card_)
         return MountState::Failed;
-    auto img = svc::open_disk_image(*vfs_, path, formats_, svc::OpenMode::ReadWrite);
+    auto img = svc::open_disk_image(*card_, path, formats_);
 
     if (!img)
         img = svc::open_disk_image(*vfs_, path, formats_, svc::OpenMode::Read);

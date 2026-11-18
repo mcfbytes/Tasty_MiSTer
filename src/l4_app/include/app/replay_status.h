@@ -49,8 +49,8 @@ struct ReplayStatus {
     ReplayRef ref = ReplayRef::None;
     EpochFail epoch_fail = EpochFail::None;
     std::uint8_t pad_[2]{};
-    MovieFrame movie_frame = kNoMovieFrame;
-    MovieFrame applied_frame = kNoMovieFrame;
+    MoviePosition movie_frame = kNoMovieFrame;
+    MoviePosition applied_frame = kNoMovieFrame;
     std::uint32_t writes = 0;
     std::uint32_t on_time = 0;
     std::uint32_t late = 0;
@@ -61,8 +61,8 @@ struct ReplayStatus {
     std::uint32_t pad_drops = 0;
     std::uint32_t stale = 0;
     std::uint32_t link_errors = 0;
-    MovieFrame first_late_frame = kNoMovieFrame;
-    MovieFrame first_underrun_frame = kNoMovieFrame;
+    MoviePosition first_late_frame = kNoMovieFrame;
+    MoviePosition first_underrun_frame = kNoMovieFrame;
     StatusMicros apply_min_us{};
     StatusMicros apply_max_us{};
     StatusMicros epoch_delay_us{};
@@ -72,13 +72,13 @@ struct ReplayStatus {
     std::uint32_t lost = 0;
     std::uint32_t delayed = 0;
     StatusMicros gap_max_us{};
-    MovieFrame gap_frame = kNoMovieFrame;
+    MoviePosition gap_frame = kNoMovieFrame;
     StatusMicros late_gap_us{};
     StatusMicros late_into_us{};
     StatusMicros late_edge_us{};
     std::uint32_t late_depth = 0;
     std::int32_t depth_min = -1;
-    MovieFrame depth_min_frame = kNoMovieFrame;
+    MoviePosition depth_min_frame = kNoMovieFrame;
     std::uint32_t pad_held = 0;
 };
 

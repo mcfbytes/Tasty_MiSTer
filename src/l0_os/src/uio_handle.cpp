@@ -77,10 +77,10 @@ std::optional<UioMinor> find_doorbell_uio_node(const UioLineSpace& space, UioLin
     char want[kUioNodeNameBuf];
     if (!format_path(
             std::span<char>(want),
-            "%.*s%u",
+            "%.*s%s",
             static_cast<int>(space.node_prefix.size()),
             space.node_prefix.data(),
-            to_ordinal(line) + 1
+            space.f2h_of(line).text().c_str()
         )) {
         return std::nullopt;
     }

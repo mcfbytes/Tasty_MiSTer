@@ -6,10 +6,13 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "hal/block_view.h"
+#include "hal/gpi_block.h"
+#include "hal/gpo_block.h"
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
 #include "hal/mailbox.h"
-#include "hal/reg.h"
+#include "hal/spi_output.h"
 #include "hal/spi_output_observer.h"
 #include "hal/spi_sample.h"
 #include "infra/seat.h"
@@ -102,8 +105,8 @@ private:
     SpiBus() = default;
 
     static SpiBus attach_registers(
-        reg::Reg<reg::WO> gpo,
-        reg::Reg<reg::RO> gpi,
+        BlockView<GpoBlock> gpo,
+        BlockView<GpiBlock> gpi,
         ISpiOutputObserver* obs,
         const LinkTimingValues& timing,
         xthread::RtStats* stats = nullptr
@@ -128,8 +131,8 @@ private:
     [[nodiscard]] Ex<SpiWord> handshake_(SpiWord out, bool guarded) noexcept;
 
     SpiOutput gpo_{};
-    reg::Reg<reg::WO> gpo_reg_;
-    reg::Reg<reg::RO> gpi_reg_;
+    BlockView<GpoBlock> gpo_reg_;
+    BlockView<GpiBlock> gpi_reg_;
 
     Width width_ = Width::Byte;
     IoVersion io_version_{};

@@ -2,8 +2,11 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <span>
 
+#include "hal/aperture_region.h"
+#include "hal/fpga_aperture.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
 #include "hal/scaler_header.h"
@@ -22,11 +25,17 @@ public:
     static constexpr std::size_t kStrideSmall = 0x0020'0000u;
     static constexpr std::size_t kSpanBytes = kBuffers * kStrideLarge;
 
-    [[nodiscard]] static constexpr PhysRegion span_of(const PhysRegion& scaler_out) noexcept {
-        return PhysRegion{scaler_out.phys, scaler_out.len == 0 ? 0 : kSpanBytes, "scaler-triple"};
+    [[nodiscard]] static constexpr Ex<ApertureRegion> span_of(
+        const FpgaAperture& aperture,
+        const ApertureRegion& scaler_out
+    ) {
+        return aperture.resolve(scaler_out.region().phys, kSpanBytes, "scaler-triple");
     }
 
-    [[nodiscard]] static Ex<ScalerBuffers> map(const PhysRegion& scaler_out);
+    [[nodiscard]] static Ex<ScalerBuffers> map(
+        const FpgaAperture& aperture,
+        const ApertureRegion& scaler_out
+    );
 
     ScalerBuffers(ScalerBuffers&&) noexcept = default;
     ScalerBuffers& operator=(ScalerBuffers&&) noexcept = default;

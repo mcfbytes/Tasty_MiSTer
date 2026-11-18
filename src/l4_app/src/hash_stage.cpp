@@ -118,7 +118,7 @@ IReplayStage::Step HashStage::finish_rom_(Ctx ctx) noexcept {
             continue;
         hasher_.arm(
             std::move(*f),
-            cores::span_past(*size, proto::FileSize{}),
+            cores::span_past(*size, proto::kFileStart),
             cores::RomDigest{scan.facts.firmware->kind}
         );
         firmware_pass_ = true;

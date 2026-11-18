@@ -86,29 +86,26 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
     }
 
     const NddLba ram_start{infra::at_index(kRamStartLba, type)};
-    std::uint64_t ram = 0;
+    std::uint32_t ram = 0;
     for (std::size_t i = 0; i < m.count_; ++i) {
         const Step& s = m.steps_[i];
         if (!s.good || !s.lba.at_or_above(ram_start))
             continue;
-        m.ram_runs_[m.ram_count_] = RamRun{
-            .base = static_cast<std::uint32_t>(ram),
-            .step = static_cast<std::uint16_t>(i)
-        };
+        m.ram_runs_[m.ram_count_] = RamRun{.base = ram, .step = static_cast<std::uint16_t>(i)};
         ++m.ram_count_;
-        ram += std::uint64_t{s.zone_bytes} * kSectorsPerBlock;
+        ram += std::uint32_t{s.zone_bytes} * kSectorsPerBlock;
     }
     const std::uint32_t ram_bytes = infra::at_index(kRamBytes, type);
     m.ram_ok_ = ram_bytes != 0 && ram == ram_bytes;
     return {};
 }
 
-std::size_t DiskMap::ram_index_at_(std::uint64_t ram_off) const noexcept {
+std::size_t DiskMap::ram_index_at_(proto::FileOffset at) const noexcept {
 
     const auto* first = ram_runs_.data();
     const auto* last = first + ram_count_;
-    const auto* it = std::upper_bound(first, last, ram_off, [](std::uint64_t v, const RamRun& r) {
-        return v < r.base;
+    const auto* it = std::upper_bound(first, last, at, [](proto::FileOffset p, const RamRun& r) {
+        return p < r.start();
     });
     return it == first ? 0 : static_cast<std::size_t>(it - first) - 1;
 }

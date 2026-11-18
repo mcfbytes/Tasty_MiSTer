@@ -37,7 +37,7 @@ public:
     [[nodiscard]] virtual bool take_play(const app::ReplayFeeder::Play& play) noexcept = 0;
     virtual void take_stop() noexcept = 0;
 
-    [[nodiscard]] virtual app::FrameCount movie_frames() const noexcept = 0;
+    [[nodiscard]] virtual app::MovieFrameCount movie_frames() const noexcept = 0;
 
     [[nodiscard]] virtual bool active() const noexcept = 0;
 

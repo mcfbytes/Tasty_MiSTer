@@ -25,6 +25,12 @@ template <class E>
 enum class NoWords : std::size_t {};
 
 template <class Word>
+inline constexpr bool kHasOpBitmap = false;
+
+template <>
+inline constexpr bool kHasOpBitmap<NoWords> = true;
+
+template <class Word>
 class KindedDirEntry;
 
 template <class Word>
@@ -45,7 +51,11 @@ public:
 
     [[nodiscard]] DeclaredLine line() const noexcept { return raw_.line; }
 
-    [[nodiscard]] OpBitmap bitmap() const noexcept { return raw_.bitmap(); }
+    [[nodiscard]] OpBitmap bitmap() const noexcept
+        requires kHasOpBitmap<Word>
+    {
+        return raw_.bitmap();
+    }
 
     [[nodiscard]] DirWord word(Word w) const noexcept {
         const std::size_t i = std::to_underlying(w);
@@ -64,6 +74,9 @@ private:
 
     SysDirEntry raw_;
 };
+
+template <class Word>
+concept CarriesOpBitmap = requires(const KindedDirEntry<Word>& e) { e.bitmap(); };
 
 template <class Word>
 [[nodiscard]] Ex<KindedDirEntry<Word>> find_kinded(

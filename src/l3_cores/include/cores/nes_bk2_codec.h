@@ -13,6 +13,7 @@
 #include "cores/types.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -76,15 +77,15 @@ public:
 };
 
 consteval bool nes_bk2_pad_bits_are_a_permutation() {
-    unsigned seen = 0;
+    constexpr proto::JoyMask kPadByte{0xFF};
+    proto::JoyMask seen{};
     for (const NesBk2Codec::PadName& p : NesBk2Codec::kPadNames) {
-        if (p.bit.v > 7)
+        const proto::JoyMask m = p.bit.mask();
+        if (!p.bit.fits() || !kPadByte.any(m) || seen.any(m))
             return false;
-        if ((seen & (1u << p.bit.v)) != 0)
-            return false;
-        seen |= 1u << p.bit.v;
+        seen = seen.with(m);
     }
-    return seen == 0xFFu;
+    return seen == kPadByte;
 }
 
 static_assert(

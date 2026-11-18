@@ -112,7 +112,7 @@ public:
 
     proto::Attenuation attenuation() const noexcept { return vol_.attenuation(); }
 
-    void step_core_volume(VolumeStep step);
+    void step_core_volume(proto::VolumeStep step);
 
     std::uint8_t core_volume_byte() const noexcept { return corevol_.field_bits(); }
 

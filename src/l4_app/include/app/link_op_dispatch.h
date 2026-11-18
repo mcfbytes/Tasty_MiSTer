@@ -115,9 +115,6 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
                s.on(std::declval<const proto::LinkOp::BindIdentity&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
-               s.on(std::declval<const proto::LinkOp::BindDoorbells&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
                s.on(std::declval<const proto::LinkOp::DropCore&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
@@ -144,6 +141,9 @@ concept LinkOpTransferSink = std::same_as<typename S::Result, Delivered>
            { s.on(std::declval<const proto::LinkOp::FileTx&>(), c) } -> std::same_as<Delivered>;
            {
                s.on(std::declval<const proto::LinkOp::StagePayload&>(), c)
+           } -> std::same_as<Delivered>;
+           {
+               s.on(std::declval<const proto::LinkOp::PlainDownload&>(), c)
            } -> std::same_as<Delivered>;
            {
                s.on(std::declval<const proto::LinkOp::StageDiscPayload&>(), c)

@@ -8,6 +8,8 @@
 
 namespace mister::svc {
 
+inline constexpr std::uint8_t kAutosaveInfoDefaultSeconds = 3;
+
 struct ConfigSnapshot {
     TASTY_SEAT_EXEMPT(const_shared);
     std::uint32_t keyrah_mode = 0;
@@ -125,6 +127,8 @@ struct ConfigSnapshot {
     std::uint8_t hd_colors = 0xFF;
     std::uint8_t hd_game_display = 0;
     std::uint8_t hd_menu_opacity = 85;
+    std::uint8_t autosave = 1;
+    std::uint8_t autosave_info = kAutosaveInfoDefaultSeconds;
 
     std::uint8_t alt_ini = 0;
     bool second_pass_ran = false;

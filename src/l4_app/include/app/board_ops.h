@@ -21,18 +21,6 @@ protected:
     IBoardReset& operator=(const IBoardReset&) = default;
 };
 
-class IRtPriorityScope {
-public:
-    virtual ~IRtPriorityScope() = default;
-    virtual void relax() = 0;
-    virtual void restore() = 0;
-
-protected:
-    IRtPriorityScope() = default;
-    IRtPriorityScope(const IRtPriorityScope&) = default;
-    IRtPriorityScope& operator=(const IRtPriorityScope&) = default;
-};
-
 class ISleeper {
 public:
     virtual ~ISleeper() = default;
@@ -60,7 +48,6 @@ protected:
 struct BoardOps {
     infra::OptRef<IBoardReset> reset{};
     infra::OptRef<ISleeper> sleeper{};
-    infra::OptRef<IRtPriorityScope> rt{};
     infra::OptRef<IStopSignal> stop{};
 };
 

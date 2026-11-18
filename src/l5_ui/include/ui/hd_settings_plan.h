@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <functional>
-#include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -11,11 +11,14 @@
 #include "app/page_description.h"
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
+#include "ui/hd_row.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
-#include "ui/system_page.h"
+#include "ui/page_id.h"
+#include "ui/scripts_entry.h"
+#include "ui/transition.h"
 #include "svc/types.h"
 
 namespace mister::ui {
@@ -40,13 +43,39 @@ public:
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
+    class HdEnterClassicRow final : public IHdRow {
+        TASTY_SEAT_RESIDENT(Ui);
+
+    public:
+        explicit HdEnterClassicRow(PageId classic) noexcept : classic_(classic) {}
+
+        std::optional<RowKey> key() const override;
+        app::PageDescription::Row describe() const override;
+        Transition select() override;
+
+    private:
+        PageId classic_;
+    };
+
     class ScriptsRow final : public IHdRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit ScriptsRow(HdSettingsPlan& plan) noexcept : plan_(plan) {}
 
-        bool shown() const override;
+        app::PageDescription::Row describe() const override;
+        Transition select() override;
+
+    private:
+        HdSettingsPlan& plan_;
+    };
+
+    class AutosaveRow final : public IHdRow {
+        TASTY_SEAT_RESIDENT(Ui);
+
+    public:
+        explicit AutosaveRow(HdSettingsPlan& plan) noexcept : plan_(plan) {}
+
         app::PageDescription::Row describe() const override;
         Transition select() override;
 
@@ -67,18 +96,20 @@ private:
     };
 
     PageContext& ctx_;
-    std::unique_ptr<SystemPage> sys_;
+    ScriptsEntry scripts_entry_;
     svc::Tally refusals_{};
+    bool autosave_on_ = false;
     std::uint32_t published_ = 0;
     RebootAction reboot_action_{*this};
     HdPushRow controllers_;
     HdPushRow display_;
     HdPushRow network_;
+    AutosaveRow autosave_{*this};
     ScriptsRow scripts_{*this};
     HdPushRow about_;
     HdAskRow reboot_;
     HdSeparatorRow separator_;
-    HdPushRow advanced_;
+    HdEnterClassicRow advanced_;
     std::vector<std::reference_wrapper<IHdRow>> refs_;
 };
 

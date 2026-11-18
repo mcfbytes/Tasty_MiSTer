@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "app/fb_tenancy.h"
 #include "app/fb_view.h"
 #include "app/hd_rect.h"
 #include "app/output_geometry.h"
@@ -60,19 +61,21 @@ public:
     HpsFramebuffer(const HpsFramebuffer&) = delete;
     HpsFramebuffer& operator=(const HpsFramebuffer&) = delete;
 
-    [[nodiscard]] Ex<void> raise() noexcept;
+    [[nodiscard]] Ex<FbLease> raise(FbTenant who) noexcept;
 
-    [[nodiscard]] Ex<void> raise_view(const FbView& view) noexcept;
+    [[nodiscard]] Ex<FbLease> raise_view(FbTenant who, const FbView& view) noexcept;
 
-    [[nodiscard]] Ex<void> drop() noexcept;
+    [[nodiscard]] Ex<void> drop(const FbLease& lease) noexcept;
 
     [[nodiscard]] bool take_fb_cmd(std::string_view line) noexcept;
 
-    void hold(bool on) noexcept { held_ = on; }
+    void hold(bool on) noexcept { tenancy_.hold(on); }
 
-    [[nodiscard]] bool raised() const noexcept { return raised_; }
+    [[nodiscard]] bool raised() const noexcept { return tenancy_.claimed(); }
 
-    [[nodiscard]] bool held() const noexcept { return held_; }
+    [[nodiscard]] bool held() const noexcept { return tenancy_.held(); }
+
+    [[nodiscard]] bool holds(const FbLease& lease) const noexcept { return tenancy_.holds(lease); }
 
     [[nodiscard]] const FbView& picture() const noexcept { return picture_; }
 
@@ -94,9 +97,7 @@ private:
     hal::PhysRegion fb_;
     std::string mode_param_;
     FbView picture_{};
-    bool raised_ = false;
-    bool held_ = false;
-    bool viewing_ = false;
+    FbTenancy tenancy_{};
     std::uint32_t refused_ = 0;
 };
 

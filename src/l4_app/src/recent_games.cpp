@@ -261,7 +261,7 @@ void RecentGames::assemble_(
             out.push_back(std::move(r));
     };
 
-    hidden_ = 0;
+    hidden_ = svc::Tally{};
     if (session.names_a_game()) {
         Record r{
             .core = {},
@@ -282,7 +282,7 @@ void RecentGames::assemble_(
 
     for (const PlayedHistory::Record& h : played) {
         if (h.core_image.empty()) {
-            ++hidden_;
+            hidden_.add();
             continue;
         }
         Record r{.core = {}, .core_image = {}, .rbf = {}, .path = {}, .title = {}, .row = h.row};
@@ -304,7 +304,7 @@ void RecentGames::assemble_(
             more = true;
             const CoreName* core = core_named_(src.core);
             if (core == nullptr) {
-                ++hidden_;
+                hidden_.add();
                 continue;
             }
             Record

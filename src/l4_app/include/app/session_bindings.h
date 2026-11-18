@@ -33,8 +33,6 @@ public:
 
     static constexpr std::size_t kIdentityFields = 4;
     static constexpr std::size_t kButtonListCap = kLinkTxSlabBytes;
-
-    static constexpr std::size_t kDoorbellRows = kLinkTxSlabBytes / sizeof(proto::IrqBinding);
     static_assert(
         MraFacts::kSetnameCap == kIdentityNameCap,
         "the setname and the latched identity name clip at one width"
@@ -50,16 +48,6 @@ public:
         bool declares_info = false;
     };
 
-    struct Doorbells {
-        std::array<proto::IrqBinding, kDoorbellRows> rows{};
-        std::uint8_t count = 0;
-        std::uint8_t declared = 0;
-
-        [[nodiscard]] std::span<const proto::IrqBinding> table() const noexcept {
-            return {rows.data(), count};
-        }
-    };
-
     struct Mount {
         decltype(InternedFile::path) path{};
         proto::FileSize size_bytes{};
@@ -68,10 +56,6 @@ public:
     void bind_facts(const proto::LinkOp::BindFacts& op, const ILinkTxReader& inbox) noexcept;
     void bind_identity(const proto::LinkOp::BindIdentity& op, const ILinkTxReader& inbox) noexcept;
     void bind_uart(const proto::LinkOp::BindUart& op, const ILinkTxReader& inbox) noexcept;
-    void bind_doorbells(
-        const proto::LinkOp::BindDoorbells& op,
-        const ILinkTxReader& inbox
-    ) noexcept;
 
     [[nodiscard]] static Ex<std::optional<Mount>> decode_mount(
         const proto::LinkOp::BindMount& op,
@@ -86,7 +70,6 @@ public:
     void forget_core() noexcept {
         identity_.reset();
         uart_ = UartBinding{};
-        doorbells_ = Doorbells{};
         record_ = no_record_;
     }
 
@@ -101,8 +84,6 @@ public:
     [[nodiscard]] const std::optional<Identity>& identity() const noexcept { return identity_; }
 
     [[nodiscard]] const UartBinding& uart() const noexcept { return uart_; }
-
-    [[nodiscard]] const Doorbells& doorbells() const noexcept { return doorbells_; }
 
     [[nodiscard]] std::string_view core_name() const noexcept {
         return identity_.has_value() ? identity_->core_name.view() : std::string_view{};
@@ -127,7 +108,6 @@ private:
     IdentityRecord no_record_{build_identity_record({}, MraFacts{})};
     IdentityRecord record_{no_record_};
     UartBinding uart_{};
-    Doorbells doorbells_{};
     proto::BindGeneration gen_{};
 };
 

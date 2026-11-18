@@ -20,13 +20,10 @@ void TastySink::deliver(const app::Event& e) {
 
 void TastySink::on(const app::Event::CoreLoaded& a, const app::Event::Head&) {
     TASTY_SEAT_BODY(TastySink);
-    const std::optional<app::SessionIdentity> id = identity_ ? identity_->copy() : std::nullopt;
-    video_.set_core_name(id ? id->core.view() : std::string_view{});
-    video_.set_spd_identity(
-        id ? app::home_name(*id) : std::string_view{},
-        id ? id->rotation : proto::RotationDir::None
+    video_.on_core_loaded(
+        app::CoreIdentity::of(identity_ ? identity_->copy() : std::nullopt),
+        a.front_end
     );
-    video_.on_core_loaded(a.front_end);
 }
 
 void TastySink::on(const app::Event::SessionFailed&, const app::Event::Head&) {

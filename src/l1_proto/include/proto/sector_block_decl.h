@@ -12,6 +12,7 @@
 #include "infra/error.h"
 #include "os/map_length.h"
 #include "os/types.h"
+#include "proto/block_line.h"
 #include "proto/declared_line.h"
 #include "proto/dir_version.h"
 #include "proto/sys_directory_image.h"
@@ -35,7 +36,7 @@ struct SectorBlockDecl {
         os::MapLength extent{};
 
         [[nodiscard]] constexpr bool declared() const noexcept {
-            return slot.v != 0 && wsrc != os::PhysAddr{};
+            return !slot.is_primary() && wsrc != os::PhysAddr{};
         }
 
         [[nodiscard]] constexpr BlockSize frame_bytes() const noexcept {
@@ -61,12 +62,21 @@ struct SectorBlockDecl {
     std::uint16_t strobe_gap = 0;
     DirVersion version{};
     std::array<Card, kCards> cards{};
-    DeclaredLine line_decl{};
 
     [[nodiscard]] constexpr BlockSize frame_bytes() const noexcept {
         return BlockSize{std::uint32_t{frame_words} * hal::SectorBlock::kWordBytes};
     }
 };
+
+struct SectorBlockDeclLookup {
+    SectorBlockDecl block{};
+    DeclaredLine declared{};
+};
+
+static_assert(
+    line_source(DirEntryKind::Sector) == LineFrom::IrqRow,
+    "a SECTOR entry's line is the BLK row whose cause word 5 repeats"
+);
 
 static_assert(
     SectorBlockDecl{.frame_words = 64}.frame_bytes() == BlockSize{256},
@@ -77,7 +87,7 @@ static_assert(
     "the card's frame is the same product, typed"
 );
 
-[[nodiscard]] Ex<SectorBlockDecl> find_sector_block(
+[[nodiscard]] Ex<SectorBlockDeclLookup> find_sector_block(
     const SysDirectoryImage& dir,
     hal::LwExtent window
 ) noexcept;

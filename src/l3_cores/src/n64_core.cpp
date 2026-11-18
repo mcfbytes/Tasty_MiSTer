@@ -13,6 +13,7 @@
 #include "cores/stream_load_end.h"
 #include "infra/endian.h"
 #include "infra/indexed_array.h"
+#include "infra/path_parts.h"
 #include "proto/core_session.h"
 
 namespace mister::cores {
@@ -20,7 +21,7 @@ namespace mister::cores {
 N64Core::N64Core(const CoreProfile& p, const HostServices& h)
     : Core(p, h),
       cheats_(h.clock, h.windows.named(manifests::kN64Windows[0].region.name)),
-      saves_(h.vfs, h.disk_activity) {}
+      saves_(h.save_store) {}
 
 using n64::SystemType;
 
@@ -63,15 +64,12 @@ void N64Core::on_status_changed() noexcept {
     saves_.note_layout(*this);
 }
 
-void N64Core::on_set_pending_file_ext(std::string_view ext) noexcept {
-    (void)ext_.assign(ext);
-}
-
-Ex<proto::SessionParams> N64Core::stream_opening(IoIndex index) {
+Ex<proto::SessionParams> N64Core::stream_opening(const StreamAsk& ask) {
     TASTY_SEAT_BODY(N64Core);
+    const proto::FioIndexByte index = ask.index;
     if (!session_)
-        return std::unexpected(Error{Errc::core_load, ERR_SITE(), index.v});
-    const n64::FileRoute route = n64::stream_route(index);
+        return std::unexpected(index.refusal(Errc::core_load, ERR_SITE()));
+    const n64::FileRoute route = n64::stream_route(index.io());
     last_index_ = index;
     ++transfers_;
     bytes_sent_ = 0;
@@ -80,6 +78,8 @@ Ex<proto::SessionParams> N64Core::stream_opening(IoIndex index) {
     } else {
         crc32_ = {};
     }
+
+    (void)ext_.assign(infra::suffix_from_last_dot(ask.path));
     proto::SessionParams params{};
     params.ext = ext_.view();
     return params;
@@ -90,11 +90,11 @@ void N64Core::stream_closed(const StreamLoadEnd& end) noexcept {
     bytes_sent_ = end.bytes.v;
     if (!end.ok)
         return;
-    const n64::FileRoute route = n64::stream_route(end.index);
+    const n64::FileRoute route = n64::stream_route(end.index.io());
     if (route != n64::FileRoute::Rom && route != n64::FileRoute::Ipl)
         return;
 
-    if (route == n64::FileRoute::Rom || (end.index.v & 0x3fu) == n64::kDdIplIndex.v) {
+    if (route == n64::FileRoute::Rom || end.index.io() == n64::kDdIplIndex) {
         loaded_ = true;
     }
 

@@ -28,7 +28,7 @@ public:
 
     [[nodiscard]] Ex<PcmExtent> open(svc::TrackNumber track) override;
     [[nodiscard]] Ex<std::span<std::byte>> read_at(
-        std::uint64_t off,
+        proto::FileSize into,
         std::span<std::byte> dst
     ) override;
     void close() noexcept override;
@@ -43,14 +43,14 @@ public:
 
 private:
     [[nodiscard]] Ex<void> ensure_parsed_();
-    [[nodiscard]] Ex<void> locate_data_(svc::IFile& f, std::uint32_t file_size);
+    [[nodiscard]] Ex<void> locate_data_(svc::IFile& f, proto::FileSize file_size);
 
     const svc::Vfs* vfs_;
     FixedStr<CueSheet::kPathMax, StrFit::Clip> cue_{};
     FixedStr<CueSheet::kPathMax, StrFit::Clip> base_{};
     CueSheet sheet_{};
     std::unique_ptr<svc::IFile> wav_{};
-    std::uint32_t data_start_ = 0;
+    proto::FileOffset data_start_ = proto::kFileStart;
     std::uint32_t data_size_ = 0;
     bool parsed_ = false;
 };

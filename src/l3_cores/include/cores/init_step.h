@@ -2,7 +2,7 @@
 #pragma once
 
 #include "cores/types.h"
-#include "proto/core_session.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 

@@ -6,6 +6,7 @@
 
 #include <chrono>
 
+#include "app/save_stage_director.h"
 #include "hal/boot_handoff.h"
 
 namespace mister::app {
@@ -46,10 +47,41 @@ void BoardReboot::settle(bool cold) {
     due_ = os::Deadline::in(clock_, std::chrono::nanoseconds{kDrainBoundNs});
 }
 
+void BoardReboot::quiesced() {
+    TASTY_SEAT_BODY(BoardReboot);
+    if (!owed_ || owed_->commit)
+        return;
+    commit_or_finish_();
+}
+
+void BoardReboot::commit_or_finish_() {
+    if (!director_)
+        return finish();
+    commit_seq_ = commit_seq_.next();
+    owed_->commit = CommitAllOrder{
+        .seq = commit_seq_,
+        .ordered = director_->order_commit_all(commit_seq_)
+    };
+    due_ = os::Deadline::in(clock_, proto::kRebootCommitBound);
+}
+
 bool BoardReboot::watch() {
     TASTY_SEAT_BODY(BoardReboot);
     if (!owed_)
         return false;
+    if (auto& commit = owed_->commit) {
+        if (!commit->ordered)
+            commit->ordered = director_->order_commit_all(commit->seq);
+        if (commit->ordered && director_->commit_all_served(commit->seq)) {
+            finish();
+            return false;
+        }
+        if (!due_.expired(clock_))
+            return true;
+        tally_.reboot_commit_expiries.add();
+        finish();
+        return false;
+    }
     if (!owed_->ordered) {
 
         owed_->ordered = repush_(
@@ -60,8 +92,8 @@ bool BoardReboot::watch() {
         return true;
 
     ++tally_.reboot_drain_expiries;
-    finish();
-    return false;
+    commit_or_finish_();
+    return owed_.has_value();
 }
 
 void BoardReboot::finish() {

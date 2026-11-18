@@ -30,6 +30,7 @@
 #include "report.h"
 #include "app/board_ops.h"
 #include "app/board_reboot.h"
+#include "app/boot_handoff.h"
 #include "infra/error.h"
 #include "infra/heartbeat.h"
 #include "infra/opt_ref.h"
@@ -190,6 +191,7 @@ int ProcessStandup::ExitPath::fail() const {
     if (session_) {
         app::LinkSession& sup = session_->sup_;
         app::ExitReboot owed = app::ExitReboot::None;
+        session_->settle_save_lane();
         {
             const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
             if (auto sd = sup.shutdown(); !sd) {
@@ -218,6 +220,20 @@ const ProcessStandup::ExitPath::SessionStage& ProcessStandup::ExitPath::session(
         );
     }
     return *session_;
+}
+
+void ProcessStandup::ExitPath::SessionStage::settle_save_lane() const {
+    app::LinkSession& sup = sup_.get();
+    bool fio_free = false;
+    {
+        const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
+        fio_free = sup.save_lane_fio_free();
+    }
+    const mister::SeatScope main_as_main{mister::SeatTag::Main};
+    handoff_.get().settle_save_lane([&sup, fio_free] {
+        const mister::SeatScope step_stands_in_for_rt{mister::SeatTag::RT};
+        return sup.settle_save_step(fio_free);
+    });
 }
 
 void ProcessStandup::ExitPath::SessionStage::reboot_at_exit(ColdRebootCause why) const {
@@ -443,6 +459,12 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
             .doorbells = board.doorbells,
             .doorbell_nodes = hal::doorbell_nodes(board),
             .video = board.video,
+            .write_combine = board.memory.write_combine
+                                 .resolve(
+                                     ERR_SITE(),
+                                     hal::fact_ordinal(hal::FactField::MemoryWriteCombine)
+                                 )
+                                 .value_or(hal::WriteCombine::Forbidden),
             .kernel = board.kernel,
             .disk_lamp = parts_->disk_lamp(),
             .threads = board.threads,
@@ -467,7 +489,7 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
     app::LinkSession& session = hub_->link_session();
     app::SessionOwner& owner = hub_->owner();
 
-    exit_ = ExitPath{link, session, owner.board_reboot(), mode_};
+    exit_ = ExitPath{link, session, owner.board_reboot(), owner.handoff(), mode_};
     mode_.voice().kernel(ev_.kernel);
     return {};
 }
@@ -481,7 +503,7 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
 
         const app::BootArgs boot_args = mode_.traits().boot_args;
 
-        if (const Ex<void> silenced = mode_.before_boot(session); !silenced) {
+        if (const Ex<void> silenced = mode_.before_boot(owner); !silenced) {
             report("MAIN: StdoutRouter::install_initial_silence", silenced.error());
             return exit_.fail();
         }
@@ -511,14 +533,16 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
                 if (!boot_config_latched && owner.boot_config_parsed()) {
                     boot_config_latched = true;
                     if (const auto exe = mode_.boot_handoff(owner)) {
-                        app::ExitReboot failed = app::ExitReboot::None;
-                        {
-                            const mister::SeatScope session_as_rt{mister::SeatTag::RT};
-                            failed = session.handoff_to_alternate_executable(
+
+                        const app::ExitReboot
+                            failed = owner.handoff().handoff_to_alternate_executable(
                                 exe->c_str(),
-                                boot_args
+                                boot_args,
+                                [&session] {
+                                    const mister::SeatScope session_as_rt{mister::SeatTag::RT};
+                                    session.hold_core();
+                                }
                             );
-                        }
 
                         if (failed == app::ExitReboot::Cold) {
                             exit_.session().reboot_at_exit(ColdRebootCause::ExecFailed);
@@ -619,11 +643,18 @@ int ProcessStandup::shut_down(const Ex<void>& ran) {
 
         assembly.mark_quiescing();
 
+        exit_.session().settle_save_lane();
+
         if (auto sd = session.shutdown(); !sd) {
             report("LinkSession::shutdown", sd.error());
         } else {
             exit_owed = *sd;
         }
+    }
+    {
+
+        const mister::SeatScope main_as_main{mister::SeatTag::Main};
+        hub_->owner().order_exit_commits();
     }
     if (exit_owed == app::ExitReboot::Cold)
         exit_.session().reboot_at_exit(ColdRebootCause::UnconfiguredFabric);

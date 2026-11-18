@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_block_poll.h"
 #include "hal/selected.h"
-#include "infra/endian.h"
+#include "hal/spi_halves.h"
 #include "proto/block_server.h"
 #include "proto/uio_opcodes.h"
+#include "proto/wire_word.h"
 
 #include <array>
 #include <span>
@@ -23,34 +24,27 @@ enum CsdLayout : unsigned {
     kCsdSizeByte0 = 6,
     kCsdSizeByte1 = 7,
     kCsdSizeByte2 = 8,
-    kCsdSizeShift0 = 9,
-    kCsdSizeShift1 = 17,
-    kCsdSizeShift2 = 25,
-    kPairBytes = 2,
     kSdhcPermanently = 1,
     kStockBlockBytes = 512,
 };
 
-enum StockRequest : std::uint16_t {
-    kStockTagMask = 0x00F0,
-    kStockTag = 0x0050,
-    kStockActive = 0x3F03,
-    kStockConfig = 0x000C,
-    kStockNoAck = 0x0004,
-    kStockDisk0 = 0x0003,
-    kStockDisk0Read = 0x0001,
-    kStockDisk1 = 0x0900,
-    kStockDisk1Read = 0x0100,
-    kStockDisk2 = 0x1200,
-    kStockDisk2Read = 0x0200,
-    kStockDisk3 = 0x2400,
-    kStockDisk3Read = 0x0400,
-    kLbaHalfBits = 16,
-};
+inline constexpr hal::SpiWord kStockTagMask{0x00F0};
+inline constexpr hal::SpiWord kStockTag{0x0050};
+inline constexpr hal::SpiWord kStockActive{0x3F03};
+inline constexpr hal::SpiWord kStockConfig{0x000C};
+inline constexpr hal::SpiWord kStockNoAck{0x0004};
+inline constexpr hal::SpiWord kStockDisk0{0x0003};
+inline constexpr hal::SpiWord kStockDisk0Read{0x0001};
+inline constexpr hal::SpiWord kStockDisk1{0x0900};
+inline constexpr hal::SpiWord kStockDisk1Read{0x0100};
+inline constexpr hal::SpiWord kStockDisk2{0x1200};
+inline constexpr hal::SpiWord kStockDisk2Read{0x0200};
+inline constexpr hal::SpiWord kStockDisk3{0x2400};
+inline constexpr hal::SpiWord kStockDisk3Read{0x0400};
 
 struct StockDiskRow {
-    StockRequest any;
-    StockRequest read;
+    hal::SpiWord any;
+    hal::SpiWord read;
     DiskUnit unit;
 };
 
@@ -66,45 +60,26 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
     std::span<const std::uint8_t> bytes,
     hal::Width width
 ) {
-    if (width == hal::Width::Word) {
-        for (std::size_t i = 0; i + 1 < bytes.size(); i += kPairBytes) {
-            const auto pair_word = infra::load_le<std::uint16_t>(
-                bytes.subspan(i).first<kPairBytes>()
-            );
-            if (auto r = link.transfer(hal::SpiWord{pair_word}); !r) {
-                return std::unexpected(r.error());
-            }
-        }
-        if ((bytes.size() & 1u) != 0u) {
-            if (auto r = link.transfer(hal::SpiWord{std::uint16_t{bytes.back()}}); !r) {
-                return std::unexpected(r.error());
-            }
-        }
-        return {};
-    }
-    for (const std::uint8_t b : bytes) {
-        if (auto r = link.transfer(hal::SpiWord{b}); !r) {
-            return std::unexpected(r.error());
-        }
-    }
+    auto walk = for_each_word(width, bytes, [&link](hal::SpiWord word) {
+        if (auto r = link.transfer(word); !r)
+            return Ex<bool>{std::unexpected(r.error())};
+        return Ex<bool>{true};
+    });
+    if (!walk)
+        return std::unexpected(walk.error());
     return {};
-}
-
-Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
-    return Lba{
-        static_cast<std::uint32_t>(low.v) | (static_cast<std::uint32_t>(high.v) << kLbaHalfBits)
-    };
 }
 
 }
 
 [[nodiscard]] Ex<void> SpiBlockPoll::send_config() {
     hal::ISpiTransport& link = wiring_.link;
-    const std::uint64_t size0 = wiring_.slot0_file_bytes ? *wiring_.slot0_file_bytes : 0;
+    const FileSize size0 = wiring_.slot0_file_bytes ? *wiring_.slot0_file_bytes : FileSize{};
     std::array<std::uint8_t, kCsd.size()> csd = kCsd;
-    csd[kCsdSizeByte0] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift0);
-    csd[kCsdSizeByte1] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift1);
-    csd[kCsdSizeByte2] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift2);
+    const auto [csize0, csize1, csize2] = size0.csd_size_bytes();
+    csd[kCsdSizeByte0] = csize0;
+    csd[kCsdSizeByte1] = csize1;
+    csd[kCsdSizeByte2] = csize2;
 
     hal::Selected cs(link, hal::ChipSelect::Io);
 
@@ -146,7 +121,7 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
             auto r0 = link.transfer(word(UioOp::GetSdStat));
             if (!r0)
                 return std::unexpected(r0.error());
-            c = SdStatusWord{r0->v};
+            c = SdStatusWord::of(*r0);
         }
 
         if (c.valid()) {
@@ -162,7 +137,7 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
                 return std::unexpected(w3.error());
 
             d.req.slot = c.slot();
-            d.req.lba = lba_of_words(*w2, *w3);
+            d.req.lba = Lba::of(hal::SpiHalves{.low = *w2, .high = *w3});
             d.req.block_count = c.block_count();
             d.req.write = c.writes();
             d.block_size = c.block_size();
@@ -173,36 +148,36 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
             auto w1 = link.transfer(hal::SpiWord{0});
             if (!w1)
                 return std::unexpected(w1.error());
-            const std::uint16_t rq = w1->v;
+            const hal::SpiWord rq = *w1;
             stock = true;
             d.block_size = BlockSize{kStockBlockBytes};
             d.req.block_count = BlockCount{1};
 
-            if ((rq & kStockTagMask) == kStockTag && (rq & kStockActive) != 0u) {
+            if (rq.masked(kStockTagMask) == kStockTag && rq.any_of(kStockActive)) {
                 auto w2 = link.transfer(hal::SpiWord{0});
                 if (!w2)
                     return std::unexpected(w2.error());
                 auto w3 = link.transfer(hal::SpiWord{0});
                 if (!w3)
                     return std::unexpected(w3.error());
-                d.req.lba = lba_of_words(*w2, *w3);
+                d.req.lba = Lba::of(hal::SpiHalves{.low = *w2, .high = *w3});
 
-                config_request = ((rq & kStockConfig) == kStockConfig);
+                config_request = rq.all_of(kStockConfig);
 
                 std::optional<DiskUnit> disk;
                 bool read = false;
                 for (const StockDiskRow& row : kStockDisks) {
-                    if ((rq & row.any) == 0u)
+                    if (!rq.any_of(row.any))
                         continue;
                     disk = row.unit;
-                    read = (rq & row.read) != 0u;
+                    read = rq.any_of(row.read);
                     break;
                 }
 
-                d.ack = (rq & kStockNoAck) != 0u || !disk ? SectorAck{} : SectorAck::stock(*disk);
+                d.ack = rq.any_of(kStockNoAck) || !disk ? SectorAck{} : SectorAck::stock(*disk);
 
                 if (disk) {
-                    d.req.slot = SlotIndex{disk->v};
+                    d.req.slot = disk->slot();
                     d.req.write = !read;
                     d.decoded = true;
                     ++diag_.stock_requests;

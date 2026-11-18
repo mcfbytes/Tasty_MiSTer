@@ -23,7 +23,7 @@ public:
     [[nodiscard]] std::uint32_t held() const noexcept { return held_; }
 
 private:
-    [[nodiscard]] Ex<void> hold_(UioOp opcode, std::uint8_t index, std::uint32_t word);
+    [[nodiscard]] Ex<void> hold_(UioOp opcode, std::uint8_t index, PadWord word);
 
     PadLevels want_{};
     std::uint32_t held_ = 0;

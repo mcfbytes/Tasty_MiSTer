@@ -36,11 +36,11 @@ Ex<void> CdCore::on_mount(IoIndex, const MountedPath& p) {
     return drive_.arm_disc(p);
 }
 
-Ex<proto::SessionParams> CdCore::stream_opening(IoIndex) {
+Ex<proto::SessionParams> CdCore::stream_opening(const StreamAsk& ask) {
     TASTY_SEAT_BODY(CdCore);
     if (auto r = drive_.eject_for_cart(); !r)
         return std::unexpected(r.error());
-    tx_.opened();
+    tx_.opened(ask);
     proto::SessionParams params{};
     params.ext = tx_.ext();
     return params;

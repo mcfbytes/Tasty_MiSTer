@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -133,12 +134,19 @@ public:
         const DeviceIdentity& id,
         bool mod
     ) const;
-    [[nodiscard]] Ex<void> save(
+
+    struct Write {
+        std::string rel;
+        std::string retire;
+        std::span<const std::byte> bytes;
+    };
+
+    [[nodiscard]] static Ex<Write> encode(
         std::string_view core,
         const DeviceIdentity& id,
         const ButtonMap& map,
         bool mod
-    ) const;
+    );
 
 private:
     infra::OptRef<const Vfs> vfs_;

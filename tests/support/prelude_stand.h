@@ -22,16 +22,9 @@
 #include "support/fake_link_router.h"
 #include "support/stand_ini.h"
 #include "support/temp_root.h"
+#include "testing/step_clock.h"
 
 namespace mister::testing {
-
-struct PreludeClock final : os::IClock {
-    std::int64_t ns = 0;
-
-    [[nodiscard]] os::RawMonotonicClock::time_point now() const override {
-        return os::RawMonotonicClock::time_point{std::chrono::nanoseconds{ns}};
-    }
-};
 
 [[nodiscard]] inline app::VideoWire::Wiring video_wiring(
     app::LinkTxChannel<SeatTag::Ui>& link_tx,
@@ -85,7 +78,7 @@ public:
         : wire_(wire),
           ui_rx_(ui_rx),
           vfs_(vfs),
-          clock_{},
+          clock_{std::chrono::nanoseconds{0}},
           composer_({.wire = wire, .audio = audio_, .clock = clock_}) {}
 
     PreludeStand(const PreludeStand&) = delete;
@@ -97,7 +90,7 @@ public:
 
     [[nodiscard]] const svc::Vfs& vfs() const noexcept { return vfs_; }
 
-    [[nodiscard]] PreludeClock& clock() noexcept { return clock_; }
+    [[nodiscard]] StepClock& clock() noexcept { return clock_; }
 
     void core_loaded(bool front_end = false) noexcept {
         const mister::SeatScope as_ui{mister::SeatTag::Ui};
@@ -144,8 +137,8 @@ private:
     app::VideoWire& wire_;
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
     const svc::Vfs& vfs_;
-    app::AudioPump audio_{vfs_, wire_};
-    PreludeClock clock_{};
+    app::AudioPump audio_{vfs_, wire_, {}};
+    StepClock clock_{std::chrono::nanoseconds{0}};
     app::PreludeComposer composer_;
     bool armed_ = false;
     proto::BindGeneration gen_{};

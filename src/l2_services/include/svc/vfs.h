@@ -20,6 +20,7 @@
 #include "svc/dir_entry.h"
 #include "svc/durable_write.h"
 #include "svc/file.h"
+#include "svc/rename_files.h"
 #include "svc/scan_filter.h"
 #include "svc/search_policy.h"
 #include "svc/types.h"
@@ -28,6 +29,7 @@
 namespace mister::svc {
 
 class MemoryMounts;
+class CardWriter;
 
 using proto::FileSize;
 
@@ -83,15 +85,10 @@ public:
     bool dir_exists(std::string_view path) const noexcept;
     bool file_exists(std::string_view path) const noexcept;
 
+    enum class NameKind : std::uint8_t { Absent, PlainFile, Other };
+    [[nodiscard]] NameKind name_kind(std::string_view path) const noexcept;
+
     [[nodiscard]] Ex<std::chrono::sys_seconds> modified(std::string_view path) const;
-
-    [[nodiscard]] Ex<void> ensure_dir(std::string_view rel) const;
-
-    [[nodiscard]] Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const {
-        return durable_.replace(tmp_rel, final_rel);
-    }
-
-    void sync_parent_dir(std::string_view path) const noexcept { durable_.sync_parent_dir(path); }
 
     using DurabilityLog = DurableWrite::DurabilityLog;
     static DurabilityLog durability_log() noexcept;
@@ -109,11 +106,22 @@ public:
 
 private:
     friend struct VfsTestAccess;
+    friend class CardWriter;
 
     Vfs(StorageRoot root, std::string root_path);
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;
     [[nodiscard]] std::string composed_(std::string_view path) const;
+
+    Ex<std::unique_ptr<IFile>> open_write_(std::string_view path, OpenMode mode) const;
+
+    [[nodiscard]] Ex<void> ensure_dir_(std::string_view rel) const;
+
+    [[nodiscard]] Ex<void> replace_(const RenameFiles& names) const;
+
+    void sync_parent_dir_(std::string_view path) const noexcept;
+
+    [[nodiscard]] Ex<void> remove_(std::string_view rel) const;
 
     StorageRoot root_{};
     std::string root_path_;

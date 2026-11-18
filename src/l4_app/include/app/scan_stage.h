@@ -44,8 +44,8 @@ private:
     [[nodiscard]] Step finish_scan_(Ctx ctx) noexcept;
 
     std::unique_ptr<svc::IFile> file_{};
-    std::uint64_t file_size_ = 0;
-    std::uint64_t off_ = 0;
+    proto::FileSize file_size_{};
+    proto::FileOffset off_{};
     bool in_log_ = false;
     bool log_done_ = false;
 

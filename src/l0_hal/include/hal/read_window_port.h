@@ -11,7 +11,7 @@
 namespace mister::hal {
 
 template <class Layout, class Owner>
-class ReadWindowPort final : public IRegPort<Layout, RegAccess::ReadOnly> {
+class ReadWindowPort final : public IRegPort<Layout> {
     TASTY_SEAT_FROM(Owner);
 
 public:

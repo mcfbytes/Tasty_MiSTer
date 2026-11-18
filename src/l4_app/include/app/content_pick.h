@@ -42,7 +42,7 @@
 #include "cores/loader_memo.h"
 #include "cores/ram_image_recipe.h"
 #include "cores/registry.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/telemetry.h"
@@ -83,7 +83,7 @@ public:
         svc::Crc32 crc{};
         proto::WideIoIndex wire_index{};
         PathText path{};
-        std::uint64_t from = 0;
+        proto::FileOffset from{};
         bool cut_on_hold = false;
     };
 
@@ -146,7 +146,7 @@ public:
         ActKeys& act_keys;
         const proto::StatusCell& status_cell;
         const BootRestore& boot_restore;
-        hal::PhysRegion aperture;
+        hal::FpgaAperture aperture;
         WindowTally& windows;
     };
 
@@ -286,7 +286,7 @@ private:
     ActKeys& act_keys_;
     const proto::StatusCell& status_cell_;
     const BootRestore& boot_restore_;
-    const hal::PhysRegion aperture_;
+    const hal::FpgaAperture aperture_;
     WindowTally& windows_;
     Owed content_owed_{};
     std::optional<PickedLoad> picked_load_{};

@@ -32,7 +32,7 @@ inline constexpr auto kCdiSlots = std::to_array<FileSlot>({
 inline constexpr auto kCdiStartAssets = stock_start_chain("CD-i");
 
 inline constexpr StagingPolicy kCdiStaging{
-    .order = StageOrder::Cdi,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kCdiSlots),
     .save = SaveMountPolicy{
@@ -60,8 +60,10 @@ inline constexpr CoreProfile kCdi{
     .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{cdi::kBlockBytes}),
     .image_rows_no_zip = true,
     .cheats = {},
-    .file_tx_whole = true,
+    .no_stream_role = true,
     .reset = {},
+
+    .grants = {Grant::Discs},
 };
 
 std::unique_ptr<Core> make_cdi(const CoreProfile& p, const CoreGrant& g);

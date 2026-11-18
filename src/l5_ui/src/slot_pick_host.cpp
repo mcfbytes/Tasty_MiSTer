@@ -111,8 +111,7 @@ Transition SlotPickHost::open(const OptionItem& it, bool offer_recent) {
         refusals_.add();
         return Transition{};
     }
-    b_.browser->pending = browser_request(it, *row, offer_recent);
-    return Transition::push(PageId::Browser);
+    return b_.browser->open(PageId::Browser, browser_request(it, *row, offer_recent));
 }
 
 Transition SlotPickHost::open_recents(const OptionItem& it) {
@@ -125,8 +124,7 @@ Transition SlotPickHost::open_recents(const OptionItem& it) {
     if (b_.recents->load(r.recents_core, *r.recents).empty())
         return Transition{};
     r.recents_first = true;
-    b_.browser->pending = static_cast<BrowserSession::Request&&>(r);
-    return Transition::push(PageId::Browser);
+    return b_.browser->open(PageId::Browser, static_cast<BrowserSession::Request&&>(r));
 }
 
 Transition SlotPickHost::pick(const OptionItem& it, std::string_view path) {

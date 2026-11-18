@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "hal/board_profile.h"
 #include "hal/phys_region.h"
 #include "proto/mailbox_act.h"
 #include "proto/mailbox_frame.h"
@@ -42,11 +43,20 @@ inline constexpr std::uint32_t kSectorBytes = 1024;
 inline constexpr std::uint16_t kAudioIndex = 2;
 inline constexpr std::uint8_t kDataIndex = 3;
 
-inline constexpr std::uint32_t kGapAt = 0x01A0'0000u;
-inline constexpr std::uint32_t kGapBytes = 0x0080'0000u;
+inline constexpr std::uint32_t kCoreHoleOffset = 0x0200'0000u;
+inline constexpr std::uint32_t kCoreHoleBytes = 0x0080'0000u;
 
-inline constexpr std::uint32_t kStockDataBound = 0x1F20'0000u;
-inline constexpr proto::FileSize kDataBound{0x1EA0'0000u};
+inline constexpr std::uint32_t kDataBaseOffset = 0x0300'0000u;
+
+inline constexpr std::uint32_t kTrackOffset = 0x0380'0000u;
+
+inline constexpr std::uint32_t kSaveStateOffset = 0x1F80'0000u;
+inline constexpr proto::FileSize kDataBound{0x1C00'0000u};
+
+static_assert(
+    kDataBaseOffset >= kCoreHoleOffset && kDataBaseOffset == kTrackOffset - kCoreHoleBytes
+);
+static_assert(proto::FileSize{kTrackOffset} + kDataBound == proto::FileSize{kSaveStateOffset});
 
 struct TrackCursor {
     std::uint64_t v = 0;
@@ -77,17 +87,9 @@ struct TrackCursor {
     return set_words((std::uint64_t{size} << 16) | kSetTrackSize);
 }
 
-[[nodiscard]] constexpr proto::MailboxWords set_data_base(hal::FabricAddr base) noexcept {
-    const auto halves = hal::to_phys(base).low_halves();
+[[nodiscard]] constexpr proto::MailboxWords set_data_base() noexcept {
+    const auto halves = hal::kBoardApertures.front().translate(kDataBaseOffset)->low_halves();
     return {kSetDataBase, halves[0], halves[1]};
-}
-
-[[nodiscard]] constexpr std::uint64_t window_offset(std::uint64_t file_off) noexcept {
-    return file_off < kGapAt ? file_off : file_off + kGapBytes;
-}
-
-[[nodiscard]] constexpr proto::FileSize data_extent(proto::FileSize size) noexcept {
-    return size.holds_offset(kGapAt) ? size + proto::FileSize{kGapBytes} : size;
 }
 
 }

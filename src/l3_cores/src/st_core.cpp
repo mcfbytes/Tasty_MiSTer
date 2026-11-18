@@ -15,7 +15,6 @@
 #include "proto/link.h"
 #include "proto/spi_frame.h"
 #include "proto/download_session.h"
-#include "proto/image_bracket.h"
 #include "proto/status_word.h"
 #include "proto/uio_opcodes.h"
 
@@ -23,22 +22,12 @@ namespace mister::cores {
 
 namespace {
 
-constexpr auto kBlankCart = [] {
-    std::array<std::uint8_t, StCore::kCartBytes> a{};
-    a.fill(std::uint8_t{0xFF});
-    return a;
-}();
-
 constexpr auto kDiskSlots = std::array{
     st_ctrl::StSlot::FloppyA,
     st_ctrl::StSlot::FloppyB,
     st_ctrl::StSlot::Acsi0,
     st_ctrl::StSlot::Acsi1
 };
-
-[[nodiscard]] constexpr proto::DiskUnit unit_of(AcsiTarget target) noexcept {
-    return proto::DiskUnit{target.v};
-}
 
 [[nodiscard]] constexpr proto::FileSize file_size_of(std::span<const std::uint8_t> bytes) noexcept {
     return proto::FileSize{bytes.size()};
@@ -68,13 +57,14 @@ Ex<void> StCore::push_control_() {
     proto::SpiFrame frame{host().link};
     if (auto r = frame.begin(proto::UioOp::SetStatus2); !r)
         return r;
-    const std::uint16_t payload[4] = {
-        static_cast<std::uint16_t>(cfg_.system_ctrl.v),
-        static_cast<std::uint16_t>((cfg_.system_ctrl.v >> 16)),
-        static_cast<std::uint16_t>(cfg_.ext_ctrl),
-        static_cast<std::uint16_t>((cfg_.ext_ctrl >> 16)),
+    const hal::SpiHalves sys = cfg_.system_ctrl.wire_halves();
+    const std::array<hal::SpiWord, 4> payload = {
+        sys.low,
+        sys.high,
+        hal::SpiWord{static_cast<std::uint16_t>(cfg_.ext_ctrl)},
+        hal::SpiWord{static_cast<std::uint16_t>(cfg_.ext_ctrl >> 16)}
     };
-    for (const std::uint16_t w : payload) {
+    for (const hal::SpiWord w : payload) {
         if (auto r = frame.word(w); !r)
             return r;
     }
@@ -134,90 +124,27 @@ Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts, std::s
                 return {};
             }
             ++cold_resets_;
-            return clear_low_ram_();
-        case StMediaFact::Verb::NoTos:
-            ++tos_refusals_;
             return {};
-        case StMediaFact::Verb::NoCart:
-            return tx_cart_(kBlankCart);
+        case StMediaFact::Verb::NoTos:
+            ++no_tos_refusals_;
+            return {};
         case StMediaFact::Verb::Release:
             return update_sysctrl_(cfg_.system_ctrl.without(st_ctrl::CtrlWord::kCpuReset));
         case StMediaFact::Verb::kCount:
             break;
     }
-    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), detail_of(f->verb)});
-}
-
-Ex<void> StCore::clear_low_ram_() {
-
-    static constexpr std::array<std::uint8_t, kClearBytes> kZero{};
-    auto ds = proto::DownloadSession::begin(host().link, kClearIndex);
-    if (!ds)
-        return std::unexpected(ds.error());
-    if (auto r = ds->write(std::span<const std::uint8_t>(kZero), hal::Width::Word); !r) {
-        return r;
-    }
-    return ds->end();
-}
-
-Ex<void> StCore::tx_tos_(std::span<const std::uint8_t> bytes, std::string_view ext) {
-    const std::uint64_t len = bytes.size();
-    proto::WideIoIndex index{};
-    if (len >= kTosLargeBytes) {
-        index = kTosLargeIndex;
-    } else if (len == kTosSmallBytes) {
-        index = kTosSmallIndex;
-    } else {
-        ++tos_refusals_;
-        return {};
-    }
-    proto::SessionParams params{};
-    params.ext = ext;
-    auto bracket = proto::ImageBracket::open(image_sink(), index, params);
-    if (!bracket)
-        return std::unexpected(bracket.error());
-
-    for (std::size_t off = 0; off < bytes.size(); off += kChunkBytes) {
-        const std::size_t n = std::min(kChunkBytes, bytes.size() - off);
-        if (auto r = bracket->write(bytes.subspan(off, n)); !r)
-            return r;
-    }
-    if (auto r = bracket->end(); !r)
-        return r;
-    bytes_sent_ = len;
-    return {};
-}
-
-Ex<void> StCore::tx_cart_from_(std::span<const std::uint8_t> image) {
-    if (cfg_.system_ctrl.has(st_ctrl::CtrlWord::kDongle)) {
-        return tx_cart_(kBlankCart);
-    }
-    if (image.size() != kCartBufferBytes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), file_size_of(image).detail()});
-    }
-
-    return tx_cart_(image.subspan(sizeof(std::uint32_t)));
-}
-
-Ex<void> StCore::tx_cart_(std::span<const std::uint8_t> rom) {
-    auto bracket = proto::ImageBracket::open(image_sink(), kCartIndex);
-    if (!bracket)
-        return std::unexpected(bracket.error());
-    if (auto r = bracket->write(rom); !r)
-        return r;
-    bytes_sent_ = kCartBytes;
-    return bracket->end();
+    return std::unexpected(f->refusal(Errc::bad_format, ERR_SITE()));
 }
 
 Ex<void> StCore::insert_disk_(st_ctrl::StSlot slot, std::string_view path) {
     if (const auto target = slot.acsi_target()) {
 
         if (!path.empty())
-            return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+            return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
         return eject_hdd_(*target);
     }
     if (!slot.is_floppy())
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     FixedStr<kPathBytes, StrFit::Clip>& img = infra::at_index(floppy_img_, slot);
     (void)img.assign(path);
 
@@ -229,13 +156,13 @@ Ex<void> StCore::insert_disk_(st_ctrl::StSlot slot, std::string_view path) {
 
 Ex<void> StCore::eject_hdd_(AcsiTarget target) {
     if (host().disk)
-        host().disk->abandon_command_on(unit_of(target));
+        host().disk->abandon_command_on(target.unit());
     (void)cfg_.acsi_img[target].assign({});
     store_sysctrl_(cfg_.system_ctrl.without(st_ctrl::acsi_enable_bit(target)));
     acsi_[target] = AcsiBind{};
     auto pushed = push_control_();
     if (host().disk)
-        host().disk->order_bind(unit_of(target), {});
+        host().disk->order_bind(target.unit(), {});
     return pushed;
 }
 
@@ -253,9 +180,9 @@ MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     if (!acsi_[*target].out || cfg_.acsi_img[*target].view() != path) {
         (void)cfg_.acsi_img[*target].assign(path);
         acsi_[*target] = AcsiBind{.bound = false, .out = true};
-        disk.order_bind(unit_of(*target), path);
+        disk.order_bind(target->unit(), path);
     }
-    const MountState answer = disk.bind_answer(unit_of(*target));
+    const MountState answer = disk.bind_answer(target->unit());
     if (answer == MountState::Pending)
         return MountState::Pending;
     acsi_[*target].out = false;
@@ -268,10 +195,20 @@ MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     return answer;
 }
 
+Ex<proto::SessionParams> StCore::stream_opening(const StreamAsk& ask) {
+    TASTY_SEAT_BODY(StCore);
+    return stream_.stream_opening(StreamAsk{.index = ask.index});
+}
+
+void StCore::stream_closed(const StreamLoadEnd& end) noexcept {
+    TASTY_SEAT_BODY(StCore);
+    stream_.stream_closed(end);
+}
+
 Ex<void> StCore::on_mount(IoIndex slot, const MountedPath& p) {
     const auto disk_slot = st_ctrl::StSlot::of(slot);
     if (!disk_slot)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     if (disk_slot->is_disk())
         return insert_disk_(*disk_slot, p.path);
     if (*disk_slot == st_ctrl::StSlot::Tos) {
@@ -284,21 +221,7 @@ Ex<void> StCore::on_mount(IoIndex slot, const MountedPath& p) {
         (void)cart_img_.assign(p.path);
         return {};
     }
-    return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
-}
-
-void StCore::on_set_pending_file_ext(std::string_view ext) noexcept {
-    (void)ext_.assign(ext);
-}
-
-Ex<void> StCore::on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) {
-    bytes_sent_ = 0;
-    const auto slot = st_ctrl::StSlot::of(index);
-    if (slot == st_ctrl::StSlot::Tos)
-        return tx_tos_(bytes, ext_.view());
-    if (slot == st_ctrl::StSlot::Cart)
-        return tx_cart_from_(bytes);
-    return unimplemented(ERR_SITE());
+    return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
 }
 
 Ex<void> StCore::apply(ConfigBlob value) {
@@ -306,9 +229,7 @@ Ex<void> StCore::apply(ConfigBlob value) {
     StConfig next = StConfig::defaults();
     if (!value.bytes.empty()) {
         if (value.bytes.size() != infra::bytes_of(next).size()) {
-            return std::unexpected(
-                Error{Errc::bad_format, ERR_SITE(), file_size_of(value.bytes).detail()}
-            );
+            return std::unexpected(file_size_of(value.bytes).refusal(Errc::bad_format, ERR_SITE()));
         }
         std::memcpy(&next, value.bytes.data(), sizeof next);
     }
@@ -330,8 +251,10 @@ std::span<const std::byte> StCore::value(std::span<std::byte> dst) const noexcep
     return dst.first(sizeof v);
 }
 
-std::uint32_t StCore::word_(WordId w) const noexcept {
-    return w == WordId{0} ? cfg_.system_ctrl.v : cfg_.ext_ctrl;
+st_ctrl::CtrlWord StCore::word_(WordId w) const noexcept {
+    return w == WordId{0}
+        ? cfg_.system_ctrl
+        : st_ctrl::CtrlWord::load_raw(std::span<const std::uint32_t, 1>(&cfg_.ext_ctrl, 1));
 }
 
 Ex<void> StCore::push_word_(WordId w, st_ctrl::CtrlWord v) {
@@ -361,9 +284,7 @@ OptionRowView StCore::option_view(proto::OptionRowIndex index) noexcept {
                     return {};
                 return StOptionRow::of(*o).cycle_view(facts_(), *cycle);
             }
-            const proto::FieldValue cur = cycle->bits.read(
-                st_ctrl::CtrlWord{word_(cycle->word)}.status_word()
-            );
+            const proto::FieldValue cur = cycle->bits.read(word_(cycle->word).status_word());
             return OptionRowView::cycle(cur, cycle->value_name(cur));
         }
         case OptionRow::Kind::File: {
@@ -408,12 +329,12 @@ Ex<void> StCore::set_option(proto::OptionRowIndex index, proto::FieldValue choic
     const infra::IndexedSpan<const OptionRow, proto::OptionRowIndex> rows{profile().option_rows};
     const auto found = rows.find(index);
     if (!found) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), index.v});
+        return std::unexpected(index.refusal(Errc::slot_range, ERR_SITE()));
     }
     const OptionRow& r = *found;
     const auto o = option_of(r.id);
     if (!o)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.id.wire()});
+        return std::unexpected(r.id.refusal(Errc::slot_range, ERR_SITE()));
     switch (r.kind()) {
         case OptionRow::Kind::Cycle: {
             const OptionRow::CycleArm* cycle = r.cycle_arm();
@@ -430,7 +351,7 @@ Ex<void> StCore::set_option(proto::OptionRowIndex index, proto::FieldValue choic
                 return apply_write_(*w);
             }
             const proto::StatusWord next = cycle->bits.write(
-                st_ctrl::CtrlWord{word_(cycle->word)}.status_word(),
+                word_(cycle->word).status_word(),
                 choice
             );
             return push_word_(cycle->word, st_ctrl::CtrlWord::of(next));
@@ -443,7 +364,7 @@ Ex<void> StCore::set_option(proto::OptionRowIndex index, proto::FieldValue choic
         case OptionRow::Kind::kCount:
             break;
     }
-    return std::unexpected(Error{Errc::slot_range, ERR_SITE(), index.v});
+    return std::unexpected(index.refusal(Errc::slot_range, ERR_SITE()));
 }
 
 Ex<void> StCore::apply_write_(const StOptionRow::Write& w) {
@@ -465,11 +386,13 @@ void StCore::service_kick() noexcept {
 }
 
 bool StCore::acsi_bound(AcsiTarget target) const noexcept {
-    return target.v < kAcsiTargets && acsi_[target].bound;
+    const auto bind = acsi_.find(target);
+    return bind && bind->bound;
 }
 
 std::string_view StCore::acsi_path(AcsiTarget target) const noexcept {
-    return target.v < kAcsiTargets ? cfg_.acsi_img[target].view() : std::string_view{};
+    const auto img = cfg_.acsi_img.find(target);
+    return img ? img->view() : std::string_view{};
 }
 
 }

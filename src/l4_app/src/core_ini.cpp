@@ -88,7 +88,17 @@ void CoreIni::publish(const svc::ConfigSnapshot& cfg) {
     TASTY_SEAT_BODY(CoreIni);
     cell_.publish(cfg);
     idle_cell_.publish(idle_knobs_of(cfg));
+    autosave_cell_.publish(autosave_knobs_of(cfg));
     boot_pending_ = false;
+}
+
+void CoreIni::republish_autosave(bool on) {
+    TASTY_SEAT_BODY(CoreIni);
+    if (boot_pending_)
+        return;
+    AutosaveKnobs k = autosave_cell_.sample().value;
+    k.enabled = on;
+    autosave_cell_.publish(k);
 }
 
 bool CoreIni::wait_for_mount_(std::string_view needle) {

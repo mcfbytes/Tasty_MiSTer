@@ -5,10 +5,6 @@
 
 namespace mister::ui {
 
-bool Navigator::selectable(RowIndex i) const noexcept {
-    return mask_.has(i);
-}
-
 bool Navigator::move(Direction d) noexcept {
     if (mask_ == MenuMask{})
         return false;

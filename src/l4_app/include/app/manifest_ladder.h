@@ -17,7 +17,7 @@
 #include "app/window_tally.h"
 #include "cores/ladder_host.h"
 #include "cores/manifest_stager.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
@@ -37,7 +37,7 @@ public:
         LoadLadder::Host rung;
         cores::ILadderHost& owner;
         ILoadWindowMap<seat_owner::Main>& map;
-        hal::PhysRegion aperture;
+        hal::FpgaAperture aperture;
         WindowTally& windows;
         std::chrono::nanoseconds now_ns{};
     };

@@ -65,7 +65,7 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kMegaCdTicks.speeds == 0, "MegaCD engages no speed-indexed override");
+static_assert(kMegaCdTicks.speeds == CdSpeedCount{}, "MegaCD engages no speed-indexed override");
 
 static_assert(
     kMegaCdCuePolicy.offset_op == svc::CuePolicy::OffsetOp::Accumulate,

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/reg_access.h"
+
 namespace mister::hal {
 
 struct UioFrameLane {
@@ -18,6 +20,8 @@ struct UioFrameLane {
     enum class Sel : std::uint32_t { Uio = 0, Fpga = 1, OsdHdmi = 2, OsdVga = 3 };
 
     static constexpr std::size_t kSize = 0x20;
+
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
     static constexpr std::uint32_t kId = 0x314E414Cu;
     static constexpr std::uint32_t kSelShift = 16;
 

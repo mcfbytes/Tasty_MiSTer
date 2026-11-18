@@ -13,7 +13,7 @@
 namespace mister::app {
 
 class StdoutRouter {
-    TASTY_SEAT_RESIDENT(RT);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Sink : std::uint8_t { Original, Null, DebugFile };

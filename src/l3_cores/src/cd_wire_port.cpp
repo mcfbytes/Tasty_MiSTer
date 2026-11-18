@@ -182,7 +182,7 @@ Ex<void> CdWirePort::submit_sector(const CdSectorAct& act) {
     TASTY_SEAT_BODY(CdWirePort);
     const auto q = fio_queue_;
     if (!q)
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), act.index.v});
+        return std::unexpected(act.index.refusal(Errc::negotiation, ERR_SITE()));
     if (cdda_cap_ && cd_.io.cdda == act.index)
         cdda_cap_->append(std::as_bytes(act.sector));
     std::array<proto::SpiFioQueue::Bracket, 2> b{};
@@ -210,7 +210,8 @@ bool CdWirePort::can_send_data(cdwire::Selector selector) {
         ++wire_faults_;
         return false;
     }
-    return answer->v == 1;
+    constexpr hal::SpiWord kDataReady{1};
+    return *answer == kDataReady;
 }
 
 Ex<void> CdWirePort::send_status(std::span<const std::uint16_t> words) {
@@ -256,7 +257,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
             ++wire_faults_;
             failed = true;
         } else {
-            const auto req = static_cast<std::uint8_t>(first->v);
+            const auto req = first->low_byte();
             wanted = eng.on_command_edge(req);
             if (const auto sel = eng.command_selector(); wanted && sel) {
 
@@ -273,7 +274,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
                         failed = true;
                         break;
                     }
-                    out.words[i] = r->v;
+                    out.words[i] = *r;
                 }
             }
         }

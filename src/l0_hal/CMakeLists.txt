@@ -17,8 +17,11 @@ target_link_libraries(mister_hal
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
+  hal/aperture_region.h
   hal/axi.h
+  hal/block_view.h
   hal/board_profile.h
+  hal/board_regions.h
   hal/board_windows.h
   hal/boards_table.h
   hal/boot_handoff.h
@@ -32,6 +35,10 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/doorbell_source.h
   hal/fact.h
   hal/fact_field.h
+  hal/gpi_block.h
+  hal/gpo_block.h
+  hal/fbdev_placement.h
+  hal/fbdev_probe.h
   hal/fabric_region.h
   hal/fpga_aperture.h
   hal/fpga_memory.h
@@ -39,20 +46,22 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/handoff_page.h
   hal/hdmi_int.h
   hal/hdmi_int_level.h
+  hal/hps_ddr_region.h
   hal/irq_pin.h
   hal/kernel_contract.h
   hal/link_port.h
   hal/link_timing.h
   hal/mailbox.h
   hal/memory_model.h
+  hal/observer_view.h
   hal/phys_region.h
+  hal/pad_block.h
   hal/pin_levels.h
   hal/program_geometry.h
   hal/reboot_flag.h
   hal/read_window_port.h
-  hal/reg.h
+  hal/reg_access.h
   hal/reg_block.h
-  hal/reg_field.h
   hal/reg_port.h
   hal/reg_word.h
   hal/region_id.h
@@ -63,6 +72,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/sdram_cfg.h
   hal/selected.h
   hal/spi_bus.h
+  hal/spi_output.h
   hal/spi_output_observer.h
   hal/spi_sample.h
   hal/spi_sample_source.h
@@ -82,5 +92,9 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/video_out_decl.h
   hal/window_decl.h
   hal/window_port.h
+  hal/disk_lamp.h
+  hal/lw_sys_window.h
+  hal/reg_lend.h
+  hal/spi_halves.h
 )
 

@@ -27,8 +27,9 @@ struct Msf {
         };
     }
 
-    [[nodiscard]] static constexpr Msf of_lba_bcd_masked(std::uint32_t position_frames) noexcept {
+    [[nodiscard]] static constexpr Msf of_lba_bcd_masked(proto::Lba position) noexcept {
         using Bcd = proto::PackedBcd;
+        const std::uint32_t position_frames = position.v;
         const std::uint32_t seconds = position_frames / kFramesPerSecond;
         constexpr std::size_t kFields = 3;
         const std::array<std::uint32_t, kFields> digits{
@@ -54,10 +55,6 @@ struct Msf {
         };
     }
 
-    [[nodiscard]] static constexpr Msf of_lba_bcd_masked(proto::Lba position) noexcept {
-        return of_lba_bcd_masked(position.v);
-    }
-
     [[nodiscard]] static constexpr Msf of_lba_stock(std::int32_t lba) noexcept {
         constexpr std::int32_t kFps = static_cast<std::int32_t>(kFramesPerSecond);
         constexpr std::int32_t kSpm = static_cast<std::int32_t>(kSecondsPerMinute);
@@ -81,10 +78,6 @@ struct Msf {
         };
     }
 
-    [[nodiscard]] static constexpr Msf of_minute(TrackCount count) noexcept {
-        return Msf{count.v, 0, 0};
-    }
-
     [[nodiscard]] static constexpr proto::Lba lba_from_bcd(
         std::span<const std::byte, 3> bytes
     ) noexcept {
@@ -99,7 +92,12 @@ struct Msf {
     friend constexpr bool operator==(Msf, Msf) = default;
 };
 
+constexpr Msf TrackCount::as_toc_minute() const noexcept {
+    return Msf{v, 0, 0};
+}
+
 static_assert(sizeof(Msf) == 3, "the record is the three bytes a frame carries");
+static_assert(TrackCount{12}.as_toc_minute() == Msf{12, 0, 0}, "the count is the minute byte");
 static_assert(Msf::of_lba(-4) == Msf{0, 0, 0}, "the clamped form cannot go negative");
 static_assert(Msf::of_lba(150) == Msf{0, 2, 0}, "150 frames is 00:02:00");
 
@@ -108,11 +106,11 @@ static_assert(
     "the stock form truncates the signed division into the byte"
 );
 static_assert(
-    Msf::of_lba_bcd_masked(150) == Msf{0, 0x02, 0x00} && Msf::of_lba_bcd_masked(450'000).m == 0x00,
+    Msf::of_lba_bcd_masked(proto::Lba{150}) == Msf{0, 0x02, 0x00}
+        && Msf::of_lba_bcd_masked(proto::Lba{450'000}).m == 0x00,
     "the masked form wraps the tens digit"
 );
 static_assert(Msf::of_wrapped(150) == Msf{0, 0x02, 0x00}, "the cdi form packs its bytes");
 static_assert(Msf::of_wrapped(450'000).m == 0xA0, "100 minutes wraps the packed minute byte");
-static_assert(Msf::of_minute(TrackCount{12}) == Msf{12, 0, 0}, "the count is the minute byte");
 
 }

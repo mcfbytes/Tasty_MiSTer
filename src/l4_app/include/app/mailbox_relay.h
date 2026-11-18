@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <utility>
 
 #include "app/companion_host.h"
 #include "app/mailbox_slot.h"
@@ -27,6 +28,8 @@ public:
 
     static constexpr unsigned kReapPerRound = 2;
 
+    static constexpr proto::FioWordCount kMaxRoundWords{proto::kMailboxFrameWords};
+
     explicit MailboxRelay(xthread::WakeFlag& servant_wake) noexcept : chan_(servant_wake) {}
 
     MailboxRelay(const MailboxRelay&) = delete;
@@ -41,6 +44,10 @@ public:
     void bind(proto::MailboxPoll poll, proto::CompanionBindGen gen) noexcept;
 
     void forget() noexcept;
+
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept {
+        return std::exchange(round_words_, proto::FioWordCount{});
+    }
 
     void serve_worker(CompanionHost& host) noexcept;
 
@@ -81,6 +88,7 @@ private:
     bool polling_ = false;
     proto::CompanionBindGen gen_{};
     std::uint16_t round_ = 0;
+    proto::FioWordCount round_words_{};
     xthread::Counter polls_, forwarded_, declines_, stale_, acts_, refusals_, wire_faults_;
     xthread::Counter none_acts_;
 };

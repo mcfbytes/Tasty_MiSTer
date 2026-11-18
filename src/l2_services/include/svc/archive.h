@@ -44,12 +44,12 @@ struct MemberOrdinal {
 };
 
 struct ArchiveLocator {
-    proto::FileSize directory_offset{};
+    proto::FileOffset directory_at{};
     MemberOrdinal ordinal{};
 
     [[nodiscard]] constexpr std::array<std::uint64_t, 2> to_unz() const noexcept {
         std::array<std::uint64_t, 2> words{};
-        directory_offset.stamp_into(words[0]);
+        words[0] = directory_at.seek_word();
         ordinal.stamp_into(words[1]);
         return words;
     }

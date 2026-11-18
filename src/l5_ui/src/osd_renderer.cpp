@@ -293,6 +293,13 @@ void OsdRenderer::glyph(OsdRow row, unsigned col, Glyph g) {
     commit(row);
 }
 
+void OsdRenderer::columns(OsdRow row, std::span<const std::uint8_t> bytes) {
+    const std::size_t n = std::min<std::size_t>(bytes.size(), kLineBytes);
+    std::fill(std::begin(scratch_), std::end(scratch_), std::uint8_t{0});
+    std::copy_n(bytes.begin(), n, std::begin(scratch_));
+    commit(row);
+}
+
 void OsdRenderer::box(OsdRow top, OsdRow bottom) {
     constexpr char kRuleCell = '\x81';
     constexpr std::size_t kCellsBesideStripe = 29;

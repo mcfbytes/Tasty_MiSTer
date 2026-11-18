@@ -54,7 +54,6 @@ public:
     struct DiagWires {
         xthread::DiagLog& log;
         xthread::LogLane& rt_lane;
-        const xthread::Telemetry<bool, SeatTag::RT>& transitioning;
     };
 
     ThreadAssembly(

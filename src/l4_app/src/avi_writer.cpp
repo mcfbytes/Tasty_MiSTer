@@ -83,7 +83,7 @@ void AviWriter::on(const ChunkSlot::Open& s, ControlGeneration gen) noexcept {
     const auto h = avi::header(f_);
     if (!write_all_(h))
         return;
-    pos_ = avi::kHeaderBytes;
+    pos_ = proto::kFileStart + proto::FileSize{avi::kHeaderBytes};
     st_.state = RecWriteState::Open;
 }
 
@@ -104,14 +104,14 @@ void AviWriter::on(const ChunkSlot::Data& s, ControlGeneration gen) noexcept {
         return;
     }
     std::byte* const idx = index_.stripe(0).data();
-    std::uint64_t at = pos_;
+    proto::FileOffset at = pos_;
     for (std::uint32_t i = 0; i < s.chunks; ++i) {
         const ChunkDesc desc = ChunkSlot::desc_word(s.desc, i);
         const std::uint32_t len = desc.payload();
         if (entries_ < kMaxEntries) {
             avi::index_entry(
                 desc.key(),
-                static_cast<std::uint32_t>(at - avi::kMoviFourcc),
+                at - avi::kMoviFourccAt,
                 len,
                 std::span<std::byte, avi::kIndexEntry>(
                     idx + entries_.scaled_by(avi::kIndexEntry),
@@ -121,12 +121,12 @@ void AviWriter::on(const ChunkSlot::Data& s, ControlGeneration gen) noexcept {
             entries_ += AviFrameCount{1};
         }
         f_.max_chunk = std::max(f_.max_chunk, len);
-        at += avi::chunk_bytes(len);
+        at += proto::FileSize{avi::chunk_bytes(len)};
     }
 
     if (!rate_known_ && s.rate.known())
         learn_rate_(s.rate);
-    pos_ += s.used;
+    pos_ += proto::FileSize{s.used};
     f_.frames += s.chunks;
     f_.movi_bytes += s.used;
     st_.frames += s.chunks;

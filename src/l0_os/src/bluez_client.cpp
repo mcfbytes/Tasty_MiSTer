@@ -17,8 +17,8 @@
 #include "os/dbus_header.h"
 #include "os/dbus_message.h"
 #include "os/dbus_reader.h"
+#include "os/dbus_wire_types.h"
 #include "os/dbus_writer.h"
-#include "os/types.h"
 
 namespace mister::os {
 namespace {

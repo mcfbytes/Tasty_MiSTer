@@ -47,7 +47,7 @@ inline constexpr auto kDe10Windows = std::to_array<WindowDecl>({
      .uio_name = "mister_nic301"},
     {.id = WindowId{6},
      .region = {kLwBridgeBase, kLwBridgeSize, "lw-bridge"},
-     .uio_name = "mister_lw_window"},
+     .uio_name = "mister_lw_bridge"},
 });
 static_assert(
     windows_well_formed(kDe10Windows),
@@ -59,7 +59,6 @@ inline constexpr std::array<PhysRegion, kRegionCount> kDe10Regions{
     regions::kX86Share,
     regions::kX86Mem,
     regions::kA2065Flat,
-    regions::kSaturnCdBuf,
     regions::kVideoFb,
     regions::kScalerOut,
 };
@@ -99,11 +98,16 @@ inline constexpr BoardProfile kDe10Profile{
     .fpga_mem = kBoardApertures[std::to_underlying(BoardId::De10Nano)],
     .regions = kDe10Regions,
     .f2h_lines = 64u,
-    .doorbells = {.pool = 8u, .cause_base = LwOffset{0x1000u}, .cause_span = 0x1000u},
+    .doorbells =
+        {.pool = 8u,
+         .first_f2h = os::F2hLine{8u},
+         .vsync_line = os::F2hLine{0u},
+         .cause_base = LwOffset{0x1000u},
+         .cause_span = 0x1000u},
     .irq_pins = kDe10IrqPins,
     .video = {.i2c_buses = I2cBusRange{.first = 0u, .last = 2u}, .vsync_device = "/dev/fb0"},
 
-    .kernel = {.doorbell_prefix = "mister_doorbell", .sd_block = "mmcblk0", .activity_led = {}},
+    .kernel = {.doorbell_prefix = "mister_f2h_irq", .sd_block = "mmcblk0", .activity_led = {}},
     .threads = kDe10ThreadMap,
     .main_cpu = os::CpuId{0},
     .verified = true,
@@ -251,6 +255,39 @@ consteval bool boards_carry_the_published_aperture() {
 static_assert(
     boards_carry_the_published_aperture(),
     "every board row's fpga_mem must be its kBoardApertures entry"
+);
+
+consteval bool boards_regions_are_on_their_side() {
+    for (const BoardProfile* p : kBoardTable) {
+        const FpgaAperture& ap = p->fpga_mem;
+        for (std::size_t i = 0; i < kRegionCount; ++i) {
+            const PhysRegion& r = p->regions[i];
+            if (r.len == regions::kLenUnsourced)
+                continue;
+            if (ap.region.len == 0)
+                return false;
+            if (regions::kSide[i] == ApertureSide::Below) {
+                if (r.end() > ap.region.phys)
+                    return false;
+            } else if (
+                r.phys < ap.region.phys
+                || !span_fits<std::uint64_t>(
+                    r.phys.offset_from(ap.region.phys),
+                    r.len,
+                    ap.region.len
+                )
+            ) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static_assert(
+    boards_regions_are_on_their_side(),
+    "a SOURCED board region must lie on the side kSide declares: Inside wholly "
+    "inside the board's aperture, Below ending at or below its base"
 );
 
 consteval bool boards_irq_rows_well_formed() {

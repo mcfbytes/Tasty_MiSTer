@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <optional>
 
+#include "hal/reg_access.h"
+
 namespace mister::hal {
 
 struct SysBlock {
@@ -18,6 +20,8 @@ struct SysBlock {
         Id = 0x1C,
     };
     static constexpr std::size_t kSize = 0x20;
+
+    static constexpr RegAccess kAccess = RegAccess::ReadOnly;
     static constexpr std::uint32_t kId = 0x31535453u;
     static constexpr std::uint32_t kSnapshotWords = 4;
 

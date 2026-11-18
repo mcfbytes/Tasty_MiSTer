@@ -33,19 +33,22 @@ constexpr std::uint8_t ascii_upper(std::uint8_t c) noexcept {
     return (c >= 'a' && c <= 'z') ? static_cast<std::uint8_t>(c - 0x20u) : c;
 }
 
-[[nodiscard]] Ex<void> write_index_register(ILinkFrame& frame, std::uint16_t index) {
-    const std::array<std::uint16_t, 1> words{index};
-    return send_frame(frame, FioOp::FileIndex, words);
+[[nodiscard]] Ex<void> write_index_register(ILinkFrame& frame, hal::SpiWord index) {
+    if (auto r = frame.begin(FioOp::FileIndex); !r)
+        return r;
+    if (auto r = frame.word(index); !r)
+        return r;
+    return frame.end();
 }
 
 }
 
-Ex<void> FioBracket::set_index(ILinkFrame& frame, IoIndex index) {
-    return write_index_register(frame, index.v);
+Ex<void> FioBracket::set_index(ILinkFrame& frame, FioIndexByte index) {
+    return write_index_register(frame, index.wire_word());
 }
 
 Ex<void> FioBracket::set_index(ILinkFrame& frame, WideIoIndex index) {
-    return write_index_register(frame, index.v);
+    return write_index_register(frame, index.wire_word());
 }
 
 Ex<void> FioBracket::send_file_info(ILinkFrame& frame, std::string_view ext) {
@@ -85,7 +88,7 @@ Ex<FioBracket> FioBracket::begin(
         if (auto r = link.transfer(word(FioOp::FileTx)); !r)
             return std::unexpected(r.error());
 
-        const bool guarded = mode.v == kModeDownload.v && params.aux.v == 0;
+        const bool guarded = mode == kModeDownload && params.aux.empty();
         if (auto r = guarded ? link.transfer_or_post(mode) : beat(link, mode).transform(taken);
             !r) {
             return std::unexpected(r.error());
@@ -93,14 +96,11 @@ Ex<FioBracket> FioBracket::begin(
 
         bracket.emplace(FioBracket{link, index});
 
-        if (params.aux.v != 0) {
-            const auto lo = static_cast<std::uint16_t>(params.aux.v);
-            const auto hi = static_cast<std::uint16_t>(
-                (params.aux.v >> std::numeric_limits<std::uint16_t>::digits)
-            );
-            auto r = beat(link, hal::SpiWord{lo});
+        if (!params.aux.empty()) {
+            const hal::SpiHalves halves = params.aux.halves();
+            auto r = beat(link, halves.low);
             if (r)
-                r = beat(link, hal::SpiWord{hi});
+                r = beat(link, halves.high);
             if (!r) {
                 cs.release();
                 (void)bracket->end();

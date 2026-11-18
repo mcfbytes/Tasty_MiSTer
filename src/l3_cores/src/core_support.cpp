@@ -53,13 +53,9 @@ Ex<void> Core::mount(IoIndex slot, const MountedPath& p) {
         [slot](const FileSlot& fs) { return fs.index == slot && !is_load_row(fs); }
     );
     if (!declared && !profile_->slots.empty()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     }
     return on_mount(slot, p);
-}
-
-Ex<void> Core::file_tx(IoIndex index, std::span<const std::uint8_t> bytes) {
-    return on_file_tx(index, bytes);
 }
 
 Ex<void> Core::osd_closed() {

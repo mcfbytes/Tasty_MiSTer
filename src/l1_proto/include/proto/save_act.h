@@ -34,7 +34,7 @@ static_assert(std::is_trivially_copyable_v<SaveAct>);
         case SaveAct::Kind::Open:
             return 4;
         case SaveAct::Kind::Read:
-            return 1u + (w == hal::Width::Word ? (a.len + 1u) / 2u : a.len);
+            return 1u + static_cast<std::uint32_t>(hal::words(w, a.len));
         case SaveAct::Kind::Close:
             return 2;
     }

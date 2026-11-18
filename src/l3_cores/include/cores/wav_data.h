@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "infra/error.h"
@@ -12,6 +13,11 @@ namespace mister::cores::wav {
 
 inline constexpr std::uint32_t kPrefixBytes = 12;
 inline constexpr std::uint32_t kChunkHeaderBytes = 8;
+inline constexpr proto::FileSize kPrefix{kPrefixBytes};
+inline constexpr proto::FileSize kChunkHeader{kChunkHeaderBytes};
+
+inline constexpr proto::FileSize kRiffReach{std::numeric_limits<std::uint32_t>::max()};
+inline constexpr proto::FileOffset kRiffPositionLimit = proto::kFileStart + kRiffReach;
 
 using ChunkHeader = std::span<const std::byte, kChunkHeaderBytes>;
 
@@ -23,15 +29,15 @@ enum class Refusal : std::uint32_t {
 };
 
 struct WavData {
-    std::uint32_t start = 0;
+    proto::FileOffset start = proto::kFileStart;
     std::uint32_t size = 0;
 };
 
 [[nodiscard]] constexpr bool can_read_header(
-    std::uint32_t pos,
+    proto::FileOffset pos,
     proto::FileSize file_size
 ) noexcept {
-    return file_size.v >= kChunkHeaderBytes && pos < file_size.v - kChunkHeaderBytes;
+    return file_size.holds(pos + kChunkHeader);
 }
 
 [[nodiscard]] bool is_data_chunk(ChunkHeader header) noexcept;

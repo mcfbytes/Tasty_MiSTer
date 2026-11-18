@@ -40,7 +40,7 @@ void FrameNumbering::restart() noexcept {
     nvotes_ = 0;
 }
 
-MovieFrame FrameNumbering::movie_of(
+MoviePosition FrameNumbering::movie_of(
     const CoreFrameRecord& cell,
     WideCoreFrame core
 ) const noexcept {

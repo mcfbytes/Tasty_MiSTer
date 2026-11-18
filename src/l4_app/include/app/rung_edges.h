@@ -6,7 +6,7 @@
 #include "app/link_tx_channel.h"
 #include "app/load_window_map.h"
 #include "app/window_tally.h"
-#include "hal/phys_region.h"
+#include "hal/fpga_aperture.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
 #include "os/clock.h"
@@ -24,7 +24,7 @@ struct RungEdges {
     const FileTxLevelCell& level;
     EventQueue<SeatTag::Main>::Producer events;
     ILoadWindowMap<seat_owner::Main>& window_map;
-    hal::PhysRegion aperture;
+    hal::FpgaAperture aperture;
     const svc::Vfs& vfs;
     WindowTally& windows;
     const os::IClock& clock;

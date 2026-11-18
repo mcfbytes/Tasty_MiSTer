@@ -142,7 +142,7 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
     }
 
     const cores::ReplayLead fallback = req.codec->format().default_lead(scan.facts);
-    const FrameCount codec_lead = FrameCount::of(fallback);
+    const MovieFrameCount codec_lead = MovieFrameCount::of(fallback);
     if (!req.lead_override) {
         const cores::IReplayCore::LeadRange range = req.codec->core().lead_range();
         if (!range.admits(fallback))
@@ -173,7 +173,7 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
     ctx.w.diag.appendf(
         "{\"t\":\"tas\",\"k\":\"armed\",\"frames\":%u,\"ports\":%s,\"lead\":%s,"
         "\"phase_us\":%u,\"poweron_us\":%u,\"vsync_ok\":%u,\"checks\":%u,\"status\":"
-        "\"%04x%04x%04x%04x%04x%04x%04x%04x\"}",
+        "\"%s%s%s%s%s%s%s%s\"}",
         scan.scanned,
         scan.facts.ports.text().c_str(),
         arm.lead.text().c_str(),
@@ -181,14 +181,14 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
         us_of(arm.poweron_ns).count(),
         scan.vsync_ok ? 1u : 0u,
         static_cast<unsigned>(arm.n_checks),
-        live.words[7],
-        live.words[6],
-        live.words[5],
-        live.words[4],
-        live.words[3],
-        live.words[2],
-        live.words[1],
-        live.words[0]
+        live.words[7].padded_hex().c_str(),
+        live.words[6].padded_hex().c_str(),
+        live.words[5].padded_hex().c_str(),
+        live.words[4].padded_hex().c_str(),
+        live.words[3].padded_hex().c_str(),
+        live.words[2].padded_hex().c_str(),
+        live.words[1].padded_hex().c_str(),
+        live.words[0].padded_hex().c_str()
     );
     return Step::enter(Step::Next::Run);
 }
@@ -274,7 +274,7 @@ void SettleStage::load_checkpoints_(Ctx ctx) noexcept {
     if (!f)
         return;
     std::array<std::byte, 4096> buf;
-    const auto got = (*f)->read_at(0, buf);
+    const auto got = (*f)->read_at(proto::kFileStart, buf);
     if (!got)
         return;
     std::uint64_t v = 0;

@@ -12,6 +12,7 @@
 
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "hal/boards_table.h"
 #include "hal/boot_handoff.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
@@ -19,7 +20,10 @@
 
 namespace mister::boards::cyclone_v {
 
-inline constexpr hal::PhysRegion kHandoffPage{os::PhysAddr{0x1FFF'F000u}, 0x1000u, "uboot-handoff"};
+inline constexpr hal::HpsDdrRegion kHandoffPage = hal::HpsDdrRegion::below(
+    hal::board_by_id(hal::BoardId::De10Nano).fpga_mem,
+    hal::PhysRegion{os::PhysAddr{0x1FFF'F000u}, 0x1000u, "uboot-handoff"}
+);
 
 inline constexpr auto kHandoffEnvCookie = std::to_array<std::uint8_t>({0x21, 0x43, 0x65, 0x87});
 inline constexpr auto kHandoffSdramCookie = std::to_array<std::uint8_t>({0x12, 0x57});

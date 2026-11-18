@@ -3,18 +3,20 @@
 
 #include "open_verdict.h"
 
+#include "hal/board_regions.h"
+
 namespace mister::fw {
 
 std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
+    const hal::FpgaAperture& aperture,
     std::span<const hal::PhysRegion> regions,
     OpenVerdict& verdict
 ) {
     std::optional<hal::ScalerBuffers> out;
-
-    const auto region = hal::declared_region(regions, hal::RegionId::ScalerOut);
+    const auto region = hal::BoardRegions::aperture_region(regions, hal::RegionId::ScalerOut);
     if (!region)
         return out;
-    if (auto m = hal::ScalerBuffers::map(*region); m) {
+    if (auto m = hal::ScalerBuffers::map(aperture, *region); m) {
         out.emplace(std::move(*m));
     } else {
         verdict.refuse("T-CAPTURE: ScalerBuffers::map", m.error());
@@ -42,7 +44,7 @@ RecorderBlock::RecorderBlock(
               .video = parts.wires.video.geometry_cell(),
               .channel = raw_frames_
           },
-          map_scaler_buffers(plat.regions, verdict)
+          map_scaler_buffers(plat.fpga_mem, plat.regions, verdict)
       },
       avi_encoder_{app::AviEncoder::Wiring{
           .out = infra::OptRef<app::ChunkChannel>{chunks_},

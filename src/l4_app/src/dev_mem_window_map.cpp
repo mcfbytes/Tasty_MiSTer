@@ -4,7 +4,7 @@
 namespace mister::app {
 
 template <class Owner>
-Ex<hal::FpgaMemory> DevMemWindowMap<Owner>::map(const hal::PhysRegion& r) {
+Ex<hal::FpgaMemory> DevMemWindowMap<Owner>::map(const hal::ApertureRegion& r) {
     TASTY_SEAT_BODY(SeatOwner);
     return hal::FpgaMemory::map(r);
 }

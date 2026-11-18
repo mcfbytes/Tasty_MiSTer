@@ -1,49 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <optional>
 
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
-#include "proto/core_session.h"
-#include "proto/session_live.h"
-#include "proto/status_cell.h"
+#include "proto/status_change.h"
+#include "proto/status_source.h"
 #include "proto/status_word.h"
 
 namespace mister::proto {
 
-class SpiStatusDecoder {
+class SpiStatusSource final : public IStatusSource {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SpiStatusDecoder(
-        hal::ISpiTransport& link,
-        CoreSession& session,
-        StatusCell& cell,
-        const ISessionLive& live
-    ) noexcept
-        : link_(link),
-          session_(session),
-          cell_(cell),
-          live_(live) {}
+    explicit SpiStatusSource(hal::ISpiTransport& link) noexcept : link_(link) {}
 
-    void service() noexcept;
-
-    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
-
-    [[nodiscard]] std::uint8_t last() const noexcept { return last_; }
-
-    [[nodiscard]] std::uint32_t flush_refusals() const noexcept { return flush_refusals_; }
+    [[nodiscard]] std::optional<StatusChange> take(
+        StatusChange held,
+        StatusWord& words
+    ) noexcept override;
 
 private:
     hal::ISpiTransport& link_;
-    CoreSession& session_;
-    StatusCell& cell_;
-    const ISessionLive& live_;
-    std::uint8_t last_ = 0;
-    std::uint32_t flush_refusals_ = 0;
-    StatusWord words_{};
-    StatusWord published_{};
 };
 
 }

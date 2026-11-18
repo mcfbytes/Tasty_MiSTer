@@ -45,14 +45,14 @@ template <class OnLine>
 [[nodiscard]] Ex<WalkEnd> for_each_movie_line(svc::IFile& file, OnLine&& on_line) {
     MovieLines lines;
     std::array<std::byte, MovieLines::kChunk.file_word<std::size_t>()> buf;
-    std::uint64_t off = 0;
+    proto::FileOffset off = proto::kFileStart;
     for (;;) {
         const auto got = file.read_at(off, buf);
         if (!got)
             return std::unexpected(got.error());
         if (*got == 0)
             break;
-        off += *got;
+        off += proto::FileSize{*got};
         if (!lines.feed(std::span<const std::byte>(buf.data(), *got), on_line))
             return WalkEnd::Stopped;
     }

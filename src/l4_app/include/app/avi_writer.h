@@ -75,7 +75,7 @@ private:
     FrameArena index_{};
     AviFrameCount entries_{};
     avi::Fields f_{};
-    std::uint64_t pos_ = 0;
+    proto::FileOffset pos_{};
     bool rate_known_ = false;
     RecEvery frame_mul_{};
 

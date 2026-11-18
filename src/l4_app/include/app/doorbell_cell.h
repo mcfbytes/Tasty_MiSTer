@@ -22,6 +22,6 @@ struct DoorbellStats {
 
 static_assert(std::is_trivially_copyable_v<DoorbellStats>);
 
-using DoorbellStatsCell = xthread::Telemetry<DoorbellStats, SeatTag::RT>;
+using DoorbellStatsCell = xthread::Telemetry<DoorbellStats, SeatTag::Main>;
 
 }

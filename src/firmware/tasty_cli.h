@@ -37,11 +37,11 @@ struct TastyArgs {
 
     std::optional<app::PathText> record{};
 
-    std::optional<app::FrameCount> lead{};
+    std::optional<app::MovieFrameCount> lead{};
 
     std::optional<std::chrono::microseconds> phase_us{};
 
-    std::optional<app::MovieFrame> stop_at{};
+    std::optional<app::MoviePosition> stop_at{};
     std::optional<cores::IReplayCore::RamFill> ram_fill{};
 
     std::optional<app::PathText> save{};
@@ -57,7 +57,6 @@ struct TastyArgs {
 };
 
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept;
-[[nodiscard]] const char* tasty_verb_name(TastyVerb v) noexcept;
 void tasty_print_usage(std::FILE* out = stderr) noexcept;
 
 }

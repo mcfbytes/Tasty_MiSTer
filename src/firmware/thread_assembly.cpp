@@ -190,7 +190,6 @@ ThreadAssembly::ThreadAssembly(
               .events = events,
               .ev = ev_cell_,
               .quiescing = quiescing_,
-              .transitioning = diag.transitioning,
               .diag = diag.log,
               .rt_lane = diag.rt_lane
           },

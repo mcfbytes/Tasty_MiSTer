@@ -8,9 +8,11 @@
 #include "app/lat_stat.h"
 #include "app/log_clock.h"
 #include "app/picture_row.h"
+#include "hal/fpga_memory.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -34,7 +36,7 @@ struct HdOsdStatus {
     std::uint16_t stride_mib = 0;
     bool lowlat = false;
 
-    bool slots_uio = false;
+    hal::FpgaMemory::Mapping slots_map = hal::FpgaMemory::Mapping::DevMem;
 
     bool scaler_uio = false;
 
@@ -43,6 +45,9 @@ struct HdOsdStatus {
 
     HdVisibleWindow window{};
     LatStat bd_us{};
+
+    LatStat flush_us{};
+    svc::Tally flush_fails{};
 };
 
 static_assert(std::is_trivially_copyable_v<HdOsdStatus>);
@@ -50,7 +55,7 @@ static_assert(std::is_nothrow_default_constructible_v<HdOsdStatus>);
 
 constexpr void to_json(infra::JsonOut& o, const HdOsdStatus& s) noexcept {
 
-    constexpr unsigned kSlotsMapped = 1, kScalerMapped = 2;
+    constexpr unsigned kSlotsMapped = 1, kScalerMapped = 2, kSlotsWriteCombined = 4;
     o.field("state", s.state);
     o.field("fail", s.fail);
     o.field("badge", s.badge);
@@ -70,7 +75,14 @@ constexpr void to_json(infra::JsonOut& o, const HdOsdStatus& s) noexcept {
     o.field("bh", s.backdrop_h);
     o.field("stride_mib", s.stride_mib);
     o.field("lowlat", s.lowlat);
-    o.field("uio", (s.slots_uio ? kSlotsMapped : 0u) | (s.scaler_uio ? kScalerMapped : 0u));
+    const bool slots_uio = s.slots_map == hal::FpgaMemory::Mapping::Uio;
+    const bool slots_wc = s.slots_map == hal::FpgaMemory::Mapping::Fbdev;
+    o.field(
+        "uio",
+        (slots_uio ? kSlotsMapped : 0u)
+            | (s.scaler_uio ? kScalerMapped : 0u)
+            | (slots_wc ? kSlotsWriteCombined : 0u)
+    );
     o.field("bd_same", s.bd_same);
     o.field("panel_us", s.panel_us.last.count());
     o.field("panel_us_max", s.panel_us.max.count());
@@ -84,6 +96,9 @@ constexpr void to_json(infra::JsonOut& o, const HdOsdStatus& s) noexcept {
     o.field("bd_us", s.bd_us.last.count());
     o.field("bd_us_max", s.bd_us.max.count());
     o.field("copy_kb", s.window.copy_kb);
+    o.field("flush_us", s.flush_us.last.count());
+    o.field("flush_us_max", s.flush_us.max.count());
+    o.field("flush_fail", s.flush_fails);
 }
 
 using HdOsdStatusCell = xthread::Telemetry<HdOsdStatus, SeatTag::HdOsd>;

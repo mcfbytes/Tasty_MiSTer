@@ -11,7 +11,7 @@ template <class Owner>
 class ILoadWindowMap {
 public:
     virtual ~ILoadWindowMap() = default;
-    [[nodiscard]] virtual Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) = 0;
+    [[nodiscard]] virtual Ex<hal::FpgaMemory> map(const hal::ApertureRegion& r) = 0;
 
 protected:
     ILoadWindowMap() = default;

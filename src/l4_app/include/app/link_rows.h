@@ -30,10 +30,11 @@ enum class MainAct : std::uint8_t {
     GrantPads,
     GrantSector,
     MintBindSlot,
+    AnswerIrqRows,
     None,
     kCount
 };
-enum class RtAct : std::uint8_t { BindCensus, BindDoorbells, None, kCount };
+enum class RtAct : std::uint8_t { BindCensus, None, kCount };
 
 struct LinkRow {
     LinkKind kind;
@@ -65,10 +66,10 @@ inline constexpr auto kLinkRows = std::to_array<LinkRow>({
      "the core's LinkDecoderDecl table, bound wholesale (item)"},
     {LinkKind::Doorbells,
      BindPhase::Bind,
-     MainAct::None,
-     RtAct::BindDoorbells,
+     MainAct::AnswerIrqRows,
+     RtAct::None,
      "IRQ:",
-     "one notifier per declared binding; a refusal falls back to the row's poll"},
+     "a row no off-RT seat owns is answered by its declared poll cadence"},
     {LinkKind::BlockSlots,
      BindPhase::Bind,
      MainAct::MintBindSlot,
@@ -167,6 +168,7 @@ struct BindOutcome {
             case MainAct::GrantWindows:
             case MainAct::GrantPads:
             case MainAct::GrantSector:
+            case MainAct::AnswerIrqRows:
             case MainAct::None:
 
                 continue;

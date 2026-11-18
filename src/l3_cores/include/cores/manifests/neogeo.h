@@ -53,7 +53,7 @@ inline constexpr CdTickPeriods kNeoGeoCdTicks{
     .idle = std::chrono::microseconds{10'000},
     .stream = std::chrono::microseconds{10'000},
     .caller = std::chrono::microseconds{1'000},
-    .speeds = 4,
+    .speeds = CdSpeedCount{4},
     .speed = {
         std::chrono::microseconds{10'000},
         std::chrono::microseconds{5'000},
@@ -100,7 +100,7 @@ static_assert(
     "megacd.cpp:32 keys the fast cadence off CD-DA; neogeocd.cpp:92 off DATA"
 );
 static_assert(
-    kNeoGeoCdTicks.speeds == 4 && kMegaCdTicks.speeds == 0,
+    kNeoGeoCdTicks.speeds == CdSpeedCount{4} && kMegaCdTicks.speeds == CdSpeedCount{},
     "neogeocd.cpp:97-108 is a four-entry speed table; MegaCD has none"
 );
 static_assert(
@@ -142,7 +142,7 @@ inline constexpr auto kNeoGeoWindows = std::to_array<CoreWindowDecl>({
 });
 
 inline constexpr StagingPolicy kNeoGeoStaging{
-    .order = StageOrder::NeoGeoCd,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kNeoGeoSlots),
     .save = SaveMountPolicy{.slot = IoIndex{0}},
@@ -166,6 +166,8 @@ inline constexpr CoreProfile kNeoGeo{
     .windows = kNeoGeoWindows,
 
     .reset = {.button_reacts = true},
+
+    .grants = {Grant::Lamp, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_neogeo(const CoreProfile& p, const CoreGrant& g);

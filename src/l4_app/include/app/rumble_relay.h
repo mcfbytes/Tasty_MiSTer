@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "app/rumble_players_cell.h"
+#include "hal/types.h"
 #include "infra/diag_log.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
@@ -30,10 +31,10 @@ public:
 
     void on(const proto::LinkEvent::PolledWord& w) noexcept;
 
-    [[nodiscard]] std::uint16_t last_applied(proto::PlayerIndex player) const noexcept {
+    [[nodiscard]] hal::SpiWord last_applied(proto::PlayerIndex player) const noexcept {
         if (const infra::OptRef<const Seen> held = seen_.find(player))
             return held->word;
-        return std::uint16_t{0};
+        return hal::SpiWord{};
     }
 
     [[nodiscard]] std::uint32_t applied() const noexcept { return applied_; }
@@ -49,7 +50,7 @@ public:
     [[nodiscard]] std::uint32_t reapplied() const noexcept { return reapplied_; }
 
 private:
-    void apply_(svc::PlayerIndex player, std::uint16_t word) noexcept;
+    void apply_(svc::PlayerIndex player, hal::SpiWord word) noexcept;
 
     svc::IRumbleOut& out_;
     RumblePlayersCell& pads_;
@@ -57,7 +58,7 @@ private:
 
     struct Seen {
         svc::PadSignature pad{};
-        std::uint16_t word = 0;
+        hal::SpiWord word{};
     };
 
     infra::IndexedArray<Seen, svc::kMaxPlayers, svc::PlayerIndex> seen_{};

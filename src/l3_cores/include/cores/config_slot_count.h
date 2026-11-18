@@ -5,6 +5,8 @@
 #include <concepts>
 #include <cstdint>
 
+#include "cores/types.h"
+
 namespace mister::cores {
 
 struct ConfigSlotCount {
@@ -13,6 +15,12 @@ struct ConfigSlotCount {
     template <std::integral I>
     [[nodiscard]] static constexpr ConfigSlotCount of(I n) noexcept {
         return ConfigSlotCount{static_cast<std::uint8_t>(n)};
+    }
+
+    template <class F>
+    constexpr void for_each_slot(F&& f) const {
+        for (std::uint8_t i = 0; i < v; ++i)
+            f(ConfigSlot{i});
     }
 
     friend constexpr bool operator==(ConfigSlotCount, ConfigSlotCount) = default;

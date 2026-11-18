@@ -251,6 +251,8 @@ inline constexpr Option kExtSchema[] = {
     {"HD_COLORS", OptionType::U8, 0, 255, 255, TASTY_CFG_OFF(hd_colors), 0, false},
     {"HD_GAME_DISPLAY", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(hd_game_display), 0, false},
     {"HD_MENU_OPACITY", OptionType::U8, 50, 100, 85, TASTY_CFG_OFF(hd_menu_opacity), 0, false},
+    {"AUTOSAVE", OptionType::U8, 0, 1, 1, TASTY_CFG_OFF(autosave), 0, false},
+    {"AUTOSAVE_INFO", OptionType::U8, 0, 10, 3, TASTY_CFG_OFF(autosave_info), 0, false},
 };
 
 template <class F>
@@ -354,6 +356,8 @@ consteval bool default_agrees(const ConfigSnapshot& d, const Option& o) {
     TASTY_CFG_CHECK(hd_colors)
     TASTY_CFG_CHECK(hd_game_display)
     TASTY_CFG_CHECK(hd_menu_opacity)
+    TASTY_CFG_CHECK(autosave)
+    TASTY_CFG_CHECK(autosave_info)
     TASTY_CFG_CHECK(alt_ini)
     TASTY_CFG_CHECK(parse_error_count)
 #undef TASTY_CFG_CHECK

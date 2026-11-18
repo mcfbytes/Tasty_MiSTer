@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 
+#include "infra/indexed_array.h"
 #include "ps2_scancodes.h"
 
 namespace mister::proto {
@@ -24,15 +25,13 @@ void Ps2Keyboard::push_frame(std::span<const std::uint8_t> bytes) {
 }
 
 Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
-    const std::uint8_t idx = hid_usage.v;
-
-    const bool was_down = down_[idx];
-    down_[idx] = pressed;
+    const bool was_down = infra::at_index(down_, hid_usage);
+    infra::at_index(down_, hid_usage) = pressed;
     const Press press = !pressed ? Press::kRelease : (was_down ? Press::kRepeat : Press::kMake);
     const bool set1 = scan_set_ == ScanSet::kSet1;
 
     const std::array<std::uint32_t, 256>& table = set1 ? kEv2Ps2Set1 : kEv2Ps2Set2;
-    const std::uint32_t code = table[idx];
+    const std::uint32_t code = infra::at_index(table, hid_usage);
     if (code == NONE)
         return {};
 
@@ -126,7 +125,7 @@ std::optional<Ps2Frame> Ps2Keyboard::next_frame() noexcept {
     return std::nullopt;
 }
 
-void Ps2Keyboard::accept_control(std::uint16_t word0) {
+void Ps2Keyboard::accept_control(Ps2ControlWord word0) {
     ps2_control_ = true;
     port_.accept(word0, [this](std::uint8_t byte) { decode_control(byte); });
 }

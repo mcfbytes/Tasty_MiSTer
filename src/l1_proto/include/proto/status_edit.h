@@ -43,7 +43,7 @@ struct StatusEdit {
             if (!n)
                 break;
             e.mask = e.mask.with(*n, true);
-            if (i < BitField::kWordBits && ((value.v >> i) & 1u) != 0u)
+            if (i < BitField::kWordBits && value.has_bit(i))
                 e.bits = e.bits.with(*n, true);
         }
         return e;
@@ -56,9 +56,9 @@ struct StatusEdit {
     [[nodiscard]] constexpr StatusWord over(const StatusWord& w) const noexcept {
         StatusWord out{};
         for (unsigned i = 0; i < StatusWord::kWords; ++i) {
-            out.words[i] = static_cast<std::uint16_t>(
-                (w.words[i] & ~mask.words[i]) | (bits.words[i] & mask.words[i])
-            );
+            out.words[i] = w.words[i]
+                               .without(mask.words[i])
+                               .with(bits.words[i].masked(mask.words[i]));
         }
         return out;
     }

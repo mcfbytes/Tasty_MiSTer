@@ -18,7 +18,6 @@
 #include "app/block_poll_route.h"
 #include "app/built_core.h"
 #include "app/core_terms.h"
-#include "app/doorbell_lines.h"
 #include "app/lw_block_lend.h"
 #include "app/lw_osd.h"
 #include "app/lw_sector.h"
@@ -56,8 +55,6 @@ class Core;
 }
 
 namespace mister::app {
-
-class BindTail;
 
 class CoreBuilder {
     TASTY_SEAT_RESIDENT(Main);
@@ -148,12 +145,6 @@ public:
         GrantedWindows windows
     ) noexcept;
 
-    [[nodiscard]] static DoorbellLines open_doorbells(
-        hal::IDoorbellSource& src,
-        const hal::DoorbellPolicy& policy,
-        std::span<const proto::IrqBinding> irqs
-    ) noexcept;
-
     [[nodiscard]] static constexpr bool may_carry_pads(const proto::AxiLwDecl& decl) noexcept {
         return decl.size.covers(hal::LwExtent::of_layout<hal::SysDirectory>());
     }
@@ -188,63 +179,6 @@ public:
     [[nodiscard]] static bool fabric_owned(
         const proto::IrqBinding& b,
         std::span<const proto::AxiLwDecl> lw
-    ) noexcept;
-
-    struct RtRows {
-
-        struct RtRowCount {
-            std::size_t v = 0;
-
-            [[nodiscard]] constexpr RtRowCount next() const noexcept { return RtRowCount{v + 1}; }
-
-            [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
-
-            [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
-
-            template <class T>
-            [[nodiscard]] constexpr std::size_t bytes_of() const noexcept {
-                return v * sizeof(T);
-            }
-
-            template <class T, std::size_t N>
-            [[nodiscard]] constexpr std::span<const T> prefix_of(
-                const std::array<T, N>& rows
-            ) const noexcept {
-                return std::span<const T>(rows).first(v);
-            }
-
-            template <class T, std::size_t N>
-            [[nodiscard]] constexpr std::span<const T> prefix_of(
-                const T (&rows)[N]
-            ) const noexcept {
-                return std::span<const T>(rows).first(v);
-            }
-
-            friend constexpr bool operator==(RtRowCount, RtRowCount) = default;
-
-        private:
-            friend class BindTail;
-
-            [[nodiscard]] constexpr std::uint8_t wire_byte() const noexcept {
-                return static_cast<std::uint8_t>(
-                    std::min(v, static_cast<std::size_t>(std::numeric_limits<std::uint8_t>::max()))
-                );
-            }
-        };
-
-        std::array<proto::IrqBinding, kMaxDoorbellRows> rows{};
-        RtRowCount count{};
-        RtRowCount declared{};
-
-        [[nodiscard]] std::span<const proto::IrqBinding> table() const noexcept {
-            return count.prefix_of(rows);
-        }
-    };
-
-    [[nodiscard]] static RtRows rt_rows(
-        std::span<const proto::IrqBinding> irqs,
-        std::span<const proto::AxiLwDecl> lw,
-        std::optional<hal::LwOffset> owned
     ) noexcept;
 
     [[nodiscard]] static Ex<LwSector> grant_sector(
@@ -342,7 +276,7 @@ private:
         const proto::SectorBlockDecl& block,
         const cores::CoreProfile& profile
     ) noexcept;
-    [[nodiscard]] Ex<hal::PhysRegion> card_region_(
+    [[nodiscard]] Ex<hal::ApertureRegion> card_region_(
         const proto::SectorBlockDecl::Card& card
     ) const noexcept;
 

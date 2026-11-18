@@ -7,6 +7,7 @@
 #include <span>
 
 #include "cd_core_detail.h"
+#include "cores/cd_command_words.h"
 #include "cores/cd_head_prime.h"
 #include "cores/cd_msf.h"
 #include "cores/cdwire.h"
@@ -81,14 +82,15 @@ Ex<void> SegaCddEngine::do_push_sector(CdDialectPorts& p) {
     return send_sector_(p);
 }
 
-Ex<void> SegaCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
-    const std::uint16_t w0 = words[0], w1 = words[1], w2 = words[2];
+Ex<void> SegaCddEngine::do_accept(const CdCommandWords& cmd, CdDialectPorts& p) {
 
-    if (take_reset_request() || w0 == 0x00FFu)
+    if (take_reset_request() || cmd.words[0] == cdwire::kSegaResetWord)
         do_reset_machine();
 
-    speed_index_ = static_cast<std::uint8_t>((w2 >> 8) & 0x3u);
-    const std::uint64_t c = cdwire::sega_compose(w0, w1, w2);
+    speed_index_ = cdwire::sega_speed_index(cmd.words[2]);
+    const std::uint64_t c = cdwire::sega_compose(
+        std::span<const hal::SpiWord>(cmd.words).first<3>()
+    );
     if (!cdwire::sega_command_ok(c, row_.crc_start)) {
         ++stats_.crc_faults;
     }

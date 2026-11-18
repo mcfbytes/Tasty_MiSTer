@@ -28,7 +28,7 @@ constexpr proto::BlockSize kCookedSector{kUserDataBytes};
 constexpr proto::BlockSize kRawSector{kRawFrameBytes};
 
 constexpr auto position_bytes = [](Lba pos, proto::BlockSize unit) noexcept {
-    return static_cast<std::int64_t>(unit.position_of(pos));
+    return unit.position_of(pos).seek_offset();
 };
 
 }
@@ -290,7 +290,10 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 IFile* f = m.table.file(m.toc.at(TrackIndex{}).backing);
                 m.toc.sector_size = kRawFrameBytes;
                 if (f != nullptr) {
-                    auto rd = f->read_at(0, std::span<std::byte>(head, sizeof(head)));
+                    auto rd = f->read_at(
+                        proto::kFileStart,
+                        std::span<std::byte>(head, sizeof(head))
+                    );
                     if (rd
                         && *rd == sizeof(head)
                         && std::memcmp(head, kSegaMagic.data(), kSegaMagic.size()) == 0) {

@@ -11,7 +11,6 @@
 
 #include "cores/ladder_host.h"
 #include "cores/wire_chunk.h"
-#include "cores/wire_word.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/link_op.h"
@@ -54,11 +53,22 @@ public:
         const Frame& frame
     );
 
+    struct HeldFrame {
+        proto::WideIoIndex dest{};
+        hal::Width framing{};
+        proto::FioWordCount piece{};
+    };
+
+    [[nodiscard]] static Ex<PayloadPieces> held_window(
+        std::vector<std::uint8_t> bytes,
+        const HeldFrame& frame
+    );
+
     [[nodiscard]] static constexpr std::size_t piece_bytes(
         WireChunk chunk,
-        WireWordBytes word
+        hal::Width word
     ) noexcept {
-        const std::size_t cap = word.scale(kPieceWords);
+        const std::size_t cap = kPieceWords * hal::word_bytes(word);
         if (chunk.one_write())
             return cap;
         return chunk.whole_within(cap);
@@ -68,7 +78,7 @@ public:
 
     [[nodiscard]] proto::FileSize size() const noexcept { return size_; }
 
-    [[nodiscard]] proto::FileSize sent() const noexcept { return proto::FileSize{sent_}; }
+    [[nodiscard]] proto::FileSize sent() const noexcept { return sent_ - proto::kFileStart; }
 
     [[nodiscard]] proto::ActKey16 act() const noexcept { return frame_.act; }
 
@@ -89,14 +99,17 @@ private:
     [[nodiscard]] Ex<void> stage_(std::size_t n);
     [[nodiscard]] Ex<Pass> fail_(ILadderHost& host);
 
+    [[nodiscard]] proto::LinkOp piece_op_(proto::FileId id, proto::LinkOp::StagePhase phase);
+
     std::unique_ptr<svc::IFile> file_;
     std::vector<std::uint8_t> bytes_;
     std::optional<std::vector<std::uint8_t>> staged_{};
     proto::FileSize size_{};
-    std::uint64_t sent_ = 0;
-    std::optional<WireWordBytes> word_bytes_{};
+    proto::FileOffset sent_{};
+    std::optional<hal::Width> width_{};
     std::string ext_;
     Frame frame_;
+    std::optional<HeldFrame> held_{};
     Pass end_ = Pass::Waiting;
     std::optional<Error> failure_{};
     bool cut_owed_ = false;

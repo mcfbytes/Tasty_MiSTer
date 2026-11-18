@@ -21,6 +21,7 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/link_op.h"
+#include "svc/card_writer.h"
 
 namespace mister::svc {
 class Vfs;
@@ -40,7 +41,7 @@ public:
         proto::IoIndex index{};
         PathText path{};
         CorrelationTag tag{};
-        std::optional<std::uint8_t> index_word{};
+        std::optional<proto::FioIndexByte> index_word{};
     };
 
     class Host {
@@ -131,7 +132,7 @@ private:
     void arm_plain_mount_(Host& host, const MountAsk& ask);
     void arm_start_mount_(Host& host, const MountAsk& ask);
 
-    [[nodiscard]] std::optional<std::uint8_t> pick_index_word_(
+    [[nodiscard]] std::optional<proto::FioIndexByte> pick_index_word_(
         proto::IoIndex index,
         std::string_view path
     ) const;
@@ -149,6 +150,7 @@ private:
     void publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept;
 
     const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     LinkTxChannel<SeatTag::Main>& inbox_;
     EventQueue<SeatTag::Main>::Producer owner_events_;
     const os::IClock& clock_;

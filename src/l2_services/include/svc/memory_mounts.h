@@ -5,12 +5,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "infra/errno.h"
+#include "infra/opt_ref.h"
+#include "infra/error.h"
 #include "svc/file.h"
+#include "svc/io_meter.h"
 #include "svc/types.h"
 #include "infra/seat.h"
 
@@ -33,7 +38,29 @@ public:
 
     [[nodiscard]] Tally sequential_hints(std::string_view key) const noexcept;
 
+    enum class IoVerb : std::uint8_t { Open, Read, Write };
+    [[nodiscard]] std::optional<Error> refusal(std::string_view key, IoVerb verb) const noexcept;
+
+    [[nodiscard]] std::unique_ptr<IFile> observed(
+        std::string_view key,
+        std::unique_ptr<IFile> file
+    ) const;
+
 private:
+    friend struct VfsTestAccess;
+
+    struct Refusal {
+        std::string path;
+        IoVerb verb = IoVerb::Open;
+        infra::Errno err{};
+        FileSize grace{};
+    };
+
+    [[nodiscard]] infra::OptRef<const Refusal> find_refusal_(
+        std::string_view key,
+        IoVerb verb
+    ) const noexcept;
+
     struct Blob {
         std::string path;
         std::span<const std::byte> blob;
@@ -44,6 +71,8 @@ private:
     [[nodiscard]] const Blob* find_(std::string_view key) const noexcept;
 
     std::vector<Blob> blobs_;
+    std::vector<Refusal> refusals_;
+    infra::OptRef<IIoMeter> meter_{};
 };
 
 }

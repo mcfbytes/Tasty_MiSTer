@@ -15,7 +15,7 @@
 #include "os/dbus_incoming.h"
 #include "os/dbus_message.h"
 #include "os/dbus_serial.h"
-#include "os/types.h"
+#include "os/dbus_wire_types.h"
 #include "os/unix_stream_socket.h"
 
 namespace mister::os {

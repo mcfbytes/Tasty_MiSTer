@@ -9,6 +9,7 @@
 #include "proto/types.h"
 #include "svc/chd_geometry.h"
 #include "svc/disc_identity.h"
+#include "svc/seek_span.h"
 #include "svc/toc.h"
 #include "svc/types.h"
 
@@ -19,7 +20,7 @@ using proto::Lba;
 [[nodiscard]] std::optional<TrackIndex> track_for_lba(const Toc& toc, Lba lba) noexcept;
 
 using SeekTime = std::chrono::duration<std::uint32_t, std::milli>;
-[[nodiscard]] SeekTime seek_time(Lba from_lba, Lba to_lba) noexcept;
+[[nodiscard]] SeekTime seek_time(SeekSpan span) noexcept;
 
 struct DiscGeometry {
 
@@ -36,9 +37,7 @@ struct DiscGeometry {
         return svc::track_for_lba(toc, lba);
     }
 
-    [[nodiscard]] SeekTime seek_time(Lba from_lba, Lba to_lba) const noexcept {
-        return svc::seek_time(from_lba, to_lba);
-    }
+    [[nodiscard]] SeekTime seek_time(SeekSpan span) const noexcept { return svc::seek_time(span); }
 
     [[nodiscard]] std::uint32_t chd_hunk_bytes() const noexcept { return chd.hunk_detail(); }
 };

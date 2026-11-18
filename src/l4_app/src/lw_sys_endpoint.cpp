@@ -2,6 +2,7 @@
 #include "app/lw_sys_endpoint.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 
 #include "infra/seat_owner_io.h"
@@ -9,6 +10,8 @@
 #include "reactor/notifier.h"
 
 namespace mister::app {
+
+static_assert(hal::SysBlock::kSnapshotWords == proto::StatusWord::kRegisters);
 
 LwSysEndpoint::LwSysEndpoint(const Wiring& w) noexcept : Base(w.grant, w.lease), w_(w) {}
 
@@ -93,19 +96,16 @@ std::optional<proto::StatusSnapshot> LwSysEndpoint::read_snapshot_() noexcept {
     const std::optional<SysBlock::Stflg>
         first = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
 
-    std::array<std::uint16_t, proto::StatusWord::kWords> words{};
-    for (std::uint32_t i = 0; i < SysBlock::kSnapshotWords; ++i) {
-        const std::array<std::uint16_t, 2> halves = port_().read(SysBlock::status(i)).halves();
-        words[2 * i] = halves[0];
-        words[2 * i + 1] = halves[1];
-    }
+    std::array<hal::SpiHalves, proto::StatusWord::kRegisters> regs{};
+    for (std::uint32_t i = 0; i < SysBlock::kSnapshotWords; ++i)
+        regs[i] = port_().read(SysBlock::status(i)).halves();
+    snapshot.words = proto::StatusWord::of_registers(regs);
 
     const std::optional<SysBlock::Stflg>
         second = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
     if (!first || first != second)
         return std::nullopt;
     snapshot.stflg = *first;
-    snapshot.words = proto::StatusWord{words};
     return snapshot;
 }
 

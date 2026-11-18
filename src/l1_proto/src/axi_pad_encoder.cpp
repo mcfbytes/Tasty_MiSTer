@@ -24,15 +24,15 @@ Ex<void> AxiPadEncoder::digital(UioOp opcode, JoyMask map) {
         return otherwise_.digital(opcode, map);
     const PadLevels::Slot s = PadLevels::level_of(opcode, 0);
     if (PadLevels::is_level(s))
-        return level_(s, map.v);
-    return store_(opcode, 0, map.v);
+        return level_(s, PadWord::of(map));
+    return store_(opcode, 0, PadWord::of(map));
 }
 
 Ex<void> AxiPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(AxiPadEncoder);
     if (!block_.ops.honours(opcode))
         return otherwise_.stick(opcode, index, pos);
-    const std::uint32_t word = pos.packed();
+    const PadWord word = PadWord::of(pos);
     const PadLevels::Slot s = PadLevels::level_of(opcode, index);
     if (PadLevels::is_level(s))
         return level_(s, word);
@@ -57,7 +57,7 @@ std::uint32_t AxiPadEncoder::link_words(UioOp opcode, bool follow_up) const noex
     return (follow_up && !block_.ops.honours(UioOp::Astick)) ? kStickWords : 0u;
 }
 
-Ex<void> AxiPadEncoder::level_(PadLevels::Slot level, std::uint32_t word) {
+Ex<void> AxiPadEncoder::level_(PadLevels::Slot level, PadWord word) {
     want_.put(level, word);
     if (!trusted_) {
         ++held_;
@@ -67,7 +67,7 @@ Ex<void> AxiPadEncoder::level_(PadLevels::Slot level, std::uint32_t word) {
 }
 
 Ex<void> AxiPadEncoder::settle_(PadLevels::Slot level) {
-    const std::optional<std::uint32_t> want = want_.at(level);
+    const std::optional<PadWord> want = want_.at(level);
     if (!want || want == stored_.at(level))
         return {};
     const PadLevels::Reg r = PadLevels::reg(level);
@@ -77,17 +77,12 @@ Ex<void> AxiPadEncoder::settle_(PadLevels::Slot level) {
     return {};
 }
 
-Ex<void> AxiPadEncoder::store_(UioOp opcode, std::uint8_t index, std::uint32_t word) {
+Ex<void> AxiPadEncoder::store_(UioOp opcode, std::uint8_t index, PadWord word) {
     if (!trusted_)
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), proto::word(opcode).v});
+        return std::unexpected(proto::word(opcode).refusal(Errc::fpga_not_ready, ERR_SITE()));
 
-    const auto off = static_cast<std::uint32_t>(
-        hal::UioRegFile::at(pad_op(opcode), pad_index(index))
-    );
-    const auto reg = pad_.at<hal::reg::WO>(off);
-    if (!reg)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
-    reg->write(word);
+    const hal::UioRegFile::Reg reg = hal::UioRegFile::at(pad_op(opcode), pad_index(index));
+    word.write_to(pad_, reg);
     return {};
 }
 

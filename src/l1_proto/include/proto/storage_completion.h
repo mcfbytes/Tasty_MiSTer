@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -43,6 +44,8 @@ struct StorageCompletion {
         SlotIndex slot{};
         StorageStatus status = StorageStatus::Ok;
         std::uint8_t pad_[2]{};
+
+        Error fault{};
     };
 
     struct Fetch {
@@ -71,7 +74,7 @@ struct StorageCompletion {
 
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
-        std::uint64_t size = 0;
+        FileSize size{};
     };
 
     struct Detach {
@@ -89,6 +92,10 @@ struct StorageCompletion {
 static_assert(
     infra::MessageSum<StorageCompletion> && infra::alternatives_are_total<StorageCompletion>()
 );
-static_assert(sizeof(StorageCompletion) == 32 && alignof(StorageCompletion) == 8);
+static_assert(sizeof(StorageCompletion) == 40 && alignof(StorageCompletion) == 8);
+static_assert(
+    sizeof(StorageCompletion::Attach) == 8 && alignof(StorageCompletion::Attach) == 8,
+    "an Attach's extent is one 64-bit FileSize"
+);
 
 }

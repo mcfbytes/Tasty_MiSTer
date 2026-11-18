@@ -16,6 +16,8 @@ struct LoadAsk {
     hal::FabricAddr load_addr{};
 
     bool disc = false;
+
+    bool dongle = false;
 };
 
 }

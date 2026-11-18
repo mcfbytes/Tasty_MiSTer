@@ -31,7 +31,7 @@ public:
 
     void set_region(proto::RegionCode region) override {
         TASTY_SEAT_BODY(NeoGeoCore);
-        drive_.set_region(region.v);
+        drive_.set_region(region);
     }
 
     [[nodiscard]] Ex<void> deferred_reset() override {
@@ -77,10 +77,6 @@ private:
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
         return infra::OptRef<IStreamLoad>{stream_};
-    }
-
-    void on_set_pending_file_ext(std::string_view ext) noexcept override {
-        stream_.set_pending_ext(ext);
     }
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {

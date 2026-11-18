@@ -40,6 +40,10 @@ void DiskRelay::service_rt(proto::Link& link, const proto::DiskPollDecl& poll) n
     poll_(link, poll);
 }
 
+proto::FioWordCount DiskRelay::take_round_words() noexcept {
+    return std::exchange(rt_.round_words, proto::FioWordCount{});
+}
+
 void DiskRelay::order_bind(proto::DiskUnit unit, std::string_view path) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     const infra::OptRef<Order> order = rt_.orders.find(unit);
@@ -197,12 +201,16 @@ bool DiskRelay::write_(proto::Link& link, const proto::DiskAct& a, DiskSlot& s) 
 
     if ((a.len() & 1u) != 0u || a.len() > s.bytes.size())
         return false;
-    if (!link.command(hal::ChipSelect::Io, a.opcode()))
-        return false;
 
-    constexpr std::size_t kWordBytes = 2;
+    constexpr std::uint32_t kWordBytes = 2;
     constexpr unsigned kByteBits = 8;
     constexpr unsigned kByteMask = 0xFF;
+
+    rt_.round_words = proto::FioWordCount{
+        1u + a.len() / kWordBytes + (a.word().has_value() ? 1u : 0u)
+    };
+    if (!link.command(proto::LinkSel::Io, a.opcode()))
+        return false;
     switch (a.kind()) {
         case proto::DiskAct::Kind::Out:
             for (std::size_t i = 0; i < a.len(); i += kWordBytes) {
@@ -272,7 +280,7 @@ void DiskRelay::poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexce
     constexpr unsigned kByteMask = 0xFF;
     Ask::Command c{};
     {
-        if (!link.command(hal::ChipSelect::Io, poll.opcode)) {
+        if (!link.command(proto::LinkSel::Io, poll.opcode)) {
             rt_.wire_faults.add();
             return;
         }

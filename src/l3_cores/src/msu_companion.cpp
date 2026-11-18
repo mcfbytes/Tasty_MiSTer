@@ -39,8 +39,8 @@ Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
     };
     const auto base = row_address(row, manifests::kSnesWindows, ask.aperture_base);
     if (!size.empty() && size <= msu::kDataBound && base) {
-        row.set_file_extent(size, msu::data_extent(size));
-        p.load = CompanionPlan::Load{.before = msu::set_data_base(*base), .row = row};
+        row.set_file_extent(size, size);
+        p.load = CompanionPlan::Load{.before = msu::set_data_base(), .row = row};
     }
     p.after = msu::set_enable(p.present);
     p.poll = p.present ? proto::MailboxPoll::On : proto::MailboxPoll::Off;

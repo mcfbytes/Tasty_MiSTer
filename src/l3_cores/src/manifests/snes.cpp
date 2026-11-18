@@ -10,6 +10,7 @@
 #include "cores/msu_wire.h"
 #include "cores/sgb_core.h"
 #include "cores/snes_core.h"
+#include "cores/snes_loader.h"
 
 namespace mister::cores::manifests {
 
@@ -17,6 +18,11 @@ using namespace std::chrono_literals;
 
 std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<SnesCore>(p, g.services);
+}
+
+std::unique_ptr<ILoader> make_snes_loader(const LoaderContext& ctx) {
+    (void)ctx;
+    return std::make_unique<SnesLoader>();
 }
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
@@ -78,12 +84,9 @@ static_assert(
         && msu::set_enable(false) == mister::proto::MailboxWords{0x0001, 0, 0},
     "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)"
 );
-
-inline constexpr std::uint32_t kMsuDataBaseAt = 0x2060'0000u;
 static_assert(
-    msu::set_data_base(hal::FabricAddr{kMsuDataBaseAt})
-        == mister::proto::MailboxWords{0x0003, 0, 0x2060},
-    "snes.cpp:524: (0x20600000ULL << 16) | MSU_DATA_BASE"
+    msu::set_data_base() == mister::proto::MailboxWords{0x0003, 0, 0x2300},
+    "snes.cpp:524 sent 0x20600000; the base is now the aperture + msu::kDataBaseOffset"
 );
 static_assert(
     msu::set_track_size(0x0001'2345u) == mister::proto::MailboxWords{0x0002, 0x2345, 1},
@@ -94,26 +97,9 @@ static_assert(
     "snes.cpp:477,492,568: 1024-byte sectors on index 2; snes.cpp:525: the data on 3"
 );
 static_assert(
-    msu::kGapAt + 0x2060'0000u == 0x2200'0000u
-        && msu::kGapBytes == 0x80'0000u
-        && msu::kGapAt % 0x40000u == 0,
-    "user_io.cpp:2882,2888: +0x800000 at 0x22000000, tested per 256 KiB chunk start"
-);
-static_assert(
-    msu::window_offset(msu::kGapAt - 1) == msu::kGapAt - 1
-    && msu::window_offset(msu::kGapAt) == msu::kGapAt + msu::kGapBytes
-);
-static_assert(
-    msu::kDataBound + proto::FileSize{kSnesWindows[0].region.offset + msu::kGapBytes}
-            == proto::FileSize{0x1F80'0000u}
-        && msu::kStockDataBound == 0x1F20'0000u,
-    "SNES.sv:1411,1417: the data span ends where the save-state DDR at $3F80.0000 "
-    "starts; stock's snes.cpp:522 bound overruns it"
-);
-static_assert(
     std::ranges::none_of(
         kSnes.slots,
-        [](const FileSlot& s) { return s.index.v == msu::kDataIndex; }
+        [](const FileSlot& s) { return s.index == proto::IoIndex{msu::kDataIndex}; }
     ),
     "no content row loads on index 3: a window close there is the data track's"
 );
@@ -127,7 +113,7 @@ static_assert(
     "SNES.sv: the power-on RAM image is the cartridge row's `f,RAM` file, no slot of its own"
 );
 static_assert(
-    kSnes.staging.order == StageOrder::None,
+    !kSnes.staging.staged,
     "no boot ladder: the save mount is the host-side opensave act "
     "inside the ROM tx, not a staging rung"
 );

@@ -58,7 +58,7 @@ struct CmdVerb {
         std::string_view movie;
         std::string_view rom;
         std::optional<std::chrono::microseconds> phase;
-        std::optional<FrameCount> lead;
+        std::optional<MovieFrameCount> lead;
     };
 
     struct TasStop {};

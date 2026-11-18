@@ -6,15 +6,17 @@
 
 #include "app/bay_releases.h"
 #include "app/board_ops.h"
+#include "app/fabric_state.h"
 #include "app/built_core.h"
+#include "app/autosave_cells.h"
 #include "app/identity_record.h"
 #include "app/ini_parse.h"
 #include "app/rumble_players_cell.h"
-#include "app/ladder_cell.h"
 #include "app/uart_mode.h"
 #include "cores/save_copy_level.h"
 #include "infra/log_lane.h"
 #include "infra/opt_ref.h"
+#include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
@@ -22,6 +24,7 @@
 #include "os/types.h"
 #include "os/uio_line_space.h"
 #include "proto/status_snapshot.h"
+#include "svc/file_slot_backend.h"
 
 namespace mister::xthread {
 struct RtStats;
@@ -68,6 +71,7 @@ class MailboxRelay;
 class DiskRelay;
 class SaveUploadRelay;
 class WindowJobService;
+class SwitchPark;
 
 struct SupervisorParts {
 
@@ -79,6 +83,7 @@ struct SupervisorParts {
         SaveUploadRelay& saves;
         svc::DiscReadService& discs;
         WindowJobService& window_jobs;
+        svc::SaveSlotBackends& save_backends;
 
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
 
@@ -91,6 +96,9 @@ struct SupervisorParts {
 
     LinkTxChannel<SeatTag::Main>& link_inbox;
     LinkRxChannel<SeatTag::Main>& link_rx;
+
+    FabricCell& fabric_cell;
+    SwitchPark& switch_park;
     const ConfigCell& config_cell;
 
     IdentityRecordCell& identity_record_cell;
@@ -99,7 +107,7 @@ struct SupervisorParts {
     LinkTxChannel<SeatTag::Input>& input_inbox;
     LinkRouter& router;
 
-    const LadderStateCell& ladder_cell;
+    infra::OptRef<const xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask{};
 
     svc::DiscReadService& unbound_discs;
 
@@ -120,7 +128,6 @@ struct SupervisorParts {
     infra::OptRef<const svc::Vfs> vfs{};
 
     infra::OptRef<UartModeController::Handoffs> uart_handoffs{};
-    bool stdout_routing = false;
 
     hal::DoorbellPolicy doorbells{};
     hal::FpgaAperture fpga_mem{};
@@ -140,6 +147,8 @@ struct SupervisorParts {
 
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
     Services services;
+
+    infra::OptRef<OsdMaskCell> osd_mask_cell{};
 };
 
 }

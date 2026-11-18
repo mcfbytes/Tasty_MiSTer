@@ -48,20 +48,20 @@ UioBurst ScanoutRelay::emit_(const UioBurst& ask) noexcept {
 
     hal::Selected cs(link_, hal::ChipSelect::Io);
     ++round_words_;
-    if (auto r = link_.transfer(hal::SpiWord{ask.opcode}); !r) {
+    if (auto r = link_.transfer(ask.opcode); !r) {
         ++failures_;
         out.ok = false;
         return out;
     }
     for (std::uint8_t i = 0; i < ask.count; ++i) {
         ++round_words_;
-        auto r = link_.transfer(hal::SpiWord{ask.words[i]});
+        auto r = link_.transfer(ask.words[i]);
         if (!r) {
             ++failures_;
             out.ok = false;
             return out;
         }
-        out.words[i] = r->v;
+        out.words[i] = *r;
     }
     return out;
 }

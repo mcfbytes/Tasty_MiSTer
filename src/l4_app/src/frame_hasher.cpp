@@ -84,7 +84,7 @@ bool FrameHasher::emit_runs_(const A& s, ControlGeneration gen) noexcept {
                 continue;
             row.hash = prev_hash_;
             row.stamp = run.stamp_at(i);
-            if (s.stamp.movie_frame >= MovieFrame{}) {
+            if (s.stamp.movie_frame >= MoviePosition{}) {
                 const WideMovieFrame mf = wide_frame(s.stamp.movie_frame)
                     - (s.stamp.core_frame - row.stamp.core_frame).movie_span();
                 row.stamp.movie_frame = std::max(mf, kNoWideMovieFrame).narrowed();

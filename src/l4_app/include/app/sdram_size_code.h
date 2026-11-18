@@ -41,7 +41,7 @@ static_assert(
     sdram_word(SdramSizeCode::Mb128, false) == 3
     && sdram_word(SdramSizeCode::Mb64, false) == 2
     && sdram_word(SdramSizeCode::Mb32, false) == 1
-    && sdram_word(SdramSizeCode::Unwired, true) == kSdramCookieMeasured.v
+    && proto::OsdMask{sdram_word(SdramSizeCode::Unwired, true)} == kSdramCookieMeasured
 );
 static_assert(!kSdramCookieMeasured.has(proto::kSdramSizeBits));
 

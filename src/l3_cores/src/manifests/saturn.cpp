@@ -36,7 +36,7 @@ static_assert(
 );
 
 static_assert(
-    kSaturnTicks.speeds == 3
+    kSaturnTicks.speeds == CdSpeedCount{3}
         && kSaturnTicks.speed[0] == 16'667us
         && kSaturnTicks.speed[1] == 13'333us
         && kSaturnTicks.speed[2] == 6'667us,
@@ -117,7 +117,7 @@ static_assert(
     "saturncdd.cpp:326-356: Load takes .cue and .chd and refuses the rest"
 );
 
-static_assert(kSaturn.staging.order == StageOrder::Saturn);
+static_assert(kSaturn.staging.staged);
 static_assert(
     kSaturn.staging.save && kSaturn.staging.save->slot == IoIndex{1},
     "sat.cpp:133: user_io_file_mount(buf, 1, 1) — slot 1, not 3DO's 0"

@@ -19,8 +19,8 @@ void RomHasher::arm(
     std::vector<cores::RomDigest> alts
 ) noexcept {
     file_ = std::move(file);
-    read_at_ = proto::FileSize{span.offset};
-    remaining_ = proto::FileSize{span.length};
+    read_at_ = span.offset;
+    remaining_ = span.length;
     digest_ = std::move(digest);
     alts_ = std::move(alts);
 }
@@ -33,10 +33,7 @@ RomHasher::Pace RomHasher::step() noexcept {
         const std::size_t remaining_bytes = remaining_.file_word<std::size_t>();
         const std::size_t want = std::min(buf.size(), remaining_bytes);
         const std::span<std::uint8_t> chunk(buf.data(), want);
-        const auto got = file_->read_at(
-            read_at_.file_word<std::size_t>(),
-            std::as_writable_bytes(chunk)
-        );
+        const auto got = file_->read_at(read_at_, std::as_writable_bytes(chunk));
         if (!got || *got == 0 || *got > want)
             return Pace::ReadFailed;
         digest_.update(chunk.first(*got));

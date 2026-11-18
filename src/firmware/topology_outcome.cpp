@@ -23,10 +23,10 @@ namespace mister::fw {
         return out;
     }
 
-    const long declared = static_cast<long>(hal::max_cpu(m).v) + 1;
     const std::size_t online = online_cpus < 0 ? std::size_t{0}
                                                : static_cast<std::size_t>(online_cpus);
-    out.coverage = RtSetup{online_cpus == declared, online_cpus == declared ? 0 : ENOSPC};
+    const bool covered = hal::max_cpu(m).is_last_of(online);
+    out.coverage = RtSetup{covered, covered ? 0 : ENOSPC};
     if (hal::cpus_within(m, online)) {
         out.topology = RtSetup{true, 0};
         return out;

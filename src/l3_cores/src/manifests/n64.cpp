@@ -6,6 +6,7 @@
 #include "cores/n64_core.h"
 #include "cores/n64_loader.h"
 #include "cores/n64_ram_save_order.h"
+#include "cores/n64_save_store.h"
 
 namespace mister::cores::manifests {
 
@@ -23,6 +24,13 @@ std::unique_ptr<ILoader> make_n64_loader(const LoaderContext& ctx) {
         ctx.memo,
         ctx.status_cell
     );
+}
+
+std::unique_ptr<svc::IStorageBackend> make_n64_save_store(
+    const svc::Vfs& vfs,
+    infra::OptRef<xthread::WakeFlag> activity
+) {
+    return std::make_unique<n64::SaveChannelStore>(vfs, activity);
 }
 
 static_assert(kN64.kind == CoreKind::N64);
@@ -50,7 +58,7 @@ static_assert(
     "would alias every 17 ms deadline onto the round after next"
 );
 static_assert(
-    kN64.staging.order == StageOrder::None,
+    !kN64.staging.staged,
     "no boot ladder: the saves are mounted after the ROM tx, not stepped"
 );
 static_assert(

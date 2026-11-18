@@ -31,6 +31,13 @@ add_library(mister_os STATIC
   src/vm_status.cpp
   src/vt_console.cpp
   src/write_all.cpp
+)
+target_include_directories(mister_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(mister_os
+  PUBLIC mister_infra
+  PRIVATE tasty_options)
+
+add_library(mister_os_connect STATIC
   src/ssid.cpp
   src/passphrase.cpp
   src/ipv4_addr.cpp
@@ -50,12 +57,12 @@ add_library(mister_os STATIC
   src/hci_reset.cpp
   src/usb_adapter_cycle.cpp
 )
-target_include_directories(mister_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(mister_os
-  PUBLIC mister_infra
+target_link_libraries(mister_os_connect
+  PUBLIC mister_os
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
+  os/ff_effect_id.h
   os/anon_mapping.h
   os/block_device.h
   os/bt_probe.h
@@ -101,6 +108,9 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/write_all.h
   os/writeback_paths.h
   os/writeback_probe.h
+)
+tasty_add_header_checks(tasty_os_connect_header_checks LIB mister_os_connect HEADERS
+  os/hex_digit.h
   os/ssid.h
   os/passphrase.h
   os/country_code.h
@@ -149,5 +159,6 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/usb_device_count.h
   os/usb_adapter_cycle.h
   os/bt_radio.h
+  os/dbus_wire_types.h
 )
 

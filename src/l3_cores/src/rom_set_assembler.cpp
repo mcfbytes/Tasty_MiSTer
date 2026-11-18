@@ -117,7 +117,7 @@ bool RomSetAssembler::file_part(const Rom& rom, const FilePart& p) {
         const std::string_view zip = (bar == std::string_view::npos) ? rest : rest.substr(0, bar);
         fname = part_path(zip, p.name);
         for (RepeatCount i{}; i < p.common.repeat; i = i + RepeatCount{1}) {
-            result = stream_file(fname, p.crc.v, p.offset, p.length, p.common.map);
+            result = stream_file(fname, p.crc, p.offset, p.length, p.common.map);
             if (!result)
                 break;
         }
@@ -339,12 +339,12 @@ bool RomSetAssembler::scatter(std::span<const std::uint8_t> src, MapWord map) {
 
 bool RomSetAssembler::stream_file(
     const std::string& fname,
-    std::uint32_t crc,
+    svc::Crc32 crc,
     std::optional<RomOffset> start,
     std::optional<RomLength> length,
     MapWord map
 ) {
-    auto f = vfs_.open_zip_by_crc(fname, svc::Crc32{crc});
+    auto f = vfs_.open_zip_by_crc(fname, crc);
     if (!f)
         return false;
     const Ex<proto::FileSize> sz = (*f)->size();
@@ -362,7 +362,7 @@ bool RomSetAssembler::stream_file(
     if (length && !length->empty())
         bytes2send = bytes2send.min(*length);
     std::array<std::uint8_t, kStreamChunkBytes> buf{};
-    std::uint64_t at = off.size();
+    proto::FileOffset at = proto::kFileStart + off.file_size();
     while (bytes2send != RomLength{}) {
         const std::span<std::uint8_t> chunk = bytes2send.first_of(std::span<std::uint8_t>(buf));
 
@@ -372,7 +372,7 @@ bool RomSetAssembler::stream_file(
         if (!scatter(chunk, map))
             return false;
         bytes2send -= RomLength::of(chunk);
-        at += chunk.size();
+        at += proto::FileSize::of(std::span<const std::uint8_t>(chunk));
     }
     return true;
 }

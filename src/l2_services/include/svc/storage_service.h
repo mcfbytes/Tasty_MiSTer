@@ -8,6 +8,7 @@
 #include <span>
 
 #include "infra/counter.h"
+#include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
@@ -15,6 +16,7 @@
 #include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
+#include "proto/slot_attributes.h"
 #include "proto/storage_channel.h"
 #include "svc/block_ctl.h"
 #include "svc/io_coworker.h"
@@ -63,6 +65,11 @@ public:
 
         infra::OptRef<const BlankSaveSpec> blank{};
         bool performed = false;
+    };
+
+    struct Outcome {
+        proto::StorageStatus status = proto::StorageStatus::Ok;
+        Error fault{};
     };
 
     void on(
@@ -149,7 +156,7 @@ private:
         const Work& w
     ) const noexcept;
 
-    void finish_(proto::StorageStatus st, Work& w, const proto::StorageCompletion& c) noexcept;
+    void finish_(const Outcome& o, Work& w, const proto::StorageCompletion& c) noexcept;
     Data data_;
     Ctl ctl_;
 
@@ -215,13 +222,14 @@ private:
             void attached(
                 infra::OptRef<IStorageBackend> file,
                 std::optional<proto::FileSize> extent,
-                bool growable,
+                proto::MountClass mount,
                 infra::OptRef<const BlankSaveSpec> blank
             ) noexcept {
                 save_ = ISaveFilesOnIo::Save{
                     .file = file,
                     .extent = extent,
-                    .growable = growable,
+                    .growable = mount == proto::MountClass::Save,
+                    .mount = mount,
                     .gen = save_.gen.next(),
                     .blank = blank
                 };

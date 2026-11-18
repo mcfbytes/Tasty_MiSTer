@@ -14,18 +14,18 @@
 #   Corrosion_DIR          an installed Corrosion (default: Slint's CMake fetches it)
 set -euo pipefail
 
-SLINT_VERSION=1.18.1
+SLINT_VERSION=1.19.0
 SLINT_URL="https://github.com/slint-ui/slint/archive/v${SLINT_VERSION}/slint-${SLINT_VERSION}.tar.gz"
-SLINT_SHA256=fe485305ed303215e76c04918ee9aefbffbe229f18f979098ec36c7fa1dab28b
-PATCH_REPO="https://raw.githubusercontent.com/mcfbytes/Buildroot_MiSTer/1e774eefd15e25b536176f5393894308d2b72a78/package/slint"
+SLINT_SHA256=9c15a9f6dfe94fbe96cb97dcb38207907403a67c9b23d8a93468ea1bb132246c
+PATCH_REPO="https://raw.githubusercontent.com/mcfbytes/Buildroot_MiSTer/eae07567a1349037fed4f723bec145c55ca9025a/package/slint"
 IMAGE_PATCHES=(
-  "0001-api-cpp-dlopen-libfontconfig-instead-of-linking-it.patch 3688b77bf01d1e8fdf96a72308b990e88e75a093ef5a28becebcf42f913598de"
+  "0001-api-cpp-dlopen-libfontconfig-instead-of-linking-it.patch 34b07553dd659dd4fb6dee944eb0c6d090b6edf12609ca71a54e488734dcd1e6"
   "0002-api-cpp-add-an-ARGB8888-software-renderer-target.patch 0edf25c64c078594b542373e315c03a97845b5fa6884e6265fce8b817af0b3eb"
-  "0003-api-cpp-let-the-caller-drive-the-animation-clock.patch 990d1a97cce8537fd72ee40094b96bd7a5a2c9caf77cb6693c8f20b8007f3fe5"
+  "0003-api-cpp-let-the-caller-drive-the-animation-clock.patch e1588871b3edc7ea5fa3abf09ef2753e5b32511a48e9e7db4c08db5748ec5059"
 )
 # The host compiler that turns the HD menu's .slint into C++: installed as $prefix/bin/slint-compiler.
 COMPILER_URL="https://github.com/slint-ui/slint/releases/download/v${SLINT_VERSION}/slint-compiler-Linux-x86_64.tar.gz"
-COMPILER_SHA256=543091e6102a02db3403aa77c774a11d9f383b31cb03e25cddad63269a1fb779
+COMPILER_SHA256=40f50891de8b78c59cd04158c4f55d3f9ee45f8908aacc22192d76ffc0b7693a
 # slint-notices.py reads this pin; the two move together.
 RUST_TOOLCHAIN=${RUST_TOOLCHAIN:-1.97.0}
 RUST_TARGET=armv7-unknown-linux-gnueabihf

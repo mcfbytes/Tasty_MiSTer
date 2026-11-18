@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/types.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -25,7 +26,7 @@ enum class Cadence : std::uint8_t { Census, SessionStart, kCount };
 struct PollShapeRow {
     PollShape shape;
     UioOp opcode;
-    std::uint16_t mask;
+    hal::SpiWord mask;
     Condition push_when;
     SeatTag sink;
     CommandForm form;
@@ -36,7 +37,7 @@ struct PollShapeRow {
 inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
     {.shape = PollShape::InfoPoll,
      .opcode = UioOp::InfoGet,
-     .mask = 0x00FF,
+     .mask = hal::SpiWord{0x00FF},
      .push_when = Condition::NonZero,
      .sink = SeatTag::Ui,
      .form = CommandForm::Bare,
@@ -44,7 +45,7 @@ inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
      .cadence = Cadence::Census},
     {.shape = PollShape::RumblePoll,
      .opcode = UioOp::GetRumble,
-     .mask = 0xFFFF,
+     .mask = hal::SpiWord{0xFFFF},
      .push_when = Condition::MaskedChangedSinceLast,
      .sink = SeatTag::Input,
      .form = CommandForm::ParamInHighByte,
@@ -52,7 +53,7 @@ inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
      .cadence = Cadence::Census},
     {.shape = PollShape::F12ModPoll,
      .opcode = UioOp::GetF12Mod,
-     .mask = 0xFFFF,
+     .mask = hal::SpiWord{0xFFFF},
      .push_when = Condition::MaskedChangedSinceLast,
      .sink = SeatTag::Input,
      .form = CommandForm::Bare,
@@ -103,16 +104,17 @@ static_assert(poll_rows_fit_their_form(), "a Bare row issues one parameter; none
     return opcode;
 }
 
-[[nodiscard]] constexpr bool guard_passes(
-    const PollShapeRow& r,
-    std::uint16_t word,
-    std::uint16_t last
-) noexcept {
+struct PollReply {
+    hal::SpiWord word;
+    hal::SpiWord mirror;
+};
+
+[[nodiscard]] constexpr bool guard_passes(const PollShapeRow& r, PollReply reply) noexcept {
     switch (r.push_when) {
         case Condition::NonZero:
-            return (word & r.mask) != 0;
+            return reply.word.any_of(r.mask);
         case Condition::MaskedChangedSinceLast:
-            return (word & r.mask) != (last & r.mask);
+            return reply.word.masked(r.mask) != reply.mirror.masked(r.mask);
         case Condition::kCount:
             break;
     }

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -15,6 +16,7 @@
 #include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "svc/card_writer.h"
 #include "svc/io_coworker.h"
 
 namespace mister::svc {
@@ -34,22 +36,29 @@ public:
     static constexpr std::size_t kShadowBytes = 24u * 1024u;
     static constexpr std::size_t kDepth = 4;
 
+    struct Target {
+        std::string_view rel;
+        std::string_view retire{};
+    };
+
     struct Slot {
         TASTY_SEAT_MEDIATOR(Any, Any);
         FixedStr<kRelCap, StrFit::Reject> rel{};
+        FixedStr<kRelCap, StrFit::Reject> retire{};
         std::uint32_t len = 0;
-        bool ok = false;
+
+        std::optional<Error> fault{};
         std::byte data[kBytes]{};
     };
 
     using Chan = xthread::LoanChannel<Slot, kDepth, SeatTag::Ui, SeatTag::Io>;
 
     explicit UiWriteLane(const svc::Vfs& vfs) noexcept
-        : vfs_(&vfs),
+        : card_(vfs),
           chan_(xthread::Polled{}, xthread::Polled{}) {}
 
     UiWriteLane(const svc::Vfs& vfs, xthread::WakeFlag& io_wake) noexcept
-        : vfs_(&vfs),
+        : card_(vfs),
           chan_(io_wake, xthread::Polled{}) {}
 
     UiWriteLane(const UiWriteLane&) = delete;
@@ -64,6 +73,12 @@ public:
         VerdictSink sink = VerdictSink::None
     ) noexcept;
 
+    [[nodiscard]] Ex<void> arm(
+        Target target,
+        std::span<const std::byte> bytes,
+        VerdictSink sink = VerdictSink::None
+    ) noexcept;
+
     void tick(VerdictSinks sinks) noexcept;
 
     [[nodiscard]] Ex<std::span<const std::byte>> peek(std::string_view rel) const noexcept;
@@ -74,10 +89,16 @@ public:
 
     [[nodiscard]] std::uint32_t writes() const noexcept { return ui_.writes; }
 
+    [[nodiscard]] std::optional<Error> last_fault() const noexcept { return ui_.last_fault_; }
+
     [[nodiscard]] std::size_t in_flight() const noexcept;
+
+    static constexpr svc::LaneClass kLaneClass = svc::LaneClass::Bulk;
 
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
+
+    [[nodiscard]] Chan& channel_for_test() noexcept { return chan_; }
 
 private:
     struct Shadow {
@@ -96,9 +117,10 @@ private:
         std::uint32_t refusals = 0;
         std::uint32_t failures = 0;
         std::uint32_t writes = 0;
+        std::optional<Error> last_fault_{};
     };
 
-    const svc::Vfs* vfs_;
+    svc::CardWriter card_;
     Ui ui_{};
     Chan chan_;
 };

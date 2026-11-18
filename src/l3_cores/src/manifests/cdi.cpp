@@ -73,13 +73,19 @@ consteval bool cdi_start_chain_is_stock() {
     constexpr auto kNames = std::to_array<std::string_view>(
         {"boot0.rom", "boot1.rom", "boot2.rom", "boot3.rom", "boot.rom"}
     );
-    constexpr auto kDest = std::to_array<std::uint8_t>({0x00, 0x40, 0x80, 0xC0, 0x00});
+    constexpr auto kDest = std::to_array<proto::WideIoIndex>(
+        {proto::WideIoIndex::of(proto::IoIndex{}, 0),
+         proto::WideIoIndex::of(proto::IoIndex{}, 1),
+         proto::WideIoIndex::of(proto::IoIndex{}, 2),
+         proto::WideIoIndex::of(proto::IoIndex{}, 3),
+         proto::WideIoIndex::of(proto::IoIndex{}, 0)}
+    );
     static_assert(kNames.size() == kDest.size());
     if (kCdi.start_assets.size() != kNames.size())
         return false;
     for (std::size_t i = 0; i < kNames.size(); ++i) {
         const BootAsset& r = kCdi.start_assets[i];
-        if (r.name != kNames[i] || r.dest.v != kDest[i] || r.subdir != kCdi.name)
+        if (r.name != kNames[i] || r.dest != kDest[i] || r.subdir != kCdi.name)
             return false;
     }
     return true;

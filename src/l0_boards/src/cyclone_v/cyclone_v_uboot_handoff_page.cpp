@@ -11,17 +11,17 @@ namespace mister::boards::cyclone_v {
 std::byte* UbootHandoffPage::base() noexcept {
     if (!page_)
         return nullptr;
-    return page_->view(0, kHandoffPage.len).data();
+    return page_->view(0, kHandoffPage.region().len).data();
 }
 
 Ex<hal::HandoffPage> UbootHandoffPage::handoff() {
     TASTY_SEAT_BODY(UbootHandoffPage);
     const std::byte* page = base();
     if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
+        return std::unexpected(kHandoffPage.region().phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
     const auto raw = infra::byte_cast<const std::uint8_t>(
-        std::span<const std::byte>(page, kHandoffPage.len)
+        std::span<const std::byte>(page, kHandoffPage.region().len)
     );
 
     hal::HandoffPage out{};
@@ -51,7 +51,7 @@ Ex<void> UbootHandoffPage::write_env(std::string_view core_name, std::span<const
     TASTY_SEAT_BODY(UbootHandoffPage);
     std::byte* page = base();
     if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
+        return std::unexpected(kHandoffPage.region().phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
     static constexpr char kCoreEq[] = {'c', 'o', 'r', 'e', '=', '"'};
@@ -89,9 +89,11 @@ Ex<void> UbootHandoffPage::write_sdram_cfg(std::uint16_t cfg) {
     TASTY_SEAT_BODY(UbootHandoffPage);
     std::byte* page = base();
     if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
+        return std::unexpected(kHandoffPage.region().phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
-    auto bytes = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len));
+    auto bytes = infra::byte_cast<std::uint8_t>(
+        std::span<std::byte>(page, kHandoffPage.region().len)
+    );
     kSdramCell.stamp(bytes);
     infra::store_be<std::uint16_t>(kSdramCell.value_of(bytes).first<sizeof(std::uint16_t)>(), cfg);
     return {};
@@ -101,9 +103,11 @@ Ex<void> UbootHandoffPage::write_altcfg(std::uint8_t alt) {
     TASTY_SEAT_BODY(UbootHandoffPage);
     std::byte* page = base();
     if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
+        return std::unexpected(kHandoffPage.region().phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
-    auto bytes = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len));
+    auto bytes = infra::byte_cast<std::uint8_t>(
+        std::span<std::byte>(page, kHandoffPage.region().len)
+    );
     kAltCfgCell.stamp(bytes);
     kAltCfgCell.value_of(bytes)[0] = alt;
     return {};
@@ -113,7 +117,7 @@ Ex<void> UbootHandoffPage::write_reboot_flag(bool warm) {
     TASTY_SEAT_BODY(UbootHandoffPage);
     std::byte* page = base();
     if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
+        return std::unexpected(kHandoffPage.region().phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
     const std::uint32_t flag = warm ? kHandoffRebootWarm : 0u;
     infra::store_native<std::uint32_t>(

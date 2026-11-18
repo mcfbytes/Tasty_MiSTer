@@ -52,6 +52,8 @@ public:
     void seal_boot_pump() noexcept { sealed_ = true; }
 
     void service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept override;
+
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept;
     void order_bind(proto::DiskUnit unit, std::string_view path) noexcept override;
     [[nodiscard]] cores::MountState bind_answer(proto::DiskUnit unit) noexcept override;
 
@@ -155,6 +157,8 @@ private:
         std::optional<proto::DiskUnit> open_unit{};
         bool release_owed = false;
         infra::IndexedArray<Order, kUnits, proto::DiskUnit> orders{};
+
+        proto::FioWordCount round_words{};
         xthread::Counter polls{}, lent{}, declines{}, acts{}, stale{}, wire_faults{}, abandoned{};
     };
 

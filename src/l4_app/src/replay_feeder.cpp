@@ -108,7 +108,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         refuse_(LeadRefusal::of(*p.lead).refused(Refusal::Lead));
         return true;
     }
-    if (p.stop_at && *p.stop_at == MovieFrame{}) {
+    if (p.stop_at && *p.stop_at == MoviePosition{}) {
         refuse_(
             PlayRefusal{Refusal::Movie, static_cast<std::uint32_t>(cores::MovieRefusal::NotAMovie)}
         );

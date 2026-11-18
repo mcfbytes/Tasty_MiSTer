@@ -171,6 +171,7 @@ constexpr std::uint64_t kHoldClk = 5 * 32768 / 2;
 constexpr std::uint8_t kLateFrames = 2;
 
 constexpr std::size_t kGmvHead = 64;
+constexpr proto::FileSize kGmvHeadBytes{kGmvHead};
 constexpr std::string_view kGmvMagic = "Gens Movie TEST";
 constexpr std::size_t kGmvChunk = 256;
 constexpr std::size_t kGmvLineMax = 2 * 12 + 4;
@@ -208,27 +209,47 @@ public:
         line_ = kLogPorts * width(players_.layout()) + kLineFraming;
     }
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<std::size_t> read_at(
+        proto::FileOffset pos,
+        std::span<std::byte> dst
+    ) override {
+        return text_at_(pos, dst);
+    }
+
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
+        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
+    }
+
+    [[nodiscard]] Ex<svc::FileSize> size() const override {
+        return svc::FileSize{head_.size() + frames_ * line_};
+    }
+
+    [[nodiscard]] Ex<void> flush() override { return {}; }
+
+private:
+    [[nodiscard]] Ex<std::size_t> text_at_(proto::FileOffset pos, std::span<std::byte> dst) {
         constexpr std::size_t kGmvFrameBytes = 3;
+        const proto::FileSize head{head_.size()};
+        const proto::FileSize line{line_};
         std::size_t done = 0;
-        if (off < head_.size()) {
-            const auto n = static_cast<std::size_t>(
-                std::min<std::uint64_t>(dst.size(), head_.size() - off)
-            );
-            std::copy_n(infra::text_bytes(head_).data() + off, n, dst.data());
+        if (head.holds(pos)) {
+            const auto rest = pos.skip_in(infra::text_bytes(head_));
+            const std::size_t n = std::min(dst.size(), rest.size());
+            std::copy_n(rest.data(), n, dst.data());
             done = n;
         }
         while (done < dst.size()) {
-            const std::uint64_t at = off + done - head_.size();
-            const std::uint64_t f = at / line_;
+            const proto::FileSize into = (pos + proto::FileSize{done}) - (proto::kFileStart + head);
+            const std::uint64_t f = into.whole_records(line);
+            const std::size_t skip = into.bytes_past_whole(line).file_word<std::size_t>();
             if (f >= frames_)
                 break;
             const std::uint64_t count = std::min<std::uint64_t>(
-                {frames_ - f, kGmvChunk, (dst.size() - done + (at % line_)) / line_ + 1}
+                {frames_ - f, kGmvChunk, (dst.size() - done + skip) / line_ + 1}
             );
             std::array<std::byte, kGmvFrameBytes * kGmvChunk> raw{};
             const auto got = file_->read_at(
-                kGmvHead + kGmvFrameBytes * f,
+                proto::kFileStart + kGmvHeadBytes + proto::FileSize{kGmvFrameBytes * f},
                 std::span(raw).first(static_cast<std::size_t>(kGmvFrameBytes * count))
             );
             if (!got)
@@ -241,7 +262,6 @@ public:
                 const Line one = render_(raw.data() + kGmvFrameBytes * i);
                 std::copy_n(one.c.data(), line_, text.data() + i * line_);
             }
-            const std::size_t skip = static_cast<std::size_t>(at % line_);
             const std::size_t n = std::min(
                 dst.size() - done,
                 static_cast<std::size_t>(whole * line_) - skip
@@ -254,17 +274,6 @@ public:
         return done;
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
-    }
-
-    [[nodiscard]] Ex<svc::FileSize> size() const override {
-        return svc::FileSize{head_.size() + frames_ * line_};
-    }
-
-    [[nodiscard]] Ex<void> flush() override { return {}; }
-
-private:
     [[nodiscard]] Line render_(const std::byte* b) const {
         constexpr std::size_t kThreeButtonBits = 8;
         constexpr std::size_t kLogPorts = 2;
@@ -379,6 +388,7 @@ std::optional<CoreRegion> Layout::core_region() const noexcept {
 
 Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     constexpr std::size_t kGmvFrameBytes = 3;
+    constexpr proto::FileSize kGmvFrame{kGmvFrameBytes};
     constexpr std::size_t kGmvVersionAt = 0x0F;
     constexpr std::size_t kGmvRerecordsAt = 0x10;
     constexpr std::size_t kGmvRerecordsBytes = 4;
@@ -390,10 +400,10 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     const auto size = gmv->size();
     if (!size)
         return std::unexpected(size.error());
-    if (size->v < kGmvHead)
+    if (*size < kGmvHeadBytes)
         return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     std::array<std::byte, kGmvHead> h{};
-    const auto got = gmv->read_at(0, h);
+    const auto got = gmv->read_at(proto::kFileStart, h);
     if (!got)
         return std::unexpected(got.error());
     if (*got != h.size())
@@ -412,7 +422,8 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     constexpr std::uint64_t kLogPorts = 2;
     constexpr std::uint64_t kLineFraming = 4;
     const std::uint64_t line = kLogPorts * width(players.layout()) + kLineFraming;
-    if ((size->v - kGmvHead) / kGmvFrameBytes * line > MovieArchiveFormat::kLogMax)
+    if (size->after_header(kGmvHeadBytes).whole_records(kGmvFrame) * line
+        > MovieArchiveFormat::kLogMax)
         return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
     const auto rerecords = infra::load_le<std::uint32_t>(
         std::span(h).subspan<kGmvRerecordsAt, kGmvRerecordsBytes>()
@@ -431,7 +442,7 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
         + pad_key(kMultitapFirstPlayer, players)
         + pad_key(kMaxPlayers, players)
         + "\n";
-    const std::uint64_t frames = (size->v - kGmvHead) / kGmvFrameBytes;
+    const std::uint64_t frames = size->after_header(kGmvHeadBytes).whole_records(kGmvFrame);
     return std::unique_ptr<svc::IFile>(
         std::make_unique<GmvText>(std::move(gmv), frames, std::move(head), players)
     );
@@ -814,7 +825,7 @@ std::optional<IMovieFormat::DigestSpan> MegaDriveBk2Format::rom_digest_span(
         && head[kSmdMarkerLo] == kSmdMarkerLoByte
         && head[kSmdMarkerHi] == kSmdMarkerHiByte)
         return std::nullopt;
-    return span_past(size, proto::FileSize{});
+    return span_past(size, proto::kFileStart);
 }
 
 }

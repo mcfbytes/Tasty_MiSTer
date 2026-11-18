@@ -7,10 +7,10 @@
 #include "hal/sys_directory.h"
 #include "hal/types.h"
 #include "infra/error.h"
-#include "proto/types.h"
-#include "proto/declared_line.h"
+#include "proto/block_line.h"
 #include "proto/op_bitmap.h"
 #include "proto/sys_directory_image.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 
@@ -21,8 +21,9 @@ struct LaneBlockDecl {
     LaneCaps caps{};
     std::uint16_t fifo_depth = 0;
     std::uint16_t strobe_gap = 0;
-    DeclaredLine line_decl{};
 };
+
+static_assert(line_source(DirEntryKind::Lane) == LineFrom::None, "a LANE entry declares no line");
 
 [[nodiscard]] Ex<LaneBlockDecl> find_lane_block(
     const SysDirectoryImage& dir,

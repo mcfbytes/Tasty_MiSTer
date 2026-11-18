@@ -26,11 +26,10 @@ constexpr DirEntryFacts kFacts{
     auto d = find_kinded<NoWords>(dir, kFacts, window);
     if (!d)
         return std::unexpected(d.error());
-    PadBlockDecl
-        out{.offset = d->offset(), .size = d->size(), .ops = d->bitmap(), .line = d->line()};
+    PadBlockDecl out{.offset = d->offset(), .size = d->size(), .ops = d->bitmap()};
     for (const UioOp op : {UioOp::Joystick0, UioOp::Joystick1}) {
         if (!out.ops.honours(op)) {
-            return std::unexpected(proto::word(op).refused(Errc::bad_opcode, ERR_SITE()));
+            return std::unexpected(proto::word(op).refusal(Errc::bad_opcode, ERR_SITE()));
         }
     }
     return out;

@@ -64,9 +64,9 @@ private:
 
 [[nodiscard]] constexpr IMovieFormat::DigestSpan span_past(
     proto::FileSize size,
-    proto::FileSize header
+    proto::FileOffset from
 ) noexcept {
-    return IMovieFormat::DigestSpan{.offset = header, .length = size - header};
+    return IMovieFormat::DigestSpan{.offset = from, .length = from.remaining_in(size)};
 }
 
 [[nodiscard]] infra::OptRef<const MovieCodec> movie_codec_for(

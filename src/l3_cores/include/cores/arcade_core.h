@@ -77,7 +77,6 @@ private:
     }
 
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
-    void on_set_pending_file_ext(std::string_view ext) noexcept override;
     std::uint64_t on_last_tx_bytes() const noexcept override;
     svc::Crc32 on_last_tx_crc() const noexcept override;
 

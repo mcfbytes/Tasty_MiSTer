@@ -12,6 +12,8 @@ namespace mister::hal {
 
 struct DoorbellPolicy {
     std::uint32_t pool = 0;
+    os::F2hLine first_f2h{};
+    os::F2hLine vsync_line{};
     LwOffset cause_base{0};
     std::uint32_t cause_span = 0;
 

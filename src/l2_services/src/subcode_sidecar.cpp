@@ -40,7 +40,8 @@ constexpr int kCdgColumnOffset[] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 9
                                     12 - 96, 13 - 120, 14 - 144, 15 - 168, 16,       17 - 24,
                                     1 - 48,  19 - 72,  20 - 96,  21 - 120, 22 - 144, 3 - 168};
 
-constexpr std::uint32_t kCdgReach = 165;
+constexpr std::uint32_t kCdgReachBytes = 165;
+constexpr proto::FileSize kCdgReach{kCdgReachBytes};
 constexpr std::size_t kCdgSpan = 254;
 
 Ex<std::span<std::byte>> SubcodeSidecar::read_cdg_subcode_(
@@ -50,15 +51,18 @@ Ex<std::span<std::byte>> SubcodeSidecar::read_cdg_subcode_(
     constexpr std::size_t kCdgColumns = std::size(kCdgColumnOffset);
     constexpr std::size_t kCdgPacks = kSubcodeBytes / kCdgColumns;
 
-    const std::uint64_t want = kRecordBytes.position_of(proto::Lba{} + at);
-    const std::uint64_t base = want > kCdgReach ? want - kCdgReach : 0;
+    const proto::FileOffset want = kRecordBytes.position_of(proto::Lba{} + at);
+    const proto::FileOffset base = want - proto::kFileStart > kCdgReach ? want - kCdgReach
+                                                                        : proto::kFileStart;
     std::byte buf[kCdgSpan]{};
     auto rd = sub_->read_at(base, std::span<std::byte>(buf, sizeof(buf)));
     if (!rd)
         return std::unexpected(rd.error());
     for (std::size_t pack = 0; pack < kCdgPacks; ++pack) {
         for (std::size_t col = 0; col < kCdgColumns; ++col) {
-            const std::ptrdiff_t rel = static_cast<std::ptrdiff_t>(pack * kCdgColumns + kCdgReach)
+            const std::ptrdiff_t rel = static_cast<std::ptrdiff_t>(
+                                           pack * kCdgColumns + kCdgReachBytes
+                                       )
                 + kCdgColumnOffset[col];
             dst[pack * kCdgColumns + col] = buf[static_cast<std::size_t>(rel)];
         }

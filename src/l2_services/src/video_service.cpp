@@ -5,7 +5,9 @@
 #include "svc/pll_solver.h"
 #include "svc/yc_table.h"
 
+#include <array>
 #include <charconv>
+#include <span>
 
 #include "infra/ascii.h"
 #include "video_service_detail.h"
@@ -96,10 +98,18 @@ std::int64_t strtoull_prefix(std::string_view s) {
 
 constexpr std::size_t kMaxTokens = 32;
 
-struct TokenList {
-    std::array<std::string_view, kMaxTokens> items{};
+template <typename T>
+struct BoundedRun {
+    std::array<T, kMaxTokens> items{};
     std::size_t count = 0;
+
+    [[nodiscard]] std::span<const T> live() const noexcept {
+        return std::span<const T>(items).first(count);
+    }
 };
+
+using TokenList = BoundedRun<std::string_view>;
+using IntegerRun = BoundedRun<std::uint32_t>;
 
 TokenList tokenize_commas(std::string_view s) {
     TokenList out{};
@@ -135,11 +145,21 @@ constexpr double kKhzPerMhz = 1000.0;
 constexpr std::uint32_t kTokenByteMask = 0xFF;
 
 struct ModeSpec {
-    std::array<std::uint32_t, kMaxTokens> val{};
-    TokenList integers{};
+    IntegerRun integers{};
     TokenList flags{};
     double rate = 0.0;
 };
+
+IntegerRun leading_integers(const TokenList& tokens) {
+    IntegerRun out{};
+    for (const std::string_view token : tokens.live()) {
+        const auto parsed = parse_u32_base0(token);
+        if (!parsed)
+            break;
+        out.items[out.count++] = *parsed;
+    }
+    return out;
+}
 
 std::optional<ModeSpec> scan_mode(std::string_view spec) {
     if (spec.empty())
@@ -148,23 +168,16 @@ std::optional<ModeSpec> scan_mode(std::string_view spec) {
     if (tokens.count == 0)
         return std::nullopt;
     ModeSpec s{};
-    std::size_t run = 0;
-    for (; run < tokens.count; ++run) {
-        const auto parsed = parse_u32_base0(tokens.items[run]);
-        if (!parsed)
-            break;
-        s.val[run] = *parsed;
-    }
+    s.integers = leading_integers(tokens);
 
-    if (run == kArityCvtFractional && tokens.count > kArityCvtFractional) {
-        if (const auto parsed = parse_double_all(tokens.items[run])) {
+    if (s.integers.count == kArityCvtFractional && tokens.count > kArityCvtFractional) {
+        if (const auto parsed = parse_double_all(tokens.items[s.integers.count])) {
             s.rate = *parsed;
-            ++run;
+            ++s.integers.count;
         }
     }
-    for (std::size_t i = 0; i < tokens.count; ++i) {
-        TokenList& side = (i < run) ? s.integers : s.flags;
-        side.items[side.count++] = tokens.items[i];
+    for (std::size_t i = s.integers.count; i < tokens.count; ++i) {
+        s.flags.items[s.flags.count++] = tokens.items[i];
     }
     return s;
 }
@@ -282,7 +295,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     if (cnt == kArityPreset) {
 
         return video_timing::ParsedMode{video_timing::PresetPick{
-            .index = PresetIndex::of(s.val[kTokenWidth]),
+            .index = PresetIndex::of(s.integers.items[kTokenWidth]),
             .hpol = m.hpol,
             .vpol = m.vpol
         }};
@@ -290,11 +303,12 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
 
     if (cnt == kArityCvt) {
 
-        const double rate = (s.rate != 0.0) ? s.rate : static_cast<double>(s.val[kTokenRate]);
+        const double rate = (s.rate != 0.0) ? s.rate
+                                            : static_cast<double>(s.integers.items[kTokenRate]);
 
         const bool hpol = m.hpol;
         const bool vpol = m.vpol;
-        const Resolution active{s.val[kTokenWidth], s.val[kTokenHeight]};
+        const Resolution active{s.integers.items[kTokenWidth], s.integers.items[kTokenHeight]};
         m = calculate_cvt(
             active,
             static_cast<float>(rate),
@@ -311,30 +325,34 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         m = video_timing::with_timings(
             m,
             std::span<const std::uint32_t, kModelineTimings>(
-                s.val.data() + item(ModelineItem::Hact),
+                s.integers.items.data() + item(ModelineItem::Hact),
                 kModelineTimings
             )
         );
         const PllBlock raw_pll = PllBlock::from_item_words(
             std::span<const std::uint32_t, PllBlock::kItemWords>(
-                s.val.data() + item(ModelineItem::PllFirst),
+                s.integers.items.data() + item(ModelineItem::PllFirst),
                 PllBlock::kItemWords
             )
         );
         if (cnt > item(ModelineItem::Hpol)) {
-            m.hpol = (s.val[item(ModelineItem::Hpol)] != 0);
+            m.hpol = (s.integers.items[item(ModelineItem::Hpol)] != 0);
         }
         if (cnt > item(ModelineItem::Vpol)) {
-            m.vpol = (s.val[item(ModelineItem::Vpol)] != 0);
+            m.vpol = (s.integers.items[item(ModelineItem::Vpol)] != 0);
         }
         if (cnt > item(ModelineItem::Vic)) {
-            m.vic = static_cast<std::uint8_t>(s.val[item(ModelineItem::Vic)] & kTokenByteMask);
+            m.vic = static_cast<std::uint8_t>(
+                s.integers.items[item(ModelineItem::Vic)] & kTokenByteMask
+            );
         }
         if (cnt > item(ModelineItem::Rb)) {
-            m.rb = static_cast<std::uint8_t>(s.val[item(ModelineItem::Rb)] & kTokenByteMask);
+            m.rb = static_cast<std::uint8_t>(
+                s.integers.items[item(ModelineItem::Rb)] & kTokenByteMask
+            );
         }
         if (cnt > item(ModelineItem::PixelRepeat)) {
-            m.pixel_repeat = (s.val[item(ModelineItem::PixelRepeat)] != 0);
+            m.pixel_repeat = (s.integers.items[item(ModelineItem::PixelRepeat)] != 0);
         }
 
         return video_timing::ParsedMode{video_timing::CustomMode{.mode = m, .raw_pll = raw_pll}};
@@ -343,14 +361,17 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     if (cnt == kArityTimings || cnt == kArityTimingsPolarity) {
         m = video_timing::with_timings(
             m,
-            std::span<const std::uint32_t, kModelineTimings>(s.val.data(), kModelineTimings)
+            std::span<const std::uint32_t, kModelineTimings>(
+                s.integers.items.data(),
+                kModelineTimings
+            )
         );
 
-        m.fpix_mhz = static_cast<double>(s.val[kTokenPixelClockKhz]) / kKhzPerMhz;
+        m.fpix_mhz = static_cast<double>(s.integers.items[kTokenPixelClockKhz]) / kKhzPerMhz;
         if (cnt == kArityTimingsPolarity) {
 
-            m.hpol = (s.val[kTokenShortHpol] != 0);
-            m.vpol = (s.val[kTokenShortVpol] != 0);
+            m.hpol = (s.integers.items[kTokenShortHpol] != 0);
+            m.vpol = (s.integers.items[kTokenShortVpol] != 0);
         }
         return video_timing::ParsedMode{video_timing::CustomMode{.mode = m}};
     }

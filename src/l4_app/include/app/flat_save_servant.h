@@ -13,6 +13,7 @@
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/save_act.h"
+#include "svc/card_writer.h"
 
 namespace mister::svc {
 class Vfs;
@@ -31,7 +32,7 @@ public:
     [[nodiscard]] proto::SaveAct start(
         const cores::SaveImage& image,
         std::string_view rel,
-        cores::WireWordBytes word
+        hal::Width word
     ) noexcept override;
     [[nodiscard]] proto::SaveAct resume(
         std::span<const std::uint8_t, proto::kSavePieceBytes> bytes
@@ -41,7 +42,7 @@ private:
     enum class Phase : std::uint8_t { Idle, Opening, Reading, Closing };
     [[nodiscard]] proto::SaveAct next_read_() noexcept;
 
-    const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     std::vector<std::byte> image_;
     FixedStr<kConfigRelCap, StrFit::Reject> rel_{};
     proto::WideIoIndex index_{};

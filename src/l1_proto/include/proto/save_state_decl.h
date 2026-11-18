@@ -19,13 +19,14 @@ struct SaveStateDecl {
     [[nodiscard]] constexpr bool within(hal::PhysRegion aperture) const noexcept {
         if (size == 0u || size > kMaxBytes)
             return false;
-        const std::optional<hal::FabricAddr> low = hal::to_fabric(aperture.phys);
-        const os::PhysAddr end{aperture.phys.v + std::uint64_t{aperture.len}};
+        const std::optional<hal::FabricAddr> low = hal::FabricAddr::of(aperture.phys);
+        const std::optional<hal::FabricAddr> high = hal::FabricAddr::of(aperture.end());
 
-        if (!low || !hal::to_fabric(end))
+        if (!low || !high || base < *low)
             return false;
-        const os::PhysAddr at = hal::to_phys(base);
-        return base >= *low && at < end && at.advanced(size) < end;
+        const hal::FabricAddr last = base.advanced(size);
+
+        return last >= base && last < *high;
     }
 };
 

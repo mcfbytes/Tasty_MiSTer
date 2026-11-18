@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "infra/opt_ref.h"
+#include "proto/slot_attributes.h"
 #include "proto/types.h"
 #include "svc/storage_backend.h"
 #include "svc/types.h"
@@ -19,6 +20,7 @@ public:
 
         std::optional<proto::FileSize> extent{};
         bool growable = false;
+        proto::MountClass mount = proto::MountClass::Image;
         Generation gen{};
 
         infra::OptRef<const BlankSaveSpec> blank{};

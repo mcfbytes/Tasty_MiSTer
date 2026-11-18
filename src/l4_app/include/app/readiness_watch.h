@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <variant>
 
 #include "app/bitstream_programmer.h"
 #include "hal/pin_levels.h"
@@ -40,6 +41,11 @@ public:
         bool cold = false;
     };
 
+    struct Recovered {};
+
+    using End = std::variant<Reboot, Recovered>;
+    static_assert(std::variant_size_v<End> == 2);
+
     struct Tally {
         std::uint32_t recoveries = 0;
         std::uint32_t recover_polls = 0;
@@ -52,7 +58,7 @@ public:
     ReadinessWatch(const ReadinessWatch&) = delete;
     ReadinessWatch& operator=(const ReadinessWatch&) = delete;
 
-    [[nodiscard]] std::optional<Reboot> watch_readiness(SwitchView sw, Host& host);
+    [[nodiscard]] std::optional<End> watch_readiness(SwitchView sw, Host& host);
 
     void set_readiness_poll_budget(std::uint32_t n) noexcept { readiness_poll_budget_ = n; }
 
@@ -79,9 +85,9 @@ public:
     }
 
 private:
-    [[nodiscard]] std::optional<Reboot> recover_session_(SwitchView sw, Host& host);
+    [[nodiscard]] std::optional<End> recover_session_(SwitchView sw, Host& host);
 
-    [[nodiscard]] std::optional<Reboot> probe_for_recovery_(SwitchView sw, Host& host);
+    [[nodiscard]] std::optional<End> probe_for_recovery_(SwitchView sw, Host& host);
 
     const hal::PinLevelCell& levels_;
     BitstreamProgrammer& programmer_;

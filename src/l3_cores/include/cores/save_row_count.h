@@ -11,6 +11,7 @@ namespace mister::cores::n64 {
 
 struct SaveRowCount {
     std::uint8_t v = 0;
+    using affine_count = SaveRowCount;
 
     template <std::integral I>
     [[nodiscard]] static constexpr SaveRowCount of(I rows) noexcept {
@@ -20,6 +21,12 @@ struct SaveRowCount {
     [[nodiscard]] constexpr bool none() const noexcept { return v == 0; }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
+    [[nodiscard]] constexpr bool contains(SaveRow row) const noexcept { return row.v < v; }
+
+    [[nodiscard]] constexpr std::uint32_t extent_at(std::uint32_t row_bytes) const noexcept {
+        return static_cast<std::uint32_t>(v) * row_bytes;
+    }
 
     [[nodiscard]] static constexpr SaveRowCount through(SaveRow row) noexcept {
         return SaveRowCount::of(row.v + 1u);
@@ -36,6 +43,8 @@ struct SaveRowCount {
 };
 
 inline constexpr std::size_t kMaxSaveRows = 5;
+
+inline constexpr SaveRowCount kOneSaveRow{1};
 
 constexpr bool SaveRowCount::fits() const noexcept {
     return v <= kMaxSaveRows;

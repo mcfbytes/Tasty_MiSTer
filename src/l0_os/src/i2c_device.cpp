@@ -15,6 +15,10 @@
 
 namespace mister::os {
 
+bool I2cAddr::claim_on(int fd) const noexcept {
+    return ::ioctl(fd, I2C_SLAVE, int{v}) == 0;
+}
+
 namespace {
 
 [[nodiscard]] Ex<UniqueFd> open_i2c_node(unsigned bus, I2cAddr addr) {
@@ -31,7 +35,7 @@ namespace {
     }
     UniqueFd owned(fd);
 
-    if (::ioctl(owned.get(), I2C_SLAVE, int{addr.v}) < 0) {
+    if (!addr.claim_on(owned.get())) {
         return std::unexpected(infra::errno_error(Errc::uio_open, ERR_SITE(), errno));
     }
     return owned;
@@ -49,7 +53,7 @@ enum : std::uint8_t { kSmbusRead = I2C_SMBUS_READ, kSmbusWrite = I2C_SMBUS_WRITE
 ) {
     i2c_smbus_ioctl_data args{};
     args.read_write = read_write;
-    args.command = command ? command->v : std::uint8_t{0};
+    args.command = I2cReg::command_of(command);
     args.size = static_cast<std::uint32_t>(type);
     args.data = data;
     if (::ioctl(fd, I2C_SMBUS, &args) < 0) {

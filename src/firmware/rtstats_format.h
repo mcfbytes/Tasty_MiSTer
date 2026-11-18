@@ -15,7 +15,7 @@
     "\"assets\":%u,\"bios\":%u,\"disc\":%u,\"save\":%u}," \
     "\"video\":{\"edges\":%u,\"staged\":%u,\"emitted\":%u,\"arm\":%u," \
     "\"refused\":%u,\"rf_bits\":%u,\"mode\":%u,\"fpix\":%u," \
-    "\"fb\":{\"ack\":%s,\"en\":%u},\"vi\":%u,\"res\":%u," \
+    "\"fb\":{\"ack\":%s,\"en\":%u},\"vi\":%u,\"res\":%s," \
     "\"w\":%u,\"h\":%u," \
     "\"geo\":{\"s\":%u,\"c\":%u,\"r\":%u,\"e\":%u,\"l\":%u," \
     "\"g\":%u,\"t\":%u}," \
@@ -105,7 +105,7 @@ inline constexpr const char* kTallyWorstCase = "4294967295";
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, 511u, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, \
         ::mister::fw::kReplyWordWorstCase, TASTY_RTSTATS_BOOL_MAX, TASTY_RTSTATS_BOOL_MAX, \
-        TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        ::mister::fw::kReplyWordWorstCase, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \

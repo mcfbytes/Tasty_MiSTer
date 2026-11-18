@@ -56,31 +56,30 @@ std::size_t page_size() noexcept {
 
 [[nodiscard]] Ex<MappedRegs> map_registers(os::PhysAddr phys, std::size_t len) {
     if (len == 0) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(phys)});
+        return std::unexpected(phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
     const std::size_t page = page_size();
-    const std::size_t lead = static_cast<std::size_t>(phys.v) & (page - 1u);
-    const os::PhysAddr aligned{phys.v - static_cast<std::uint32_t>(lead)};
+    const os::PageLead at = phys.page_lead(page);
 
-    auto pages = os::MmioRegion::map(aligned, lead + len, os::MmioRegion::Attr::Device);
+    auto pages = os::MmioRegion::map(at.page, at.lead + len, os::MmioRegion::Attr::Device);
     if (!pages)
         return std::unexpected(pages.error());
-    return MappedRegs{std::move(*pages), lead};
+    return MappedRegs{std::move(*pages), at.lead};
 }
 
 [[nodiscard]] Ex<MappedRegs> map_lw_registers(PhysRegion lw, LwOffset off, LwExtent len) {
 
     if (lw.len == 0)
-        return std::unexpected(off.refused(Errc::dt_missing, ERR_SITE()));
+        return std::unexpected(off.refusal(Errc::dt_missing, ERR_SITE()));
 
     const std::optional<LwExtent> window = LwExtent::of_length(os::MapLength{lw.len});
     if (!window || !off.fits(*window, len)) {
-        return std::unexpected(off.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(off.refusal(Errc::bad_format, ERR_SITE()));
     }
     if (!off.dword_aligned())
-        return std::unexpected(off.refused(Errc::bad_format, ERR_SITE()));
-    return map_registers(os::PhysAddr{lw.phys.v + off.v}, len.map_length().bytes());
+        return std::unexpected(off.refusal(Errc::bad_format, ERR_SITE()));
+    return map_registers(off.address_in(lw.phys), len.map_length().bytes());
 }
 
 [[nodiscard]] Ex<MappedRegs> map_named(
@@ -89,7 +88,7 @@ std::size_t page_size() noexcept {
     std::size_t len
 ) {
     if (len == 0) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(phys)});
+        return std::unexpected(phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
     const auto idx = os::find_uio_node(uio_name);
@@ -187,15 +186,15 @@ std::optional<ApertureNode> resolve_aperture(const char* sysfs_root, const PhysR
 
     if (os::PhysAddr{*addr} != kFpgaMemBase)
         return std::nullopt;
-    const std::uint64_t off = r.phys.v - kFpgaMemBase.v;
+    const std::uint64_t off = r.phys.offset_from(kFpgaMemBase);
     if (!span_fits<std::uint64_t>(off, r.len, *size))
         return std::nullopt;
 
     return ApertureNode{.minor = *idx, .base = os::PhysAddr{*addr}, .size = *size};
 }
 
-Ex<FpgaMemory> FpgaMemory::map_aperture(PhysRegion r, os::MmioRegion::Access access) {
-    if (const auto node = resolve_aperture(os::kUioClassRoot, r)) {
+Ex<FpgaMemory> FpgaMemory::map_aperture(const ApertureRegion& r, os::MmioRegion::Access access) {
+    if (const auto node = resolve_aperture(os::kUioClassRoot, r.region())) {
         if (const auto fd = open_uio_node(node->minor)) {
 
             if (auto mem = map_uio(fd->get(), node->base, r, access))
@@ -206,9 +205,17 @@ Ex<FpgaMemory> FpgaMemory::map_aperture(PhysRegion r, os::MmioRegion::Access acc
     return map(r, access);
 }
 
-Ex<FpgaMemory> FpgaMemory::map(PhysRegion r, os::MmioRegion::Access access) {
+Ex<FpgaMemory> FpgaMemory::map(const ApertureRegion& r, os::MmioRegion::Access access) {
+    return map_phys(r.region(), access);
+}
+
+Ex<FpgaMemory> FpgaMemory::map(const HpsDdrRegion& r, os::MmioRegion::Access access) {
+    return map_phys(r.region(), access);
+}
+
+Ex<FpgaMemory> FpgaMemory::map_phys(PhysRegion r, os::MmioRegion::Access access) {
     if (r.len == 0) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
+        return std::unexpected(r.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
     auto pages = os::MmioRegion::map(r.phys, r.len, os::MmioRegion::Attr::UncachedNormal, access);
@@ -221,6 +228,52 @@ Ex<FpgaMemory> FpgaMemory::map(PhysRegion r, os::MmioRegion::Access access) {
     mem.base_ = bytes_of(*mem.map_);
     mem.access_ = access;
     return mem;
+}
+
+static_assert(os::MapLength{regions::kVideoFb.len}.less(kFramebufferHeader).has_value());
+
+std::optional<FbdevPlacement> place_on_fbdev(
+    const FbdevProbe& probe,
+    WriteCombine wc,
+    const PhysRegion& r
+) noexcept {
+    if (wc != WriteCombine::Allowed || !probe.drains || !probe.window)
+        return std::nullopt;
+    return FbdevPlacement::of(r, *probe.window);
+}
+
+Ex<FpgaMemory> FpgaMemory::map_fbdev(os::Framebuffer fb, const FbdevPlacement& at) {
+    auto pages = os::MmioRegion::map_fd(fb.fd(), os::MmioRegion::MapOffset{}, at.len());
+    if (!pages)
+        return std::unexpected(pages.error());
+
+    FpgaMemory mem;
+    mem.region_ = at.region();
+    mem.map_ = std::move(*pages);
+    mem.base_ = bytes_of(*mem.map_);
+    mem.lead_ = kFramebufferHeader;
+    mem.mapping_ = Mapping::Fbdev;
+    mem.fb_.emplace(std::move(fb));
+    return mem;
+}
+
+Ex<FpgaMemory> FpgaMemory::map_scanout(
+    const ApertureRegion& r,
+    WriteCombine wc,
+    const char* fb_node
+) {
+    if (wc == WriteCombine::Allowed && fb_node != nullptr) {
+        os::Framebuffer fb = os::Framebuffer::adopt(UniqueFd{::open(fb_node, O_RDWR | O_CLOEXEC)});
+        if (fb.valid()) {
+            const FbdevProbe probe{.window = fb.window(), .drains = fb.flush()};
+            if (const auto at = place_on_fbdev(probe, wc, r.region())) {
+                if (auto mem = map_fbdev(std::move(fb), *at))
+                    return mem;
+            }
+        }
+    }
+
+    return map_aperture(r, os::MmioRegion::Access::ReadWrite);
 }
 
 namespace {
@@ -237,16 +290,16 @@ struct UioMapping {
     os::MmioRegion::Access access
 ) {
     if (r.len == 0) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
+        return std::unexpected(r.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
     if (r.phys < node_base) {
 
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
+        return std::unexpected(r.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
-    const std::uint64_t gap = r.phys.v - node_base.v;
+    const std::uint64_t gap = r.phys.offset_from(node_base);
     if (gap > std::uint64_t{static_cast<std::size_t>(-1) - r.len}) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
+        return std::unexpected(r.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
     const auto lead = static_cast<std::size_t>(gap);
 
@@ -266,18 +319,18 @@ struct UioMapping {
 Ex<FpgaMemory> FpgaMemory::map_uio(
     int fd,
     os::PhysAddr node_base,
-    PhysRegion r,
+    const ApertureRegion& r,
     os::MmioRegion::Access access
 ) {
-    auto m = map_uio_pages(fd, node_base, r, access);
+    auto m = map_uio_pages(fd, node_base, r.region(), access);
     if (!m)
         return std::unexpected(m.error());
 
     FpgaMemory mem;
-    mem.region_ = r;
+    mem.region_ = r.region();
     mem.map_ = std::move(m->pages);
     mem.base_ = bytes_of(*mem.map_) + m->lead;
-    mem.uio_bound_ = true;
+    mem.mapping_ = Mapping::Uio;
     mem.access_ = access;
     return mem;
 }
@@ -286,12 +339,16 @@ FpgaMemory::FpgaMemory(FpgaMemory&& o) noexcept
     : region_(o.region_),
       map_(std::move(o.map_)),
       base_(o.base_),
-      uio_bound_(o.uio_bound_),
-      access_(o.access_) {
+      lead_(o.lead_),
+      mapping_(o.mapping_),
+      access_(o.access_),
+      fb_(std::move(o.fb_)) {
     o.region_ = PhysRegion{};
     o.base_ = nullptr;
-    o.uio_bound_ = false;
+    o.lead_ = os::MapLength{};
+    o.mapping_ = Mapping::DevMem;
     o.access_ = os::MmioRegion::Access::ReadWrite;
+    o.fb_.reset();
 }
 
 FpgaMemory& FpgaMemory::operator=(FpgaMemory&& o) noexcept {
@@ -299,12 +356,16 @@ FpgaMemory& FpgaMemory::operator=(FpgaMemory&& o) noexcept {
         region_ = o.region_;
         map_ = std::move(o.map_);
         base_ = o.base_;
-        uio_bound_ = o.uio_bound_;
+        lead_ = o.lead_;
+        mapping_ = o.mapping_;
         access_ = o.access_;
+        fb_ = std::move(o.fb_);
         o.region_ = PhysRegion{};
         o.base_ = nullptr;
-        o.uio_bound_ = false;
+        o.lead_ = os::MapLength{};
+        o.mapping_ = Mapping::DevMem;
         o.access_ = os::MmioRegion::Access::ReadWrite;
+        o.fb_.reset();
     }
     return *this;
 }
@@ -324,31 +385,30 @@ FpgaMemory FpgaMemory::borrow(std::span<std::byte> backing, PhysRegion r) {
 
 std::span<std::byte> FpgaMemory::view(std::size_t off, std::size_t len) {
     if (base_ == nullptr) {
-        fatal(
-            Error{Errc::mmap_failed, ERR_SITE(), os::low32(region_.phys)},
-            "FpgaMemory::view unmapped"
-        );
+        fatal(region_.phys.refusal(Errc::mmap_failed, ERR_SITE()), "FpgaMemory::view unmapped");
     }
-    if (!span_fits(off, len, region_.len)) {
+    const std::optional<os::MapLength> in = os::MapLength{off}.less(lead_);
+    if (!span_fits(off, len, region_.len) || !in) {
         fatal(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)},
             "FpgaMemory::view out of range"
         );
     }
-    return {base_ + off, len};
+    return {in->into(base_), len};
 }
 
 Ex<std::size_t> FpgaMemory::write_at(std::size_t off, std::span<const std::byte> src) {
     if (base_ == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(region_.phys)});
+        return std::unexpected(region_.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
-    if (!span_fits(off, src.size(), region_.len)) {
+    const std::optional<os::MapLength> in = os::MapLength{off}.less(lead_);
+    if (!span_fits(off, src.size(), region_.len) || !in) {
         return std::unexpected(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
         );
     }
     if (!src.empty())
-        std::memcpy(base_ + off, src.data(), src.size());
+        std::memcpy(in->into(base_), src.data(), src.size());
 
     std::atomic_thread_fence(std::memory_order_release);
     return src.size();
@@ -356,9 +416,10 @@ Ex<std::size_t> FpgaMemory::write_at(std::size_t off, std::span<const std::byte>
 
 Ex<std::size_t> FpgaMemory::read_at(std::size_t off, std::span<std::byte> dst) const {
     if (base_ == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(region_.phys)});
+        return std::unexpected(region_.phys.refusal(Errc::mmap_failed, ERR_SITE()));
     }
-    if (!span_fits(off, dst.size(), region_.len)) {
+    const std::optional<os::MapLength> in = os::MapLength{off}.less(lead_);
+    if (!span_fits(off, dst.size(), region_.len) || !in) {
         return std::unexpected(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
         );
@@ -366,12 +427,18 @@ Ex<std::size_t> FpgaMemory::read_at(std::size_t off, std::span<std::byte> dst) c
 
     std::atomic_thread_fence(std::memory_order_acquire);
     if (!dst.empty())
-        std::memcpy(dst.data(), base_ + off, dst.size());
+        std::memcpy(dst.data(), in->into(base_), dst.size());
     return dst.size();
 }
 
 void FpgaMemory::publish() noexcept {
     std::atomic_thread_fence(std::memory_order_release);
+}
+
+bool FpgaMemory::scanout_handoff() noexcept {
+    handoff();
+
+    return !fb_ || fb_->flush();
 }
 
 void FpgaMemory::handoff() noexcept {
@@ -383,29 +450,25 @@ void FpgaMemory::handoff() noexcept {
 }
 
 void FpgaMemory::store_release(WordOffset at, std::uint32_t v) {
-    const std::size_t word_off = at.v;
 
-    if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
-        fatal(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
-            "FpgaMemory::store_release"
-        );
+    const bool fits = base_ != nullptr && at.fits_in(region_.len);
+    const std::optional<os::MapLength> in = fits ? at.byte_offset().less(lead_) : std::nullopt;
+    if (!in) {
+        fatal(at.refusal(Errc::slot_range, ERR_SITE()), "FpgaMemory::store_release");
     }
-    auto* p = reinterpret_cast<volatile std::uint32_t*>(base_ + word_off * 4u);
+    auto* p = reinterpret_cast<volatile std::uint32_t*>(in->into(base_));
 
     std::atomic_thread_fence(std::memory_order_release);
     *p = v;
 }
 
 std::uint32_t FpgaMemory::load_acquire(WordOffset at) const {
-    const std::size_t word_off = at.v;
-    if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
-        fatal(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
-            "FpgaMemory::load_acquire"
-        );
+    const bool fits = base_ != nullptr && at.fits_in(region_.len);
+    const std::optional<os::MapLength> in = fits ? at.byte_offset().less(lead_) : std::nullopt;
+    if (!in) {
+        fatal(at.refusal(Errc::slot_range, ERR_SITE()), "FpgaMemory::load_acquire");
     }
-    const auto* p = reinterpret_cast<const volatile std::uint32_t*>(base_ + word_off * 4u);
+    const auto* p = reinterpret_cast<const volatile std::uint32_t*>(in->into(base_));
     const std::uint32_t v = *p;
     std::atomic_thread_fence(std::memory_order_acquire);
     return v;

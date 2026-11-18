@@ -19,7 +19,7 @@ mra::DipWord saved_dips(const svc::Vfs& vfs, std::string_view name, mra::DipWord
     if (!f)
         return def;
     mra::DipWord::Bytes raw{};
-    auto r = (*f)->read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(raw)));
+    auto r = (*f)->read_at(proto::kFileStart, std::as_writable_bytes(std::span<std::uint8_t>(raw)));
     if (!r || *r != raw.size())
         return def;
     return mra::DipWord::from_le_bytes(raw);

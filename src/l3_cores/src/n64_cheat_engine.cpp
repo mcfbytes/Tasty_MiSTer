@@ -12,7 +12,7 @@ Ex<void> CheatEngine::apply(std::span<const std::uint8_t> table, CheatUnit unit)
     }
     if (unit != CheatUnit{CheatCode::kBytes}) {
         count_ = 0;
-        return std::unexpected(unit.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(unit.refusal(Errc::bad_format, ERR_SITE()));
     }
     std::size_t n = table.size() / CheatCode::kBytes;
     if (n > CheatCode::kMax) {

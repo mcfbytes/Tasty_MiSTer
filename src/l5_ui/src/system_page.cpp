@@ -7,12 +7,11 @@
 #include <iterator>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 #include "app/cmd_verb_sink.h"
 #include "app/page_description.h"
 #include "app/bitstream_resolve.h"
-#include "app/name_config.h"
-#include "app/recents_store.h"
 #include "app/ui_request_ring.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
@@ -22,19 +21,7 @@
 #include "ui/page_ask.h"
 #include "ui/page_row.h"
 #include "ui/page_walk.h"
-#include "ui/browse_source.h"
-#include "ui/browser_entry.h"
-#include "ui/browser_host.h"
-#include "ui/browser_launch.h"
-#include "ui/browser_session.h"
-#include "ui/core_pick_host.h"
-#include "ui/confirm_host.h"
-#include "ui/confirm_launch.h"
-#include "ui/confirm_page.h"
 #include "ui/page_context.h"
-#include "ui/page_launches.h"
-#include "ui/script_launch.h"
-#include "ui/script_pick_host.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -52,6 +39,8 @@ constexpr const char kRowHelp[] = " Help                      \x16";
 constexpr const char kRowSave[] = " Save settings";
 constexpr const char kRowReboot[] = " Reboot (hold \x16 cold reboot)";
 constexpr const char kRowUseHd[] = " Use HD OSD";
+
+constexpr std::string_view kRowAutosavePrefix = " Auto-save to SD: ";
 
 constexpr std::string_view kHdRebootLabel = "Reboot";
 constexpr std::string_view kHdRebootValue = "hold for cold reboot";
@@ -127,6 +116,12 @@ constexpr std::array<SystemRowFact, kSystemItemTotal> kSystemRows{{
      kHdRebootLabel,
      kHdRebootValue,
      app::PageDescription::RowKind::Action},
+    {SystemItem::Autosave,
+     proto::OsdRow{13},
+     {},
+     kAutosaveLabel,
+     {},
+     app::PageDescription::RowKind::Value},
     {SystemItem::UseHd,
      proto::OsdRow{14},
      kRowUseHd,
@@ -174,51 +169,26 @@ app::PageDescription::RowKind system_row_kind(std::optional<SystemItem> item) no
     return row ? row->kind : app::PageDescription::RowKind::Action;
 }
 
-constexpr std::string_view kScriptsWarningBody[] = {
-    "",
-    "         Attention:",
-    " This is dangerous operation!",
-    "",
-    " Script has control over the",
-    " whole system and may damage",
-    " the files or settings, then",
-    " MiSTer won't boot, so you",
-    " will have to re-format the",
-    " SD card and fill with files",
-    " in order to use it again.",
-    "",
-    "  Do you want to continue?",
-};
-constexpr std::string_view kScriptsWarningChoices[] = {
-    "            No",
-    "            Yes",
-    "  Yes, and don't ask again",
-};
-
 }
 
 void SystemPage::on_enter(PageContext& ctx) {
     TASTY_SEAT_BODY(SystemPage);
-    launches_ = infra::OptRef<PageLaunches>{ctx.launches};
-    storage_ = ctx.storage;
+    ctx_ = infra::OptRef<PageContext>{ctx};
     route_ = ctx.route;
     ui_requests_ = ctx.ui_requests;
-    recents_ = ctx.recents;
-    names_ = ctx.names;
-    script_pick_.bind({.launches = launches_, .storage = ctx.storage});
-    core_pick_.bind({.route = ctx.route, .recents = ctx.recents});
+    scripts_.bind(ctx);
+    cores_.bind(ctx);
 }
 
 namespace {
 
 constexpr proto::OsdRow kLineVersion{1};
-constexpr proto::OsdRow kLineGapTop{2};
+constexpr proto::OsdRow kLineKernel{2};
 constexpr proto::OsdRow kLineStorage{3};
 constexpr proto::OsdRow kLineSpace{4};
 constexpr proto::OsdRow kLineGapMid{6};
-constexpr proto::OsdRow kLineKernel{13};
-constexpr std::array<proto::OsdRow, 6>
-    kTextOnlyLines{kLineVersion, kLineGapTop, kLineStorage, kLineSpace, kLineGapMid, kLineKernel};
+constexpr std::array<proto::OsdRow, 5>
+    kTextOnlyLines{kLineVersion, kLineKernel, kLineStorage, kLineSpace, kLineGapMid};
 
 inline constexpr std::size_t kClassicPageRows = std::size(kTextOnlyLines) + kSystemRows.size();
 static_assert(
@@ -252,8 +222,6 @@ consteval bool rows_partition_the_classic_page() {
 }
 
 static_assert(rows_partition_the_classic_page(), "the item rows and text rows tile the OSD");
-constexpr RowIndex kConfirmCancel{0};
-constexpr RowIndex kConfirmRememberScripts{2};
 }
 
 template <class Visit>
@@ -280,7 +248,7 @@ void SystemPage::for_each_row(Visit&& visit) const {
         std::snprintf(s.data(), s.size(), "       MiSTer v%s", facts_.version.c_str());
     }
     visit(kLineVersion, std::nullopt, std::string_view{s.data()}, false);
-    visit(kLineGapTop, std::nullopt, std::string_view{}, false);
+    visit(kLineKernel, std::nullopt, std::string_view{kernel_row(facts_.kernel)}, false);
 
     std::string_view storage;
     std::string_view switch_to;
@@ -320,7 +288,10 @@ void SystemPage::for_each_row(Visit&& visit) const {
     } else {
         draw_label(SystemItem::Reboot);
     }
-    visit(kLineKernel, std::nullopt, std::string_view{kernel_row(facts_.kernel)}, false);
+    const std::string autosave_row = std::string{kRowAutosavePrefix}.append(
+        autosave_word(session_.autosave)
+    );
+    draw_item(SystemItem::Autosave, autosave_row, false);
 
     if (session_.shows_hd_switch()) {
         draw_label(SystemItem::UseHd);
@@ -375,6 +346,10 @@ bool SystemPage::walk(PageWalk& out) const {
         } else {
             (void)r.hd.label.assign(plain_label(text));
         }
+        if (item == SystemItem::Autosave) {
+            (void)r.hd.label.assign(kAutosaveLabel);
+            (void)r.hd.value.assign(autosave_word(session_.autosave));
+        }
         r.hd.kind = system_row_kind(item);
         r.hd.enabled = !stippled;
         r.hd.selected = item.has_value() && item_selected(*item);
@@ -407,7 +382,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
 
     if (ev.buttons.has_any({UiEvent::Menu})) {
         if (session_.front_end && !session_.in_hd_tree)
-            return open_core_browser(false);
+            return open_cores_(false);
         return Transition::close_all();
     }
 
@@ -420,7 +395,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
     }
 
     if (ev.buttons.has_any({UiEvent::Recent}) && item_selected(SystemItem::Core)) {
-        return open_core_browser(true);
+        return open_cores_(true);
     }
     if (!ev.buttons.has_any({UiEvent::Select}))
         return reboot_release(ev);
@@ -433,11 +408,11 @@ Transition SystemPage::handle(const UiEvent& ev) {
     switch (*item) {
         case SystemItem::Core:
 
-            return open_core_browser(false);
+            return open_cores_(false);
         case SystemItem::Exit:
             return Transition::leave();
         case SystemItem::Scripts:
-            return open_scripts_confirm();
+            return open_scripts_();
         case SystemItem::SaveSettings: {
 
             if (!session_.core_loaded) {
@@ -459,6 +434,8 @@ Transition SystemPage::handle(const UiEvent& ev) {
                 reboot_.ask_landed();
             return Transition{};
         }
+        case SystemItem::Autosave:
+            return toggle_autosave_();
         case SystemItem::UseHd:
             return use_hd_();
         case SystemItem::DefineJoystick:
@@ -522,6 +499,15 @@ Transition SystemPage::use_hd_() {
     return Transition::choose_hd_style();
 }
 
+Transition SystemPage::toggle_autosave_() {
+    if (!push_ask(ui_requests_, app::UiRequest::SetAutosave{.on = !session_.autosave})) {
+        refusals_.add();
+    } else {
+        ++published_;
+    }
+    return Transition{};
+}
+
 bool SystemPage::ask_reboot_() {
     if (!push_ask(ui_requests_, app::UiRequest::Reboot{})) {
         refusals_.add();
@@ -531,85 +517,27 @@ bool SystemPage::ask_reboot_() {
     return true;
 }
 
-Transition SystemPage::open_scripts_confirm() {
-    if (names_ && names_->scripts_confirm_skippable()) {
-        return arm_scripts_browser_() ? Transition::push(PageId::Browser) : Transition{};
-    }
-    if (!launches_ || !launches_->confirm) {
+Transition SystemPage::open_root_child(PageContext& ctx) {
+    TASTY_SEAT_BODY(SystemPage);
+    return cores_.open(ctx, false);
+}
+
+Transition SystemPage::open_scripts_() {
+    TASTY_SEAT_BODY(SystemPage);
+    if (!ctx_) {
         refusals_.add();
         return Transition{};
     }
-    ConfirmPage::Spec spec;
-    spec.title = "Warning!!!";
-    spec.body = kScriptsWarningBody;
-    spec.choices = kScriptsWarningChoices;
-    spec.host = infra::opt_ref_of(static_cast<IConfirmHost*>(this));
-    launches_->confirm->pending = spec;
-    return Transition::push(PageId::Confirm);
+    return scripts_.open(*ctx_);
 }
 
-bool SystemPage::arm_scripts_browser_() {
-    const infra::OptRef<BrowserLaunch> browser = browser_();
-    if (!browser || !storage_) {
-        refusals_.add();
-        return false;
-    }
-    BrowserSession::Request r;
-    r.extensions = "SH";
-    r.scan.include_dirs = true;
-
-    r.home_path = "Scripts";
-    r.games_dir.assign(session_.core_dir.view());
-    r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&script_pick_));
-    browser->pending = static_cast<BrowserSession::Request&&>(r);
-
-    return true;
-}
-
-Transition SystemPage::open_root_child(PageContext&) {
+Transition SystemPage::open_cores_(bool recents_first) {
     TASTY_SEAT_BODY(SystemPage);
-    return open_core_browser(false);
-}
-
-Transition SystemPage::open_scripts(PageContext&) {
-    TASTY_SEAT_BODY(SystemPage);
-    return open_scripts_confirm();
-}
-
-Transition SystemPage::open_core_browser(bool recents_first) {
-    const infra::OptRef<BrowserLaunch> browser = browser_();
-    if (!browser || !storage_) {
+    if (!ctx_) {
         refusals_.add();
         return Transition{};
     }
-    BrowserSession::Request r;
-    r.extensions = "RBFMRAMGL";
-    r.scan.cores_only = true;
-    const app::RecentsStore::ListId cores_list = app::RecentsStore::ListId::cores();
-    r.recents = cores_list;
-    r.recents_first = recents_first;
-    r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&core_pick_));
-    if (recents_first) {
-
-        if (!recents_ || recents_->load(app::RecentsStore::kNoCore, cores_list).empty()) {
-            refusals_.add();
-            return Transition{};
-        }
-    }
-    browser->pending = static_cast<BrowserSession::Request&&>(r);
-    return Transition::push(PageId::Browser);
-}
-
-Transition SystemPage::on_confirm(RowIndex choice) {
-    TASTY_SEAT_BODY(SystemPage);
-    if (choice == kConfirmCancel)
-        return Transition::pop();
-    if (choice == kConfirmRememberScripts) {
-
-        if (!names_ || !names_->remember_scripts_confirm())
-            refusals_.add();
-    }
-    return arm_scripts_browser_() ? Transition::replace(PageId::Browser) : Transition::pop();
+    return cores_.open(*ctx_, recents_first);
 }
 
 std::unique_ptr<SystemPage> make_system_page(

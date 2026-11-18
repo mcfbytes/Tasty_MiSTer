@@ -8,6 +8,7 @@
 #include <span>
 #include <type_traits>
 
+#include "app/autosave_cells.h"
 #include "app/bay_releases.h"
 #include "app/bitstream_programmer.h"
 #include "app/built_core.h"
@@ -24,6 +25,7 @@
 #include "app/core_frame_record.h"
 #include "app/dev_mem_window_map.h"
 #include "app/event.h"
+#include "app/fabric_state.h"
 #include "app/frame_demand.h"
 #include "app/capture_arm.h"
 #include "app/capture_hit.h"
@@ -46,8 +48,10 @@
 #include "app/lw_sys_endpoint.h"
 #include "app/raw_key_edge.h"
 #include "app/rumble_players_cell.h"
+#include "app/run_policy.h"
 #include "app/disk_relay.h"
 #include "app/save_upload_relay.h"
+#include "app/switch_park.h"
 #include "app/mailbox_relay.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
@@ -81,7 +85,6 @@
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "board_reset.h"
-#include "ladder_scope.h"
 #include "open_verdict.h"
 #include "os/clock.h"
 #include "os/epoll_set.h"
@@ -94,7 +97,10 @@
 #include "svc/disc_read_service.h"
 #include "svc/disc_store.h"
 #include "svc/io_main.h"
+#include "svc/io_pass.h"
 #include "svc/prefetch_main.h"
+#include "svc/file_slot_backend.h"
+#include "svc/save_stage_keeper.h"
 #include "svc/storage_service.h"
 #include "svc/unbound_disc.h"
 #include "thread_assembly.h"
@@ -114,6 +120,7 @@ public:
             xthread::WakeFlag& main_stop;
             xthread::WakeFlag& ui_wake;
             xthread::WakeFlag& io_wake;
+            app::UiWriteLane& ui_writes;
             app::LinkTxChannel<SeatTag::Ui>& ui_inbox;
             app::VideoPump& video;
 
@@ -147,6 +154,8 @@ public:
             app::IniCell& ini;
 
             xthread::WakeFlag& disk_activity;
+
+            app::MenuFocusCell& menu_focus;
         };
 
         struct SessionFacts {
@@ -160,6 +169,8 @@ public:
             infra::OptRef<const app::LauncherStateCell> launcher_state{};
             infra::OptRef<app::LauncherKeyBridge> launcher_keys{};
             bool grants_uart = false;
+
+            app::RunPolicy policy{};
         };
 
         struct Seats {
@@ -167,8 +178,6 @@ public:
             DiagSampler& diag;
 
             infra::OptRef<app::SaveStateAttach> save_states{};
-
-            infra::OptRef<app::UiWriteLane> ui_writes{};
         };
 
         Wires wires;
@@ -197,6 +206,12 @@ public:
     [[nodiscard]] DiagSampler::DeviceCells diag_sources(const BootParts& plat) noexcept;
 
     [[nodiscard]] DiagSampler::Services diag_services() noexcept;
+
+    [[nodiscard]] svc::SaveStageOrders& save_stage_orders() noexcept { return save_stage_orders_; }
+
+    [[nodiscard]] const svc::SaveStageCell& save_stage_cell() const noexcept {
+        return save_stage_cell_;
+    }
 
     OpenVerdict& verdict() noexcept { return opened_; }
 
@@ -232,7 +247,8 @@ private:
     [[nodiscard]] std::optional<app::HostLedWatch> open_led_watch_(const BootParts& plat) noexcept;
     [[nodiscard]] std::optional<app::InputMain> open_input_main_() noexcept;
 
-    [[nodiscard]] bool rides_io_(svc::IIoCoworker& lane, const char* what) noexcept;
+    template <class Lane>
+    [[nodiscard]] bool rides_io_(Lane& lane, const char* what) noexcept;
     template <class Row>
     void grant_if_latched_(const ThreadAssembly::SeatMains& mains) noexcept;
     template <class... Rows>
@@ -244,8 +260,6 @@ public:
     const hal::ThreadMap& threads_;
 
     xthread::DiagLog diag_log_;
-
-    xthread::Telemetry<bool, SeatTag::RT> transitioning_{};
 
     xthread::WakeFlag io_wake_;
 
@@ -318,6 +332,9 @@ public:
     xthread::WakeFlag main_stop_{};
 
     app::LinkTxChannel<SeatTag::Main> main_inbox_;
+
+    app::FabricCell fabric_cell_{};
+    app::SwitchPark switch_park_{main_wake_};
     app::LinkRxChannel<SeatTag::Main> main_rx_;
     app::LinkRxChannel<SeatTag::Ui> ui_rx_;
 
@@ -327,6 +344,8 @@ public:
     app::UartModeController::Handoffs uart_handoffs_{ui_wake_};
 
     app::LinkRouter link_router_;
+
+    app::UiWriteLane ui_writes_;
 
     app::VideoPump video_pump_;
 
@@ -350,7 +369,14 @@ public:
     app::MailboxRelay mailbox_relay_;
     app::CompanionHost companion_host_;
     std::optional<app::PcmMain> pcm_main_;
+
+    svc::IoPassCell io_pass_{};
     std::optional<svc::IoMain> io_main_;
+
+    svc::SaveStageOrders save_stage_orders_;
+    svc::SaveStageCell save_stage_cell_{};
+    svc::SaveStageKeeper save_stage_keeper_;
+    svc::SaveSlotBackends save_backends_;
     svc::StorageService storage_;
     svc::DiscStore disc_store_;
     svc::DiscReadService discs_;
@@ -369,6 +395,8 @@ public:
     app::ConfStrCell conf_str_cell_;
 
     app::LadderStateCell ladder_cell_{};
+
+    xthread::Telemetry<std::uint32_t, SeatTag::Diag> diag_ask_{};
     reactor::CoreState core_state_{};
 
     app::CheatBlobCell cheat_blob_{};
@@ -377,13 +405,14 @@ public:
     app::SaveStateFactsCell save_state_facts_{};
     cores::SaveCopyCell save_copy_{};
 
+    app::OsdMaskCell osd_mask_cell_{};
+    app::MenuFocusCell menu_focus_cell_{};
+
     app::CheatCatalogCell cheat_catalog_{};
     app::CheatLink cheat_link_{cheat_blob_};
 
     app::CoreBay bay_{};
     app::BayReleasesCell bay_releases_{};
-
-    LadderScope ladder_;
 
     BoardReset board_reset_;
 

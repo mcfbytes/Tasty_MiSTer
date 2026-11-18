@@ -16,9 +16,27 @@ constexpr std::array<std::string_view, 1> kRebootBody{"Reboot MiSTer?"};
 
 }
 
+app::PageDescription::Row HdSettingsPlan::HdEnterClassicRow::describe() const {
+    TASTY_SEAT_BODY(HdEnterClassicRow);
+    app::PageDescription::Row r{};
+    r.kind = app::PageDescription::RowKind::Submenu;
+    (void)r.label.assign("Advanced (classic menu)");
+    return r;
+}
+
+std::optional<RowKey> HdSettingsPlan::HdEnterClassicRow::key() const {
+    TASTY_SEAT_BODY(HdEnterClassicRow);
+    return push_row_key(classic_);
+}
+
+Transition HdSettingsPlan::HdEnterClassicRow::select() {
+    TASTY_SEAT_BODY(HdEnterClassicRow);
+    return Transition::enter_classic();
+}
+
 HdSettingsPlan::HdSettingsPlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
-      sys_(make_system_page(in.ctx.sys, in.ctx.session)),
+      scripts_entry_(in.ctx.session),
       controllers_(HdPushRow::Spec{.label = "Controllers", .page = PageId::HdControllers}),
       display_(HdPushRow::Spec{.label = "Display", .page = PageId::HdDisplay}),
       network_(HdPushRow::Spec{.label = "Network", .page = PageId::Network}),
@@ -31,14 +49,21 @@ HdSettingsPlan::HdSettingsPlan(const HdPlanInputs& in)
               .confirm = in.ctx.launches.confirm
           }
       ),
-      advanced_(HdPushRow::Spec{.label = "Advanced (classic menu)", .page = in.classic}) {
+      advanced_(in.classic) {
     TASTY_SEAT_BODY(HdSettingsPlan);
-
-    if (sys_ != nullptr)
-        sys_->on_enter(ctx_);
-    refs_ = {controllers_, display_, network_, scripts_, about_, reboot_, separator_, advanced_};
-    if (sys_ == nullptr)
-        refusals_.add();
+    scripts_entry_.bind(ctx_);
+    autosave_on_ = in.ctx.session.autosave;
+    refs_ = {
+        controllers_,
+        display_,
+        network_,
+        autosave_,
+        scripts_,
+        about_,
+        reboot_,
+        separator_,
+        advanced_
+    };
     if (!in.ctx.launches.confirm)
         refusals_.add();
 }
@@ -58,10 +83,10 @@ std::span<const std::reference_wrapper<IHdRow>> HdSettingsPlan::rows() const {
     return refs_;
 }
 
-void HdSettingsPlan::refresh(const SystemFacts& facts, const SessionFacts& session) {
+void HdSettingsPlan::refresh(const SystemFacts&, const SessionFacts& session) {
     TASTY_SEAT_BODY(HdSettingsPlan);
-    if (sys_ != nullptr)
-        sys_->on_facts(facts, session);
+    autosave_on_ = session.autosave;
+    scripts_entry_.on_facts(session);
 }
 
 RowCount HdSettingsPlan::pinned() const noexcept {
@@ -71,7 +96,7 @@ RowCount HdSettingsPlan::pinned() const noexcept {
 
 svc::Tally HdSettingsPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdSettingsPlan);
-    return refusals_.sum(sys_ != nullptr ? sys_->refusals() : svc::Tally{});
+    return refusals_.sum(scripts_entry_.refusals());
 }
 
 std::uint32_t HdSettingsPlan::commands_published() const noexcept {
@@ -79,9 +104,23 @@ std::uint32_t HdSettingsPlan::commands_published() const noexcept {
     return published_;
 }
 
-bool HdSettingsPlan::ScriptsRow::shown() const {
-    TASTY_SEAT_BODY(ScriptsRow);
-    return plan_.sys_ != nullptr;
+app::PageDescription::Row HdSettingsPlan::AutosaveRow::describe() const {
+    TASTY_SEAT_BODY(AutosaveRow);
+    app::PageDescription::Row r{};
+    r.kind = app::PageDescription::RowKind::Value;
+    (void)r.label.assign(kAutosaveLabel);
+    (void)r.value.assign(autosave_word(plan_.autosave_on_));
+    return r;
+}
+
+Transition HdSettingsPlan::AutosaveRow::select() {
+    TASTY_SEAT_BODY(AutosaveRow);
+    if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::SetAutosave{.on = !plan_.autosave_on_})) {
+        plan_.refusals_.add();
+    } else {
+        ++plan_.published_;
+    }
+    return Transition{};
 }
 
 app::PageDescription::Row HdSettingsPlan::ScriptsRow::describe() const {
@@ -94,9 +133,7 @@ app::PageDescription::Row HdSettingsPlan::ScriptsRow::describe() const {
 
 Transition HdSettingsPlan::ScriptsRow::select() {
     TASTY_SEAT_BODY(ScriptsRow);
-    if (plan_.sys_ == nullptr)
-        return Transition{};
-    return plan_.sys_->open_scripts(plan_.ctx_);
+    return plan_.scripts_entry_.open(plan_.ctx_);
 }
 
 Transition HdSettingsPlan::RebootAction::on_yes() {

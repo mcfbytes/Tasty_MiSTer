@@ -24,7 +24,7 @@ public:
     [[nodiscard]] static Ex<StreamLoadBracket> open(
         IStreamLoad& core,
         proto::IImageSink& sink,
-        IoIndex index,
+        const StreamAsk& ask,
         StreamLoadKind kind = StreamLoadKind::Stream,
         std::uint32_t length = 0
     );
@@ -52,14 +52,18 @@ public:
     [[nodiscard]] StreamLoadKind kind() const noexcept { return kind_; }
 
 private:
-    StreamLoadBracket(IoIndex index, StreamLoadKind kind, proto::ImageBracket&& b) noexcept
+    StreamLoadBracket(
+        proto::FioIndexByte index,
+        StreamLoadKind kind,
+        proto::ImageBracket&& b
+    ) noexcept
         : index_(index),
           kind_(kind),
           bracket_(std::move(b)) {}
 
     void cut_() noexcept;
 
-    IoIndex index_;
+    proto::FioIndexByte index_;
     StreamLoadKind kind_;
     std::optional<proto::ImageBracket> bracket_;
 };

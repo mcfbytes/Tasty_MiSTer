@@ -6,7 +6,10 @@
 #include <type_traits>
 
 #include "cores/config_codec.h"
+#include "cores/config_slot_count.h"
+#include "cores/types.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -35,9 +38,13 @@ constexpr ConfigSlotMask ConfigSlotMask::with(cores::ConfigSlot slot) const noex
 
 struct ConfigSlotTable {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint8_t count = 0;
+    cores::ConfigSlotCount count{};
     ConfigSlotMask exists{};
-    FixedStr<cores::kConfigPreviewChars, StrFit::Clip> preview[cores::kMaxConfigSlots] = {};
+    infra::IndexedArray<
+        FixedStr<cores::kConfigPreviewChars, StrFit::Clip>,
+        cores::kMaxConfigSlots,
+        cores::ConfigSlot>
+        preview{};
 };
 
 static_assert(std::is_trivially_copyable_v<ConfigSlotTable>);

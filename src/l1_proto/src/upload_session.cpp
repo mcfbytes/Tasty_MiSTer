@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "hal/selected.h"
-#include "infra/endian.h"
 #include "proto/fio_opcodes.h"
+#include "proto/wire_word.h"
 
 namespace mister::proto {
 
@@ -23,29 +23,7 @@ namespace {
     std::span<std::uint8_t> data,
     hal::Width w
 ) {
-    if (w == hal::Width::Word) {
-        const std::size_t pairs = data.size() / 2u;
-        for (std::size_t i = 0; i < pairs; ++i) {
-            auto r = beat(link, hal::SpiWord{0});
-            if (!r)
-                return std::unexpected(r.error());
-            infra::store_le<std::uint16_t>(data.subspan(2u * i).first<2>(), r->v);
-        }
-        if ((data.size() & 1u) != 0u) {
-            auto r = beat(link, hal::SpiWord{0});
-            if (!r)
-                return std::unexpected(r.error());
-            data.back() = static_cast<std::uint8_t>(r->v & 0x00FFu);
-        }
-        return {};
-    }
-    for (std::uint8_t& byte : data) {
-        auto r = beat(link, hal::SpiWord{0});
-        if (!r)
-            return std::unexpected(r.error());
-        byte = static_cast<std::uint8_t>(r->v & 0x00FFu);
-    }
-    return {};
+    return fill_from_words(w, data, [&link] { return beat(link, hal::SpiWord{0}); });
 }
 
 }

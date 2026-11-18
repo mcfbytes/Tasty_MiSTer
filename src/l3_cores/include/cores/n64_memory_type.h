@@ -160,17 +160,17 @@ static_assert(
     MemoryType cart,
     bool tpak
 ) noexcept {
-    std::size_t idx = before.size();
+    SaveRowCount rest = before;
     std::uint32_t off = 0;
-    if (idx != 0 && cart != MemoryType::None) {
+    if (!rest.none() && cart != MemoryType::None) {
         off += save_partition({}, cart).length;
-        --idx;
+        rest -= kOneSaveRow;
     }
-    if (idx != 0 && tpak) {
+    if (!rest.none() && tpak) {
         off += save_partition({}, MemoryType::Tpak).length;
-        --idx;
+        rest -= kOneSaveRow;
     }
-    off += static_cast<std::uint32_t>(save_partition({}, MemoryType::Cpak).length * idx);
+    off += rest.extent_at(save_partition({}, MemoryType::Cpak).length);
     return off;
 }
 

@@ -1,4 +1,27 @@
 add_library(mister_proto STATIC
+  src/conf_str.cpp
+  src/file_slots.cpp
+  src/held_pad_encoder.cpp
+  src/conf_str_caps.cpp
+  src/image_bracket.cpp
+  src/item_table.cpp
+  src/joystick_port.cpp
+  src/osd_surface.cpp
+  src/pad_levels.cpp
+  src/ps2_keyboard.cpp
+  src/ps2_mouse.cpp
+  src/ps2_wire.cpp
+  src/rtc_image.cpp
+  src/save_state_name.cpp
+  src/frame_pad_encoder.cpp
+  src/status_register.cpp
+)
+target_include_directories(mister_proto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(mister_proto
+  PUBLIC mister_hal
+  PRIVATE tasty_options)
+
+add_library(mister_proto_link STATIC
   src/pad_block_decl.cpp
   src/sector_block_decl.cpp
   src/osd_block_decl.cpp
@@ -8,31 +31,17 @@ add_library(mister_proto STATIC
   src/sys_directory_image.cpp
   src/axi_pad_encoder.cpp
   src/block_slots.cpp
-  src/conf_str.cpp
-  src/file_slots.cpp
-  src/held_pad_encoder.cpp
-  src/conf_str_caps.cpp
   src/core_session.cpp
   src/download_session.cpp
   src/fio_bracket.cpp
   src/upload_session.cpp
   src/frame_counter_read.cpp
-  src/image_bracket.cpp
   src/spi_image_sink.cpp
-  src/item_table.cpp
-  src/joystick_port.cpp
   src/link.cpp
   src/link_ops.cpp
-  src/osd_surface.cpp
   src/osd_transport.cpp
-  src/pad_levels.cpp
-  src/ps2_keyboard.cpp
-  src/ps2_mouse.cpp
-  src/ps2_wire.cpp
-  src/rtc_image.cpp
   src/spi_ps2_decoder.cpp
   src/savestate_engine.cpp
-  src/save_state_name.cpp
   src/save_primer.cpp
   src/spi_block_decoder.cpp
   src/spi_block_poll.cpp
@@ -41,16 +50,14 @@ add_library(mister_proto STATIC
   src/spi_frame.cpp
   src/spi_identify_decoder.cpp
   src/spi_osd_mask_decoder.cpp
-  src/frame_pad_encoder.cpp
   src/spi_sampler.cpp
   src/spi_status_decoder.cpp
   src/axi_status_decoder.cpp
-  src/status_register.cpp
+  src/status_decoder.cpp
   src/user_io/poll_reader.cpp
 )
-target_include_directories(mister_proto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(mister_proto
-  PUBLIC mister_reactor
+target_link_libraries(mister_proto_link
+  PUBLIC mister_proto mister_reactor
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
@@ -59,9 +66,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_backing.h
   proto/block_roles.h
   proto/block_server.h
-  proto/block_slots.h
   proto/build_generation.h
-  proto/disc_announce.h
   proto/fixed_block_roles.h
   proto/late_answers.h
   proto/no_block_roles.h
@@ -70,34 +75,19 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/conf_str_file_row.h
   proto/file_slot_hit.h
   proto/file_slots.h
-  proto/dir_entry_facts.h
   proto/dir_entry_kind.h
-  proto/dir_version.h
   proto/op_bitmap.h
-  proto/pad_block_decl.h
-  proto/sys_dir_entry.h
   proto/declared_line.h
-  proto/lane_block_decl.h
+  proto/block_line.h
   proto/link_frame.h
-  proto/link.h
-  proto/link_ops.h
-  proto/spi_frame.h
-  proto/sys_directory_image.h
-  proto/sector_block_decl.h
-  proto/osd_block_decl.h
-  proto/sys_block_decl.h
   proto/axi_ddr_decl.h
   proto/axi_kind.h
   proto/axi_lw_decl.h
-  proto/axi_pad_encoder.h
   proto/axi_unkinded_decl.h
   proto/capability.h
   proto/conf_str_caps.h
   proto/conf_switches.h
-  proto/core_session.h
-  proto/download_session.h
   proto/frame_count.h
-  proto/frame_counter_read.h
   proto/image_bracket.h
   proto/image_sink.h
   proto/image_source.h
@@ -110,7 +100,6 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/link_event.h
   proto/link_op.h
   proto/link_port.h
-  proto/decoder_row.h
   proto/session_live.h
   proto/link_router.h
   proto/save_kind.h
@@ -122,8 +111,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/info_window.h
   proto/osd_surface.h
   proto/osd_target.h
-  proto/osd_transport.h
   proto/ps2_command_port.h
+  proto/ps2_control_word.h
   proto/mouse_delta.h
   proto/ps2_keyboard.h
   proto/ps2_mouse.h
@@ -140,29 +129,22 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/save_request.h
   proto/save_state_decl.h
   proto/save_state_name.h
-  proto/savestate_engine.h
-  proto/save_primer.h
   proto/sd_request.h
   proto/sector_floor.h
   proto/session_params.h
   proto/slot_attributes.h
   proto/resident_window.h
   proto/slot_record.h
-  proto/spi_block_decoder.h
-  proto/spi_block_poll.h
-  proto/spi_conf_str_decoder.h
-  proto/spi_fio_queue.h
   proto/fio_window.h
-  proto/fio_bracket.h
-  proto/spi_image_sink.h
-  proto/spi_identify_decoder.h
-  proto/spi_osd_mask_decoder.h
   proto/osd_focus.h
-  proto/spi_ps2_decoder.h
-  proto/spi_sampler.h
-  proto/spi_status_decoder.h
-  proto/axi_status_decoder.h
-  proto/status_snapshot.h
+  proto/autosave_policy.h
+  proto/in_place_opens.h
+  proto/save_stage.h
+  proto/save_stage_report.h
+  proto/save_stage_row.h
+  proto/save_stage_types.h
+  proto/stage_key.h
+  proto/save_trigger.h
   proto/standard_item.h
   proto/standard_item_row.h
   proto/state_slot.h
@@ -179,19 +161,71 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/storage_request_dispatch.h
   proto/types.h
   proto/window_fails.h
+  proto/wire_word.h
   proto/uio_opcodes.h
   proto/fio_opcodes.h
   proto/osd_opcodes.h
-  proto/link_route.h
-  proto/upload_session.h
+  proto/link_sel.h
   proto/rotation_dir.h
   proto/reset_edge.h
   proto/reset_fence.h
   proto/reset_terms.h
   proto/rtc_image.h
   proto/user_io/poll_shape.h
-  proto/user_io/poll_reader.h
   proto/user_io/rumble_motors.h
   proto/user_io/poll_params.h
+  proto/frame_drops.h
+  proto/mailbox_words.h
+  proto/osd_rotation.h
+  proto/pad_word.h
+  proto/save_slot_rule.h
+  proto/save_target.h
+  proto/sd_stat.h
+  proto/user_io/declared_select.h
+  proto/pad_masks.h
+)
+tasty_add_header_checks(tasty_proto_link_header_checks LIB mister_proto_link HEADERS
+  proto/block_slots.h
+  proto/disc_announce.h
+  proto/dir_entry_facts.h
+  proto/dir_version.h
+  proto/pad_block_decl.h
+  proto/sys_dir_entry.h
+  proto/lane_block_decl.h
+  proto/link.h
+  proto/link_ops.h
+  proto/spi_frame.h
+  proto/link_sel_carriers.h
+  proto/sys_directory_image.h
+  proto/sector_block_decl.h
+  proto/osd_block_decl.h
+  proto/sys_block_decl.h
+  proto/axi_pad_encoder.h
+  proto/core_session.h
+  proto/download_session.h
+  proto/frame_counter_read.h
+  proto/decoder_row.h
+  proto/osd_transport.h
+  proto/savestate_engine.h
+  proto/save_primer.h
+  proto/spi_block_decoder.h
+  proto/spi_block_poll.h
+  proto/spi_conf_str_decoder.h
+  proto/spi_fio_queue.h
+  proto/fio_bracket.h
+  proto/spi_image_sink.h
+  proto/spi_identify_decoder.h
+  proto/spi_osd_mask_decoder.h
+  proto/spi_ps2_decoder.h
+  proto/spi_sampler.h
+  proto/spi_status_decoder.h
+  proto/axi_status_decoder.h
+  proto/status_change.h
+  proto/status_source.h
+  proto/status_decoder.h
+  proto/status_snapshot.h
+  proto/irq_cause.h
+  proto/upload_session.h
+  proto/user_io/poll_reader.h
 )
 

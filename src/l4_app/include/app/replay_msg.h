@@ -53,14 +53,14 @@ struct ReplayMsg {
 
     struct Input {
         static constexpr Kind kKind = Kind::Input;
-        MovieFrame first{};
-        MovieFrame last{};
+        MoviePosition first{};
+        MoviePosition last{};
         std::array<proto::JoyMask, kReplayPorts> mask{};
     };
 
     struct End {
         static constexpr Kind kKind = Kind::End;
-        MovieFrame frame{};
+        MoviePosition frame{};
     };
 
     using Alternatives = std::tuple<Arm, Input, End>;

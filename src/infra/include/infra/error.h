@@ -86,6 +86,8 @@ struct Error {
     std::uint32_t detail;
 
     [[nodiscard]] constexpr infra::Errno os_errno() const noexcept;
+
+    friend constexpr bool operator==(const Error&, const Error&) = default;
 };
 
 static_assert(std::is_trivially_copyable_v<Error> && sizeof(Error) == 8);

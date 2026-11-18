@@ -6,6 +6,8 @@
 
 namespace mister::cores {
 
+using ::mister::infra::affine::operator-;
+
 std::span<std::uint8_t> SectorReadAhead::take(
     svc::IFile& file,
     msu::TrackCursor cursor,
@@ -76,7 +78,10 @@ std::span<std::uint8_t> SectorReadAhead::read_(
 ) noexcept {
     std::size_t got = 0;
     while (got < dst.size()) {
-        auto r = file.read_at(off, std::as_writable_bytes(dst.subspan(got)));
+        auto r = file.read_at(
+            proto::kFileStart + (off - msu::TrackCursor{}),
+            std::as_writable_bytes(dst.subspan(got))
+        );
         if (!r) {
             ++tally_.read_errors;
             break;

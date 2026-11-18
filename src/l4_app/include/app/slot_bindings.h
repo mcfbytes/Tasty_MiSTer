@@ -9,7 +9,6 @@
 #include <optional>
 #include <string_view>
 
-#include "app/board_ops.h"
 #include "app/cheat_apply.h"
 #include "app/core_block_roles.h"
 #include "app/core_option_cells.h"
@@ -25,7 +24,6 @@
 #include "app/mount_status_cell.h"
 #include "app/owed_mount.h"
 #include "app/owed_save_bind.h"
-#include "app/rt_relax_scope.h"
 #include "app/save_channel_roles.h"
 #include "app/save_extent_cell.h"
 #include "app/save_image_source.h"
@@ -59,7 +57,9 @@
 #include "proto/storage_channel.h"
 #include "proto/types.h"
 #include "svc/chd_prefetch.h"
+#include "svc/file_slot_backend.h"
 #include "svc/storage_lifecycle.h"
+#include "svc/types.h"
 #include "svc/vfs.h"
 
 namespace mister::hal {
@@ -89,7 +89,6 @@ public:
         hal::ISpiTransport& link;
         LinkBinder& binder;
         const os::IClock& clock;
-        BoardOps ops;
         ICheatApply& cheats;
         const SessionBindings& bindings;
         LinkRxChannel<SeatTag::Main>& link_rx;
@@ -98,6 +97,7 @@ public:
         SessionTally& session_tally;
         CoreOptionCells& options;
         xthread::LogLane& log_lane;
+        svc::SaveSlotBackends& save_backends;
 
         infra::OptRef<const svc::Vfs> vfs{};
 
@@ -134,6 +134,8 @@ public:
     [[nodiscard]] proto::BlockSlotMask channel_borrows() const noexcept { return channel_borrows_; }
 
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
+
+    [[nodiscard]] svc::Generation save_bracket_gen() const noexcept { return save_bracket_gen_; }
 
     using Result = ILinkEncoder::Outcome;
     Result on(const proto::LinkOp::BindSlot& a, const LinkOpCtx& ctx) noexcept;
@@ -246,10 +248,11 @@ private:
 
     void after_mount_answer_(infra::OptRef<cores::Core> core) noexcept;
 
+    [[nodiscard]] infra::OptRef<svc::IStorageBackend> save_backend_(proto::SlotIndex si) noexcept;
+
     hal::ISpiTransport& link_;
     LinkBinder& binder_;
     const os::IClock& clock_;
-    const BoardOps ops_;
 
     ICheatApply& cheats_;
 
@@ -262,6 +265,7 @@ private:
     infra::OptRef<const svc::Vfs> vfs_;
     infra::OptRef<svc::IStorageLifecycle> storage_life_;
     infra::OptRef<svc::IStorageBackend> disc_backend_;
+    svc::SaveSlotBackends& save_backends_;
     infra::OptRef<svc::ChdPrefetch> prefetch_;
     MountStatusCell mount_status_cell_{};
     SaveExtentCell save_extent_cell_{};
@@ -284,6 +288,7 @@ private:
 
     proto::BlockSlotMask channel_borrows_{};
     Tally tally_{};
+    svc::Generation save_bracket_gen_{};
 };
 
 static_assert(LinkOpMountSink<SlotBindings>);

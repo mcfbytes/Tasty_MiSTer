@@ -2,21 +2,40 @@
 #include "app/launcher_screen.h"
 
 #include "app/hps_framebuffer.h"
-#include "app/video_pump.h"
 
 namespace mister::app {
 
 bool LauncherScreen::raise_() noexcept {
-    if (!w_.fb.raise())
+    const auto lease = w_.fb.raise(FbTenant::Launcher);
+    if (!lease)
         return false;
+    lease_ = *lease;
+    drop_owed_ = false;
     ++raises_;
     return true;
 }
 
+void LauncherScreen::drop_lease_() noexcept {
+    if (!lease_)
+        return;
+    if (!w_.fb.drop(*lease_) && w_.fb.holds(*lease_)) {
+        drop_owed_ = true;
+        return;
+    }
+    drop_owed_ = false;
+    lease_.reset();
+}
+
+void LauncherScreen::retry_drop_() noexcept {
+    if (drop_owed_)
+        drop_lease_();
+}
+
 void LauncherScreen::tick() noexcept {
     TASTY_SEAT_BODY(LauncherScreen);
+    retry_drop_();
     LauncherState s{};
-    const std::uint32_t applies = w_.video.stats().applies;
+    const std::uint32_t applies = w_.video_stats.sample().value.applies;
     if (seen_.take_if_changed(w_.state, s)) {
         w_.fb.hold(s.scanout_owned);
         const bool new_claim = s.owns_screen
@@ -25,7 +44,7 @@ void LauncherScreen::tick() noexcept {
             raise_owed_ = true;
         } else if (!s.owns_screen && last_.owns_screen) {
             raise_owed_ = false;
-            (void)w_.fb.drop();
+            drop_lease_();
         } else if (s.owns_screen && last_.scanout_owned && !s.scanout_owned) {
             raise_owed_ = true;
         }

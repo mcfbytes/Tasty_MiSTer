@@ -6,6 +6,7 @@
 #include <optional>
 #include <type_traits>
 
+#include "hal/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -22,7 +23,7 @@ struct DiskAct {
 
     [[nodiscard]] static constexpr DiskAct none() noexcept { return DiskAct{}; }
 
-    [[nodiscard]] static constexpr DiskAct out(std::uint16_t opcode, std::uint16_t len) noexcept {
+    [[nodiscard]] static constexpr DiskAct out(hal::SpiWord opcode, std::uint16_t len) noexcept {
         DiskAct act;
         act.kind_ = Kind::Out;
         act.last_ = false;
@@ -31,7 +32,7 @@ struct DiskAct {
         return act;
     }
 
-    [[nodiscard]] static constexpr DiskAct in(std::uint16_t opcode, std::uint16_t len) noexcept {
+    [[nodiscard]] static constexpr DiskAct in(hal::SpiWord opcode, std::uint16_t len) noexcept {
         DiskAct act;
         act.kind_ = Kind::In;
         act.last_ = false;
@@ -41,7 +42,7 @@ struct DiskAct {
     }
 
     [[nodiscard]] static constexpr DiskAct signal(
-        std::uint16_t opcode,
+        hal::SpiWord opcode,
         bool last,
         std::optional<std::uint16_t> word
     ) noexcept {
@@ -60,7 +61,7 @@ struct DiskAct {
 
     [[nodiscard]] constexpr bool last() const noexcept { return last_; }
 
-    [[nodiscard]] constexpr std::uint16_t opcode() const noexcept { return opcode_; }
+    [[nodiscard]] constexpr hal::SpiWord opcode() const noexcept { return opcode_; }
 
     [[nodiscard]] constexpr std::uint16_t len() const noexcept { return len_; }
 
@@ -73,26 +74,26 @@ struct DiskAct {
     [[nodiscard]] constexpr std::optional<DiskUnit> unit() const noexcept {
         if (unit_ == kNoUnit_)
             return std::nullopt;
-        return DiskUnit{unit_};
+        return unit_;
     }
 
     [[nodiscard]] constexpr DiskAct with_unit(DiskUnit unit) const noexcept {
-        if (unit.v == kNoUnit_) {
-            fatal(Error{Errc::slot_range, ERR_SITE(), unit.v}, "DiskAct::with_unit: not a unit");
+        if (unit == kNoUnit_) {
+            fatal(unit.refusal(Errc::slot_range, ERR_SITE()), "DiskAct::with_unit: not a unit");
         }
         DiskAct act = *this;
-        act.unit_ = unit.v;
+        act.unit_ = unit;
         return act;
     }
 
 private:
-    static constexpr std::uint8_t kNoUnit_ = 0xFF;
+    static constexpr DiskUnit kNoUnit_{0xFF};
 
     Kind kind_ = Kind::None;
     bool last_ = true;
     bool has_word_ = false;
-    std::uint8_t unit_ = kNoUnit_;
-    std::uint16_t opcode_ = 0;
+    DiskUnit unit_ = kNoUnit_;
+    hal::SpiWord opcode_{};
     std::uint16_t len_ = 0;
     std::uint16_t word_ = 0;
 };

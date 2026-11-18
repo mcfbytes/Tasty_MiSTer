@@ -6,6 +6,10 @@
 
 namespace mister::proto {
 
+namespace {
+constexpr hal::SpiWord kPs2ControlPresent{0x100};
+}
+
 void SpiPs2Decoder::probe() noexcept {
     if (ps2_control_)
         return;
@@ -20,7 +24,7 @@ void SpiPs2Decoder::probe() noexcept {
     auto w = link_.transfer(hal::SpiWord{0});
     if (!w)
         return count_error_();
-    if ((w->v & 0x100u) != 0u)
+    if (w->any_of(kPs2ControlPresent))
         ps2_control_ = true;
 }
 
@@ -45,7 +49,9 @@ void SpiPs2Decoder::service() noexcept {
     if (!w1)
         return count_error_();
 
-    if (!out_.push(LinkEvent::Ps2Control{.keyboard = w0->v, .mouse = w1->v}))
+    if (!out_.push(
+            LinkEvent::Ps2Control{.keyboard = Ps2ControlWord{*w0}, .mouse = Ps2ControlWord{*w1}}
+        ))
         count_error_();
 }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -8,6 +9,8 @@
 #include "infra/message_sum.h"
 
 namespace mister::app {
+
+enum class UiTarget : std::uint8_t { Owner, Saves };
 
 struct UiAdmission {
 
@@ -21,17 +24,23 @@ struct UiAdmission {
     Scope scoped = Scope::None;
     Refusal refuse_via = Refusal::Answer;
     bool bespoke = false;
+    UiTarget target = UiTarget::Owner;
 };
 
 inline constexpr auto kUiAdmission = [] {
     using K = UiRequest::Kind;
     constexpr auto kSession = UiAdmission::Scope::Session;
     constexpr auto kLive = UiAdmission::Scope::LiveSession;
+    constexpr auto kSaves = UiTarget::Saves;
     return std::to_array<UiAdmission>({
         {.kind = K::LoadCore},
-        {.kind = K::SaveConfig},
-        {.kind = K::SaveDips, .gate_switch = true, .gate_load = true},
-        {.kind = K::SaveCoreConfig, .gate_switch = true, .gate_load = true, .scoped = kSession},
+        {.kind = K::SaveConfig, .target = kSaves},
+        {.kind = K::SaveDips, .gate_switch = true, .gate_load = true, .target = kSaves},
+        {.kind = K::SaveCoreConfig,
+         .gate_switch = true,
+         .gate_load = true,
+         .scoped = kSession,
+         .target = kSaves},
         {.kind = K::LoadCoreConfig, .gate_switch = true, .gate_load = true, .scoped = kSession},
         {.kind = K::LoadFile, .gate_switch = true, .gate_load = true},
         {.kind = K::MountImage, .gate_switch = true, .gate_load = true, .scoped = kSession},
@@ -44,10 +53,11 @@ inline constexpr auto kUiAdmission = [] {
          .gate_load = true,
          .scoped = kLive,
          .refuse_via = UiAdmission::Refusal::FileAsk},
-        {.kind = K::SetOsdStyle},
+        {.kind = K::SetOsdStyle, .target = kSaves},
         {.kind = K::SdramDetected},
-        {.kind = K::SetHdLook},
+        {.kind = K::SetHdLook, .target = kSaves},
         {.kind = K::SwitchIni},
+        {.kind = K::SetAutosave},
     });
 }();
 static_assert(
@@ -80,9 +90,41 @@ static_assert(
     "refuse_via answers the scope test; a row without one has nothing to answer"
 );
 
+consteval bool bespoke_rows_target_the_owner(const decltype(kUiAdmission)& rows) {
+    for (const UiAdmission& r : rows)
+        if (r.bespoke && r.target != UiTarget::Owner)
+            return false;
+    return true;
+}
+
+static_assert(
+    bespoke_rows_target_the_owner(kUiAdmission),
+    "a bespoke arm runs in the owner; no sink sees its ask"
+);
+
+consteval bool targets_saves(UiRequest::Kind k) {
+    return kUiAdmission[infra::ordinal(k)].target == UiTarget::Saves;
+}
+
+static_assert(
+    std::ranges::count(kUiAdmission, UiTarget::Saves, &UiAdmission::target) == 5,
+    "exactly five kinds are the saves sink's"
+);
+static_assert(
+    targets_saves(UiRequest::Kind::SaveConfig)
+        && targets_saves(UiRequest::Kind::SaveDips)
+        && targets_saves(UiRequest::Kind::SaveCoreConfig)
+        && targets_saves(UiRequest::Kind::SetOsdStyle)
+        && targets_saves(UiRequest::Kind::SetHdLook),
+    "the saves sink takes the three saves and the two INI writes"
+);
+
 template <class A>
 [[nodiscard]] consteval UiAdmission ui_admission() {
     return kUiAdmission[infra::ordinal(A::kKind)];
 }
+
+template <class A>
+concept SavesRouted = requires { A::kKind; } && (ui_admission<A>().target == UiTarget::Saves);
 
 }

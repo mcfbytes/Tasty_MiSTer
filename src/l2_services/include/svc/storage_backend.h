@@ -16,12 +16,12 @@ public:
     virtual ~IStorageBackend() = default;
 
     [[nodiscard]] virtual Ex<std::span<std::uint8_t>> read_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<std::uint8_t> dst
     ) = 0;
 
     [[nodiscard]] virtual Ex<std::span<const std::uint8_t>> write_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<const std::uint8_t> src
     ) = 0;
 
@@ -29,6 +29,13 @@ public:
         proto::SlotIndex slot,
         const BlockCtl::StorageOrder& order
     ) = 0;
+
+    [[nodiscard]] virtual Ex<proto::FileSize> open_save_extent(
+        proto::SlotIndex slot,
+        const BlockCtl::StorageOrder& order
+    ) {
+        return open_extent(slot, order);
+    }
 
     [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::uint8_t>) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});

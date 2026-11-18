@@ -17,12 +17,12 @@
 #include "cores/ladder_host.h"
 #include "cores/ladder_pc.h"
 #include "cores/payload_pieces.h"
-#include "cores/wire_word.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/types.h"
+#include "svc/card_writer.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -126,8 +126,6 @@ protected:
     [[nodiscard]] bool order_reset();
     [[nodiscard]] bool order_disc_payload(const proto::LinkOp::StageDiscPayload& facts = {});
 
-    [[nodiscard]] bool order_empty_bracket(WideIoIndex dest);
-
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
     [[nodiscard]] std::chrono::nanoseconds now_ns() const;
 
@@ -135,6 +133,7 @@ protected:
 
     const CoreProfile& profile_;
     const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     ILadderHost& host_;
     const os::IClock& clock_;
 

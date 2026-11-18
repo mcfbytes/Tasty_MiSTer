@@ -16,26 +16,26 @@ struct BlankRegion {
     proto::FileSize within;
     std::span<const std::byte> bytes;
 
-    [[nodiscard]] constexpr proto::FileSize image_offset(
+    [[nodiscard]] constexpr proto::FileOffset image_offset(
         proto::BlockSize lba_bytes
     ) const noexcept {
-        return proto::byte_offset(block, lba_bytes) + within;
+        return lba_bytes.position_of(block) + within;
     }
 
     void paste_into(
         proto::BlockSize lba_bytes,
-        proto::FileSize base,
+        proto::FileOffset base,
         std::span<std::uint8_t> out
     ) const noexcept {
         if (bytes.empty() || out.empty())
             return;
-        const proto::FileSize at = image_offset(lba_bytes);
-        const proto::FileSize end = base + proto::FileSize::of(out);
-        const proto::FileSize run_end = at + proto::FileSize::of(bytes);
+        const proto::FileOffset at = image_offset(lba_bytes);
+        const proto::FileOffset end = base + proto::FileSize::of(out);
+        const proto::FileOffset run_end = at + proto::FileSize::of(bytes);
         if (run_end <= base || at >= end)
             return;
-        const proto::FileSize from = std::max(at, base);
-        const proto::FileSize to = std::min(run_end, end);
+        const proto::FileOffset from = std::max(at, base);
+        const proto::FileOffset to = std::min(run_end, end);
         const std::span<const std::byte> run = (to - from).first_of((from - at).skip_in(bytes));
         std::ranges::copy(
             infra::byte_cast<const std::uint8_t>(run),

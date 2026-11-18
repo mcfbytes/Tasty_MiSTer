@@ -4,6 +4,8 @@
 #include <string_view>
 
 #include "cores/st_core.h"
+#include "infra/indexed_array.h"
+#include "cores/st_loader.h"
 #include "cores/st_media_ladder.h"
 #include "cores/st_sysctrl.h"
 
@@ -17,6 +19,10 @@ std::unique_ptr<Core> make_st(const CoreProfile& p, const CoreGrant& g) {
 
 std::unique_ptr<BootLadder> make_st_ladder(const CoreProfile& p, const LadderContext& ctx) {
     return std::make_unique<StMediaLadder>(p, ctx);
+}
+
+std::unique_ptr<ILoader> make_st_loader(const LoaderContext&) {
+    return std::make_unique<StLoader>();
 }
 
 static_assert(kAtariSt.kind == CoreKind::AtariSt);
@@ -46,11 +52,6 @@ static_assert(
     kAtariSt.default_uart_baud == BaudRate{19200},
     "user_io.cpp:1726: `uart_speeds[0] = is_st() ? 19200 : 115200` seeds an empty "
     "CONF_STR speed list, and 19200 is the ST's MIDI-era default"
-);
-static_assert(
-    !kAtariSt.skips_memsz,
-    "user_io.cpp:1455: the ST is a plain CORE_TYPE_8BIT core and takes UIO_SET_MEMSZ "
-    "like every other one; only the SharpMZ 0xA7 dialect skips it"
 );
 
 static_assert(
@@ -137,7 +138,7 @@ static_assert(
 );
 
 static_assert(
-    kAtariSt.staging.order == StageOrder::None,
+    !kAtariSt.staging.staged,
     "st_tos.cpp:556-591 is the ST's media ladder, not a CD staging order: the "
     "16 KiB clear, the TOS, the ACSI remount and the cartridge, in that order"
 );
@@ -208,16 +209,18 @@ static_assert(
     "st_tos.cpp:565 — fill_tx(0, 16*1024, 3) clears the first 16 KiB"
 );
 static_assert(
-    StCore::kTosLargeBytes == 256u * 1024u && StCore::kTosSmallBytes == 192u * 1024u,
+    StLoader::kTosLargeBytes == proto::FileSize{256u * 1024u}
+        && StLoader::kTosSmallBytes == proto::FileSize{192u * 1024u},
     "st_tos.cpp:571-573 — TOS dispatch is purely by SIZE"
 );
 static_assert(
-    StCore::kTosLargeIndex == proto::WideIoIndex{0}
-        && StCore::kTosSmallIndex == proto::WideIoIndex{1},
+    StLoader::kTosLargeIndex == proto::WideIoIndex{0}
+        && StLoader::kTosSmallIndex == proto::WideIoIndex{1},
     "st_tos.cpp:571-573 — >= 256 KiB goes to index 0, exactly 192 KiB to index 1"
 );
 static_assert(
-    StCore::kCartIndex == proto::WideIoIndex{2} && StCore::kCartBufferBytes == (128u * 1024u) + 4u,
+    StLoader::kCartIndex == proto::WideIoIndex{2}
+        && StLoader::kCartBufferBytes == proto::FileSize{(128u * 1024u) + 4u},
     "st_tos.cpp:417-427 — a 128 KiB + 4 byte buffer, index 2, first 4 bytes dropped"
 );
 
@@ -368,8 +371,8 @@ static_assert(
 );
 static_assert(
     kStOptionPages.size() == 2
-        && kStOptionPages[kStMainPage.v].empty()
-        && kStOptionPages[kStConfigPage.v] == "Config",
+        && infra::at_index(kStOptionPages, kStMainPage).empty()
+        && infra::at_index(kStOptionPages, kStConfigPage) == "Config",
     "menu.cpp:4630 titles the main page with the core's own name, :4815 the sub-page "
     "'Config'; an empty entry means the core name"
 );

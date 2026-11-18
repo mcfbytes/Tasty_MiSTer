@@ -72,7 +72,7 @@ public:
         bool anchored,
         CoreFrameGap lag
     ) noexcept;
-    [[nodiscard]] MovieFrame movie_of(
+    [[nodiscard]] MoviePosition movie_of(
         const CoreFrameRecord& cell,
         WideCoreFrame core
     ) const noexcept;

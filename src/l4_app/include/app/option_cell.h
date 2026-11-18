@@ -45,6 +45,10 @@ struct OptionTable {
             return std::nullopt;
         return declared->view();
     }
+
+    [[nodiscard]] constexpr bool holds_page(proto::SubmenuNo page) const noexcept {
+        return page_title.find(page).has_value();
+    }
 };
 
 static_assert(std::is_trivially_copyable_v<OptionTable>);

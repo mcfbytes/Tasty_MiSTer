@@ -149,8 +149,7 @@ private:
         std::uint32_t on(const FioWindow::Open&) const noexcept { return kWindowHeaderWords; }
 
         std::uint32_t on(const FioWindow::Data& d) const noexcept {
-            const std::size_t n = width == hal::Width::Word ? (d.len + 1u) / 2u : d.len;
-            return kDataHeaderWords + static_cast<std::uint32_t>(n);
+            return kDataHeaderWords + static_cast<std::uint32_t>(hal::words(width, d.len));
         }
 
         std::uint32_t on(const FioWindow::Close&) const noexcept { return kWindowHeaderWords; }

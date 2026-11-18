@@ -139,8 +139,8 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
         return std::unexpected(data_pages.error());
     auto hand_pages = os::MmioRegion::map_fd(
         owner.get(),
-        MapOffset::of(kHandoffPage.phys),
-        os::MapLength{kHandoffPage.len}
+        MapOffset::of(kHandoffPage.region().phys),
+        os::MapLength{kHandoffPage.region().len}
     );
     if (!hand_pages)
         return std::unexpected(hand_pages.error());
@@ -148,7 +148,7 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
     Programmer loader = Programmer::over(
         hal::RegisterWindow<FpgaMgr>::borrow(mgr_pages->base(), mgr_pages->length()),
         hal::RegisterWindow<FpgaMgrData>::borrow(data_pages->base(), data_pages->length()),
-        hal::FpgaMemory::borrow(hand_pages->plain_bytes(), kHandoffPage)
+        hal::FpgaMemory::borrow(hand_pages->plain_bytes(), kHandoffPage.region())
     );
     loader.mgr_pages_ = std::move(*mgr_pages);
     loader.data_pages_ = std::move(*data_pages);

@@ -148,6 +148,8 @@ private:
     [[nodiscard]] bool samples_() const noexcept;
     void panel_step_(const HdLayout& layout, PxPlane panel, bool asked) noexcept;
     void place_(HdFlipHolds::Instant at, bool wrote = false) noexcept;
+
+    void handoff_() noexcept;
     [[nodiscard]] PixelCount in_place_px_() const noexcept;
     [[nodiscard]] bool copy_stale_(HdFlipHolds::Instant at) noexcept;
     bool flip_(HdFlipHolds::Instant at) noexcept;

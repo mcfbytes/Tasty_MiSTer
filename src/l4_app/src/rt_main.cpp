@@ -11,6 +11,7 @@
 #include "app/core_frame_counter.h"
 #include "app/disk_relay.h"
 #include "app/replay_gate.h"
+#include "app/round_budget.h"
 #include "app/save_upload_relay.h"
 #include "app/scanout_relay.h"
 #include "infra/message_sum.h"
@@ -19,26 +20,6 @@
 #include "reactor/round_timer.h"
 
 namespace mister::app {
-
-static_assert(
-    ReplayGate::kMaxRoundWords + CoreFrameCounter::kMaxRoundWords + ScanoutRelay::kMaxRoundWords
-        <= proto::tightest_round_budget_words(),
-    "the replay's, the frame reader's and the scanout relay's words together fit the round budget"
-);
-
-static_assert(
-    DiskRelay::kMaxRoundWords + CoreFrameCounter::kMaxRoundWords + ScanoutRelay::kMaxRoundWords
-        <= proto::tightest_round_budget_words(),
-    "a disk act's words and the frame reader's and scanout relay's fit the round budget"
-);
-
-static_assert(
-    SaveUploadRelay::kMaxRoundWords
-            + CoreFrameCounter::kMaxRoundWords
-            + ScanoutRelay::kMaxRoundWords
-        <= proto::tightest_round_budget_words(),
-    "a save act's words and the frame reader's and scanout relay's fit the round budget"
-);
 
 static_assert(
     hal::DiskLamp::kTick == std::chrono::nanoseconds{reactor::kTickNs},
@@ -72,6 +53,8 @@ void RtMain::serve() noexcept {
         stopping_ = true;
         return;
     }
+
+    RoundBudget budget{round_budget_words_};
     round(tick);
 
     if (transfer_holds_()) {
@@ -84,7 +67,7 @@ void RtMain::serve() noexcept {
         return;
     }
 
-    const bool drained = drain_fio_();
+    const bool drained = drain_fio_(budget);
     const bool wrote = !drained
         && exec_.round_unclaimed()
         && osd_
@@ -97,19 +80,23 @@ void RtMain::settle() noexcept {
     exec_.settle();
 }
 
-bool RtMain::drain_fio_() noexcept {
+bool RtMain::drain_fio_(RoundBudget& budget) noexcept {
 
-    FioRoundBudget budget{round_budget_words_};
+    if (session_) {
+        budget.debit(RoundAct::Disk, session_->disks().take_round_words());
+        budget.debit(RoundAct::Mailbox, session_->mailbox().take_round_words());
+    }
+
     if (replay_)
-        budget.spend(replay_->take_round_words());
+        budget.debit(RoundAct::Replay, replay_->take_round_words());
     if (frames_)
-        budget.spend(frames_->take_round_words());
+        budget.debit(RoundAct::Frames, frames_->take_round_words());
     if (scanout_)
-        budget.spend(scanout_->take_round_words());
+        budget.debit(RoundAct::Scanout, scanout_->take_round_words());
     if (!session_)
         return false;
 
-    budget.spend(session_->saves().take_round_words());
+    budget.debit(RoundAct::Saves, session_->saves().take_round_words());
     proto::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
         q.abandon();
@@ -117,7 +104,7 @@ bool RtMain::drain_fio_() noexcept {
     }
 
     session_->service_saves(budget.remaining());
-    budget.spend(session_->saves().take_round_words());
+    budget.debit(RoundAct::Saves, session_->saves().take_round_words());
     return q.drain(budget.remaining()) != proto::FioWordCount{};
 }
 
@@ -155,9 +142,6 @@ void RtMain::round(bool tick) {
 
     if (tick && session_)
         session_->poll_osd_mask();
-
-    if (tick && session_)
-        session_->publish_doorbell_stats();
     note_switch_();
 }
 
@@ -188,19 +172,35 @@ void RtMain::drain_(
     bool windows_closed
 ) noexcept {
     constexpr bool pads = Producer == SeatTag::Input;
-    while (!budget.exhausted() && !wire_held_()) {
-        const auto op = inbox.pop();
-        if (!op)
+
+    constexpr bool pieces = Producer == SeatTag::Main;
+    while (!budget.exhausted() && (pieces || !wire_held_())) {
+        const bool dat_held = pieces && dat_window_held_();
+        if (pieces && wire_held_() && !dat_held)
             break;
+        const auto op = inbox.pop();
+        if (!op) {
+
+            if (pieces && session_)
+                session_->held().release_window();
+            break;
+        }
         budget.take();
+
+        if (dat_held && dat_hold_for(infra::kind_of(*op)) == DatHold::Release) {
+            session_->held().release_window();
+        }
 
         if (pads && replay_ && replay_->suppresses(*op))
             continue;
-        const std::uint32_t ends = session_->held().tally().downloads_closed;
         const std::uint32_t resets = session_->tally().resets_pulsed;
         const Delivered d = session_->deliver(*op, inbox, windows_closed);
 
-        if (replay_ && session_->held().tally().downloads_closed != ends) {
+        if (timer_ && round_class_for(infra::kind_of(*op)) == RoundClass::Lifecycle) {
+            timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
+        }
+
+        if (replay_ && d.edge == Delivered::Edge::DownloadClosed) {
             if (const auto end = session_->last_download())
                 replay_->note_download_end(*end);
         }
@@ -262,7 +262,7 @@ void RtMain::replay_step_() noexcept {
 void RtMain::frames_step_() noexcept {
     if (!frames_)
         return;
-    MovieFrame movie = kNoMovieFrame;
+    MoviePosition movie = kNoMovieFrame;
     if (replay_ && replay_->armed())
         movie = replay_->status().movie_frame;
     frames_->settle(replay_ready_(), core_edge_seq_().v, movie);
@@ -307,6 +307,10 @@ bool RtMain::switch_window_() const noexcept {
 
 bool RtMain::wire_held_() const noexcept {
     return session_ && session_->wire_held();
+}
+
+bool RtMain::dat_window_held_() const noexcept {
+    return session_ && session_->held().dat_window_held();
 }
 
 bool RtMain::transfer_holds_() const noexcept {

@@ -10,8 +10,6 @@
 
 namespace mister::cores {
 
-enum class StageOrder : std::uint8_t { None, MegaCd, PceCd, Psx, ThreeDo, Saturn, Cdi, NeoGeoCd };
-
 struct SaveMountPolicy {
     IoIndex slot;
 
@@ -27,7 +25,8 @@ struct SaveMountPolicy {
 };
 
 struct StagingPolicy {
-    StageOrder order = StageOrder::None;
+
+    bool staged = false;
     std::uint32_t reset_pulse_us = 0;
 
     IoIndex disc_slot{1};

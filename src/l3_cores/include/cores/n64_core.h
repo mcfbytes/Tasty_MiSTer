@@ -49,7 +49,7 @@ public:
 
     [[nodiscard]] std::uint32_t transfers() const noexcept { return transfers_; }
 
-    [[nodiscard]] proto::IoIndex last_index() const noexcept { return last_index_; }
+    [[nodiscard]] proto::FioIndexByte last_index() const noexcept { return last_index_; }
 
     [[nodiscard]] const n64::CheatEngine& cheats() const noexcept { return cheats_; }
 
@@ -91,13 +91,12 @@ private:
     }
 
     void on_status_changed() noexcept override;
-    void on_set_pending_file_ext(std::string_view ext) noexcept override;
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
         return infra::OptRef<IStreamLoad>{*this};
     }
 
-    [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
+    [[nodiscard]] Ex<proto::SessionParams> stream_opening(const StreamAsk& ask) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
     [[nodiscard]] Ex<void> on_apply_load_facts(
@@ -135,7 +134,7 @@ private:
     svc::Crc32 crc32_{};
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
-    proto::IoIndex last_index_{};
+    proto::FioIndexByte last_index_{};
     std::uint32_t save_plan_errors_ = 0;
     std::uint32_t facts_refusals_ = 0;
 

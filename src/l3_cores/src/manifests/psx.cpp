@@ -66,7 +66,7 @@ static_assert(
     "psx.cpp:452-455: the whole mcdheader lands at image offset 0"
 );
 static_assert(
-    kPsxBlankSave.lba_bytes.v == 1024,
+    kPsxBlankSave.lba_bytes == proto::BlockSize{1024},
     "psx.cpp:449-450: offset = lba * 1024, size = cnt * 1024"
 );
 
@@ -118,7 +118,7 @@ static_assert(
 );
 
 static_assert(
-    kPsx.staging.order == StageOrder::Psx
+    kPsx.staging.staged
         && kPsx.staging.disc_slot == IoIndex{1}
         && kPsx.staging.save
         && kPsx.staging.save->slot == IoIndex{2},

@@ -9,13 +9,13 @@ std::optional<TransferRow> AddressedLoad::window_row(
     hal::FabricAddr addr,
     proto::FileSize bytes,
     proto::WideIoIndex index,
-    const hal::PhysRegion& aperture
+    const hal::FpgaAperture& aperture
 ) noexcept {
 
     if (addr == hal::FabricAddr{} || bytes.high_word() != 0)
         return std::nullopt;
 
-    if (!hal::resolve_load_region(aperture, hal::to_phys(addr), 1))
+    if (!addr.physical_in(aperture))
         return std::nullopt;
     TransferRow r{};
     r.dest = RowDest::Window;
@@ -41,7 +41,7 @@ Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
     return p;
 }
 
-void AddressedLoad::shape(const TransferRow&, std::span<std::uint8_t>, std::uint64_t) {
+void AddressedLoad::shape(const TransferRow&, std::span<std::uint8_t>, proto::FileOffset) {
     TASTY_SEAT_BODY(AddressedLoad);
 }
 

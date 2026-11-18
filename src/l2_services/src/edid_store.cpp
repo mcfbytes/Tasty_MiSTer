@@ -141,7 +141,7 @@ Ex<void> EdidStore::refresh(const adv7513::Io& io) {
     segments_ = buf;
     segments_live_ = segments;
 
-    ++gen_.v;
+    gen_ = gen_.next();
     return {};
 }
 

@@ -66,28 +66,6 @@ void tasty_print_usage(std::FILE* out) noexcept {
     );
 }
 
-const char* tasty_verb_name(TastyVerb v) noexcept {
-    switch (v) {
-        case TastyVerb::Help:
-            return "help";
-        case TastyVerb::Play:
-            return "play";
-        case TastyVerb::Info:
-            return "info";
-        case TastyVerb::Check:
-            return "check";
-        case TastyVerb::Status:
-            return "status";
-        case TastyVerb::Stop:
-            return "stop";
-        case TastyVerb::RecStart:
-            return "rec-start";
-        case TastyVerb::RecStop:
-            return "rec-stop";
-    }
-    return "?";
-}
-
 namespace {
 
 constexpr std::size_t kVerbArg = 1;
@@ -247,7 +225,7 @@ struct OptionRow {
     const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
     if (!n)
         return false;
-    a.lead = app::FrameCount{*n};
+    a.lead = app::MovieFrameCount{*n};
     return true;
 }
 
@@ -327,7 +305,7 @@ struct OptionRow {
     const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
     if (!n || *n < 0)
         return false;
-    a.rec.from_frame = app::MovieFrame{*n};
+    a.rec.from_frame = app::MoviePosition{*n};
     return true;
 }
 
@@ -335,7 +313,7 @@ struct OptionRow {
     const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
     if (!n || *n < 0)
         return false;
-    a.rec.to_frame = app::MovieFrame{*n};
+    a.rec.to_frame = app::MoviePosition{*n};
     return true;
 }
 

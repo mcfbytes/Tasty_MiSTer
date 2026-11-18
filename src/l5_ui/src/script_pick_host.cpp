@@ -30,8 +30,7 @@ Transition ScriptPickHost::on_picked(const BrowserEntry&, std::string_view path)
         return Transition::pop();
     }
     const std::string argv0 = std::string(b_.storage->root_path()) + "/" + std::string(path);
-    script->pending = ScriptLaunch::Request::script(argv0);
-    return Transition::replace(PageId::ScriptRun);
+    return script->open(PageId::ScriptRun, ScriptLaunch::Request::script(argv0), true);
 }
 
 }

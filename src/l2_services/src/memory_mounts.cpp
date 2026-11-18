@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/memory_mounts.h"
 
+#include "observed_file.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 namespace mister::svc {
@@ -16,16 +19,16 @@ public:
         : blob_(blob),
           hints_(std::move(hints)) {}
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        if (off >= blob_.size())
+    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+        if (!FileSize::of(blob_).holds(at))
             return std::size_t{0};
-        const std::size_t start = static_cast<std::size_t>(off);
-        const std::size_t n = std::min(blob_.size() - start, dst.size());
-        std::memcpy(dst.data(), blob_.data() + start, n);
+        const std::span<const std::byte> tail = at.skip_in(blob_);
+        const std::size_t n = std::min(tail.size(), dst.size());
+        std::memcpy(dst.data(), tail.data(), n);
         return n;
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
@@ -33,7 +36,7 @@ public:
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
+    [[nodiscard]] Ex<void> advise(Access a, proto::FileOffset, FileSize) override {
         if (a == Access::Sequential)
             hints_->fetch_add(1, std::memory_order_relaxed);
         return {};
@@ -44,6 +47,40 @@ private:
     std::shared_ptr<std::atomic<std::uint32_t>> hints_;
 };
 
+}
+
+infra::OptRef<const MemoryMounts::Refusal> MemoryMounts::find_refusal_(
+    std::string_view key,
+    IoVerb verb
+) const noexcept {
+    for (const Refusal& r : refusals_)
+        if (r.verb == verb && r.path == key)
+            return infra::OptRef<const Refusal>{r};
+    return std::nullopt;
+}
+
+std::optional<Error> MemoryMounts::refusal(std::string_view key, IoVerb verb) const noexcept {
+    const auto r = find_refusal_(key, verb);
+    if (!r)
+        return std::nullopt;
+    return r->err.refusal(Errc::os, ERR_SITE());
+}
+
+std::unique_ptr<IFile> MemoryMounts::observed(
+    std::string_view key,
+    std::unique_ptr<IFile> file
+) const {
+    const std::optional<Error> reads = refusal(key, IoVerb::Read);
+    const auto writes = find_refusal_(key, IoVerb::Write);
+    if (!meter_ && !reads && !writes)
+        return file;
+    std::optional<detail::ObservedFile::WriteRefusal> w{};
+    if (writes)
+        w = detail::ObservedFile::WriteRefusal{
+            writes->err.refusal(Errc::os, ERR_SITE()),
+            writes->grace
+        };
+    return std::make_unique<detail::ObservedFile>(std::move(file), meter_, reads, w);
 }
 
 void MemoryMounts::mount(std::string key, std::span<const std::byte> blob, Crc32 crc) {

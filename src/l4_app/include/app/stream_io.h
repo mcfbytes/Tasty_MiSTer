@@ -27,7 +27,7 @@ struct StreamFile {
     svc::OpenMode mode = svc::OpenMode::Read
 );
 
-[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileSize off, std::span<std::byte> dst);
+[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileOffset off, std::span<std::byte> dst);
 
 [[nodiscard]] Ex<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size);
 

@@ -5,6 +5,7 @@
 
 #include "infra/endian.h"
 #include "infra/path_parts.h"
+#include "svc/card_writer.h"
 
 namespace mister::cores::n64dd {
 namespace {
@@ -115,7 +116,7 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
     w.area = *area;
     if (auto m = DiskMap::build_into(w.map, w.area); !m)
         return std::unexpected(m.error());
-    total_ = proto::FileSize{w.map.ram_bytes()};
+    total_ = w.map.ram_bytes();
 
     if (total_.empty()) {
         phase_ = Phase::Done;
@@ -135,7 +136,7 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
         });
         w.dirty.set(k, dirty);
     }
-    off_ = 0;
+    off_ = proto::kFileStart;
     phase_ = Phase::Write;
 
     if (vfs.file_exists(w.ram_path.view())) {
@@ -149,38 +150,41 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
     return {};
 }
 
-Ex<void> RamSaveJob::gather_(ICoreWindow& window, std::uint64_t off, std::size_t n) {
+Ex<void> RamSaveJob::gather_(ICoreWindow& window, proto::FileOffset at, std::size_t n) {
     Work& w = *work_;
     Ex<void> got{};
-    w.map.for_each_ram_run(off, n, [&](FlatOffset flat, std::size_t at, std::size_t len) {
-        if (!got)
-            return;
-        auto r = flat.read_via(window, std::span(w.image).subspan(at, len));
-        if (!r)
-            got = std::unexpected(r.error());
-    });
+    w.map.for_each_ram_run(
+        at,
+        proto::FileSize{n},
+        [&](FlatOffset flat, std::size_t into, std::size_t len) {
+            if (!got)
+                return;
+            auto r = flat.read_via(window, std::span(w.image).subspan(into, len));
+            if (!r)
+                got = std::unexpected(r.error());
+        }
+    );
     return got;
 }
 
 Ex<void> RamSaveJob::compare_step_(ICoreWindow& window) {
     Work& w = *work_;
-    const auto remaining = total_.after_header(proto::FileSize{off_});
+    const auto remaining = off_.remaining_in(total_);
     const auto n = static_cast<std::size_t>(
         std::min<std::uint64_t>(kStepBytes, remaining.file_word<std::size_t>())
     );
     if (auto r = gather_(window, off_, n); !r)
         return r;
-    const bool same = svc::read_exact(*w.in, proto::FileSize{off_}, std::span(w.file).first(n))
-                          .has_value()
+    const bool same = svc::read_exact(*w.in, off_, std::span(w.file).first(n)).has_value()
         && std::memcmp(w.image.data(), w.file.data(), n) == 0;
     if (!same) {
         w.in.reset();
-        off_ = 0;
+        off_ = proto::kFileStart;
         phase_ = Phase::Write;
         return {};
     }
-    off_ += n;
-    if (proto::FileSize{off_} < total_)
+    off_ += proto::FileSize{n};
+    if (total_.holds(off_))
         return {};
     w.in.reset();
     matched_ = true;
@@ -191,27 +195,28 @@ Ex<void> RamSaveJob::compare_step_(ICoreWindow& window) {
 Ex<void> RamSaveJob::write_step_(ICoreWindow& window, const svc::Vfs& vfs) {
     Work& w = *work_;
     if (!w.out) {
+        svc::CardWriter card{vfs};
         const std::string_view path = w.ram_path.view();
         if (const auto dir = infra::dirname(path); dir) {
-            if (auto d = vfs.ensure_dir(*dir); !d)
+            if (auto d = card.ensure_dir(*dir); !d)
                 return d;
         }
-        auto out = vfs.open(path, svc::OpenMode::Sync);
+        auto out = card.open(path, svc::OpenMode::Sync);
         if (!out)
             return std::unexpected(out.error());
         w.out = std::move(*out);
     }
-    const auto remaining = total_.after_header(proto::FileSize{off_});
+    const auto remaining = off_.remaining_in(total_);
     const auto n = static_cast<std::size_t>(
         std::min<std::uint64_t>(kStepBytes, remaining.file_word<std::size_t>())
     );
     if (auto r = gather_(window, off_, n); !r)
         return r;
-    if (auto r = svc::write_all(*w.out, proto::FileSize{off_}, std::span(w.image).first(n)); !r) {
+    if (auto r = svc::write_all(*w.out, off_, std::span(w.image).first(n)); !r) {
         return r;
     }
-    off_ += n;
-    if (proto::FileSize{off_} < total_)
+    off_ += proto::FileSize{n};
+    if (total_.holds(off_))
         return {};
     w.out.reset();
     wrote_ = true;

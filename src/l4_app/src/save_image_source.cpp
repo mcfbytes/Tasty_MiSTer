@@ -1,26 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_image_source.h"
 
-#include <utility>
-
 #include "infra/byte_view.h"
 
 namespace mister::app {
-namespace {
-
-template <std::size_t... I>
-std::array<svc::FileSlotBackend, sizeof...(I)> make_backends(
-    std::index_sequence<I...>,
-    const svc::Vfs& vfs
-) noexcept {
-    return std::array<svc::FileSlotBackend, sizeof...(I)>{((void)I, svc::FileSlotBackend{vfs})...};
-}
-
-}
-
-SaveImageSource::SaveImageSource(const svc::Vfs& vfs) noexcept
-    : backends_{make_backends(std::make_index_sequence<kSlots>{}, vfs)} {}
-
 infra::OptRef<SaveImageSource::Binding> SaveImageSource::find(proto::SlotIndex slot) {
     return bindings_.find(slot);
 }
@@ -72,12 +55,10 @@ proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
     const auto b = find(slot);
     if (!b || b->path.view().empty())
         return proto::SlotAttributes{};
-    const bool pre = !b->manual;
-    return proto::SlotAttributes{
-        .writable = pre || b->exists,
-        .growable = pre,
-        .deferred_create = pre && !b->exists
-    };
+    return proto::SlotAttributes::at_mount(
+        b->manual ? proto::MountClass::Image : proto::MountClass::Save,
+        b->exists
+    );
 }
 
 bool SaveImageSource::manual(proto::SlotIndex slot) const noexcept {
@@ -148,12 +129,6 @@ void SaveImageSource::mark(proto::SlotIndex slot, Attach state) noexcept {
         b->attach = state;
 }
 
-infra::OptRef<svc::IStorageBackend> SaveImageSource::backend(proto::SlotIndex slot) noexcept {
-    if (!slot.below<kSlots>())
-        return {};
-    return infra::OptRef<svc::IStorageBackend>{infra::at_index(backends_, slot)};
-}
-
 std::span<const std::byte> SaveImageSource::order(proto::SlotIndex slot) const noexcept {
     const auto b = find(slot);
     if (!b)
@@ -169,7 +144,7 @@ bool SaveImageSource::fill_blank(
     const auto b = find(slot);
     if (!b || !b->blank.declared())
         return false;
-    svc::render_blank(b->blank, proto::byte_offset(lba, b->blank.lba_bytes), window);
+    svc::render_blank(b->blank, b->blank.lba_bytes.position_of(lba), window);
     return true;
 }
 

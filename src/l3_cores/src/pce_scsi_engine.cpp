@@ -11,6 +11,7 @@
 #include <type_traits>
 
 #include "cd_core_detail.h"
+#include "cores/cd_command_words.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_head_prime.h"
 #include "cores/cd_msf.h"
@@ -25,6 +26,7 @@
 #include "infra/error.h"
 #include "proto/spi_fio_queue.h"
 #include "proto/types.h"
+#include "svc/seek_span.h"
 #include "svc/toc.h"
 
 namespace mister::cores {
@@ -44,6 +46,7 @@ static_assert(kStatusCommandWords <= proto::SpiFioQueue::kMaxCommandWords);
 constexpr PollTicks::TickLength kPceTick{13.33F};
 constexpr PollTicks kLoadSettleTicks{10};
 constexpr PollTicks kSpinUpTicks = PollTicks::spanning(svc::SeekTime{220}, kPceTick);
+static_assert(PceCommand::kBytes == PceCommand::kWords * sizeof(hal::SpiWord));
 static_assert(kSpinUpTicks == PollTicks{16});
 static_assert(std::is_same_v<PollTicks::Span, svc::SeekTime>);
 
@@ -99,21 +102,13 @@ Ex<void> PceScsiEngine::do_push_sector(CdDialectPorts& p) {
     return read_send_(p);
 }
 
-Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPorts& p) {
+Ex<void> PceScsiEngine::do_accept(const CdCommandWords& cmd, CdDialectPorts& p) {
 
-    switch (w[6] & 0xFFu) {
+    switch (cmd.words[kSubOpcodeWord].low_byte()) {
         case 0: {
 
             std::array<std::uint8_t, PceCommand::kBytes> raw{};
-            for (std::size_t i = 0; i < PceCommand::kWords; ++i) {
-                infra::store_le<std::uint16_t>(
-                    std::span<std::uint8_t, sizeof(std::uint16_t)>(
-                        raw.data() + i + i,
-                        sizeof(std::uint16_t)
-                    ),
-                    w[i]
-                );
-            }
+            cmd.store_le(raw);
             return command_exec_(PceCommand::of(raw), p);
         }
         case 1:
@@ -147,7 +142,7 @@ PollTicks PceScsiEngine::seek_ticks_(HeadMove move, const svc::DiscGeometry& geo
     const std::optional<Lba> b = move.to.readable();
     if (!a || !b)
         return PollTicks{};
-    return PollTicks::spanning(geom.seek_time(*a, *b), kPceTick);
+    return PollTicks::spanning(geom.seek_time(svc::SeekSpan{*a, *b}), kPceTick);
 }
 
 Ex<bool> PceScsiEngine::drain_pending(ICdLink& link) {
@@ -572,7 +567,7 @@ Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts&
             m.lba = new_lba;
             hint_at_(m.lba, true, p.geom);
             m.track = track_by_lba_(new_lba, p.geom);
-            m.cdda.play(new_lba, head_of(toc.end));
+            m.cdda.play(HeadMove{new_lba, head_of(toc.end)});
             m.cdda_mode = command.cdda_mode();
             m.cdda_first = true;
             m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? State::Pause : State::Play;

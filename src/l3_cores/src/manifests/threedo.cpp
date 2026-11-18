@@ -50,7 +50,7 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kThreeDoTicks.speeds == 0, "3DO engages no speed-indexed override");
+static_assert(kThreeDoTicks.speeds == CdSpeedCount{}, "3DO engages no speed-indexed override");
 
 static_assert(kThreeDoServices.size() == 2, "ARCHITECTURE.md 3.4: 3DO has exactly two census rows");
 static_assert(
@@ -132,7 +132,7 @@ static_assert(
     "3DO.sv S0,CUEISO plus menu.cpp:2477-2482 CHD append; 3docdd.cpp:316-337 loads all three"
 );
 
-static_assert(kThreeDo.staging.order == StageOrder::ThreeDo);
+static_assert(kThreeDo.staging.staged);
 static_assert(
     kThreeDo.staging.save && kThreeDo.staging.save->bracket == WideIoIndex{4},
     "3do.h:77 / 3do.cpp:80: SAVE_IO_INDEX 0x4, the empty-window "

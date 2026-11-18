@@ -17,7 +17,7 @@ public:
 
     [[nodiscard]] static DirVersion of_wire(std::uint32_t word) noexcept;
 
-    [[nodiscard]] Error refused(Errc why, infra::ErrorSite at) const noexcept;
+    [[nodiscard]] Error refusal(Errc why, infra::ErrorSite at) const noexcept;
     [[nodiscard]] bool has_major(DirMajor m) const noexcept;
 
     [[nodiscard]] bool is_base_minor() const noexcept;

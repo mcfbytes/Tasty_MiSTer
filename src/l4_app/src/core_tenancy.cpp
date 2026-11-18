@@ -65,7 +65,7 @@ Ex<void> CoreTenancy::adopt(const proto::LinkOp::AdoptCore& a) {
     if (!at || bay_.at(*at).gen != a.gen || !bay_.at(*at).core) {
         ++tally_.stale_adopts;
         release_(slot, a.gen);
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::negotiation, ERR_SITE()));
     }
 
     if (current_) {
@@ -191,7 +191,7 @@ bool CoreTenancy::poll_retiree_(Retiree& r) noexcept {
 void CoreTenancy::abandon_retiring_(bool counted) noexcept {
     if (counted) {
         ++tally_.core_abandons;
-        session_tally_.last_error = Error{Errc::timeout, ERR_SITE(), retiring_.mask.v};
+        session_tally_.last_error = retiring_.mask.refusal(Errc::timeout, ERR_SITE());
     }
     for (Retiree& a : abandoned_) {
         if (a.gen != 0)

@@ -47,6 +47,7 @@ struct UiRequest {
         SdramDetected,
         SetHdLook,
         SwitchIni,
+        SetAutosave,
         kCount,
     };
 
@@ -156,6 +157,11 @@ struct UiRequest {
         svc::IniChoice ini{};
     };
 
+    struct SetAutosave {
+        static constexpr Kind kKind = Kind::SetAutosave;
+        bool on = true;
+    };
+
     using Alternatives = std::tuple<
         LoadCore,
         SaveConfig,
@@ -172,7 +178,8 @@ struct UiRequest {
         SetOsdStyle,
         SdramDetected,
         SetHdLook,
-        SwitchIni>;
+        SwitchIni,
+        SetAutosave>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

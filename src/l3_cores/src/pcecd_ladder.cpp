@@ -11,9 +11,14 @@
 namespace mister::cores {
 namespace {
 
-constexpr std::uint64_t kPceBiosCap = 262144;
+constexpr proto::FileSize kPceBiosCap{262144};
 
 constexpr std::size_t kPceChunk = 1024;
+constexpr proto::FileSize kPceChunkBytes{kPceChunk};
+
+constexpr proto::FileSize kPceHeaderUnit{1024};
+
+constexpr proto::RegionCode kUsCart{1};
 
 std::uint8_t bit_reverse(std::uint8_t c) {
     return static_cast<std::uint8_t>(
@@ -49,44 +54,48 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
         load_path_.clear();
         return AssetWait::Miss;
     }
-    const std::uint64_t file_size = szr->v;
+    const proto::FileSize file_size = *szr;
 
-    const std::uint64_t start = file_size & 0x3FFu;
-    std::uint64_t size = file_size;
-    std::uint8_t swap = 0;
+    const proto::FileOffset start = proto::kFileStart + file_size.bytes_past_whole(kPceHeaderUnit);
+    proto::FileSize size = file_size;
+    proto::RegionCode swap{};
     if (size >= kPceBiosCap) {
-        size = kPceBiosCap;
+        size = file_size.min(kPceBiosCap);
 
         for (const auto& srow : profile_.signatures) {
-            if (srow.region.v == 0 || srow.magic.empty())
+            if (srow.region.is_clear() || srow.magic.empty())
                 continue;
             std::byte probe[64];
             const std::size_t n = srow.magic.size() > sizeof(probe) ? sizeof(probe)
                                                                     : srow.magic.size();
-            auto rd = (*f)->read_at(start + srow.offset, std::span<std::byte>(probe, n));
+            auto rd = (*f)->read_at(
+                start + proto::FileSize{srow.offset},
+                std::span<std::byte>(probe, n)
+            );
             if (!rd)
                 break;
             if (*rd == n && std::memcmp(probe, srow.magic.data(), n) == 0) {
-                swap = srow.region.v;
+                swap = srow.region;
             }
             break;
         }
     }
 
-    std::uint8_t us_cart = 0;
+    proto::RegionCode us_cart{};
     std::vector<std::uint8_t> payload;
-    payload.reserve(static_cast<std::size_t>(size));
+    payload.reserve(size.file_word<std::size_t>());
     std::uint8_t buf[kPceChunk];
-    std::uint64_t off = start;
-    while (size != 0) {
-        const auto chunk = static_cast<std::size_t>(size > kPceChunk ? kPceChunk : size);
-        size -= chunk;
+    proto::FileOffset off = start;
+    while (!size.empty()) {
+        const proto::FileSize piece = size.min(kPceChunkBytes);
+        const auto chunk = piece.file_word<std::size_t>();
+        size -= piece;
         auto rd = (*f)->read_at(off, std::as_writable_bytes(std::span(buf)).first(chunk));
         if (!rd)
             return std::unexpected(rd.error());
         const std::size_t got = *rd;
-        off += got;
-        if (swap != 0) {
+        off += proto::FileSize{got};
+        if (!swap.is_clear()) {
             for (std::size_t i = 0; i < got; ++i)
                 buf[i] = bit_reverse(buf[i]);
         } else if (file_size >= kPceBiosCap) {
@@ -94,7 +103,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
             if (got >= 8) {
                 for (std::size_t i = 0; i + 8 <= got - 1; ++i) {
                     if (std::memcmp(buf + i, "ALL DATA", 8) == 0)
-                        us_cart = 1;
+                        us_cart = kUsCart;
                 }
             }
         }
@@ -105,7 +114,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
 
     const WideIoIndex dest = bios_dest_(row);
 
-    const proto::RegionCode region{static_cast<std::uint8_t>(swap | us_cart)};
+    const proto::RegionCode region = swap.with(us_cart);
     auto p = PayloadPieces::of_bytes(
         std::move(payload),
         {},

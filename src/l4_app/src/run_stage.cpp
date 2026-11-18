@@ -55,7 +55,7 @@ IReplayStage::Step RunStage::arm_(Ctx ctx) noexcept {
     ctx.run.gen = ctx.run.gen.next_live();
     next_run_ = 0;
     end_pushed_ = false;
-    ctx.run.pushed = FrameCount{};
+    ctx.run.pushed = MovieFrameCount{};
 
     publish_(ctx, ReplayOp::Play);
     const cores::IReplayCore::Raster r = req.codec->core().raster(scan.facts);
@@ -87,12 +87,12 @@ void RunStage::stream_(Ctx ctx) noexcept {
         const ReplayMsg::Input& run = scan.runs[next_run_];
         if (!ctx.w.ring.push(infra::make<ReplayMsg>(run, ReplayMsg::Head{ctx.run.gen})))
             return;
-        ctx.run.pushed = run.last - MovieFrame{} + FrameCount{1};
+        ctx.run.pushed = run.last - MoviePosition{} + MovieFrameCount{1};
         ++next_run_;
     }
     end_pushed_ = ctx.w.ring.push(
         infra::make<ReplayMsg>(
-            ReplayMsg::End{.frame = MovieFrame{} + scan.movie_frames},
+            ReplayMsg::End{.frame = MoviePosition{} + scan.movie_frames},
             ReplayMsg::Head{ctx.run.gen}
         )
     );
@@ -200,7 +200,7 @@ void RunStage::checkpoints_(Ctx ctx, const ReplayStatus& s) noexcept {
     if (s.gen != ctx.run.gen)
         return;
     while (arm.next_check < arm.n_checks
-           && s.movie_frame >= MovieFrame{}
+           && s.movie_frame >= MoviePosition{}
            && s.movie_frame >= arm.checks[arm.next_check]) {
         char name[48];
         const int n = std::snprintf(

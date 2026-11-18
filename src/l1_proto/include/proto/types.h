@@ -18,6 +18,8 @@
 
 #include "hal/reg_word.h"
 #include "hal/sdram_cfg.h"
+#include "hal/sector_block.h"
+#include "hal/spi_halves.h"
 #include "infra/affine.h"
 #include "infra/ascii.h"
 #include "infra/decimal_text.h"
@@ -25,6 +27,7 @@
 #include "infra/error.h"
 #include "infra/json_out.h"
 #include "hal/types.h"
+#include "infra/pause_gen.h"
 #include "infra/seat.h"
 #include "os/map_length.h"
 #include "os/types.h"
@@ -41,6 +44,7 @@ using ::mister::infra::affine::operator-=;
 struct IoIndex;
 struct ListIndex;
 struct PollParam;
+class ILinkFrame;
 
 struct SlotIndex {
     std::uint8_t v = 0;
@@ -55,6 +59,16 @@ struct SlotIndex {
     [[nodiscard]] constexpr bool in_block_slots() const noexcept;
 
     [[nodiscard]] constexpr std::uint32_t detail() const noexcept;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
+    [[nodiscard]] constexpr hal::SectorBlock::CardSlot card_slot() const noexcept {
+        return hal::SectorBlock::CardSlot{v};
+    }
+
+    [[nodiscard]] constexpr bool is_primary() const noexcept { return v == 0; }
 
     template <std::size_t Count>
     [[nodiscard]] constexpr bool below() const noexcept {
@@ -76,6 +90,10 @@ struct IoIndex {
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
 
     [[nodiscard]] constexpr ListIndex index_above(ListIndex base) const noexcept;
 
@@ -178,6 +196,14 @@ struct FileRowId {
         return FileRowId{k, i};
     }
 
+    [[nodiscard]] constexpr std::uint16_t keyed_ordinal() const noexcept {
+        constexpr std::uint16_t kMountKindBit = 0x100;
+        std::uint16_t bits = index.v;
+        if (kind == FileRowKind::Mount)
+            bits |= kMountKindBit;
+        return bits;
+    }
+
     friend constexpr bool operator==(FileRowId, FileRowId) = default;
 
 private:
@@ -188,15 +214,63 @@ static_assert(sizeof(FileRowId) == 2 && std::is_trivially_copyable_v<FileRowId>)
 static_assert(!std::is_default_constructible_v<FileRowId>);
 static_assert(FileRowId::file(IoIndex{1}) != FileRowId::mount(IoIndex{1}));
 
+struct ItemCount;
+
 struct ItemOrdinal {
     std::uint16_t v = 0;
+    using affine_count = ItemCount;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(ItemOrdinal, ItemOrdinal) = default;
+};
+
+struct ItemCount {
+    std::uint16_t v = 0;
+    using affine_count = ItemCount;
+    friend constexpr bool operator==(ItemCount, ItemCount) = default;
 };
 
 struct WideSub {
     std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr IoIndex slot_index() const noexcept { return IoIndex{v}; }
+
     friend constexpr bool operator==(WideSub, WideSub) = default;
     friend constexpr auto operator<=>(WideSub, WideSub) = default;
+};
+
+class FioIndexByte {
+public:
+    constexpr FioIndexByte() noexcept = default;
+
+    explicit constexpr FioIndexByte(std::uint8_t byte) noexcept : v{byte} {}
+
+    [[nodiscard]] constexpr IoIndex io() const noexcept {
+        constexpr std::uint8_t kIoBits = 0x3F;
+        return IoIndex{static_cast<std::uint8_t>(v & kIoBits)};
+    }
+
+    [[nodiscard]] constexpr WideSub sub() const noexcept {
+        constexpr unsigned kSubShift = 6;
+        return WideSub{static_cast<std::uint8_t>(v >> kSubShift)};
+    }
+
+    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
+    friend constexpr bool operator==(FioIndexByte, FioIndexByte) = default;
+
+private:
+    friend struct WideIoIndex;
+    std::uint8_t v = 0;
 };
 
 struct WideIoIndex {
@@ -210,13 +284,17 @@ struct WideIoIndex {
         return WideSub{static_cast<std::uint8_t>(v >> 6)};
     }
 
-    [[nodiscard]] constexpr std::uint8_t fio_byte() const noexcept {
-        return static_cast<std::uint8_t>(v);
+    [[nodiscard]] constexpr FioIndexByte fio_byte() const noexcept {
+        return FioIndexByte{static_cast<std::uint8_t>(v)};
     }
 
-    [[nodiscard]] infra::DecimalText text() const noexcept {
-        return infra::DecimalText{fio_byte()};
+    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
     }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return fio_byte().text(); }
 
     [[nodiscard]] static constexpr WideIoIndex of(IoIndex io, std::uint8_t sub) noexcept {
         return WideIoIndex{
@@ -226,13 +304,20 @@ struct WideIoIndex {
 
     [[nodiscard]] static constexpr WideIoIndex of(IoIndex io) noexcept { return of(io, 0); }
 
+    [[nodiscard]] static constexpr WideIoIndex of(FioIndexByte byte) noexcept {
+        return WideIoIndex{byte.v};
+    }
+
     friend constexpr bool operator==(WideIoIndex, WideIoIndex) = default;
 };
 
 static_assert(WideIoIndex::of(IoIndex{0x2A}, 3).io() == IoIndex{0x2A});
 static_assert(WideIoIndex::of(IoIndex{0x2A}, 3).sub() == WideSub{3});
 static_assert(WideIoIndex::of(IoIndex{2}, 2) == WideIoIndex{0x82});
-static_assert(WideIoIndex::of(IoIndex{2}, 4).fio_byte() == 0x02);
+static_assert(WideIoIndex::of(IoIndex{2}, 4).fio_byte() == FioIndexByte{2});
+static_assert(FioIndexByte{0xEA}.io() == IoIndex{0x2A});
+static_assert(FioIndexByte{0xEA}.sub() == WideSub{3});
+static_assert(WideIoIndex::of(FioIndexByte{0x82}) == WideIoIndex{0x82});
 static_assert(WideIoIndex{0x82}.sub() == WideSub{2});
 static_assert(WideIoIndex{0x82}.io() == IoIndex{2});
 
@@ -243,8 +328,11 @@ struct PathId {
 
 struct BlockCount;
 struct BlockSize;
+struct Lba;
+struct FileOffset;
 
 struct FileSize {
+    TASTY_SEAT_EXEMPT(const_shared);
     std::uint64_t v = 0;
 
     [[nodiscard]] static constexpr FileSize of(infra::ByteCount bytes) noexcept {
@@ -255,6 +343,12 @@ struct FileSize {
         requires(sizeof(B) == sizeof(char))
     [[nodiscard]] static constexpr FileSize of(std::span<B> buf) noexcept {
         return FileSize{buf.size_bytes()};
+    }
+
+    template <class Buf>
+        requires(sizeof(typename Buf::value_type) == sizeof(char))
+    [[nodiscard]] Buf zeroed() const {
+        return Buf(static_cast<std::size_t>(v), typename Buf::value_type{});
     }
 
     template <class B>
@@ -277,6 +371,23 @@ struct FileSize {
         return static_cast<std::uint32_t>(v >> std::numeric_limits<std::uint32_t>::digits);
     }
 
+    constexpr void store_le32(std::span<std::byte, 4> dst) const noexcept {
+        infra::store_le<std::uint32_t>(dst, low_word());
+    }
+
+    [[nodiscard]] constexpr std::array<std::uint8_t, 3> csd_size_bytes() const noexcept {
+        constexpr unsigned kCsdSizeShift0 = 9;
+        constexpr unsigned kCsdSizeShift1 = 17;
+        constexpr unsigned kCsdSizeShift2 = 25;
+        return {
+            static_cast<std::uint8_t>(v >> kCsdSizeShift0),
+            static_cast<std::uint8_t>(v >> kCsdSizeShift1),
+            static_cast<std::uint8_t>(v >> kCsdSizeShift2)
+        };
+    }
+
+    [[nodiscard]] Ex<void> emit_words(ILinkFrame& frame, hal::Width framing) const;
+
     [[nodiscard]] constexpr FileSize min(FileSize other) const noexcept {
         return FileSize{std::min(v, other.v)};
     }
@@ -285,15 +396,26 @@ struct FileSize {
 
     [[nodiscard]] constexpr std::uint32_t detail() const noexcept { return low_word(); }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, low_word()};
+    }
+
+    [[nodiscard]] constexpr bool has_bits(FileSize mask) const noexcept {
+        return (v & mask.v) != 0;
+    }
+
+    [[nodiscard]] constexpr bool within_tolerance_of(
+        FileSize want,
+        FileSize tolerance
+    ) const noexcept {
+        const std::uint64_t delta = v > want.v ? v - want.v : want.v - v;
+        return delta <= tolerance.v;
+    }
+
     template <std::integral Word>
     [[nodiscard]] constexpr Word file_word() const noexcept {
         constexpr unsigned kHalfBits = 32;
         return static_cast<Word>(static_cast<std::uint64_t>(high_word()) << kHalfBits | low_word());
-    }
-
-    template <std::integral Word>
-    constexpr void stamp_into(Word& slot) const noexcept {
-        slot = static_cast<Word>(v);
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
@@ -311,19 +433,9 @@ struct FileSize {
         return lo.v <= v && v <= hi.v;
     }
 
-    [[nodiscard]] constexpr bool holds_offset(std::uint32_t offset) const noexcept {
-        return offset < v;
-    }
+    [[nodiscard]] constexpr bool holds(FileOffset at) const noexcept;
 
-    [[nodiscard]] constexpr std::size_t clamp_write(
-        std::uint32_t offset,
-        std::size_t want
-    ) const noexcept {
-        if (!holds_offset(offset))
-            return 0;
-        const std::uint64_t room = v - offset;
-        return static_cast<std::size_t>(std::min<std::uint64_t>(want, room));
-    }
+    [[nodiscard]] constexpr std::size_t clamp_write(FileOffset at, std::size_t want) const noexcept;
 
     [[nodiscard]] constexpr std::size_t slots_in(std::size_t budget) const noexcept {
         return v == 0 ? 0 : budget / static_cast<std::size_t>(v);
@@ -335,6 +447,8 @@ struct FileSize {
 
     [[nodiscard]] constexpr BlockCount units_covering(BlockSize unit) const noexcept;
 
+    [[nodiscard]] constexpr bool reaches(Lba lba, BlockSize bs) const noexcept;
+
     [[nodiscard]] constexpr std::chrono::nanoseconds mib_share_of(
         std::chrono::nanoseconds per_mib
     ) const noexcept {
@@ -345,9 +459,75 @@ struct FileSize {
     }
 
     [[nodiscard]] constexpr BlockCount whole_units(BlockSize unit) const noexcept;
+
+    [[nodiscard]] constexpr std::uint64_t whole_records(FileSize record) const noexcept {
+        return v / record.v;
+    }
+
+    [[nodiscard]] constexpr FileSize bytes_past_whole(FileSize record) const noexcept {
+        return FileSize{v % record.v};
+    }
+
     friend constexpr bool operator==(FileSize, FileSize) = default;
     friend constexpr auto operator<=>(FileSize, FileSize) = default;
 };
+
+struct FileOffset {
+    TASTY_SEAT_EXEMPT(const_shared);
+    std::uint64_t v = 0;
+    using affine_count = FileSize;
+
+    [[nodiscard]] constexpr FileSize remaining_in(FileSize whole) const noexcept;
+
+    template <class B>
+        requires(sizeof(B) == sizeof(char))
+    [[nodiscard]] constexpr std::span<B> skip_in(std::span<B> buf) const noexcept {
+        return buf.subspan(static_cast<std::size_t>(v));
+    }
+
+    [[nodiscard]] constexpr std::int64_t seek_offset() const noexcept {
+        return static_cast<std::int64_t>(v);
+    }
+
+    [[nodiscard]] static constexpr std::optional<FileOffset> of_seek(std::int64_t at) noexcept {
+        if (at < 0)
+            return std::nullopt;
+        return FileOffset{static_cast<std::uint64_t>(at)};
+    }
+
+    [[nodiscard]] constexpr std::uint64_t seek_word() const noexcept { return v; }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, static_cast<std::uint32_t>(v)};
+    }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    friend constexpr bool operator==(FileOffset, FileOffset) = default;
+    friend constexpr auto operator<=>(FileOffset, FileOffset) = default;
+};
+
+inline constexpr FileOffset kFileStart{};
+static_assert(infra::affine::Position<FileOffset>);
+static_assert(kFileStart + FileSize{5} - kFileStart == FileSize{5});
+static_assert(!FileOffset::of_seek(-1) && FileOffset::of_seek(7) == kFileStart + FileSize{7});
+
+constexpr FileSize FileOffset::remaining_in(FileSize whole) const noexcept {
+    return whole.after_header(*this - kFileStart);
+}
+
+constexpr bool FileSize::holds(FileOffset at) const noexcept {
+    return at.v < v;
+}
+
+constexpr std::size_t FileSize::clamp_write(FileOffset at, std::size_t want) const noexcept {
+    if (!holds(at))
+        return 0;
+    const std::uint64_t room = v - at.v;
+    return static_cast<std::size_t>(std::min<std::uint64_t>(want, room));
+}
+
+static_assert((kFileStart + FileSize{5}).remaining_in(FileSize{3}) == FileSize{});
 
 struct Lba;
 
@@ -371,6 +551,10 @@ struct BlockCount {
         infra::store_be<std::uint32_t>(dst, v);
     }
 
+    [[nodiscard]] constexpr float whole_turns(BlockCount per_turn) const noexcept {
+        return static_cast<float>(v / per_turn.v);
+    }
+
     friend constexpr bool operator==(BlockCount, BlockCount) = default;
     friend constexpr auto operator<=>(BlockCount, BlockCount) = default;
 };
@@ -390,21 +574,21 @@ struct Lba {
 
     [[nodiscard]] static constexpr Lba of(hal::RegWord w) noexcept { return Lba{w.bits()}; }
 
+    [[nodiscard]] static constexpr Lba of(hal::SpiHalves h) noexcept {
+        return h.joined([](std::uint32_t d) { return Lba{d}; });
+    }
+
+    constexpr void store_le32(std::span<std::byte, 4> dst) const noexcept {
+        infra::store_le<std::uint32_t>(dst, v);
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(Lba, Lba) = default;
     friend constexpr auto operator<=>(Lba, Lba) = default;
 };
-
-template <std::integral Word = std::uint32_t>
-[[nodiscard]] constexpr Word detail_of(Lba lba) noexcept {
-    return static_cast<Word>(lba.v & std::numeric_limits<std::uint32_t>::max());
-}
-
-namespace detail {
-
-[[nodiscard]] constexpr std::uint64_t positional_word(FileSize at) noexcept {
-    return at.v;
-}
-}
 
 constexpr bool BlockCount::holds(Lba start, BlockCount count) const noexcept {
     return static_cast<std::uint64_t>(start.v) + count.v <= v;
@@ -438,6 +622,10 @@ struct SdStatusWord {
         return SdStatusWord{static_cast<std::uint16_t>(w.bits())};
     }
 
+    [[nodiscard]] static constexpr SdStatusWord of(hal::SpiWord w) noexcept {
+        return w.decoded([](std::uint16_t b) { return SdStatusWord{b}; });
+    }
+
     [[nodiscard]] constexpr bool decoded() const noexcept { return (v & kOpMask) != 0u; }
 
     [[nodiscard]] constexpr bool writes() const noexcept { return (v & kOpMask) == kWriteOp; }
@@ -468,6 +656,8 @@ struct SdStatParameter {
     }
 
     [[nodiscard]] constexpr bool read_only() const noexcept { return (v & kReadOnly) != 0u; }
+
+    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
 
     friend constexpr bool operator==(SdStatParameter, SdStatParameter) = default;
 };
@@ -519,6 +709,12 @@ struct MemSizeCookie {
 
     [[nodiscard]] static constexpr MemSizeCookie of(std::optional<hal::SdramCfg> cfg) noexcept {
         return cfg ? MemSizeCookie{cfg->cookie()} : MemSizeCookie{};
+    }
+
+    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
+
+    [[nodiscard]] constexpr bool is_measured() const noexcept {
+        return (v & hal::SdramCfg::kCookiePresent) != 0;
     }
 
     friend constexpr bool operator==(MemSizeCookie, MemSizeCookie) = default;
@@ -577,6 +773,10 @@ struct OsdRow {
         return static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max());
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(OsdRow, OsdRow) = default;
     friend constexpr auto operator<=>(OsdRow, OsdRow) = default;
 };
@@ -590,7 +790,7 @@ struct OsdRowBytes {
         return OsdRowBytes{static_cast<std::uint32_t>(row.size())};
     }
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
@@ -702,6 +902,32 @@ struct PlayerIndex {
     }
 
     [[nodiscard]] constexpr PollParam poll_param() const noexcept;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    static constexpr unsigned kWireShift = 4;
+    static constexpr std::uint8_t kPaddleLow = 0x0F;
+    static constexpr std::uint8_t kSpinnerLow = 0x8F;
+
+    [[nodiscard]] constexpr std::uint8_t stick_wire_index() const noexcept { return v; }
+
+    [[nodiscard]] constexpr std::uint8_t paddle_wire_index() const noexcept {
+        return static_cast<std::uint8_t>((static_cast<unsigned>(v) << kWireShift) | kPaddleLow);
+    }
+
+    [[nodiscard]] constexpr std::uint8_t spinner_wire_index() const noexcept {
+        return static_cast<std::uint8_t>((static_cast<unsigned>(v) << kWireShift) | kSpinnerLow);
+    }
+
+    [[nodiscard]] constexpr PlayerIndex joyswapped() const noexcept {
+        constexpr std::uint8_t kSwappablePorts = 2;
+        return PlayerIndex{static_cast<std::uint8_t>(v < kSwappablePorts ? v ^ 1u : v)};
+    }
+
     friend constexpr bool operator==(PlayerIndex, PlayerIndex) = default;
     friend constexpr auto operator<=>(PlayerIndex, PlayerIndex) = default;
 };
@@ -735,6 +961,8 @@ struct JoyMask {
 
     [[nodiscard]] constexpr JoyMask lowest() const noexcept { return JoyMask{v & (~v + 1u)}; }
 
+    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+
     friend constexpr bool operator==(JoyMask, JoyMask) = default;
 };
 
@@ -749,6 +977,17 @@ struct OsdMask {
 
     [[nodiscard]] constexpr OsdMask with(OsdMask bits) const noexcept {
         return OsdMask{static_cast<std::uint16_t>(v | bits.v)};
+    }
+
+    [[nodiscard]] static constexpr OsdMask of(hal::SpiWord w) noexcept {
+        return w.decoded([](std::uint16_t b) { return OsdMask{b}; });
+    }
+
+    template <class Wide>
+        requires std::unsigned_integral<decltype(Wide::v)>
+        && (sizeof(decltype(Wide::v)) >= sizeof(std::uint16_t))
+    [[nodiscard]] constexpr Wide widened() const noexcept {
+        return Wide{static_cast<decltype(Wide::v)>(v)};
     }
 
     friend constexpr bool operator==(OsdMask, OsdMask) = default;
@@ -790,6 +1029,16 @@ struct BindGeneration {
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    [[nodiscard]] constexpr bool is_unminted() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr xthread::PauseGen pause_gen() const noexcept {
+        return xthread::PauseGen{v};
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
 
     friend constexpr bool operator==(BindGeneration, BindGeneration) = default;
 };
@@ -955,6 +1204,18 @@ struct FileId {
 
     [[nodiscard]] constexpr PathId path() const noexcept { return PathId{v}; }
 
+    [[nodiscard]] constexpr std::optional<SlotIndex> pooled_slot(
+        std::size_t pool_slots
+    ) const noexcept {
+        if (v == 0 || v > pool_slots)
+            return std::nullopt;
+        return SlotIndex::of(v - 1u);
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(FileId, FileId) = default;
 };
 
@@ -969,6 +1230,10 @@ struct IdentityStamp {
 
     [[nodiscard]] constexpr bool is_none() const noexcept { return v == 0; }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(IdentityStamp, IdentityStamp) = default;
 };
 
@@ -977,6 +1242,9 @@ static_assert(IdentityStamp{}.is_none());
 
 struct CorrelationTag {
     std::uint32_t v = 0;
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
     friend constexpr bool operator==(CorrelationTag, CorrelationTag) = default;
 
     explicit constexpr operator bool() const noexcept { return v != 0; }
@@ -1029,6 +1297,11 @@ constexpr ActKey ActKey16::widen() const noexcept {
 struct SubmenuNo {
     std::uint8_t v = 0;
 
+    static constexpr std::uint8_t kDigitFirst = 1;
+    static constexpr std::uint8_t kDigitLast = 9;
+
+    [[nodiscard]] constexpr SubmenuNo digit_page_or_root() const noexcept;
+
     [[nodiscard]] constexpr SubmenuNo next() const noexcept {
         return SubmenuNo{
             v == std::numeric_limits<std::uint8_t>::max() ? v : static_cast<std::uint8_t>(v + 1u)
@@ -1039,6 +1312,10 @@ struct SubmenuNo {
 };
 
 inline constexpr SubmenuNo kRootSubmenu{0};
+
+constexpr SubmenuNo SubmenuNo::digit_page_or_root() const noexcept {
+    return v >= kDigitFirst && v <= kDigitLast ? *this : kRootSubmenu;
+}
 
 template <class Page, class F>
 constexpr void for_each_page(std::span<Page> pages, F&& f) {
@@ -1092,17 +1369,29 @@ struct BlockSlotMask {
         o.field(key, m.v);
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(BlockSlotMask, BlockSlotMask) = default;
 };
 
 struct BlockSize {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr std::uint64_t position_of(Lba lba) const noexcept {
-        return static_cast<std::uint64_t>(lba.v) * v;
+    [[nodiscard]] constexpr FileOffset position_of(Lba lba) const noexcept {
+        return FileOffset{static_cast<std::uint64_t>(lba.v) * v};
+    }
+
+    [[nodiscard]] constexpr FileSize image_bytes(Lba end) const noexcept {
+        return position_of(end) - kFileStart;
     }
 
     [[nodiscard]] constexpr std::uint32_t offset_of(BlockCount n) const noexcept { return n.v * v; }
+
+    [[nodiscard]] constexpr std::uint32_t request_bytes(BlockCount n) const noexcept {
+        return n.v * v;
+    }
 
     [[nodiscard]] constexpr std::size_t length_of(BlockCount n) const noexcept {
         return static_cast<std::size_t>(n.v * v);
@@ -1146,16 +1435,17 @@ constexpr BlockCount FileSize::whole_units(BlockSize unit) const noexcept {
     return BlockCount{static_cast<std::uint32_t>(v / unit.v)};
 }
 
+constexpr bool FileSize::reaches(Lba lba, BlockSize bs) const noexcept {
+
+    return bs.v == 0 ? lba.v == 0 : static_cast<std::uint64_t>(lba.v) <= v / bs.v;
+}
+
 constexpr BlockCount SdStatusWord::block_count() const noexcept {
     return BlockCount{((static_cast<std::uint32_t>(v) >> kCountShift) & kCountMask) + 1u};
 }
 
 constexpr BlockSize SdStatusWord::block_size() const noexcept {
     return BlockSize{kMinBlockBytes << ((static_cast<std::uint32_t>(v) >> kSizeShift) & kSizeMask)};
-}
-
-[[nodiscard]] constexpr FileSize byte_offset(Lba lba, BlockSize bs) noexcept {
-    return FileSize{bs.position_of(lba)};
 }
 
 [[nodiscard]] constexpr Lba end_lba(FileSize size, BlockSize bs) noexcept {
@@ -1198,6 +1488,10 @@ struct FieldValue {
 
     [[nodiscard]] static constexpr FieldValue flag(bool on) noexcept {
         return FieldValue{on ? 1u : 0u};
+    }
+
+    [[nodiscard]] constexpr bool has_bit(unsigned i) const noexcept {
+        return ((v >> i) & 1u) != 0u;
     }
 
     friend constexpr void json_field(
@@ -1272,6 +1566,13 @@ enum FieldRep : std::uint32_t {};
 struct RegionCode {
     std::uint8_t v = 0;
     static const RegionCode kNone;
+
+    [[nodiscard]] constexpr bool is_clear() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr RegionCode with(RegionCode other) const noexcept {
+        return RegionCode{static_cast<std::uint8_t>(v | other.v)};
+    }
+
     friend constexpr bool operator==(RegionCode, RegionCode) = default;
 };
 
@@ -1286,6 +1587,11 @@ struct OptionRowCount {
 struct OptionRowIndex {
     std::uint8_t v = 0;
     using affine_count = OptionRowCount;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(OptionRowIndex, OptionRowIndex) = default;
     friend constexpr auto operator<=>(OptionRowIndex, OptionRowIndex) = default;
 };
@@ -1298,6 +1604,10 @@ struct CoreBaySlot {
         return v < N;
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(CoreBaySlot, CoreBaySlot) = default;
 };
 
@@ -1305,6 +1615,13 @@ inline constexpr CoreBaySlot kNoBaySlot{0xFF};
 
 struct DiskUnit {
     std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr SlotIndex slot() const noexcept { return SlotIndex{v}; }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(DiskUnit, DiskUnit) = default;
 };
 
@@ -1332,10 +1649,36 @@ static_assert(SectorAck::of(SlotIndex{3}) == SectorAck{0x0300});
 static_assert(SectorAck::stock(DiskUnit{0}) == SectorAck{0x0100});
 
 struct MouseButtons {
+
+    struct Ps2PacketBits {
+        std::uint8_t flags;
+        std::uint16_t word1;
+        std::uint16_t word2;
+        friend constexpr bool operator==(Ps2PacketBits, Ps2PacketBits) = default;
+    };
+
+    static constexpr std::uint8_t kButtonMask = 0x07;
+    static constexpr std::uint16_t kMidButtonBits = 0x0F00;
+    static constexpr unsigned kMidButtonShift = 5;
+    static constexpr std::uint16_t kRightButtonBits = 0x0100;
+    static constexpr unsigned kRightButtonShift = 1;
+
     std::uint8_t v = 0;
 
     [[nodiscard]] constexpr bool has_any(MouseButtons bits) const noexcept {
         return (v & bits.v) != 0;
+    }
+
+    [[nodiscard]] constexpr Ps2PacketBits ps2_packet_bits() const noexcept {
+        return Ps2PacketBits{
+            static_cast<std::uint8_t>(v & kButtonMask),
+            static_cast<std::uint16_t>(
+                (static_cast<unsigned>(v) << kMidButtonShift) & kMidButtonBits
+            ),
+            static_cast<std::uint16_t>(
+                (static_cast<unsigned>(v) << kRightButtonShift) & kRightButtonBits
+            )
+        };
     }
 
     [[nodiscard]] static constexpr MouseButtons nth(unsigned n) noexcept {
@@ -1374,6 +1717,10 @@ struct DipRowIndex {
     template <class C>
     [[nodiscard]] constexpr auto& pick(C& c) const noexcept {
         return c[v];
+    }
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
     }
 
     friend constexpr bool operator==(DipRowIndex, DipRowIndex) = default;
@@ -1451,6 +1798,10 @@ struct DipChoice {
         return DipChoice{static_cast<std::uint8_t>(v + 1u < choices.v ? v + 1u : 0u)};
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
     friend constexpr bool operator==(DipChoice, DipChoice) = default;
 };
 
@@ -1492,11 +1843,16 @@ constexpr PollParam PlayerIndex::poll_param() const noexcept {
 struct FioWordCount {
     std::uint32_t v = 0;
 
+    [[nodiscard]] constexpr std::size_t bytes_at(hal::Width w) const noexcept {
+        return std::size_t{v} * hal::word_bytes(w);
+    }
+
     [[nodiscard]] constexpr FioWordCount saturating_sub(FioWordCount spent) const noexcept {
         return v > spent.v ? FioWordCount{v - spent.v} : FioWordCount{};
     }
 
     friend constexpr bool operator==(FioWordCount, FioWordCount) = default;
+    friend constexpr auto operator<=>(FioWordCount, FioWordCount) = default;
 };
 
 struct Attenuation {
@@ -1520,7 +1876,7 @@ struct LaneCaps {
 struct OsdGeometry {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
@@ -1534,7 +1890,7 @@ struct IrqOrdinal {
         return os::pool_line_at(v, pool_first.v);
     }
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
@@ -1545,7 +1901,7 @@ struct IrqOrdinal {
 struct CauseTag {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
@@ -1559,11 +1915,30 @@ struct CauseBits {
         return (v & bits.v) == bits.v;
     }
 
-    [[nodiscard]] constexpr Error refused(Errc why, infra::ErrorSite at) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};
     }
 
     friend constexpr bool operator==(CauseBits, CauseBits) = default;
 };
+
+enum class IrqClass : std::uint8_t { Blk, Fifo, Ring, CoreTick, kCount };
+
+enum class CoreType : std::uint8_t {
+    Unknown = 0x55,
+    EightBit = 0xA4,
+    SharpMz = 0xA7,
+};
+
+inline constexpr hal::CoreTypeByte kEightBitWire{0xA4};
+inline constexpr hal::CoreTypeByte kPrivateDialectWire{0xA7};
+
+[[nodiscard]] constexpr CoreType fold_core_type(hal::CoreTypeByte type_byte) noexcept {
+    if (type_byte == kEightBitWire || type_byte.dual_sdram())
+        return CoreType::EightBit;
+    if (type_byte == kPrivateDialectWire)
+        return CoreType::SharpMz;
+    return CoreType::Unknown;
+}
 
 }

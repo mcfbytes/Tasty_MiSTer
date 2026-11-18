@@ -2,7 +2,6 @@
 #include "proto/download_session.h"
 #include "fio_wire_detail.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -11,8 +10,8 @@
 #include <utility>
 
 #include "hal/selected.h"
-#include "infra/endian.h"
 #include "proto/fio_opcodes.h"
+#include "proto/wire_word.h"
 
 namespace mister::proto {
 
@@ -29,30 +28,19 @@ constexpr IoIndex kCheatIndex{255};
     std::span<const std::uint8_t> data,
     hal::Width w
 ) {
-    if (w == hal::Width::Word) {
-        const std::size_t pairs = data.size() / 2u;
-        for (std::size_t i = 0; i < pairs; ++i) {
-            const auto pair_word = infra::load_le<std::uint16_t>(data.subspan(2u * i).first<2>());
-            if (auto r = beat(link, hal::SpiWord{pair_word}); !r)
-                return std::unexpected(r.error());
-        }
-        if ((data.size() & 1u) != 0u) {
-            const auto tail = static_cast<std::uint16_t>(data.back());
-            if (auto r = beat(link, hal::SpiWord{tail}); !r)
-                return std::unexpected(r.error());
-        }
-        return {};
-    }
-    for (const std::uint8_t byte : data) {
-        if (auto r = beat(link, hal::SpiWord{byte}); !r)
-            return std::unexpected(r.error());
-    }
+    auto walk = for_each_word(w, data, [&link](hal::SpiWord word) {
+        if (auto r = beat(link, word); !r)
+            return Ex<bool>{std::unexpected(r.error())};
+        return Ex<bool>{true};
+    });
+    if (!walk)
+        return std::unexpected(walk.error());
     return {};
 }
 
 }
 
-Ex<void> DownloadSession::set_index(ILinkFrame& frame, IoIndex index) {
+Ex<void> DownloadSession::set_index(ILinkFrame& frame, FioIndexByte index) {
     return FioBracket::set_index(frame, index);
 }
 
@@ -95,6 +83,8 @@ Ex<DownloadSession> DownloadSession::open(hal::ISpiTransport& link, WideIoIndex 
 }
 
 DownloadSession::~DownloadSession() {
+    if (dat_held_)
+        release_dat();
     if (posted_)
         abandon();
 }
@@ -129,24 +119,18 @@ Ex<std::size_t> DownloadSession::write_taken(std::span<const std::uint8_t> data)
         return std::unexpected(head.error());
     if (!*head)
         return 0;
-    const std::size_t step = link->width() == hal::Width::Word ? 2u : 1u;
-    for (std::size_t at = 0; at < data.size(); at += step) {
-        auto out_word = static_cast<std::uint16_t>(data[at]);
-        if (step == 2u && at + 1u < data.size())
-            out_word = infra::load_le<std::uint16_t>(data.subspan(at).first<2>());
-        auto r = link->transfer_or_post(hal::SpiWord{out_word});
+    return for_each_word(link->width(), data, [link](hal::SpiWord word) {
+        auto r = link->transfer_or_post(word);
         if (!r)
-            return std::unexpected(r.error());
-        if (!*r)
-            return std::min(at + step, data.size());
-    }
-    return data.size();
+            return Ex<bool>{std::unexpected(r.error())};
+        return Ex<bool>{*r};
+    });
 }
 
 Ex<void> DownloadSession::post(std::span<const std::uint16_t> words) {
     hal::ISpiTransport* link = bracket_.link();
     if (link == nullptr || posted_ || words.empty()) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), bracket_.index().fio_byte()});
+        return std::unexpected(bracket_.index().refusal(Errc::negotiation, ERR_SITE()));
     }
 
     link->select(hal::ChipSelect::Fpga);
@@ -165,7 +149,7 @@ Ex<void> DownloadSession::post(std::span<const std::uint16_t> words) {
 
 Ex<bool> DownloadSession::settle(std::span<const std::uint16_t> tail) {
     if (!posted_) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), bracket_.index().fio_byte()});
+        return std::unexpected(bracket_.index().refusal(Errc::negotiation, ERR_SITE()));
     }
     hal::ISpiTransport* link = bracket_.link();
     auto done = link->posted_done();
@@ -195,10 +179,43 @@ void DownloadSession::abandon() noexcept {
     bracket_.detach();
 }
 
+Ex<void> DownloadSession::open_dat(hal::Width w) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr || posted_ || dat_held_ || link->posted()) {
+        return std::unexpected(bracket_.index().refusal(Errc::negotiation, ERR_SITE()));
+    }
+    link->select(hal::ChipSelect::Fpga);
+    Ex<void> r = link->transfer(word(FioOp::FileTxDat)).transform([](hal::SpiWord) noexcept {});
+    if (!r) {
+        link->deselect();
+        return r;
+    }
+    dat_ = w;
+    dat_held_ = true;
+    return {};
+}
+
+Ex<void> DownloadSession::feed(std::span<const std::uint8_t> data) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr || !dat_held_) {
+        return std::unexpected(bracket_.index().refusal(Errc::negotiation, ERR_SITE()));
+    }
+    return emit_payload(*link, data, dat_);
+}
+
+void DownloadSession::release_dat() noexcept {
+    if (!dat_held_)
+        return;
+    dat_held_ = false;
+    if (hal::ISpiTransport* link = bracket_.link())
+        link->deselect();
+}
+
 Ex<void> DownloadSession::end() {
     if (posted_) {
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), bracket_.index().fio_byte()});
+        return std::unexpected(bracket_.index().refusal(Errc::would_block, ERR_SITE()));
     }
+    release_dat();
     return bracket_.end();
 }
 

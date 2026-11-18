@@ -21,10 +21,10 @@ bool magic_hits(const DiskFormatRow& row, std::span<const std::byte> head) noexc
 bool size_hits(const DiskFormatRow& row, proto::FileSize size) noexcept {
     if (row.size_bytes == 0)
         return false;
-    const std::uint64_t want = row.size_bytes;
-    const std::uint64_t got = size.v;
-    const std::uint64_t delta = got > want ? got - want : want - got;
-    return delta <= row.tolerance;
+    return size.within_tolerance_of(
+        proto::FileSize{row.size_bytes},
+        proto::FileSize{row.tolerance}
+    );
 }
 
 }

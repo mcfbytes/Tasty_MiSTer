@@ -11,15 +11,15 @@ namespace mister::proto {
 Ex<void> SpiImageSink::begin(WideIoIndex index, const SessionParams& params) {
     TASTY_SEAT_BODY(SpiImageSink);
     if (active()) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index.v});
+        return std::unexpected(index.refusal(Errc::negotiation, ERR_SITE()));
     }
 
     if (queue_ && queue_->held()) {
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), index.v});
+        return std::unexpected(index.refusal(Errc::would_block, ERR_SITE()));
     }
 
     if (queue_ && queue_->tenant_holds_fio()) {
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), index.v});
+        return std::unexpected(index.refusal(Errc::would_block, ERR_SITE()));
     }
     ds_.reset();
     if (queue_)

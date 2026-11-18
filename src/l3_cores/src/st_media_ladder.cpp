@@ -9,8 +9,12 @@
 
 #include "cores/st_config.h"
 #include "cores/st_core.h"
+#include "cores/st_ctrl.h"
+#include "cores/st_loader.h"
+#include "cores/st_options.h"
 #include "cores/staging_core.h"
 #include "infra/byte_view.h"
+#include "infra/path_parts.h"
 #include "svc/file.h"
 #include "svc/read_bounded.h"
 
@@ -80,21 +84,31 @@ Ex<bool> StMediaLadder::on_step() {
         case Rung::EjectB:
             return order_mount_(st_ctrl::StSlot::FloppyB, {}, Rung::Hold);
         case Rung::Hold:
-            (void)order_fact_(StMediaFact::Verb::Hold, cold_ ? Rung::Tos : Rung::Cart);
-            return false;
-        case Rung::Tos:
-            if (file_ == proto::FileId{}) {
-                auto bytes = read_tos_();
-                if (bytes.empty()) {
-                    (void)order_fact_(StMediaFact::Verb::NoTos, Rung::Acsi0);
-                    return false;
-                }
-                if (auto r = intern_(st_ctrl::StSlot::Tos, std::move(bytes)); !r || !*r)
-                    return r;
+            if (!order_fact_(StMediaFact::Verb::Hold, cold_ ? Rung::Clear : Rung::Cart)) {
+                return false;
             }
-            return order_file_(st_ctrl::StSlot::Tos, Rung::TosAnswer);
+            return cold_ ? start_clear_() : false;
+        case Rung::Clear: {
+            if (!clear_) {
+                rung_ = Rung::Tos;
+                return false;
+            }
+            auto r = clear_->step(host_);
+            if (!r)
+                return std::unexpected(r.error());
+            if (*r != PayloadPieces::Pass::Done)
+                return false;
+
+            if (host_.link_in_flight() != 0)
+                return false;
+            clear_.reset();
+            rung_ = Rung::Tos;
+            return false;
+        }
+        case Rung::Tos:
+            return tos_rung_();
         case Rung::TosAnswer:
-            return await_file_(Rung::Acsi0);
+            return await_run_(Rung::Acsi0);
         case Rung::Acsi0:
         case Rung::Acsi1: {
             const bool first = rung_ == Rung::Acsi0;
@@ -109,18 +123,9 @@ Ex<bool> StMediaLadder::on_step() {
             return bind_acsi_(slot, path, next);
         }
         case Rung::Cart:
-            if (file_ == proto::FileId{}) {
-                auto bytes = read_cart_();
-                if (bytes.empty()) {
-                    (void)order_fact_(StMediaFact::Verb::NoCart, Rung::Release);
-                    return false;
-                }
-                if (auto r = intern_(st_ctrl::StSlot::Cart, std::move(bytes)); !r || !*r)
-                    return r;
-            }
-            return order_file_(st_ctrl::StSlot::Cart, Rung::CartAnswer);
+            return cart_rung_();
         case Rung::CartAnswer:
-            return await_file_(Rung::Release);
+            return await_run_(Rung::Release);
         case Rung::Release:
             if (!order_fact_(StMediaFact::Verb::Release, Rung::Done))
                 return false;
@@ -150,6 +155,28 @@ void StMediaLadder::restore_() {
         paths_[st_ctrl::kAcsiSlots[t]].assign(c.acsi_img[AcsiTarget{t}].view());
     if (!c.cart_img.empty())
         paths_[st_ctrl::StSlot::Cart].assign(c.cart_img.view());
+    restored_dongle_ = c.system_ctrl.has(st_ctrl::CtrlWord::kDongle);
+}
+
+Ex<bool> StMediaLadder::start_clear_() {
+    if (!clear_) {
+        auto run = PayloadPieces::held_window(
+            std::vector<std::uint8_t>(StCore::kClearBytes, 0),
+            PayloadPieces::HeldFrame{
+                .dest = proto::WideIoIndex::of(StCore::kClearIndex, 0),
+                .framing = hal::Width::Word,
+                .piece = StCore::kClearPieceWords
+            }
+        );
+        if (!run)
+            return std::unexpected(run.error());
+        clear_ = std::move(*run);
+    }
+
+    auto r = clear_->step(host_);
+    if (!r)
+        return std::unexpected(r.error());
+    return false;
 }
 
 bool StMediaLadder::order_fact_(StMediaFact::Verb verb, Rung next) {
@@ -164,12 +191,12 @@ bool StMediaLadder::order_fact_(StMediaFact::Verb verb, Rung next) {
 Ex<bool> StMediaLadder::order_mount_(st_ctrl::StSlot slot, std::string_view path, Rung next) {
     proto::LinkOp::BindMount op{.index = slot.io(), .perform = true};
     if (!path.empty()) {
-        std::uint64_t size = 0;
-        if (auto f = vfs_.open(path, svc::OpenMode::ReadWrite)) {
+        proto::FileSize size{};
+        if (auto f = card_.open(path, svc::OpenMode::ReadWrite)) {
             if (auto sz = (*f)->size())
-                size = sz->v;
+                size = *sz;
         }
-        auto id = host_.intern_path(path, proto::FileSize{size});
+        auto id = host_.intern_path(path, size);
         if (!id) {
             if (id.error().code == Errc::would_block)
                 return false;
@@ -207,7 +234,7 @@ std::vector<std::uint8_t> StMediaLadder::read_whole(svc::IFile& f, std::uint64_t
         return {};
     auto read = svc::read_bounded(f, cap);
 
-    if (!read || read->size() != sz->v)
+    if (!read || proto::FileSize::of(std::span<const std::byte>(*read)) != *sz)
         return {};
     const auto got = infra::byte_cast<const std::uint8_t>(std::span(*read));
     return std::vector<std::uint8_t>(got.begin(), got.end());
@@ -221,7 +248,8 @@ std::vector<std::uint8_t> StMediaLadder::read_cart_() const {
     auto f = vfs_.open(path, svc::OpenMode::Read);
     if (!f)
         return out;
-    out.assign(StCore::kCartBufferBytes, std::uint8_t{0xFF});
+    out = StLoader::kCartBufferBytes.zeroed<std::vector<std::uint8_t>>();
+    std::ranges::fill(out, std::uint8_t{StLoader::kBlankFill});
 
     [[maybe_unused]] const std::span<std::byte> written = svc::read_bounded_partial(
         **f,
@@ -230,48 +258,133 @@ std::vector<std::uint8_t> StMediaLadder::read_cart_() const {
     return out;
 }
 
-Ex<bool> StMediaLadder::intern_(st_ctrl::StSlot slot, std::vector<std::uint8_t>&& bytes) {
-    auto id = host_.intern_whole(std::move(bytes), paths_[slot]);
-    if (!id) {
-        if (id.error().code == Errc::would_block)
+Ex<bool> StMediaLadder::tos_rung_() {
+    if (!pieces_) {
+        std::vector<std::uint8_t> bytes = read_tos_();
+
+        auto plan = bytes.empty()
+            ? Ex<LoadPlan>{LoadPlan{}}
+            : plan_media_(st_ctrl::StSlot::Tos, proto::FileSize::of(std::span(bytes)));
+        if (!plan)
+            return std::unexpected(plan.error());
+        if (plan->count == 0) {
+            (void)order_fact_(StMediaFact::Verb::NoTos, Rung::Acsi0);
             return false;
-        return std::unexpected(id.error());
+        }
+        if (auto r = start_run_(plan->rows[0], bytes, false); !r)
+            return r;
     }
-    file_ = *id;
+    return step_run_(Rung::TosAnswer);
+}
+
+Ex<bool> StMediaLadder::cart_rung_() {
+    if (!pieces_) {
+        dongle_ = dongle_now_();
+        std::vector<std::uint8_t> bytes = dongle_ ? std::vector<std::uint8_t>{} : read_cart_();
+        auto plan = plan_media_(st_ctrl::StSlot::Cart, proto::FileSize::of(std::span(bytes)));
+        if (!plan)
+            return std::unexpected(plan.error());
+        if (plan->count == 0) {
+            rung_ = Rung::Release;
+            return false;
+        }
+        if (auto r = start_run_(plan->rows[0], bytes, true); !r)
+            return r;
+    }
+    return step_run_(Rung::CartAnswer);
+}
+
+bool StMediaLadder::dongle_now_() {
+    if (restored_dongle_)
+        return *restored_dongle_;
+    const auto choice = host_.option_choice(tag_of(StOption::Dongle));
+    return choice.has_value() && *choice != proto::FieldValue{};
+}
+
+Ex<LoadPlan> StMediaLadder::plan_media_(st_ctrl::StSlot slot, proto::FileSize size) {
+    TASTY_SEAT_BODY(StMediaLadder);
+    StLoader loader;
+    const LoadAsk ask{
+        .index = proto::WideIoIndex::of(slot.io()),
+        .path = paths_[slot],
+        .size = size,
+        .dongle = dongle_
+    };
+    return loader.plan(ask, host_.status_word());
+}
+
+Ex<bool> StMediaLadder::start_run_(
+    const TransferRow& row,
+    std::span<const std::uint8_t> bytes,
+    bool held
+) {
+    std::vector<std::uint8_t> payload;
+    if (row.file_len.empty()) {
+        payload = row.extent.zeroed<std::vector<std::uint8_t>>();
+        std::ranges::fill(payload, row.fill);
+    } else {
+        const proto::FileSize skip = row.file_offset - proto::kFileStart;
+        const std::span<const std::uint8_t> part = row.file_len.first_of(skip.skip_in(bytes));
+        payload.assign(part.begin(), part.end());
+    }
+    const proto::ActKey16 act = next_gen().narrow();
+    Ex<PayloadPieces> run = held ? PayloadPieces::held_window(
+                                       std::move(payload),
+                                       PayloadPieces::HeldFrame{
+                                           .dest = row.index,
+                                           .framing = host_.link_width(),
+                                           .piece = StLoader::kCartPieceWords
+                                       }
+                                   )
+                                 : PayloadPieces::of_bytes(
+                                       std::move(payload),
+                                       infra::extension(row.source),
+                                       PayloadPieces::Frame{
+                                           .dest = row.index,
+                                           .chunk = StLoader::kTosChunk,
+                                           .progress = true,
+                                           .act = act
+                                       }
+                                   );
+    if (!run)
+        return std::unexpected(run.error());
+    pieces_ = std::move(*run);
+    act_ = held ? proto::ActKey16{} : act;
     return true;
 }
 
-Ex<bool> StMediaLadder::order_file_(st_ctrl::StSlot slot, Rung answer) {
-    const proto::ActKey act = next_gen();
-    const proto::WideIoIndex index = proto::WideIoIndex::of(slot.io(), 0);
-    const proto::LinkOp::FileTx op{
-        .wire_index = index.fio_byte(),
-        .phase = proto::LinkOp::FileTxPhase::Whole,
-        .file = file_,
-        .act = act
-    };
-    if (!host_.order(op))
+Ex<bool> StMediaLadder::step_run_(Rung next) {
+    auto r = pieces_->step(host_);
+    if (!r)
+        return std::unexpected(r.error());
+    if (*r != PayloadPieces::Pass::Done)
         return false;
-    file_ = proto::FileId{};
-    act_ = act;
     due_ns_ = now_ns() + kDiscMountBoundNs;
-    rung_ = answer;
+    rung_ = next;
     return false;
 }
 
-Ex<bool> StMediaLadder::await_file_(Rung next) {
-    switch (host_.file_tx_answer(act_)) {
-        case FileTxAnswer::Pending:
-            if (now_ns() >= due_ns_)
-                return std::unexpected(Error{Errc::timeout, ERR_SITE(), act_.v});
-            return false;
-        case FileTxAnswer::Served:
-            rung_ = next;
-            return false;
-        case FileTxAnswer::Dropped:
-            break;
+Ex<bool> StMediaLadder::await_run_(Rung next) {
+    if (act_) {
+        switch (host_.payload_answer(act_)) {
+            case FileTxAnswer::Pending:
+                if (now_ns() >= due_ns_)
+                    return std::unexpected(Error{Errc::timeout, ERR_SITE(), act_.v});
+                return false;
+            case FileTxAnswer::Served:
+                break;
+            case FileTxAnswer::Dropped:
+                return std::unexpected(Error{Errc::io, ERR_SITE(), act_.v});
+        }
+        act_ = {};
+    } else if (host_.link_in_flight() != 0) {
+        if (now_ns() >= due_ns_)
+            return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
+        return false;
     }
-    return std::unexpected(Error{Errc::io, ERR_SITE(), act_.v});
+    pieces_.reset();
+    rung_ = next;
+    return false;
 }
 
 }

@@ -16,7 +16,7 @@ struct FileIntern {
 
     struct Piece {
         proto::FileSize whole{};
-        proto::FileSize offset{};
+        proto::FileOffset offset{};
     };
 
     std::vector<std::uint8_t> bytes{};

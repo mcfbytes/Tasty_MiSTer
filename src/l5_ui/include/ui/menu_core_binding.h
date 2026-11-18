@@ -7,7 +7,7 @@
 #include "app/session_identity.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
-#include "proto/core_session.h"
+#include "proto/types.h"
 
 namespace mister::app {
 class IdentityLatch;

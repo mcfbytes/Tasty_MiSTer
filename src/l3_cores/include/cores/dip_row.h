@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "cores/dip_setting.h"
 #include "cores/types.h"
 
 namespace mister::cores::mra {
@@ -26,6 +27,10 @@ struct DipField {
     }
 
     [[nodiscard]] constexpr DipWord place(DipWord val) const noexcept { return val.shifted(start); }
+
+    [[nodiscard]] constexpr DipSetting setting(DipWord placed) const noexcept {
+        return DipSetting{mask(), placed};
+    }
 
     friend constexpr bool operator==(DipField, DipField) = default;
 };

@@ -14,7 +14,6 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
-#include "proto/core_session.h"
 #include "proto/status_cell.h"
 #include "ui/status_view.h"
 

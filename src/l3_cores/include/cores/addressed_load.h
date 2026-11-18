@@ -10,6 +10,7 @@
 #include "cores/loader.h"
 #include "cores/loader_context.h"
 #include "cores/transfer_row.h"
+#include "hal/fpga_aperture.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -23,17 +24,21 @@ class AddressedLoad final : public ILoader {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    explicit AddressedLoad(const hal::PhysRegion& aperture) noexcept : aperture_(aperture) {}
+    explicit AddressedLoad(const hal::FpgaAperture& aperture) noexcept : aperture_(aperture) {}
 
     [[nodiscard]] static std::optional<TransferRow> window_row(
         hal::FabricAddr addr,
         proto::FileSize bytes,
         proto::WideIoIndex index,
-        const hal::PhysRegion& aperture
+        const hal::FpgaAperture& aperture
     ) noexcept;
 
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
-    void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
+    void shape(
+        const TransferRow& row,
+        std::span<std::uint8_t> piece,
+        proto::FileOffset at
+    ) override;
     [[nodiscard]] Ex<void> finish(infra::OptRef<ICoreWindow> window) override;
 
     [[nodiscard]] std::span<const std::uint8_t> facts() const noexcept override {
@@ -42,7 +47,7 @@ public:
     }
 
 private:
-    hal::PhysRegion aperture_;
+    hal::FpgaAperture aperture_;
 };
 
 std::unique_ptr<ILoader> make_addressed_load(const LoaderContext& ctx);

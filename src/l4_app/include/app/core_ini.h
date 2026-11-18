@@ -71,6 +71,10 @@ public:
 
     [[nodiscard]] const IdleKnobsCell& idle_cell() const noexcept { return idle_cell_; }
 
+    [[nodiscard]] const AutosaveKnobsCell& autosave_cell() const noexcept { return autosave_cell_; }
+
+    void republish_autosave(bool on);
+
 private:
     [[nodiscard]] bool wait_for_mount_(std::string_view needle);
 
@@ -83,6 +87,7 @@ private:
     bool strict_ = false;
     xthread::Telemetry<std::uint8_t, SeatTag::Main> dv_cell_{};
     IdleKnobsCell idle_cell_{};
+    AutosaveKnobsCell autosave_cell_{};
     bool boot_pending_ = true;
     std::string boot_handoff_;
 };

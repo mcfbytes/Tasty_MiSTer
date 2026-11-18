@@ -60,7 +60,7 @@ struct BlockCtl {
 
 static_assert(
     std::is_trivially_copyable_v<BlockCtl>
-    && sizeof(BlockCtl) <= 96u + kStorageOrderBytes + sizeof(infra::OptRef<const BlankSaveSpec>)
+    && sizeof(BlockCtl) <= 104u + kStorageOrderBytes + sizeof(infra::OptRef<const BlankSaveSpec>)
 );
 
 }

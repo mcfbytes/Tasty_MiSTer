@@ -20,6 +20,12 @@ struct ServiceSlot {
         return ServiceSlot{static_cast<std::uint8_t>(i)};
     }
 
+    [[nodiscard]] static constexpr ServiceSlot end() noexcept {
+        return ServiceSlot{static_cast<std::uint8_t>(kMaxServices)};
+    }
+
+    [[nodiscard]] constexpr std::uint32_t bit() const noexcept { return 1u << v; }
+
     [[nodiscard]] constexpr ServiceSlot next() const noexcept {
         return ServiceSlot{static_cast<std::uint8_t>(v + 1u)};
     }

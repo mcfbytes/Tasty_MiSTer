@@ -27,9 +27,9 @@ Ex<void> UartModeController::set_mode(proto::ILinkFrame& frame, UartMode m) {
             return r;
         if (auto r = frame.word(wire_mode(masked)); !r)
             return r;
-        if (auto r = frame.word(words.lo_); !r)
+        if (auto r = frame.word(words.halves_.low); !r)
             return r;
-        if (auto r = frame.word(words.hi_); !r)
+        if (auto r = frame.word(words.halves_.high); !r)
             return r;
         if (auto r = frame.end(); !r)
             return r;

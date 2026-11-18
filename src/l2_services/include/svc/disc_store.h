@@ -64,11 +64,11 @@ public:
     [[nodiscard]] bool mounted_for_test() const noexcept;
 
     [[nodiscard]] Ex<std::span<std::uint8_t>> read_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<std::uint8_t> dst
     ) override;
     [[nodiscard]] Ex<std::span<const std::uint8_t>> write_at(
-        proto::FileSize at,
+        proto::FileOffset at,
         std::span<const std::uint8_t> src
     ) override;
     [[nodiscard]] Ex<proto::FileSize> open_extent(

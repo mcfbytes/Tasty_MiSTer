@@ -32,10 +32,10 @@ struct ResetTerms {
         const StatusWord& next
     ) const noexcept {
         for (unsigned i = 0; i < StatusWord::kWords; ++i) {
-            const unsigned was = sent.words[i], now = next.words[i];
-            if (((was | now) & held.words[i]) != 0u)
+            const hal::SpiWord was = sent.words[i], now = next.words[i];
+            if (was.with(now).any_of(held.words[i]))
                 return true;
-            if ((~was & now & raised.words[i]) != 0u)
+            if (now.without(was).any_of(raised.words[i]))
                 return true;
         }
         return false;

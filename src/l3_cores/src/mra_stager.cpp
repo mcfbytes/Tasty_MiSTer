@@ -30,8 +30,8 @@ public:
         }
     }
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        const std::optional<RomOffset> from = end_.read_from(off);
+    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+        const std::optional<RomOffset> from = end_.read_from(at);
         if (!from)
             return std::size_t{0};
         RomOffset p = *from;
@@ -63,7 +63,7 @@ public:
         return n;
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
 
@@ -221,7 +221,7 @@ std::optional<ManifestAct> MraStager::rom_() {
 
         std::vector<std::uint8_t> flat(bytes);
         ImageFile f(std::move(out.bytes), std::move(out.runs));
-        (void)f.read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(flat)));
+        (void)f.read_at(proto::kFileStart, std::as_writable_bytes(std::span<std::uint8_t>(flat)));
         return SendBracket{.index = index, .bytes = std::move(flat)};
     }
     return std::nullopt;

@@ -45,7 +45,7 @@ struct ReplayPlay {
         return period_us > kPhaseGuard && phase >= kPhaseMin && phase <= period_us - kPhaseGuard;
     }
 
-    static constexpr FrameCount kRunSplit{60};
+    static constexpr MovieFrameCount kRunSplit{60};
     static constexpr std::uint32_t kReadChunk = 16 * 1024;
     static constexpr std::uint32_t kTickBudget = 64 * 1024;
     static constexpr unsigned kEpochTries = 3;
@@ -60,8 +60,8 @@ struct ReplayPlay {
         PathText rom{};
         ArmMicros offset_us{};
 
-        std::optional<FrameCount> lead_override{};
-        std::optional<MovieFrame> stop_at{};
+        std::optional<MovieFrameCount> lead_override{};
+        std::optional<MoviePosition> stop_at{};
         std::optional<cores::IReplayCore::RamFill> ram_fill{};
         bool seeded_save = false;
         bool set_ok = false;
@@ -73,27 +73,27 @@ struct ReplayPlay {
         std::vector<ReplayMsg::Input> runs{};
 
         std::uint32_t scanned = 0;
-        FrameCount movie_frames{};
+        MovieFrameCount movie_frames{};
         ArmMicros offset_us{};
         bool vsync_ok = false;
     };
 
     struct ArmPlan {
-        FrameCount lead{};
+        MovieFrameCount lead{};
 
         ArmLead lead_field{};
         CodecNs poweron_ns{};
         ReplayMsg::P0Parity p0 = ReplayMsg::P0Parity::Any;
         ReplayMsg::PowerOnEvent event = ReplayMsg::PowerOnEvent::LoadEnd;
         proto::IoIndex rom_index = kNoRomSlot;
-        std::array<MovieFrame, kCheckpoints> checks{};
+        std::array<MoviePosition, kCheckpoints> checks{};
         std::size_t n_checks = 0;
         std::size_t next_check = 0;
     };
 
     struct Run {
         ControlGeneration gen{};
-        FrameCount pushed{};
+        MovieFrameCount pushed{};
         unsigned tries = 0;
     };
 

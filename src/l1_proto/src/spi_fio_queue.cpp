@@ -85,7 +85,7 @@ bool SpiFioQueue::fits(ActShape act) const noexcept {
 }
 
 std::size_t SpiFioQueue::piece_bytes() const noexcept {
-    return std::size_t{piece_words_} * (link_.width() == hal::Width::Word ? 2u : 1u);
+    return std::size_t{piece_words_} * hal::word_bytes(link_.width());
 }
 
 SpiFioQueue::ActShape SpiFioQueue::shape_of(std::span<const Bracket> act) const noexcept {
@@ -159,7 +159,7 @@ Ex<void> SpiFioQueue::place_(std::span<const Bracket> act) {
     const ActShape shape = shape_of(act);
     if (!fits(shape)) {
         ++stats_.oversize;
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), shape.bytes.detail()});
+        return std::unexpected(shape.bytes.refusal(Errc::slot_range, ERR_SITE()));
     }
     const std::size_t piece = piece_bytes();
     std::size_t at = slab_used_;

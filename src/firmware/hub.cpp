@@ -94,11 +94,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
           device_.events_,
           plat.rt_evidence,
           device_.main_wake_,
-          ThreadAssembly::DiagWires{
-              .log = device_.diag_log_,
-              .rt_lane = plat.rt_lane,
-              .transitioning = device_.transitioning_
-          },
+          ThreadAssembly::DiagWires{.log = device_.diag_log_, .rt_lane = plat.rt_lane},
           UiMain::Wires{.wake = device_.ui_wake_, .uart_handoffs = device_.uart_handoffs()},
 
           UiMain::Wiring{
@@ -115,7 +111,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .menu_keys = infra::OptRef<app::MenuKeyInbox>{device_.menu_keys_},
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
-              .ui_writes = face_parts_.ui_writes,
+              .ui_writes = infra::OptRef<app::UiWriteLane>{device_.ui_writes_},
               .verdicts = face_parts_.verdicts,
               .owner_tick = tail_->owner_tick(),
               .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
@@ -149,8 +145,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
         DeviceBlock::Parts::Seats{
             .mains = seat_mains_,
             .diag = assembly_.diag(),
-            .save_states = face_parts_.save_states,
-            .ui_writes = face_parts_.ui_writes
+            .save_states = face_parts_.save_states
         }
     );
 

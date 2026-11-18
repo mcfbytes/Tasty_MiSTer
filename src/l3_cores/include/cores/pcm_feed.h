@@ -18,7 +18,7 @@ public:
     [[nodiscard]] virtual Ex<void> stop() = 0;
     [[nodiscard]] virtual Ex<void> resume() = 0;
 
-    virtual void observe_read_point(std::uint32_t off) noexcept = 0;
+    virtual void observe_read_point(PcmRingPoint at) noexcept = 0;
 
     [[nodiscard]] virtual PcmFeedState state() const noexcept = 0;
 

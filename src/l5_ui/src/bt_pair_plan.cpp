@@ -90,6 +90,14 @@ void BtPairPlan::on_focus_moved() {
     start_ = PairStart::Pick;
 }
 
+void BtPairPlan::refresh(const SystemFacts& facts, const SessionFacts& session) {
+    TASTY_SEAT_BODY(BtPairPlan);
+    (void)facts;
+    (void)session;
+    const std::optional<BtPromptRows> prompt = prompt_();
+    shown_gen_ = prompt ? std::optional<svc::PromptGen>{prompt->gen} : std::nullopt;
+}
+
 bool BtPairPlan::holds_pairing() const {
     TASTY_SEAT_BODY(BtPairPlan);
     return true;
@@ -155,10 +163,11 @@ app::PageDescription::Row BtPairPlan::slot_describe(SlotId slot) const {
 
 bool BtPairPlan::answer_(svc::PromptAnswer answer) {
     const std::optional<BtPromptRows> prompt = prompt_();
-    if (!prompt)
+
+    if (!prompt || !shown_gen_ || prompt->gen != *shown_gen_)
         return false;
     Request::BtAnswer reply{};
-    reply.gen = prompt->gen;
+    reply.gen = *shown_gen_;
     reply.answer = answer;
     return send(infra::make<Request>(reply));
 }
@@ -170,15 +179,15 @@ Transition BtPairPlan::slot_select(SlotId slot) {
         case Slot::Headline:
             return Transition{};
         case Slot::First:
-            if (!prompt)
+            if (!prompt || !shown_gen_ || prompt->gen != *shown_gen_)
                 return Transition{};
 
             if (prompt->ask == Ask::EnterPasskey) {
-                entry_gen_ = prompt->gen;
+                entry_gen_ = shown_gen_;
                 return request_text(slot, TextEntryKind::Passkey, "Passkey", false);
             }
             if (prompt->ask == Ask::EnterPin) {
-                entry_gen_ = prompt->gen;
+                entry_gen_ = shown_gen_;
                 return request_text(slot, TextEntryKind::Pin, "PIN", false);
             }
             (void)answer_(svc::PromptAnswer::Accept);

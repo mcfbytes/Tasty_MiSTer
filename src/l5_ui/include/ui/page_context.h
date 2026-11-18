@@ -6,6 +6,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "proto/osd_rotation.h"
 #include "ui/page_launches.h"
 #include "ui/status_bar_facts.h"
 #include "ui/system_facts.h"
@@ -20,6 +21,7 @@ class NameConfig;
 class PlayedHistory;
 class RecentsStore;
 class UiRequestRing;
+class UiWriteLane;
 }
 
 namespace mister::os {
@@ -63,9 +65,13 @@ struct PageContext {
 
     infra::OptRef<const app::JoyMapEnds> joymap{};
     infra::OptRef<const svc::Vfs> files{};
+
+    infra::OptRef<app::UiWriteLane> writes{};
     infra::OptRef<const app::IdentityLatch> identity{};
 
     bool bt_reset_before_pair = false;
+
+    proto::OsdRotation osd_rotation = proto::OsdRotation::None;
 
     SystemFacts sys{};
     StatusBarFacts status{};

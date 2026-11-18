@@ -141,7 +141,7 @@ void AudioService::nudge(proto::VolumeStep step) noexcept {
     vol_ = vol_.valid();
 }
 
-void AudioService::step_core_volume(VolumeStep step) {
+void AudioService::step_core_volume(proto::VolumeStep step) {
     corevol_ = corevol_.stepped(step, has_boost_);
 }
 

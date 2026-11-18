@@ -1,62 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_frame.h"
 
-#include <array>
 #include <cstddef>
+
+#include "proto/link_sel_carriers.h"
 
 namespace mister::proto {
 
-namespace {
-
-constexpr hal::ChipSelect select_of(FrameSel sel) noexcept {
-    switch (sel) {
-        case FrameSel::Uio:
-            return hal::ChipSelect::Io;
-        case FrameSel::Fpga:
-            return hal::ChipSelect::Fpga;
-        case FrameSel::OsdHdmi:
-            return hal::ChipSelect::OsdHdmi;
-        case FrameSel::OsdVga:
-            return hal::ChipSelect::OsdVga;
-    }
-    return hal::ChipSelect::None;
-}
-
-constexpr hal::ChipSelect select_of(LinkRoute route) noexcept {
-    switch (route) {
-        case LinkRoute::Uio:
-            return hal::ChipSelect::Io;
-        case LinkRoute::Fio:
-            return hal::ChipSelect::Fpga;
-        case LinkRoute::Osd:
-            return hal::ChipSelect::Osd;
-    }
-    return hal::ChipSelect::None;
-}
-
-}
-
-Ex<void> SpiFrame::begin(FrameSel sel, std::uint16_t op) {
+Ex<void> SpiFrame::begin(LinkSel sel, hal::SpiWord op) {
     TASTY_SEAT_BODY(SpiFrame);
     return open(sel, op).transform([](std::uint16_t) noexcept {});
 }
 
-Ex<std::uint16_t> SpiFrame::open(FrameSel sel, std::uint16_t op) {
+Ex<std::uint16_t> SpiFrame::open(LinkSel sel, hal::SpiWord op) {
     TASTY_SEAT_BODY(SpiFrame);
-    return open(select_of(sel), op);
+    return open_raw_(chip_select(sel), op);
 }
 
-Ex<void> SpiFrame::begin(LinkRoute route, std::uint16_t op) {
-    TASTY_SEAT_BODY(SpiFrame);
-    return open(route, op).transform([](std::uint16_t) noexcept {});
-}
-
-Ex<std::uint16_t> SpiFrame::open(LinkRoute route, std::uint16_t op) {
-    TASTY_SEAT_BODY(SpiFrame);
-    return open(select_of(route), op);
-}
-
-Ex<std::uint16_t> SpiFrame::open(hal::ChipSelect cs, std::uint16_t op) {
+Ex<std::uint16_t> SpiFrame::open_raw_(hal::ChipSelect cs, hal::SpiWord op) {
     TASTY_SEAT_BODY(SpiFrame);
     close_();
     reply_.reset();
@@ -65,7 +26,7 @@ Ex<std::uint16_t> SpiFrame::open(hal::ChipSelect cs, std::uint16_t op) {
     }
     link_.select(cs);
     open_ = true;
-    auto r = link_.transfer(hal::SpiWord{op});
+    auto r = link_.transfer(op);
     if (!r) {
         close_();
         return std::unexpected(r.error());

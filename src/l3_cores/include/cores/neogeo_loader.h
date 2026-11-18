@@ -111,10 +111,10 @@ inline constexpr std::uint32_t kM1WindowOffset = 0x200'0000u;
     return {WindowRef::at(kMemWindowSlot), 0};
 }
 
-[[nodiscard]] constexpr std::uint32_t stock_read_len(
+[[nodiscard]] constexpr proto::FileSize stock_read_len(
     std::uint32_t asked,
     std::uint32_t extent,
-    std::uint64_t rest
+    proto::FileSize rest
 ) noexcept {
     std::uint64_t n = asked;
     if (extent <= kLoadBufBytes) {
@@ -122,7 +122,7 @@ inline constexpr std::uint32_t kM1WindowOffset = 0x200'0000u;
     } else if (asked >= kLoadBufBytes) {
         n = extent;
     }
-    return static_cast<std::uint32_t>(n < rest ? n : rest);
+    return proto::FileSize{n}.min(rest);
 }
 
 [[nodiscard]] std::string make_path(std::string_view root, std::string_view name);
@@ -147,7 +147,11 @@ public:
 
     [[nodiscard]] Ex<LoadPlan> plan_romset(std::span<const neogeo::RomsetFile> entries);
 
-    void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
+    void shape(
+        const TransferRow& row,
+        std::span<std::uint8_t> piece,
+        proto::FileOffset at
+    ) override;
 
     [[nodiscard]] Ex<void> finish(infra::OptRef<ICoreWindow>) override {
         TASTY_SEAT_BODY(NeoGeoLoader);

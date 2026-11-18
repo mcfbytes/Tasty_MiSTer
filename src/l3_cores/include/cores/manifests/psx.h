@@ -133,7 +133,7 @@ inline constexpr auto kPsxSlots = std::to_array<FileSlot>({
 });
 
 inline constexpr StagingPolicy kPsxStaging{
-    .order = StageOrder::Psx,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kPsxSlots),
     .save = SaveMountPolicy{
@@ -173,9 +173,11 @@ inline constexpr CoreProfile kPsx{
     .image_rows_no_zip = true,
 
     .cheats = {.reset_on_remount = true},
-    .file_tx_whole = true,
+    .no_stream_role = true,
     .sector_program = infra::OptRef<const svc::ISectorProgram>{kPsxSectorProgram},
     .disc_rules = infra::OptRef<const svc::IDiscRules>{kPsxDiscRules},
+
+    .grants = {Grant::SaveCopy, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);

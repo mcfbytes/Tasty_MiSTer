@@ -35,8 +35,7 @@ public:
 
     template <SlotNames E>
     [[nodiscard]] constexpr E named() const noexcept {
-        return row_ < RowIndex::of(infra::ordinal(E::Count)) ? static_cast<E>(row_.before().size())
-                                                             : E::Count;
+        return row_ < RowIndex::of(infra::ordinal(E::Count)) ? row_.enumerator<E>() : E::Count;
     }
 
     [[nodiscard]] constexpr RowIndex row() const noexcept { return row_; }

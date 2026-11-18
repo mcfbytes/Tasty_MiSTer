@@ -33,6 +33,8 @@ struct DeviceIdentity {
     bool unique_filenames = false;
 
     std::optional<std::uint8_t> port_suffix;
+
+    [[nodiscard]] constexpr VidPidKey key() const noexcept { return VidPidKey::of(vid, pid); }
 };
 
 }

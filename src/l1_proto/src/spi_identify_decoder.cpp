@@ -36,7 +36,7 @@ void SpiIdentifyDecoder::service() noexcept {
             .dual_sdram = id->dual_sdram(),
             .type_byte = id->type,
             .bind_gen = gen_,
-            .wide = session_.capabilities().width == hal::Width::Word
+            .width = session_.capabilities().width
         }
     );
 }

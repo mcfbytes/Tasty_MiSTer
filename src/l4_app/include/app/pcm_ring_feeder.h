@@ -13,6 +13,7 @@
 #include "cores/core_window.h"
 #include "cores/pcm_feed.h"
 #include "cores/pcm_feed_state.h"
+#include "cores/pcm_ring.h"
 #include "cores/pcm_source.h"
 #include "infra/counter.h"
 #include "infra/error.h"
@@ -22,11 +23,13 @@
 #include "infra/park_timeout.h"
 #include "infra/polled.h"
 #include "infra/pool_slot.h"
+#include "infra/release_latch.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "app/path_text.h"
 #include "app/pcm_command.h"
 #include "os/clock.h"
+#include "os/map_length.h"
 #include "hal/fpga_memory.h"
 #include "hal/boards_table.h"
 
@@ -69,7 +72,12 @@ struct PcmMedia {
     std::optional<hal::FpgaMemory> ring{};
 
     PathText sheet{};
+
+    xthread::ReleaseGen stamp{};
 };
+
+enum class PcmRelease : std::uint8_t { Source, Media };
+using PcmLatch = xthread::BasicReleaseLatch<PcmRelease>;
 
 class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
     TASTY_SEAT_MEDIATOR(Pcm, RT);
@@ -82,11 +90,13 @@ public:
     PcmRingFeeder(
         const os::IClock& clock,
         Commands& commands,
+        xthread::WakeFlag& wake,
         infra::OptRef<const svc::Vfs> vfs
     ) noexcept
         : clock_(clock),
           vfs_(vfs),
-          commands_(commands) {}
+          commands_(commands),
+          latch_(wake) {}
 
     ~PcmRingFeeder() override = default;
 
@@ -118,6 +128,8 @@ public:
 
     void request_park() noexcept;
 
+    [[nodiscard]] bool park_acked() const noexcept { return latch_.released(ticket_); }
+
     [[nodiscard]] Ex<void> attach(hal::FpgaMemory ring, std::string_view sheet) noexcept;
 
     [[nodiscard]] Ex<void> adopt_ring(hal::FpgaMemory&& ring) noexcept;
@@ -126,14 +138,12 @@ public:
 
     [[nodiscard]] bool parked() const noexcept { return parked_.load(std::memory_order_acquire); }
 
-    [[nodiscard]] bool attached() const noexcept {
-        return visible_len_.load(std::memory_order_acquire) != 0;
-    }
+    [[nodiscard]] bool attached() const noexcept { return rings_handed_ != sample_ended_().rings; }
 
     [[nodiscard]] Ex<void> play(svc::TrackNumber track, bool loop) override;
     [[nodiscard]] Ex<void> stop() override;
     [[nodiscard]] Ex<void> resume() override;
-    void observe_read_point(std::uint32_t off) noexcept override;
+    void observe_read_point(cores::PcmRingPoint at) noexcept override;
     [[nodiscard]] cores::PcmFeedState state() const noexcept override;
     [[nodiscard]] bool can_serve() const noexcept override;
 
@@ -172,8 +182,10 @@ private:
     [[nodiscard]] Ex<void> hand_over_(PcmMedia& media) noexcept;
 
     [[nodiscard]] std::optional<PcmMedia> take_media_(xthread::PoolSlot announced) noexcept;
+
+    static constexpr std::uint32_t kPrefillParts = 2;
     void refresh_read_point_() noexcept;
-    void apply_play_(std::uint8_t track, bool loop) noexcept;
+    void apply_play_(svc::TrackNumber track, bool loop) noexcept;
     void fill_() noexcept;
     void release_media_() noexcept;
     void drop_ring_() noexcept;
@@ -184,39 +196,46 @@ private:
 
     [[nodiscard]] std::size_t write_ring_(std::size_t n) noexcept;
 
+    struct Ended {
+        cores::PcmHandovers rings{};
+        cores::PcmHandovers sources{};
+    };
+
+    [[nodiscard]] Ended sample_ended_() const noexcept;
+    [[nodiscard]] bool source_live_() const noexcept;
+
     const os::IClock& clock_;
 
     infra::OptRef<const svc::Vfs> vfs_{};
 
     Commands& commands_;
-    xthread::Telemetry<std::uint32_t, SeatTag::RT> read_point_{};
+    xthread::Telemetry<cores::PcmRingPoint, SeatTag::RT> read_point_{};
     xthread::Telemetry<cores::PcmFeedState, SeatTag::Pcm> state_{};
 
-    enum class Park : std::uint8_t {
-        Idle = 0,
-        Owed = 1,
-        Releasing = 2,
-        SwapOwed = 3,
-        SwapReleasing = 4,
-    };
-    std::atomic<Park> park_{Park::Idle};
-    std::atomic<bool> parked_{true};
+    PcmLatch latch_;
 
     xthread::Counter wakes_{}, drops_{}, discards_{}, passes_{}, misrouted_{}, refused_markers_{};
 
-    std::atomic<std::uint32_t> visible_len_{0};
-
     Media media_{xthread::Polled{}};
 
-    std::uint32_t last_observed_ = 0;
+    cores::PcmHandovers rings_handed_{};
+    cores::PcmHandovers sources_handed_{};
+    os::MapLength handed_len_{};
+    mutable Ended ended_{};
+
+    PcmLatch::Ticket ticket_{};
+
+    cores::PcmRingPoint last_observed_{};
     bool ever_observed_ = false;
 
+    std::atomic<bool> parked_{true};
     std::optional<hal::FpgaMemory> ring_{};
+
+    xthread::ReleaseGen ring_stamp_{};
     std::unique_ptr<cores::IPcmSource> src_{};
-    std::uint32_t ring_len_ = 0;
-    std::uint32_t ring_mask_ = 0;
-    std::uint32_t wr_ = 0;
-    std::uint64_t position_ = 0;
+    cores::PcmRing ring_geom_{};
+    cores::PcmRingPoint wr_{};
+    proto::FileSize position_{};
     cores::PcmExtent extent_{};
     bool playing_ = false;
     bool paused_ = false;
@@ -225,15 +244,18 @@ private:
     bool drained_ = false;
     std::uint32_t served_ = 0;
 
+    cores::PcmHandovers rings_ended_{};
+    cores::PcmHandovers sources_ended_{};
+
     struct Worker {
         TASTY_SEAT_RESIDENT(Pcm);
-        bool swap_taken = false;
+        std::optional<PcmLatch::Taken> taken{};
     };
 
     Worker work_{};
 
     std::uint32_t rp_seen_ = 0;
-    std::uint32_t read_val_ = 0;
+    cores::PcmRingPoint read_val_{};
     std::chrono::nanoseconds drain_until_{0};
     cores::PcmFeedState published_{};
 

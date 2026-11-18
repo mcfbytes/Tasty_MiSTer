@@ -46,7 +46,7 @@ inline constexpr CdTickPeriods kMegaCdTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{10'000},
     .caller = std::chrono::microseconds{10'000},
-    .speeds = 0,
+    .speeds = CdSpeedCount{},
     .speed = {},
 };
 
@@ -190,7 +190,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
 });
 
 inline constexpr StagingPolicy kMegaCdStaging{
-    .order = StageOrder::MegaCd,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kMegaCdSlots),
     .save = SaveMountPolicy{
@@ -214,6 +214,8 @@ inline constexpr CoreProfile kMegaCd{
     .cheats = {.cd_asset_layout = true},
 
     .reset = {.button_reacts = true, .toggle_ejects = true, .remapped = proto::StatusBit{1}},
+
+    .grants = {Grant::Lamp, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_megacd(const CoreProfile& p, const CoreGrant& g);

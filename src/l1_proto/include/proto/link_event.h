@@ -11,6 +11,7 @@
 #include "infra/seat.h"
 #include "hal/types.h"
 #include "infra/spsc_ring.h"
+#include "proto/ps2_control_word.h"
 #include "proto/save_kind.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_shape.h"
@@ -83,8 +84,8 @@ struct LinkEvent {
 
     struct Ps2Control {
         static constexpr Kind kKind = Kind::Ps2Control;
-        std::uint16_t keyboard = 0;
-        std::uint16_t mouse = 0;
+        Ps2ControlWord keyboard{};
+        Ps2ControlWord mouse{};
     };
 
     struct CoreMade {
@@ -100,7 +101,7 @@ struct LinkEvent {
         bool dual_sdram = false;
         hal::CoreTypeByte type_byte{};
         BindGeneration bind_gen{};
-        bool wide = false;
+        hal::Width width = hal::Width::Byte;
         std::uint8_t pad_{};
     };
 
@@ -160,7 +161,7 @@ struct LinkEvent {
         static constexpr Kind kKind = Kind::PolledWord;
         user_io::PollShape shape{};
         std::uint8_t param = 0;
-        std::uint16_t word = 0;
+        hal::SpiWord word{};
         BindGeneration bind_gen{};
         std::uint8_t pad_[2]{};
     };

@@ -12,9 +12,9 @@ class CddaPlayRange {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    void play(HeadLba from, HeadLba disc_end) noexcept {
-        start_ = from;
-        end_ = disc_end;
+    void play(HeadMove window) noexcept {
+        start_ = window.from;
+        end_ = window.to;
     }
 
     void set_end(HeadLba end) noexcept { end_ = end; }

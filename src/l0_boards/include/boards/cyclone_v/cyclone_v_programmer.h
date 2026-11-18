@@ -17,6 +17,7 @@
 #include "hal/fpga_programmer.h"
 #include "os/mmio_region.h"
 #include "hal/phys_region.h"
+#include "hal/reg_access.h"
 #include "hal/register_window.h"
 #include "hal/taken_window.h"
 #include "os/types.h"
@@ -86,6 +87,8 @@ struct FpgaMgr {
 
     static constexpr std::size_t kSize = 0x1000;
 
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
+
     static constexpr std::uint32_t kStatModeMask = 0x7;
     static constexpr std::uint32_t kStatMselMask = 0xF8;
     static constexpr std::uint32_t kStatMselLsb = 3;
@@ -126,6 +129,8 @@ inline constexpr std::array<std::array<CdRatio, 3>, 2> kCdRatioFor{{
 struct FpgaMgrData {
     enum class Reg : std::uint32_t { Data = 0x00 };
     static constexpr std::size_t kSize = 0x1000;
+
+    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::size_t kBurstWords = 8;
 };
 

@@ -28,7 +28,7 @@ struct LwSector {
 
     struct Card {
         proto::SectorBlockDecl::Card decl{};
-        hal::PhysRegion image{};
+        std::optional<hal::ApertureRegion> image{};
     };
 
     hal::RegisterWindow<hal::SectorBlock> regs;
@@ -41,7 +41,7 @@ struct LwSector {
     [[nodiscard]] proto::BlockSlotMask card_slots() const noexcept {
         proto::BlockSlotMask m{};
         for (const Card& c : cards)
-            if (c.image.len != 0)
+            if (c.image)
                 m = m.with(c.decl.slot);
         return m;
     }
@@ -60,7 +60,7 @@ struct LwSector {
         };
         for (std::size_t c = 0; c < g.cards.size(); ++c) {
             const Card& card = cards[c];
-            if (card.image.len == 0)
+            if (!card.image)
                 continue;
             g.cards[c] = SectorCard{
                 .slot = card.decl.slot,

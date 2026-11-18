@@ -17,7 +17,7 @@ namespace {
     std::vector<std::uint8_t> bytes(size.file_word<std::size_t>());
     if (bytes.empty())
         return bytes;
-    if (auto r = svc::read_exact(f, proto::FileSize{}, std::as_writable_bytes(std::span(bytes)));
+    if (auto r = svc::read_exact(f, proto::kFileStart, std::as_writable_bytes(std::span(bytes)));
         !r) {
         return std::unexpected(r.error());
     }
@@ -46,7 +46,7 @@ Ex<std::unique_ptr<svc::IFile>> UefLoader::source(
         return uef::make_tape_file({});
 
     std::array<std::uint8_t, 2> magic{};
-    if (auto r = svc::read_exact(*raw, proto::FileSize{}, std::as_writable_bytes(std::span(magic)));
+    if (auto r = svc::read_exact(*raw, proto::kFileStart, std::as_writable_bytes(std::span(magic)));
         !r) {
         return std::unexpected(r.error());
     }

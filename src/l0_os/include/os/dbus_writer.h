@@ -11,7 +11,7 @@
 #include "infra/seat.h"
 #include "os/dbus_bus_name.h"
 #include "os/dbus_object_path.h"
-#include "os/types.h"
+#include "os/dbus_wire_types.h"
 
 namespace mister::os {
 

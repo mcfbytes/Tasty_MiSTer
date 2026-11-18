@@ -26,17 +26,17 @@ public:
             return MapOffset{phys.v};
         }
 
+        [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+            return Error{code, at, static_cast<std::uint32_t>(v)};
+        }
+
         friend constexpr bool operator==(MapOffset, MapOffset) = default;
 
     private:
         friend class MmioRegion;
 
-        [[nodiscard]] constexpr std::int64_t file_offset() const noexcept {
-            return static_cast<std::int64_t>(v);
-        }
-
-        [[nodiscard]] constexpr std::uint32_t low32() const noexcept {
-            return static_cast<std::uint32_t>(v);
+        [[nodiscard]] void* map_shared(MapLength len, int prot, int fd) const noexcept {
+            return len.map_shared(prot, fd, static_cast<std::int64_t>(v));
         }
     };
 

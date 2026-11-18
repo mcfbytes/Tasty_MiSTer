@@ -74,7 +74,7 @@ private:
     Path ram_path_{};
     hal::FabricAddr load_addr_{};
     std::unique_ptr<svc::IFile> ram_file_{};
-    proto::FileSize ram_off{};
+    proto::FileOffset ram_off{};
     proto::FileSize ram_loaded{};
     bool ram_checked = false;
     std::array<std::uint8_t, kRamStepBytes> ram_buf{};

@@ -15,6 +15,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::os {
 class IClock;
@@ -77,7 +78,7 @@ public:
 
     [[nodiscard]] std::span<const Record> records() const noexcept { return records_; }
 
-    [[nodiscard]] std::uint32_t hidden() const noexcept { return hidden_; }
+    [[nodiscard]] svc::Tally hidden() const noexcept { return hidden_; }
 
     [[nodiscard]] std::uint32_t files_read() const noexcept { return files_read_; }
 
@@ -116,7 +117,7 @@ private:
     std::vector<CoreName> cores_;
     std::vector<Source> sources_;
     std::vector<Record> records_;
-    std::uint32_t hidden_ = 0;
+    svc::Tally hidden_{};
     std::uint32_t files_read_ = 0;
     std::uint32_t rereads_ = 0;
     std::int64_t build_ns_ = 0;

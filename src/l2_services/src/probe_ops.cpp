@@ -217,7 +217,7 @@ Ex<void> ProbeOps::send_yc_(bool force, GeometryPass& pass) {
     if (!pass.changed && !force)
         return {};
 
-    if (auto r = link_.command(hal::ChipSelect::Io, proto::byte(proto::UioOp::SetYcPar)); !r) {
+    if (auto r = link_.command(proto::LinkSel::Io, proto::byte(proto::UioOp::SetYcPar)); !r) {
         return std::unexpected(r.error());
     }
     if (auto r = link_.write_byte(0x00); !r) {

@@ -3,9 +3,15 @@
 
 #include <utility>
 
+#include "hal/types.h"
 #include "proto/user_io/poll_shape.h"
 
 namespace mister::app {
+
+static_assert(
+    proto::user_io::poll_row(proto::user_io::PollShape::InfoPoll).mask == hal::SpiWord{0x00FF},
+    "the info index is the reply's low byte"
+);
 
 std::string_view InfoDecoder::decode(const proto::LinkEvent::PolledWord& w) {
     TASTY_SEAT_BODY(InfoDecoder);
@@ -39,16 +45,16 @@ void InfoDecoder::refresh_() {
 }
 
 std::string_view InfoDecoder::info_text_(const proto::LinkEvent::PolledWord& w) {
-    const unsigned index = w.word & proto::user_io::poll_row(w.shape).mask;
+    const unsigned index = w.word.masked(proto::user_io::poll_row(w.shape).mask).low_byte();
     if (index == 0)
         return {};
     if (w.bind_gen != gen_) {
         ++stale_;
         return {};
     }
-    const std::string_view text = row_.has_value()
-        ? table_.subfield(table_.items()[proto::ItemTable::index_of(*row_)], index)
-        : std::string_view{};
+    const auto rows = table_.table();
+    const std::string_view text = row_.has_value() ? table_.subfield(rows[*row_], index)
+                                                   : std::string_view{};
     if (text.empty()) {
         ++unmapped_;
         return {};

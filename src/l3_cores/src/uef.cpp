@@ -185,16 +185,14 @@ UefTapeFile::UefTapeFile(std::vector<std::uint8_t>&& image) : v{std::make_unique
 
 UefTapeFile::~UefTapeFile() = default;
 
-Ex<std::size_t> UefTapeFile::read_at(std::uint64_t off, std::span<std::byte> dst) {
+Ex<std::size_t> UefTapeFile::read_at(proto::FileOffset pos, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(UefTapeFile);
-    const proto::FileSize at{off};
-    const std::size_t total = v->bits.bytes().file_word<std::size_t>();
-    const std::size_t from = at.file_word<std::size_t>();
-    if (from >= total)
+    const proto::FileSize whole = v->bits.bytes();
+    if (!whole.holds(pos))
         return std::size_t{0};
-    const std::size_t n = std::min(dst.size(), total - from);
+    const std::size_t n = std::min(dst.size(), pos.remaining_in(whole).file_word<std::size_t>());
     for (std::size_t i = 0; i < n; ++i) {
-        const TapeByte byte = TapeByte::at(at.advance(proto::FileSize{i}));
+        const TapeByte byte = TapeByte::at((pos - proto::kFileStart).advance(proto::FileSize{i}));
         OutputByte out{};
         for (const TapeBit bit : byte.bits())
             out.append(level_high(*v, bit) ? kStopBit : kStartBit);
@@ -203,7 +201,7 @@ Ex<std::size_t> UefTapeFile::read_at(std::uint64_t off, std::span<std::byte> dst
     return n;
 }
 
-Ex<std::size_t> UefTapeFile::write_at(std::uint64_t, std::span<const std::byte>) {
+Ex<std::size_t> UefTapeFile::write_at(proto::FileOffset, std::span<const std::byte>) {
     TASTY_SEAT_BODY(UefTapeFile);
     return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 }

@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <optional>
 
+#include "hal/types.h"
+
 namespace mister::proto {
 
 inline void status_bit_out_of_range() noexcept {}
@@ -38,6 +40,8 @@ public:
     [[nodiscard]] constexpr std::uint16_t mask() const noexcept {
         return static_cast<std::uint16_t>(1u << (v_ % kWordBits));
     }
+
+    [[nodiscard]] constexpr hal::SpiWord lane_mask() const noexcept { return hal::SpiWord{mask()}; }
 
     friend constexpr bool operator==(StatusBit, StatusBit) = default;
     friend constexpr auto operator<=>(StatusBit, StatusBit) = default;

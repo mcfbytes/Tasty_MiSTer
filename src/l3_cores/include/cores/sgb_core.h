@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <string_view>
 
 #include "cores/core_support.h"
 #include "cores/mailbox_carriage.h"
@@ -23,10 +22,6 @@ public:
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt&) override { return {}; }
-
-    void on_set_pending_file_ext(std::string_view ext) noexcept override {
-        stream_.set_pending_ext(ext);
-    }
 
     std::uint64_t on_last_tx_bytes() const noexcept override { return stream_.bytes(); }
 

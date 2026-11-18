@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/indexed_span.h"
 #include "proto/item.h"
 #include "proto/text_span.h"
 #include "proto/types.h"
@@ -21,11 +22,11 @@ class ItemTable {
 public:
     [[nodiscard]] static Ex<ItemTable> parse(std::string_view raw);
 
-    [[nodiscard]] static constexpr std::size_t index_of(ItemOrdinal item) noexcept {
-        return item.v;
-    }
-
     [[nodiscard]] std::span<const Item> items() const noexcept { return items_; }
+
+    [[nodiscard]] infra::IndexedSpan<const Item, ItemOrdinal> table() const noexcept {
+        return infra::IndexedSpan<const Item, ItemOrdinal>{items_};
+    }
 
     [[nodiscard]] std::string_view core_name() const noexcept { return text(name_); }
 

@@ -15,7 +15,8 @@ namespace mister::app {
 Ex<LoadWalk> LoadWalk::start(
     std::unique_ptr<cores::ILoader> loader,
     const cores::LoadPlan& plan,
-    std::span<const cores::CoreWindowDecl> windows
+    std::span<const cores::CoreWindowDecl> windows,
+    ContentEdge edge
 ) {
     if (loader == nullptr
         || plan.count > plan.rows.size()
@@ -28,7 +29,7 @@ Ex<LoadWalk> LoadWalk::start(
                 Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(i)}
             );
     }
-    return LoadWalk(std::move(loader), plan, windows);
+    return LoadWalk(std::move(loader), plan, windows, edge);
 }
 
 bool LoadWalk::wants_pass(
@@ -140,11 +141,14 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
             return skip_(r);
         file = std::move(*f);
     }
-    const auto fabric = cores::row_address(r, windows_, h.aperture.phys);
+    const auto fabric = cores::row_address(r, windows_, h.aperture.region.phys);
     if (!fabric)
         return fail_(h);
     const std::uint64_t extent = r.extent_bytes(r.file_len).file_word<std::size_t>();
-    auto w = LoadWindow<seat_owner::Main>::open(h.map, h.aperture, hal::to_phys(*fabric), extent);
+    const std::optional<os::PhysAddr> at = fabric->physical_in(h.aperture);
+    if (!at)
+        return fail_(h);
+    auto w = LoadWindow<seat_owner::Main>::open(h.map, h.aperture, *at, extent);
     if (!w)
         return fail_(h);
     std::optional<LoadWindow<seat_owner::Main>> mirror{};
@@ -173,7 +177,8 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
             .wire_index = r.index,
             .act = act,
             .row = quiet,
-            .mirror = std::move(mirror)
+            .mirror = std::move(mirror),
+            .edge = edge_
         },
         std::move(*w),
         r.source
@@ -212,7 +217,7 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
     std::size_t got = 0;
     while (got < raw.size()) {
         auto n = (*file)->read_at(
-            r.file_offset + got,
+            r.file_offset + proto::FileSize{got},
             std::as_writable_bytes(std::span(raw).subspan(got))
         );
         if (!n || *n == 0)

@@ -27,7 +27,7 @@ enum : uid_t { kKeepOwner = ~uid_t{0} };
 }
 
 [[nodiscard]] Error errno_at(infra::Errno err) noexcept {
-    return err.refused(Errc::os, ERR_SITE());
+    return err.refusal(Errc::os, ERR_SITE());
 }
 
 [[nodiscard]] bool absent_errno(infra::Errno err) noexcept {

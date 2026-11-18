@@ -24,6 +24,7 @@ set(TASTY_CORES_TASTY
   src/addressed_load.cpp
   src/registry.cpp
   src/snes_core.cpp
+  src/snes_loader.cpp
   src/mailbox_carriage.cpp
   src/snes_rom.cpp
   src/msu_machine.cpp
@@ -32,24 +33,6 @@ set(TASTY_CORES_TASTY
   src/msu_data_loader.cpp
   src/servant_id.cpp
   src/disk_servant.cpp
-  src/movie_archive.cpp
-  src/json_flatten.cpp
-  src/bk2_log.cpp
-  src/bk2_text.cpp
-  src/movie_codec.cpp
-  src/movie_lines.cpp
-  src/movie_rom_match.cpp
-  src/movie_system.cpp
-  src/nes_movie_codec.cpp
-  src/nes_bk2_codec.cpp
-  src/rom_digest.cpp
-  src/ram_image.cpp
-  src/snes_movie_codec.cpp
-  src/snes_lsmv_codec.cpp
-  src/snes_bk2_codec.cpp
-  src/megadrive_movie_codec.cpp
-  src/psx_movie_codec.cpp
-  src/psx_disc_key.cpp
   src/manifests/megadrive.cpp
   src/manifests/psx.cpp
   src/manifests/snes.cpp
@@ -83,7 +66,6 @@ set(TASTY_CORES_EXTRA
   src/electron_core.cpp
   src/host_file_sandbox.cpp
   src/mailbox_window.cpp
-  src/minimig_core.cpp
   src/mra_doc.cpp
   src/mra_stager.cpp
   src/n64_cheat_engine.cpp
@@ -116,6 +98,7 @@ set(TASTY_CORES_EXTRA
   src/romsets.cpp
   src/st_config.cpp
   src/st_core.cpp
+  src/st_loader.cpp
   src/st_media_ladder.cpp
   src/st_option_row.cpp
   src/threedo_cdd_engine.cpp
@@ -135,7 +118,31 @@ set(TASTY_CORES_EXTRA
 add_library(mister_cores STATIC ${TASTY_CORES_TASTY} ${TASTY_CORES_EXTRA})
 target_include_directories(mister_cores PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_cores
-  PUBLIC mister_services
+  PUBLIC mister_svc mister_svc_input mister_svc_disc mister_svc_video mister_proto_link
+  PRIVATE tasty_options)
+
+add_library(mister_cores_tas STATIC
+  src/movie_archive.cpp
+  src/json_flatten.cpp
+  src/bk2_log.cpp
+  src/bk2_text.cpp
+  src/movie_codec.cpp
+  src/movie_lines.cpp
+  src/movie_rom_match.cpp
+  src/movie_system.cpp
+  src/nes_movie_codec.cpp
+  src/nes_bk2_codec.cpp
+  src/rom_digest.cpp
+  src/ram_image.cpp
+  src/snes_movie_codec.cpp
+  src/snes_lsmv_codec.cpp
+  src/snes_bk2_codec.cpp
+  src/megadrive_movie_codec.cpp
+  src/psx_movie_codec.cpp
+  src/psx_disc_key.cpp
+)
+target_link_libraries(mister_cores_tas
+  PUBLIC mister_cores
   PRIVATE tasty_options)
 
 target_compile_definitions(mister_cores PRIVATE TASTY_VDATE="${TASTY_VDATE}")
@@ -161,7 +168,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/neogeo_file_index.h
   cores/snes_cart_type.h
   cores/st_ctrl.h
-  cores/wire_word.h
   cores/addressed_load.h
   cores/generic_profile.h
   cores/acsi_servant.h
@@ -208,6 +214,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/mount_state.h
   cores/save_extent.h
   cores/save_copy_level.h
+  cores/stream_ask.h
   cores/stream_load.h
   cores/stream_load_bracket.h
   cores/stream_load_end.h
@@ -248,6 +255,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/file_slot.h
   cores/fio_cheat_sink.h
   cores/generic_core.h
+  cores/grant_set.h
   cores/init_step.h
   cores/stock_scan.h
   cores/host_file_sandbox.h
@@ -263,7 +271,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/megadrive_core.h
   cores/owed_answer.h
   cores/md5.h
-  cores/minimig_core.h
   cores/mounted_path.h
   cores/mra_cheat.h
   cores/mra_cheat_records.h
@@ -305,6 +312,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_memory_type.h
   cores/save_row_count.h
   cores/save_rows.h
+  cores/save_probe_rows.h
   cores/n64_saves.h
   cores/n64_path.h
   cores/n64dd_disk_map.h
@@ -346,6 +354,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/post_notify.h
   cores/pcm_feed.h
   cores/pcm_feed_state.h
+  cores/pcm_handovers.h
+  cores/pcm_ring.h
   cores/pcm_source.h
   cores/pcm_wire_rows.h
   cores/psx_core.h
@@ -393,6 +403,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/service_tick_row.h
   cores/signature_row.h
   cores/snes_core.h
+  cores/snes_loader.h
+  cores/snes_rom_file.h
   cores/sgb_core.h
   cores/mailbox_carriage.h
   cores/snes_header_fields.h
@@ -410,6 +422,93 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/companion_ask.h
   cores/companion_plan.h
   cores/companion_load.h
+  cores/st_config.h
+  cores/st_config_layout.h
+  cores/st_core.h
+  cores/st_loader.h
+  cores/st_media_fact.h
+  cores/st_media_ladder.h
+  cores/st_option_row.h
+  cores/st_sysctrl.h
+  cores/stage_plan.h
+  cores/staging_core.h
+  cores/staging_policy.h
+  cores/switch_table.h
+  cores/threedo_cdd_engine.h
+  cores/poll_ticks.h
+  cores/types.h
+  cores/progress.h
+  cores/uef.h
+  cores/uef_loader.h
+  cores/uef_tape_file.h
+  cores/wav_data.h
+  cores/manifests/electron.h
+  cores/manifests/megacd.h
+  cores/manifests/megadrive.h
+  cores/manifests/n64.h
+  cores/manifests/neogeo.h
+  cores/manifests/pce.h
+  cores/manifests/psx.h
+  cores/manifests/snes.h
+  cores/manifests/st.h
+  cores/manifests/threedo.h
+  cores/manifests/saturn.h
+  cores/manifests/cdi.h
+  cores/role_row.h
+  cores/baud_halves.h
+  cores/bootcode_sum.h
+  cores/cd_drive_state.h
+  cores/cd_speed_count.h
+  cores/companion.h
+  cores/config_codec.h
+  cores/config_slot_count.h
+  cores/core_adopt.h
+  cores/core_window_decl.h
+  cores/core_window_grant.h
+  cores/descriptor_io.h
+  cores/dip_setting.h
+  cores/file_tx.h
+  cores/halfword_swap.h
+  cores/host_policy.h
+  cores/ladder_carry.h
+  cores/ladder_pc.h
+  cores/load_progress.h
+  cores/manifests/uneon.h
+  cores/manifests/x86.h
+  cores/mra_lane_writes.h
+  cores/mra_unit_len.h
+  cores/n64_detect_flags.h
+  cores/n64_ntsc_cadence.h
+  cores/n64_option_view.h
+  cores/n64_pass_kind.h
+  cores/n64_ram_save_order.h
+  cores/n64_rom_facts.h
+  cores/n64_row_pass.h
+  cores/n64_system_type.h
+  cores/nvram_save.h
+  cores/option_row.h
+  cores/option_row_view.h
+  cores/option_rows.h
+  cores/pause_on_osd.h
+  cores/progress_ticker.h
+  cores/q_control.h
+  cores/reset_row.h
+  cores/romset_alias_source.h
+  cores/romset_index.h
+  cores/row_cursor.h
+  cores/row_shape_key.h
+  cores/save_digit.h
+  cores/save_store_column.h
+  cores/save_word_reverse.h
+  cores/sector_io.h
+  cores/st_options.h
+  cores/st_slot.h
+  cores/start_rule.h
+  cores/subcode_q_frame.h
+  cores/toc_point.h
+  cores/wire_chunk.h
+)
+tasty_add_header_checks(tasty_cores_tas_header_checks LIB mister_cores_tas HEADERS
   cores/bk2_column.h
   cores/bk2_columns.h
   cores/bk2_log.h
@@ -443,37 +542,11 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/psx_movie_codec.h
   cores/psx_bk2_format.h
   cores/psx_disc_key.h
-  cores/st_config.h
-  cores/st_config_layout.h
-  cores/st_core.h
-  cores/st_media_fact.h
-  cores/st_media_ladder.h
-  cores/st_option_row.h
-  cores/st_sysctrl.h
-  cores/stage_plan.h
-  cores/staging_core.h
-  cores/staging_policy.h
-  cores/switch_table.h
-  cores/threedo_cdd_engine.h
-  cores/poll_ticks.h
-  cores/types.h
-  cores/progress.h
-  cores/uef.h
-  cores/uef_loader.h
-  cores/uef_tape_file.h
-  cores/wav_data.h
-  cores/manifests/electron.h
-  cores/manifests/megacd.h
-  cores/manifests/megadrive.h
-  cores/manifests/n64.h
-  cores/manifests/neogeo.h
-  cores/manifests/pce.h
-  cores/manifests/psx.h
-  cores/manifests/snes.h
-  cores/manifests/st.h
-  cores/manifests/threedo.h
-  cores/manifests/saturn.h
-  cores/manifests/cdi.h
-  cores/role_row.h
 )
+
+add_library(mister_cores_minimig STATIC src/minimig_core.cpp)
+target_include_directories(mister_cores_minimig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(mister_cores_minimig PUBLIC mister_cores PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_minimig_header_checks LIB mister_cores_minimig HEADERS
+  cores/minimig_core.h)
 

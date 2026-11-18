@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "cores/stream_ask.h"
 #include "cores/stream_load_end.h"
 #include "cores/types.h"
 #include "infra/error.h"
@@ -14,7 +15,7 @@ enum class StreamLoadKind : std::uint8_t { Stream, Window };
 
 class IStreamLoad {
 public:
-    [[nodiscard]] virtual Ex<proto::SessionParams> stream_opening(IoIndex index) = 0;
+    [[nodiscard]] virtual Ex<proto::SessionParams> stream_opening(const StreamAsk& ask) = 0;
 
     virtual void stream_closed(const StreamLoadEnd& end) noexcept = 0;
 

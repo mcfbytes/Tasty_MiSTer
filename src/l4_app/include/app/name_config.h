@@ -16,6 +16,8 @@ class Vfs;
 
 namespace mister::app {
 
+class UiWriteLane;
+
 class NameConfig {
     TASTY_SEAT_RESIDENT(Ui);
 
@@ -23,8 +25,9 @@ public:
     static constexpr std::size_t kPathBlob = kRememberedBlob;
     static constexpr std::size_t kCidLen = 32;
 
-    explicit NameConfig(const svc::Vfs& vfs, std::string cid_path)
+    NameConfig(const svc::Vfs& vfs, UiWriteLane& writes, std::string cid_path)
         : vfs_(&vfs),
+          writes_(&writes),
           cid_path_(static_cast<std::string&&>(cid_path)) {}
 
     static std::string card_cid_path(std::string_view sd_block);
@@ -43,6 +46,7 @@ public:
 
 private:
     const svc::Vfs* vfs_;
+    UiWriteLane* writes_;
     std::string cid_path_;
 };
 

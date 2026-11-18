@@ -5,12 +5,12 @@
 #include <algorithm>
 #include <utility>
 
+#include "infra/indexed_array.h"
 #include "infra/path_parts.h"
 
 namespace mister::cores::n64 {
 
-SaveChannel::SaveChannel(const svc::Vfs& vfs, infra::OptRef<xthread::WakeFlag> activity) noexcept
-    : io_(vfs, activity) {}
+SaveChannel::SaveChannel(infra::OptRef<svc::IStorageBackend> store) noexcept : store_port_(store) {}
 
 Ex<void> SaveChannel::plan(
     const ILayoutKeySource& live,
@@ -90,10 +90,15 @@ infra::OptRef<const ISaveChannel::MountPlan> SaveChannel::mount_plan() const noe
 Ex<ISaveChannel::Mount> SaveChannel::mount_at(SaveRow row) {
     TASTY_SEAT_BODY(SaveChannel);
     const auto order = orders_.find(row);
-    if (!store_.has_value() || !order || row.v >= store_->partitions().size()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), detail_of(row)});
+    if (!store_.has_value()
+        || !order
+        || !SaveRowCount::of(
+                std::min<std::size_t>(store_->partitions().size(), MountPlan::kMaxMounts)
+        )
+                .contains(row)) {
+        return std::unexpected(row.refusal(Errc::slot_range, ERR_SITE()));
     }
-    const SavePartition& p = store_->partitions()[row.v];
+    const SavePartition& p = infra::at_index(store_->partitions(), row);
     auto path = store_->path_for(p.name);
     if (!path) {
         ++name_refusals_;
@@ -124,10 +129,10 @@ Ex<ISaveChannel::Mount> SaveChannel::mount_at(SaveRow row) {
     return m;
 }
 
-svc::IStorageBackend& SaveChannel::backend() noexcept {
+infra::OptRef<svc::IStorageBackend> SaveChannel::backend() noexcept {
     TASTY_SEAT_BODY(SaveChannel);
 
-    return io_;
+    return store_port_;
 }
 
 std::span<const std::byte> SaveChannel::compose_order(SaveRow row, OrderPart part) noexcept {

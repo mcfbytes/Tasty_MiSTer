@@ -108,29 +108,43 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
     BuiltCore& slot = *lease;
 
     const cores::CoreProfile& profile = cores::profile_for(ask.name, hint);
+    if (row && row->make_save_store != nullptr)
+        slot.save_store = row->make_save_store(*terms_.vfs, terms_.disk_activity);
+
+    if (profile.saves_by_channel && slot.save_store == nullptr) {
+        drop_unbuilt_sector_();
+        return {.outcome = Built::Refused, .err = Errc::contract};
+    }
 
     if (!claimed && ask.fabric)
         grant_sector_(ask.irqs, ask.lw, profile, ask.fabric_gen);
+    slot.routes.pads = grant_pads_(ask.lw);
 
-    const RtRows rt = rt_rows(ask.irqs, ask.lw, unbuilt_cause_());
-    slot.lines = open_doorbells(source_(), terms_.doorbells, rt.table());
-    slot.pads = grant_pads_(ask.lw);
+    const cores::GrantSet grants = profile.grants;
+    infra::OptRef<svc::DiscReadService> discs{};
+    if (grants.has(cores::Grant::Discs)) {
+        discs = terms_.discs ? terms_.discs
+                             : infra::OptRef<svc::DiscReadService>{terms_.unbound_discs};
+    }
     const cores::HostServices services{
-        *terms_.vfs,
-        terms_.link,
-        terms_.clock,
-        terms_.prefetch,
-        infra::OptRef<proto::IImageSink>{terms_.bulk},
-        adopt_windows(slot, grant_windows(profile)),
-        terms_.discs ? terms_.discs : infra::OptRef<svc::DiscReadService>{terms_.unbound_discs},
-        infra::OptRef<proto::SpiFioQueue>{terms_.fio_queue},
-        terms_.mailbox,
-        terms_.save_copy,
-        terms_.disk,
-        terms_.lamp,
-        terms_.disk_activity,
+        .link = terms_.link,
+        .clock = terms_.clock,
+        .prefetch = terms_.prefetch,
+        .bulk = infra::OptRef<proto::IImageSink>{terms_.bulk},
+        .windows = adopt_windows(slot, grant_windows(profile)),
+        .discs = discs,
+        .fio_queue = infra::OptRef<proto::SpiFioQueue>{terms_.fio_queue},
+        .mailbox = grants.has(cores::Grant::Mailbox) ? terms_.mailbox
+                                                     : infra::OptRef<cores::IMailboxPort>{},
+        .save_copy = grants.has(cores::Grant::SaveCopy)
+            ? terms_.save_copy
+            : infra::OptRef<const cores::SaveCopyCell>{},
+        .disk = grants.has(cores::Grant::Disk) ? terms_.disk : infra::OptRef<cores::IDiskPort>{},
+        .lamp = grants.has(cores::Grant::Lamp) ? terms_.lamp : infra::OptRef<hal::DiskLamp>{},
+        .disk_activity = terms_.disk_activity,
+        .save_store = infra::opt_ref_of(slot.save_store.get())
     };
-    const cores::CoreGrant grant{services, ask.manifest};
+    const cores::CoreGrant grant{*terms_.vfs, services, ask.manifest};
     slot.core = row ? row->make(profile, grant) : cores::make_generic(profile, grant);
     const proto::CoreBaySlot at = xthread::index_as<proto::CoreBaySlot>(*bay_.index_of(&slot));
 
@@ -151,18 +165,18 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
         grant_sys_(ask.irqs, ask.lw, ask.fabric_gen, gen_);
     lane_ = slot.core ? find_lane_(ask.lw) : std::nullopt;
 
-    slot.osd_pages = slot.core && osd_.built_as(gen_) ? OsdPageRoute::Lw : OsdPageRoute::Link;
+    slot.routes.osd = slot.core && osd_.built_as(gen_) ? OsdPageRoute::Lw : OsdPageRoute::Link;
 
-    slot.lw_slots = slot.core && sector_.built_as(gen_) ? sector_.held()->bridge_slots()
-                                                        : proto::BlockSlotMask{};
+    slot.routes.lw_slots = slot.core && sector_.built_as(gen_) ? sector_.held()->bridge_slots()
+                                                               : proto::BlockSlotMask{};
 
-    slot.status_route = slot.core && sys_.built_as(gen_) ? StatusRoute::Lw : StatusRoute::Link;
+    slot.routes.status = slot.core && sys_.built_as(gen_) ? StatusRoute::Lw : StatusRoute::Link;
 
-    slot.block_poll = block_poll_route(
+    slot.routes.block_poll = block_poll_route(
         ask.mount_slots.united(profile_slot_mask(profile)),
-        slot.lw_slots
+        slot.routes.lw_slots
     );
-    if (slot.block_poll == BlockPollRoute::Retired)
+    if (slot.routes.block_poll == BlockPollRoute::Retired)
         ++counts_.poll_retirements;
     publish_counts_();
     held_[at] = std::move(lease);
@@ -176,7 +190,7 @@ void CoreBuilder::forget(const proto::LinkOp::AdoptCore& op) noexcept {
     if (!held_[at] || held_[at]->gen != op.gen)
         return;
 
-    if (held_[at]->block_poll == BlockPollRoute::Retired)
+    if (held_[at]->routes.block_poll == BlockPollRoute::Retired)
         --counts_.poll_retirements;
     free_(at);
 }
@@ -212,9 +226,7 @@ void CoreBuilder::drop_windows(const ParkReceipt&) noexcept {
         for (auto& w : l->windows)
             w.reset();
         l->fed_ring.reset();
-
-        l->lines = DoorbellLines{};
-        l->pads.reset();
+        l->routes.pads.reset();
     }
     dir_reads_ = {};
     lane_.reset();
@@ -300,7 +312,7 @@ Ex<CoreBuilder::Directory> CoreBuilder::read_directory(
         os::MapLength{lw_image.empty() ? lw_window.len : lw_image.size_bytes()}
     );
     if (!may_carry_pads(decl) || !window || !decl.offset.fits(*window, decl.size)) {
-        return std::unexpected(decl.offset.refused(Errc::aperture_range, ERR_SITE()));
+        return std::unexpected(decl.offset.refusal(Errc::aperture_range, ERR_SITE()));
     }
     auto win = discovered(lw_window, lw_image, decl);
     if (!win)
@@ -325,30 +337,11 @@ bool CoreBuilder::fabric_owned(
     const proto::IrqBinding& b,
     std::span<const proto::AxiLwDecl> lw
 ) noexcept {
-    if (b.klass != reactor::Cause::Blk || b.cause_base == hal::LwOffset{})
+    if (b.klass != proto::IrqClass::Blk || b.cause_base == hal::LwOffset{})
         return false;
     return std::ranges::any_of(lw, [&b](const proto::AxiLwDecl& d) noexcept {
         return may_carry_pads(d) && d.holds(b.cause_base);
     });
-}
-
-CoreBuilder::RtRows CoreBuilder::rt_rows(
-    std::span<const proto::IrqBinding> irqs,
-    std::span<const proto::AxiLwDecl> lw,
-    std::optional<hal::LwOffset> owned
-) noexcept {
-    RtRows rt{};
-    for (const proto::IrqBinding& b : irqs) {
-        if (owned && b.cause_base == *owned && fabric_owned(b, lw))
-            continue;
-        const std::size_t row = rt.count.size();
-        if (row < rt.rows.size()) {
-            rt.rows[row] = b;
-            rt.count = rt.count.next();
-        }
-        rt.declared = rt.declared.next();
-    }
-    return rt;
 }
 
 std::optional<hal::LwOffset> CoreBuilder::claim_sector(const Claim& c) noexcept {
@@ -449,14 +442,10 @@ std::array<LwSector::Card, proto::SectorBlockDecl::kCards> CoreBuilder::grant_ca
     return cards;
 }
 
-Ex<hal::PhysRegion> CoreBuilder::card_region_(
+Ex<hal::ApertureRegion> CoreBuilder::card_region_(
     const proto::SectorBlockDecl::Card& card
 ) const noexcept {
-    auto region = hal::resolve_load_region(terms_.aperture.region, card.wsrc, card.extent.bytes());
-    if (!region)
-        return std::unexpected(region.error());
-    region->name = "lw-card-image";
-    return *region;
+    return terms_.aperture.resolve(card.wsrc, card.extent.bytes(), "lw-card-image");
 }
 
 Ex<LwSector> CoreBuilder::grant_sector(
@@ -467,15 +456,16 @@ Ex<LwSector> CoreBuilder::grant_sector(
     hal::IDoorbellSource& src,
     const hal::DoorbellPolicy& policy
 ) noexcept {
-    auto block = proto::find_sector_block(dir.image, decl.size);
-    if (!block)
-        return std::unexpected(block.error());
+    auto found = proto::find_sector_block(dir.image, decl.size);
+    if (!found)
+        return std::unexpected(found.error());
+    const proto::SectorBlockDecl& block = found->block;
 
-    if (block->slot != program.slot() || block->frame_bytes() != program.frame_bytes()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), block->frame_words});
+    if (block.slot != program.slot() || block.frame_bytes() != program.frame_bytes()) {
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), block.frame_words});
     }
 
-    const hal::LwOffset at = decl.offset.plus(block->offset);
+    const hal::LwOffset at = decl.offset.plus(block.offset);
     const proto::IrqBinding* row = nullptr;
     for (const proto::IrqBinding& b : irqs) {
         if (b.cause_base == at && fabric_owned(b, std::span<const proto::AxiLwDecl>(&decl, 1))) {
@@ -483,19 +473,24 @@ Ex<LwSector> CoreBuilder::grant_sector(
             break;
         }
     }
-    if (block->cause != at || row == nullptr) {
-        return std::unexpected(block->cause.refused(Errc::dt_missing, ERR_SITE()));
+    if (block.cause != at || row == nullptr) {
+        return std::unexpected(block.cause.refusal(Errc::dt_missing, ERR_SITE()));
+    }
+
+    const proto::BlockLine owner{.line = row->line, .cause = block.cause};
+    if (!found->declared.agrees(owner)) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), found->declared.cause_off});
     }
 
     if (!policy.line_in_pool(row->line)) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), os::to_ordinal(row->line)});
     }
-    auto regs = dir.win.map<hal::SectorBlock>(block->offset);
+    auto regs = dir.win.map<hal::SectorBlock>(block.offset);
     if (!regs)
         return std::unexpected(regs.error());
 
-    const std::uint32_t want = block->version.is_base_minor() ? hal::SectorBlock::kId
-                                                              : hal::SectorBlock::kIdV2;
+    const std::uint32_t want = block.version.is_base_minor() ? hal::SectorBlock::kId
+                                                             : hal::SectorBlock::kIdV2;
     if (const std::uint32_t id = regs->read(hal::SectorBlock::Reg::Id); id != want) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), id});
     }
@@ -505,7 +500,7 @@ Ex<LwSector> CoreBuilder::grant_sector(
     return LwSector{
         .regs = std::move(*regs),
         .line = std::move(*line),
-        .block = *block,
+        .block = block,
         .program = infra::OptRef<const svc::ISectorProgram>{program}
     };
 }
@@ -607,7 +602,7 @@ void CoreBuilder::grant_sys_(
         auto got = grant_sys(hit->dir, hit->decl, source_(), terms_.doorbells, irqs);
         if (!got)
             continue;
-        pin_sys_line_(got->block.line);
+        pin_sys_line_(got->block.line.line);
         sys_.install(LwLendKey{}, std::move(*got), LwGrantStamp::built_as(gen, fabric_gen));
         ++counts_.sys_grants;
         return;
@@ -622,35 +617,42 @@ Ex<LwSys> CoreBuilder::grant_sys(
     const hal::DoorbellPolicy& policy,
     std::span<const proto::IrqBinding> taken
 ) noexcept {
-    auto block = proto::find_sys_block(dir.image, decl.size);
-    if (!block)
-        return std::unexpected(block.error());
+    auto found = proto::find_sys_block(dir.image, decl.size);
+    if (!found)
+        return std::unexpected(found.error());
+    const proto::SysBlockDecl& block = found->block;
 
-    const hal::LwOffset at = decl.offset.plus(block->offset);
-    if (block->cause != at) {
-        return std::unexpected(block->cause.refused(Errc::dt_missing, ERR_SITE()));
+    const hal::LwOffset at = decl.offset.plus(block.offset);
+    if (block.line.cause != at) {
+        return std::unexpected(block.line.cause.refusal(Errc::dt_missing, ERR_SITE()));
     }
-    if (!policy.line_in_pool(block->line)) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), os::to_ordinal(block->line)});
+
+    if (!found->declared.agrees(block.line)) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), found->declared.cause_off});
+    }
+    if (!policy.line_in_pool(block.line.line)) {
+        return std::unexpected(
+            Error{Errc::slot_range, ERR_SITE(), os::to_ordinal(block.line.line)}
+        );
     }
 
     if (std::ranges::any_of(taken, [&](const proto::IrqBinding& b) {
-            return b.line == block->line;
+            return b.line == block.line.line;
         })) {
         return std::unexpected(
-            Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(block->line)}
+            Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(block.line.line)}
         );
     }
-    auto regs = dir.win.map<hal::SysBlock>(block->offset);
+    auto regs = dir.win.map<hal::SysBlock>(block.offset);
     if (!regs)
         return std::unexpected(regs.error());
     if (const std::uint32_t id = regs->read(hal::SysBlock::Reg::Id); id != hal::SysBlock::kId) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), id});
     }
-    auto line = src.open_line(block->line);
+    auto line = src.open_line(block.line.line);
     if (!line)
         return std::unexpected(line.error());
-    return LwSys{.regs = std::move(*regs), .line = std::move(*line), .block = *block};
+    return LwSys{.regs = std::move(*regs), .line = std::move(*line), .block = block};
 }
 
 void CoreBuilder::pin_sys_line_(os::UioLine line) noexcept {
@@ -663,7 +665,7 @@ void CoreBuilder::pin_sys_line_(os::UioLine line) noexcept {
         std::ssize(name),
         "{}{}",
         terms_.doorbell_nodes.node_prefix,
-        os::to_ordinal(line) + proto::kIrqPoolFirstLine
+        terms_.doorbell_nodes.f2h_of(line).text().view()
     );
     if (written.size >= std::ssize(name)) {
         ++counts_.sys_pin_refusals;
@@ -685,47 +687,6 @@ void CoreBuilder::count_lease_hold(bool long_hold) noexcept {
         ++counts_.lease_holds;
     }
     publish_counts_();
-}
-
-DoorbellLines CoreBuilder::open_doorbells(
-    hal::IDoorbellSource& src,
-    const hal::DoorbellPolicy& policy,
-    std::span<const proto::IrqBinding> irqs
-) noexcept {
-    DoorbellLines lines{};
-    const std::size_t n = std::min(irqs.size(), kMaxDoorbellRows);
-    lines.count = n;
-    for (std::size_t i = 0; i < n; ++i) {
-        const proto::IrqBinding& b = irqs[i];
-        DoorbellLines::Line& line = lines.rows[i];
-        line.binding = b;
-
-        if (!policy.line_in_pool(b.line)) {
-            line.gate = Errc::slot_range;
-            continue;
-        }
-
-        if (b.cause_base != hal::LwOffset{}
-            && !policy.cause_in_aperture(b.cause_base, hal::CauseReg::kSize)) {
-            line.gate = Errc::bad_format;
-            continue;
-        }
-        auto uio = src.open_line(b.line);
-        if (!uio) {
-            line.why = uio.error().code;
-            continue;
-        }
-        if (b.cause_base != hal::LwOffset{}) {
-            auto w = src.map_cause(b.cause_base);
-            if (!w) {
-                line.why = w.error().code;
-                continue;
-            }
-            line.cause.emplace(std::move(*w));
-        }
-        line.handle = std::move(*uio);
-    }
-    return lines;
 }
 
 CoreBuilder::GrantedWindows CoreBuilder::grant_windows(const cores::CoreProfile& profile) noexcept {
@@ -788,15 +749,11 @@ std::uint32_t CoreBuilder::leased() const noexcept {
 void CoreBuilder::free_(proto::CoreBaySlot slot) noexcept {
     BuiltCore& b = *held_[slot];
     b.core.reset();
+    b.save_store.reset();
     for (auto& w : b.windows)
         w.reset();
     b.fed_ring.reset();
-    b.lines = DoorbellLines{};
-    b.pads.reset();
-    b.osd_pages = OsdPageRoute::Link;
-    b.lw_slots = {};
-    b.status_route = StatusRoute::Link;
-    b.block_poll = BlockPollRoute::Link;
+    b.routes = SessionRoutes{};
     b.gen = 0;
     held_[slot].reset();
     ++counts_.frees;

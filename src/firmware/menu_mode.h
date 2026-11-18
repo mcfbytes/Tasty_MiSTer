@@ -55,7 +55,7 @@ public:
 
     void disarm_stop_signals() noexcept override;
     void storage_ready(svc::Vfs& vfs) override;
-    [[nodiscard]] Ex<void> before_boot(app::LinkSession& session) override;
+    [[nodiscard]] Ex<void> before_boot(app::SessionOwner& owner) override;
     [[nodiscard]] infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner& owner
     ) const noexcept override;

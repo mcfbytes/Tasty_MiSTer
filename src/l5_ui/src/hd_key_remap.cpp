@@ -116,6 +116,7 @@ constexpr auto kPadBack = std::to_array<PadBackRow>({
     {Transition::Kind::Leave, PadBack::Back},
     {Transition::Kind::ChooseHdStyle, PadBack::BackDropped},
     {Transition::Kind::ChooseClassicStyle, PadBack::Back},
+    {Transition::Kind::EnterClassic, PadBack::BackDropped},
 });
 static_assert(infra::rows_are_ordinal(kPadBack), "every Transition kind names its pad-B answer");
 

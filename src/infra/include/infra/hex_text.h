@@ -19,6 +19,22 @@ public:
             upper_case();
     }
 
+    template <std::unsigned_integral I>
+    [[nodiscard]] static HexText zero_padded(I n, HexCase letter_case = HexCase::Lower) noexcept {
+        constexpr std::size_t kNibblesPerByte = 2;
+        constexpr std::size_t kDigits = kNibblesPerByte * sizeof(I);
+        HexText t{n, letter_case};
+        std::size_t len = 0;
+        while (t.buf_[len] != '\0')
+            ++len;
+        const std::size_t pad = kDigits - len;
+        for (std::size_t i = len; i-- > 0;)
+            t.buf_[i + pad] = t.buf_[i];
+        for (std::size_t i = 0; i < pad; ++i)
+            t.buf_[i] = '0';
+        return t;
+    }
+
     [[nodiscard]] const char* c_str() const noexcept { return buf_.data(); }
 
 private:

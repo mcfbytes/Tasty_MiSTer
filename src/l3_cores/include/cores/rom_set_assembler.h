@@ -91,7 +91,7 @@ private:
     [[nodiscard]] bool scatter(std::span<const std::uint8_t> src, MapWord map);
     [[nodiscard]] bool stream_file(
         const std::string& fname,
-        std::uint32_t crc,
+        svc::Crc32 crc,
         std::optional<RomOffset> start,
         std::optional<RomLength> length,
         MapWord map

@@ -4,7 +4,7 @@
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
-#include "proto/declared_line.h"
+#include "proto/block_line.h"
 #include "proto/op_bitmap.h"
 #include "proto/sys_directory_image.h"
 
@@ -15,8 +15,9 @@ struct PadBlockDecl {
     hal::LwOffset offset{};
     hal::LwExtent size{};
     OpBitmap ops{};
-    DeclaredLine line{};
 };
+
+static_assert(line_source(DirEntryKind::Pad) == LineFrom::None, "a PAD entry declares no line");
 
 [[nodiscard]] Ex<PadBlockDecl> find_pad_block(
     const SysDirectoryImage& dir,

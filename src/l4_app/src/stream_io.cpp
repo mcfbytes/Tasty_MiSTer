@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/stream_io.h"
 
-#include "infra/path_parts.h"
-
 namespace mister::app {
 
 [[nodiscard]] Ex<StreamFile> stream_open(
@@ -10,13 +8,6 @@ namespace mister::app {
     std::string_view rel,
     svc::OpenMode mode
 ) {
-    if (!svc::opens_read_only(mode) && mode != svc::OpenMode::ReadWrite) {
-
-        if (const std::optional<std::string_view> dir = infra::nested_dir(rel)) {
-            if (auto r = vfs.ensure_dir(*dir); !r)
-                return std::unexpected(r.error());
-        }
-    }
     auto f = vfs.open(rel, mode);
     if (!f)
         return std::unexpected(f.error());
@@ -29,14 +20,14 @@ namespace mister::app {
 namespace {
 
 template <class Buf, class Io>
-[[nodiscard]] Ex<void> pump(proto::FileSize off, Buf buf, Errc stalled, Io io) {
-    proto::FileSize at = off;
+[[nodiscard]] Ex<void> pump(proto::FileOffset off, Buf buf, Errc stalled, Io io) {
+    proto::FileOffset at = off;
     while (!buf.empty()) {
-        auto n = io(at.v, buf);
+        auto n = io(at, buf);
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0) {
-            return std::unexpected(Error{stalled, ERR_SITE(), static_cast<std::uint32_t>(at.v)});
+            return std::unexpected(at.refusal(stalled, ERR_SITE()));
         }
         buf = buf.subspan(*n);
         at += proto::FileSize{*n};
@@ -45,17 +36,17 @@ template <class Buf, class Io>
 }
 }
 
-[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileSize off, std::span<std::byte> dst) {
+[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileOffset off, std::span<std::byte> dst) {
     return pump(off, dst, Errc::short_read, [&f](auto at, auto rest) {
         return f.read_at(at, rest);
     });
 }
 
 Ex<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size) {
-    std::vector<std::uint8_t> buf(static_cast<std::size_t>(size.v));
+    std::vector<std::uint8_t> buf = size.zeroed<std::vector<std::uint8_t>>();
     if (auto r = stream_read(
             f,
-            proto::FileSize{},
+            proto::kFileStart,
             std::as_writable_bytes(std::span<std::uint8_t>(buf))
         );
         !r) {

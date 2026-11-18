@@ -7,7 +7,6 @@
 
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
-#include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_row.h"
 #include "ui/page_walk.h"

@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <memory>
 
 #include "app/front_end_logo.h"
 #include "app/hd_look_ini.h"
 #include "hal/fpga_memory.h"
+#include "hal/board_regions.h"
 #include "hal/scaler_buffers.h"
 #include "infra/park_fds.h"
 #ifdef TASTY_HAVE_HDOSD
@@ -37,14 +39,19 @@ std::optional<app::HdRenderer::Frame> HdOsdBlock::map_frame_(
     if (!std::ranges::all_of(rasters, [](const auto& r) { return r != nullptr; })) {
         return std::nullopt;
     }
-    const auto region = hal::declared_region(plat.regions, hal::RegionId::VideoFb);
+    const auto region = hal::BoardRegions::aperture_region(plat.regions, hal::RegionId::VideoFb);
     if (!region)
         return std::nullopt;
-    auto mem = hal::FpgaMemory::map_aperture(*region, os::MmioRegion::Access::ReadWrite);
+    auto mem = hal::FpgaMemory::map_scanout(*region, plat.write_combine, plat.video.vsync_device);
     if (!mem) {
         verdict.refuse("T-HDOSD: FpgaMemory::map(video-fb)", mem.error());
         return std::nullopt;
     }
+    std::fprintf(
+        stderr,
+        "mister: T-HDOSD slots mapped via %s\n",
+        hal::mapping_name(mem->mapping())
+    );
     hd_raster_ = true;
     return app::HdRenderer::Frame{hd_flips_, std::move(*mem), std::move(rasters)};
 }
@@ -84,8 +91,11 @@ HdOsdBlock::HdOsdBlock(
     } else {
         verdict.refuse("T-HDOSD: ParkFds::create", fds.error());
     }
-    if (const auto scaler = hal::declared_region(plat.regions, hal::RegionId::ScalerOut)) {
-        if (auto sc = hal::ScalerBuffers::map(*scaler); sc) {
+    if (const auto scaler = hal::BoardRegions::aperture_region(
+            plat.regions,
+            hal::RegionId::ScalerOut
+        )) {
+        if (auto sc = hal::ScalerBuffers::map(plat.fpga_mem, *scaler); sc) {
             hd_renderer_.bind_scaler(std::move(*sc));
         } else {
             verdict.refuse("T-HDOSD: ScalerBuffers::map", sc.error());

@@ -85,7 +85,7 @@ Ex<MmioRegion> MmioRegion::map(PhysAddr phys, std::size_t len, Attr attr, Access
 
     const DevMem& d = dev_mem();
     if (d.fd < 0) {
-        return std::unexpected(d.open_errno.refused(Errc::uio_open, ERR_SITE()));
+        return std::unexpected(d.open_errno.refusal(Errc::uio_open, ERR_SITE()));
     }
     return map_fd(d.fd, MapOffset::of(phys), MapLength{len}, access);
 }
@@ -104,11 +104,11 @@ Ex<MmioRegion> MmioRegion::map_at(int fd, MapOffset offset, MapLength len, Acces
     }
 
     if (!page_aligned(offset, page_size().map_length())) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), offset.low32()});
+        return std::unexpected(offset.refusal(Errc::mmap_failed, ERR_SITE()));
     }
 
     const int prot = access == Access::ReadOnly ? PROT_READ : (PROT_READ | PROT_WRITE);
-    void* p = len.map_shared(prot, fd, offset.file_offset());
+    void* p = offset.map_shared(len, prot, fd);
     if (p == MAP_FAILED) {
         return std::unexpected(infra::errno_error(Errc::mmap_failed, ERR_SITE(), errno));
     }

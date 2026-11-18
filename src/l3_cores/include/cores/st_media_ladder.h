@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -10,6 +11,7 @@
 #include "cores/boot_ladder.h"
 #include "cores/core_profile.h"
 #include "cores/ladder_context.h"
+#include "cores/load_plan.h"
 #include "cores/st_media_fact.h"
 #include "cores/st_slot.h"
 #include "infra/error.h"
@@ -55,6 +57,7 @@ private:
         Cart = 9,
         CartAnswer = 10,
         Release = 11,
+        Clear = 12,
         Done = LadderPc::kDone,
     };
 
@@ -67,16 +70,33 @@ private:
 
     [[nodiscard]] std::vector<std::uint8_t> read_tos_() const;
     [[nodiscard]] std::vector<std::uint8_t> read_cart_() const;
-    [[nodiscard]] Ex<bool> intern_(st_ctrl::StSlot slot, std::vector<std::uint8_t>&& bytes);
-    [[nodiscard]] Ex<bool> order_file_(st_ctrl::StSlot slot, Rung answer);
-    [[nodiscard]] Ex<bool> await_file_(Rung next);
+
+    [[nodiscard]] bool dongle_now_();
+
+    [[nodiscard]] Ex<LoadPlan> plan_media_(st_ctrl::StSlot slot, proto::FileSize size);
+
+    [[nodiscard]] Ex<bool> start_run_(
+        const TransferRow& row,
+        std::span<const std::uint8_t> bytes,
+        bool held
+    );
+    [[nodiscard]] Ex<bool> step_run_(Rung next);
+
+    [[nodiscard]] Ex<bool> await_run_(Rung next);
+    [[nodiscard]] Ex<bool> tos_rung_();
+    [[nodiscard]] Ex<bool> cart_rung_();
+
+    [[nodiscard]] Ex<bool> start_clear_();
 
     Rung rung_ = Rung::Done;
     bool cold_ = false;
+    bool dongle_ = false;
+    std::optional<bool> restored_dongle_{};
     std::string config_;
     st_ctrl::StSlot slot_{};
-    proto::FileId file_{};
-    proto::ActKey act_{};
+    proto::ActKey16 act_{};
+    std::optional<PayloadPieces> pieces_{};
+    std::optional<PayloadPieces> clear_{};
     std::chrono::nanoseconds due_ns_{};
 
     infra::IndexedArray<std::string, st_ctrl::StSlot::kCount, st_ctrl::StSlot> paths_{};

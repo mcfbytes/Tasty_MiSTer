@@ -8,7 +8,12 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "os/framebuffer.h"
 #include "os/mmio_region.h"
+#include "hal/aperture_region.h"
+#include "hal/fbdev_placement.h"
+#include "hal/hps_ddr_region.h"
+#include "hal/memory_model.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "infra/seat.h"
@@ -32,22 +37,36 @@ class FpgaMemory {
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    enum class Mapping : std::uint8_t { DevMem, Uio, Fbdev };
+
     [[nodiscard]] static Ex<FpgaMemory> map(
-        PhysRegion r,
+        const ApertureRegion& r,
+        os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
+    );
+    [[nodiscard]] static Ex<FpgaMemory> map(
+        const HpsDdrRegion& r,
         os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
     );
 
     [[nodiscard]] static Ex<FpgaMemory> map_uio(
         int fd,
         os::PhysAddr node_base,
-        PhysRegion r,
+        const ApertureRegion& r,
         os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
     );
 
     [[nodiscard]] static Ex<FpgaMemory> map_aperture(
-        PhysRegion r,
+        const ApertureRegion& r,
         os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
     );
+
+    [[nodiscard]] static Ex<FpgaMemory> map_scanout(
+        const ApertureRegion& r,
+        WriteCombine wc,
+        const char* fb_node
+    );
+
+    [[nodiscard]] static Ex<FpgaMemory> map_fbdev(os::Framebuffer fb, const FbdevPlacement& at);
 
     static FpgaMemory borrow(std::span<std::byte> backing, PhysRegion r);
 
@@ -66,7 +85,11 @@ public:
 
     void handoff() noexcept;
 
-    bool uio_bound() const noexcept { return uio_bound_; }
+    [[nodiscard]] bool scanout_handoff() noexcept;
+
+    bool uio_bound() const noexcept { return mapping_ == Mapping::Uio; }
+
+    Mapping mapping() const noexcept { return mapping_; }
 
     os::MmioRegion::Access access() const noexcept { return access_; }
 
@@ -76,13 +99,31 @@ public:
     std::uint32_t load_acquire(WordOffset at) const;
 
 private:
+    [[nodiscard]] static Ex<FpgaMemory> map_phys(PhysRegion r, os::MmioRegion::Access access);
+
     FpgaMemory() = default;
     PhysRegion region_{};
 
     std::optional<os::MmioRegion> map_;
     std::byte* base_ = nullptr;
-    bool uio_bound_ = false;
+
+    os::MapLength lead_{};
+    Mapping mapping_ = Mapping::DevMem;
     os::MmioRegion::Access access_ = os::MmioRegion::Access::ReadWrite;
+
+    std::optional<os::Framebuffer> fb_;
 };
+
+[[nodiscard]] constexpr const char* mapping_name(FpgaMemory::Mapping m) noexcept {
+    switch (m) {
+        case FpgaMemory::Mapping::DevMem:
+            return "dev-mem";
+        case FpgaMemory::Mapping::Uio:
+            return "uio";
+        case FpgaMemory::Mapping::Fbdev:
+            return "fbdev-wc";
+    }
+    return "?";
+}
 
 }

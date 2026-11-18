@@ -189,7 +189,7 @@ void InputDevice::mark_down(EvdevCode code, bool on) noexcept {
 void InputDevice::push_key_edge(EvdevCode code, bool pressed) noexcept {
     mark_down(code, pressed);
     keys_changed_ = true;
-    report_.keys.push(KeyEdge{code, pressed});
+    report_.keys.push(KeyEvent{code, pressed});
 }
 
 void InputDevice::track_osd_combo(EvdevCode code, bool pressed) noexcept {

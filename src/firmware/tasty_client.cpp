@@ -38,9 +38,7 @@ Ex<void> TastyClient::send(std::string_view line) const noexcept {
     const UniqueFd guard{fd};
     char buf[1024];
     if (line.size() >= sizeof buf - 1) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), proto::FileSize{line.size()}.detail()}
-        );
+        return std::unexpected(proto::FileSize{line.size()}.refusal(Errc::bad_format, ERR_SITE()));
     }
     std::memcpy(buf, line.data(), line.size());
     buf[line.size()] = '\n';

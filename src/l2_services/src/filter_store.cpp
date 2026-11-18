@@ -67,13 +67,13 @@ std::vector<std::byte> read_file(const Vfs& vfs, std::string_view path) {
     auto sz = (*f)->size();
     if (!sz)
         return {};
-    std::vector<std::byte> buf(static_cast<std::size_t>(sz->v));
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = (*f)->read_at(off, std::span<std::byte>(buf).subspan(off));
+    std::vector<std::byte> buf = sz->zeroed<std::vector<std::byte>>();
+    proto::FileOffset at = proto::kFileStart;
+    while (sz->holds(at)) {
+        auto n = (*f)->read_at(at, at.skip_in(std::span<std::byte>(buf)));
         if (!n || *n == 0)
             return {};
-        off += *n;
+        at += proto::FileSize{*n};
     }
     return buf;
 }

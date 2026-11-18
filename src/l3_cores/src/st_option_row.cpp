@@ -99,7 +99,7 @@ OptionRowView StOptionRowAspect::on_cycle_view(
     const OptionRow::CycleArm& r
 ) const noexcept {
     const auto ar = f.system_ctrl.aspect();
-    return {ar.v, false, infra::at_index(r.values, ar)};
+    return OptionRowView::cycle(ar.choice(), infra::at_index(r.values, ar));
 }
 
 Ex<StOptionRow::Write> StOptionRowAspect::on_cycle_set(

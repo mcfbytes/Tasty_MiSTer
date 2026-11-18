@@ -3,19 +3,18 @@
 
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
 
 #include "app/page_description.h"
 #include "infra/seat.h"
+#include "ui/cores_entry.h"
 #include "ui/hd_plan.h"
 #include "ui/recent_row.h"
 #include "ui/hd_rows/hd_gated_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
-#include "ui/system_page.h"
 #include "svc/types.h"
 
 namespace mister::ui {
@@ -45,7 +44,6 @@ private:
     public:
         explicit BrowseRow(HdHomePlan& plan) noexcept : plan_(plan) {}
 
-        bool shown() const override;
         app::PageDescription::Row describe() const override;
         Transition select() override;
 
@@ -54,7 +52,7 @@ private:
     };
 
     PageContext& ctx_;
-    std::unique_ptr<SystemPage> cores_;
+    CoresEntry cores_;
     svc::Tally refusals_{};
 
     RecentLaunch launch_;

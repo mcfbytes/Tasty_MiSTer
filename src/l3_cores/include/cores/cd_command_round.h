@@ -23,7 +23,7 @@ inline void run_command_round(
     CdWireLink link{wire, sink};
     CdDialectPorts p{geom, link};
     if (cmd) {
-        if (auto r = eng.accept_command(cmd->view(), p); !r)
+        if (auto r = eng.accept_command(*cmd, p); !r)
             wire.count_fault();
     }
     eng.after_command_round();

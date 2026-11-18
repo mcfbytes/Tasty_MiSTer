@@ -32,7 +32,7 @@ constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
 constexpr std::int64_t kMaxLateUs = std::numeric_limits<std::uint32_t>::max();
 
 [[nodiscard]] Error submit_refusal(Errc code, SlotIndex slot) noexcept {
-    return Error{code, ERR_SITE(), slot.v};
+    return slot.refusal(code, ERR_SITE());
 }
 
 struct CreditRow {
@@ -85,26 +85,22 @@ Ex<void> BlockSlots::announce(SlotIndex slot, FileSize size_bytes, bool writable
     SpiFrame frame{link};
     if (auto r = frame.begin(UioOp::SetSdInfo); !r)
         return r;
-    const std::uint32_t lo = size_bytes.low_word();
-    const std::uint32_t hi = size_bytes.high_word();
 
     const hal::Width framing = link.io_version() != hal::IoVersion{0} ? hal::Width::Word
                                                                       : hal::Width::Byte;
-    if (auto r = emit_u32(frame, lo, framing); !r)
-        return r;
-    if (auto r = emit_u32(frame, hi, framing); !r)
+    if (auto r = size_bytes.emit_words(frame, framing); !r)
         return r;
     if (auto r = frame.end(); !r)
         return r;
 
     if (slot > kLastAnnounceableSlot) {
         ++diag_.unencodable_announce;
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::negotiation, ERR_SITE()));
     }
     const SdStatParameter parm = SdStatParameter::of(slot, writable);
     if (auto r = frame.begin(UioOp::SetSdStat); !r)
         return r;
-    if (auto r = frame.word(parm.v); !r)
+    if (auto r = frame.word(parm.wire_word()); !r)
         return r;
     return frame.end();
 }
@@ -124,6 +120,7 @@ void BlockSlots::mount_row_(
     s.writable = attr.writable;
     s.growable = attr.growable;
     s.deferred_create = attr.deferred_create;
+    s.mount = attr.mount;
 }
 
 Ex<void> BlockSlots::mount(
@@ -133,7 +130,7 @@ Ex<void> BlockSlots::mount(
     IBlockRoles& roles
 ) {
     if (!slot.below<kBlockSlots>()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     }
 
     const infra::OptRef<IImageSource> src = source_of_(backing_(roles, slot));
@@ -157,7 +154,7 @@ Ex<void> BlockSlots::mount(
 
 Ex<void> BlockSlots::unmount(SlotIndex slot) {
     if (!slot.below<kBlockSlots>()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     }
 
     records_[slot].slot = Slot{};
@@ -167,7 +164,7 @@ Ex<void> BlockSlots::unmount(SlotIndex slot) {
 
 Ex<void> BlockSlots::install_disc(SlotIndex slot, FileSize size_bytes, IBlockRoles& roles) {
     if (!slot.below<kBlockSlots>()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
     }
     if (size_bytes.empty()) {
         records_[slot].slot = Slot{};
@@ -196,14 +193,14 @@ void BlockSlots::change_disc(SlotIndex slot) noexcept {
 
 const BlockSlots::Slot& BlockSlots::slot(SlotIndex i) const {
     if (!i.below<kBlockSlots>()) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), i.v}, "block slot index");
+        fatal(i.refusal(Errc::slot_range, ERR_SITE()), "block slot index");
     }
     return records_[i].slot;
 }
 
 void BlockSlots::invalidate(SlotIndex i) {
     if (!i.below<kBlockSlots>()) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), i.v}, "block slot index");
+        fatal(i.refusal(Errc::slot_range, ERR_SITE()), "block slot index");
     }
     drop_(i);
 }
@@ -302,7 +299,7 @@ bool BlockSlots::submit_fetch(
     if (s.state != Slot::State::Mounted)
         return false;
 
-    if (s.size_bytes.v == 0 && !s.deferred_create)
+    if (s.size_bytes.empty() && !s.deferred_create)
         return false;
     if (!storage_live_ || !chan_ || !source_of_(backing))
         return false;
@@ -373,15 +370,14 @@ bool BlockSlots::submit_create(
 
 bool BlockSlots::submit_write(
     SlotIndex slot,
-    std::uint64_t offset,
-    std::uint32_t len,
+    const SaveSlotRule::Plan& plan,
     const BlockBacking& backing
 ) noexcept {
     if (!storage_live_ || !chan_)
         return false;
     const std::optional<StorageSeq> seq = submit_(
         infra::make<StorageRequest>(
-            StorageRequest::Write{.offset = offset, .bytes = len},
+            StorageRequest::Write{.offset = plan.offset, .bytes = plan.len},
             request_head_(slot, backing)
         )
     );
@@ -408,11 +404,11 @@ Ex<void> BlockSlots::submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept 
 
     const BlockBacking backing = backing_(roles, slot);
     const infra::OptRef<IImageSource> src = source_of_(backing);
-    const bool growable = src && src->attributes(slot).growable;
+    const SlotAttributes attr = src ? src->attributes(slot) : SlotAttributes{};
     return submit_lifecycle_(
         slot,
         infra::make<StorageRequest>(
-            StorageRequest::Attach{.growable = growable},
+            StorageRequest::Attach{.mount = attr.mount},
             request_head_(slot, backing)
         )
     );
@@ -473,6 +469,8 @@ void BlockSlots::on(
         chan_->install(slot, ResidentWindow{});
         return;
     }
+    if (h.status != StorageStatus::Ok)
+        diag_.last_fetch_fault = h.fault;
     const CreditRow& row = kCreditRows[infra::ordinal(r.data.kind)];
     if (row.owes_answer)
         note_answer_wait_(now_at_() - (r.data.due - row.bound));
@@ -490,7 +488,10 @@ void BlockSlots::on(
     if (records_[slot].data.stale(records_[slot].epoch)) {
         ++diag_.stale_completions;
         chan_->install(slot, ResidentWindow{});
+        return;
     }
+    if (h.status != StorageStatus::Ok)
+        diag_.last_fetch_fault = h.fault;
 }
 
 void BlockSlots::on(
@@ -514,6 +515,7 @@ void BlockSlots::on(
             s.size_bytes = a.end;
     } else {
         ++diag_.write_failures;
+        diag_.last_write_fault = h.fault;
     }
 }
 
@@ -537,6 +539,7 @@ void BlockSlots::on(
         s.deferred_create = false;
     } else {
         ++diag_.write_failures;
+        diag_.last_write_fault = h.fault;
     }
 }
 
@@ -562,7 +565,7 @@ void BlockSlots::on(
     const SlotIndex slot = *at;
     if (const auto src = source_of_(backing_(roles, slot))) {
         const bool ok = h.status == StorageStatus::Ok;
-        src->note_attached(slot, ok, FileSize{ok ? a.size : 0});
+        src->note_attached(slot, ok, ok ? a.size : FileSize{});
     }
     if (records_[slot].ctl.stale(records_[slot].epoch))
         ++diag_.stale_completions;
@@ -650,7 +653,7 @@ std::span<const std::uint8_t> BlockSlots::substitute_(
         return std::unexpected(r.error());
     }
     if (FileSize::of(serve) < FileSize{offset}.advance(nbytes)) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), slot.v});
+        return std::unexpected(slot.refusal(Errc::io, ERR_SITE()));
     }
     if (auto r = link.block_write(nbytes.first_of(FileSize{offset}.skip_in(serve))); !r) {
         return std::unexpected(r.error());
@@ -732,7 +735,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
 
     const Slot& s = records_[slot].slot;
     if (s.state != Slot::State::Mounted
-        || (s.size_bytes.v == 0 && !s.deferred_create)
+        || (s.size_bytes.empty() && !s.deferred_create)
         || !storage_live_
         || !chan_
         || !source_of_(backing)) {
@@ -793,7 +796,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     const std::size_t sz = block_size.length_of(req.block_count);
 
     if (!chan_) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), req.slot.v});
+        return std::unexpected(req.slot.refusal(Errc::io, ERR_SITE()));
     }
 
     const std::span<std::uint8_t> drain = chan_->claim(req.slot);
@@ -807,7 +810,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
             return std::unexpected(r.error());
         }
         if (drain.size() < sz) {
-            return std::unexpected(Error{Errc::io, ERR_SITE(), req.slot.v});
+            return std::unexpected(req.slot.refusal(Errc::io, ERR_SITE()));
         }
         if (auto r = link.block_read(drain.first(sz)); !r) {
             return std::unexpected(r.error());
@@ -826,12 +829,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
         .growable = s.growable,
         .deferred_create = s.deferred_create
     };
-
-    const SaveSlotRule::Plan plan = rule.plan_write(
-        req.lba,
-        block_size,
-        static_cast<std::uint32_t>(sz)
-    );
+    const SaveSlotRule::Plan plan = rule.plan_write(req.lba, block_size, req.block_count);
     if (plan.act == SaveSlotRule::Act::Discard) {
         ++diag_.discarded_writes;
         return Pass::Answered;
@@ -842,7 +840,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
             ++diag_.write_failures;
         return Pass::Answered;
     }
-    if (!submit_write(req.slot, plan.offset, plan.len, backing))
+    if (!submit_write(req.slot, plan, backing))
         ++diag_.write_failures;
     return Pass::Answered;
 }

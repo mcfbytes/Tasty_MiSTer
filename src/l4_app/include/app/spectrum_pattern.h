@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <optional>
 
+#include "app/floor_ratio_walk.h"
 #include "app/front_end_pattern.h"
 #include "app/hd_rect.h"
 #include "app/hd_theme.h"
 #include "app/px_plane.h"
+#include "app/ratio.h"
 #include "app/types.h"
 #include "infra/seat.h"
 
@@ -33,13 +35,18 @@ inline void SpectrumPattern::paint(PxPlane& canvas, HdRect box) const noexcept {
         return;
     if (on.w <= 0 || on.h <= 0)
         return;
+    const FloorRatioWalk from_left = FloorRatioWalk::of(
+        Ratio{.num = Ratio::Term::of(kMaxShade), .den = Ratio::Term::of(on.w)}
+    );
     for (std::int32_t y = 0; y < on.h; ++y) {
         auto row = plane->row(PlaneRow{y});
         const std::int32_t blue = kMaxShade * y / on.h;
+        const std::int32_t half_blue = blue / kHalf;
         auto px = row.begin();
-        for (std::int32_t x = 0; x < on.w; ++x, ++px) {
-            std::int32_t green = kMaxShade * x / on.w - blue / kHalf;
-            std::int32_t red = kPrime - green - blue / kHalf;
+        FloorRatioWalk across = from_left;
+        for (std::int32_t x = 0; x < on.w; ++x, ++px, across.step()) {
+            std::int32_t green = across.quotient<std::int32_t>() - half_blue;
+            std::int32_t red = kPrime - green - half_blue;
             if (red < 0)
                 red = 0;
             if (green < 0)

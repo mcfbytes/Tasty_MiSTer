@@ -2,10 +2,13 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <utility>
 
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
+#include "os/map_length.h"
+#include "os/types.h"
 
 namespace mister::os {
 
@@ -26,6 +29,15 @@ public:
     [[nodiscard]] int fd() const noexcept { return fd_.get(); }
 
     [[nodiscard]] Wait wait_vsync() const noexcept;
+
+    struct Window {
+        PhysAddr start{};
+        MapLength len{};
+    };
+
+    [[nodiscard]] std::optional<Window> window() const noexcept;
+
+    [[nodiscard]] bool flush() const noexcept;
 
 private:
     explicit Framebuffer(UniqueFd fd) noexcept : fd_(std::move(fd)) {}

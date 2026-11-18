@@ -20,39 +20,27 @@ void PcmRingFeeder::wake_main_() noexcept {
 
 void PcmRingFeeder::request_park() noexcept {
 
-    Park cur = park_.load(std::memory_order_acquire);
-    while (cur != Park::Owed
-           && cur != Park::Releasing
-           && !park_.compare_exchange_weak(
-               cur,
-               Park::Owed,
-               std::memory_order_acq_rel,
-               std::memory_order_acquire
-           )) {
-    }
-    wake_main_();
+    const PcmLatch::Ticket t = latch_.ask(PcmRelease::Media);
+    if (t.gen != ticket_.gen)
+        wakes_.add();
+    ticket_ = t;
 }
 
 void PcmRingFeeder::request_swap_() noexcept {
-    Park idle = Park::Idle;
-    if (park_.compare_exchange_strong(
-            idle,
-            Park::SwapOwed,
-            std::memory_order_acq_rel,
-            std::memory_order_relaxed
-        )) {
-        wake_main_();
-    }
+    const PcmLatch::Ticket t = latch_.ask(PcmRelease::Source);
+    if (t.gen != ticket_.gen)
+        wakes_.add();
+    ticket_ = t;
 }
 
 bool PcmRingFeeder::ready_for_source() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
-    if (!parked()) {
+    if (source_live_()) {
         request_swap_();
         return false;
     }
 
-    return park_.load(std::memory_order_acquire) == Park::Idle && reap_media_();
+    return !latch_.outstanding() && reap_media_();
 }
 
 Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
@@ -65,33 +53,21 @@ Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
         );
     }
 
-    if (!parked() || !reap_media_()) {
+    if (source_live_() || !reap_media_()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-
-    Park cur = park_.load(std::memory_order_acquire);
-    while (cur == Park::Owed || cur == Park::SwapOwed) {
-        if (park_.compare_exchange_weak(
-                cur,
-                Park::Idle,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire
-            )) {
-            cur = Park::Idle;
-        }
-    }
-    if (cur != Park::Idle)
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
 
     PcmMedia m{};
     m.ring.emplace(std::move(ring));
-    const std::uint32_t before = visible_len_.load(std::memory_order_acquire);
-    visible_len_.store(static_cast<std::uint32_t>(len), std::memory_order_release);
+    m.stamp = latch_.asked();
     if (auto r = hand_over_<PcmCommand::AttachRing>(m); !r) {
-        visible_len_.store(before, std::memory_order_release);
         ring = std::move(*m.ring);
         return r;
     }
+
+    latch_.handed_over();
+    rings_handed_ = rings_handed_.next();
+    handed_len_ = os::MapLength{len};
 
     return {};
 }
@@ -99,12 +75,12 @@ Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
 Ex<void> PcmRingFeeder::set_sheet(std::string_view sheet) {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
 
-    if (!parked()) {
+    if (source_live_()) {
         request_swap_();
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
 
-    if (park_.load(std::memory_order_acquire) != Park::Idle) {
+    if (latch_.outstanding()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
 
@@ -112,7 +88,7 @@ Ex<void> PcmRingFeeder::set_sheet(std::string_view sheet) {
         PcmMedia none{};
         return hand_over_<PcmCommand::AttachSource>(none);
     }
-    if (visible_len_.load(std::memory_order_acquire) == 0) {
+    if (!attached()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
@@ -122,7 +98,7 @@ Ex<void> PcmRingFeeder::set_sheet(std::string_view sheet) {
     if (auto r = hand_over_<PcmCommand::AttachSource>(m); !r)
         return r;
 
-    parked_.store(false, std::memory_order_release);
+    sources_handed_ = sources_handed_.next();
 
     wakes_.add();
     commands_.kick();
@@ -144,24 +120,27 @@ void PcmRingFeeder::detach() noexcept {
 
 void PcmRingFeeder::release_media_() noexcept {
     drop_ring_();
-    visible_len_.store(0, std::memory_order_release);
 }
 
 void PcmRingFeeder::drop_ring_() noexcept {
     release_source_();
+    if (ring_.has_value())
+        rings_ended_ = rings_ended_.next();
     ring_.reset();
-    ring_len_ = 0;
-    ring_mask_ = 0;
+    ring_geom_ = cores::PcmRing{};
+    ring_stamp_ = xthread::ReleaseGen::none();
 }
 
 void PcmRingFeeder::release_source_() noexcept {
+    if (src_ != nullptr)
+        sources_ended_ = sources_ended_.next();
     src_.reset();
     reset_playback_();
 }
 
 void PcmRingFeeder::reset_playback_() noexcept {
-    wr_ = 0;
-    position_ = 0;
+    wr_ = cores::PcmRingPoint{};
+    position_ = {};
     extent_ = cores::PcmExtent{};
     playing_ = false;
     paused_ = false;
@@ -193,13 +172,13 @@ Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
 
     if (!commands_.push(infra::make<PcmCommand>(Alt{slot}))) {
         refused_markers_.add();
-        return std::unexpected(Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(slot.v)});
+        return std::unexpected(slot.refusal(Errc::busy, ERR_SITE()));
     }
     return {};
 }
 
 Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
-    if (parked() || park_.load(std::memory_order_acquire) != Park::Idle) {
+    if (!source_live_() || latch_.outstanding()) {
         discards_.add();
         return {};
     }
@@ -213,7 +192,7 @@ Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
 
 Ex<void> PcmRingFeeder::play(svc::TrackNumber track, bool loop) {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
-    return submit_(infra::make<PcmCommand>(PcmCommand::Play{track.v, loop}));
+    return submit_(infra::make<PcmCommand>(PcmCommand::Play{track, loop}));
 }
 
 Ex<void> PcmRingFeeder::stop() {
@@ -226,14 +205,14 @@ Ex<void> PcmRingFeeder::resume() {
     return submit_(infra::make<PcmCommand>(PcmCommand::Resume{}));
 }
 
-void PcmRingFeeder::observe_read_point(std::uint32_t off) noexcept {
+void PcmRingFeeder::observe_read_point(cores::PcmRingPoint at) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
 
-    if (ever_observed_ && off == last_observed_)
+    if (ever_observed_ && at == last_observed_)
         return;
-    last_observed_ = off;
+    last_observed_ = at;
     ever_observed_ = true;
-    read_point_.publish(off);
+    read_point_.publish(at);
     wake_main_();
 }
 
@@ -245,7 +224,7 @@ cores::PcmFeedState PcmRingFeeder::state() const noexcept {
 bool PcmRingFeeder::can_serve() const noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
 
-    return !parked() && attached();
+    return source_live_() && attached();
 }
 
 Ex<std::size_t> PcmRingFeeder::write(std::size_t, std::span<const std::byte>) {
@@ -264,7 +243,7 @@ void PcmRingFeeder::publish() noexcept {
 
 std::size_t PcmRingFeeder::size() const noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
-    return visible_len_.load(std::memory_order_acquire);
+    return attached() ? handed_len_.bytes() : 0;
 }
 
 infra::OptRef<cores::IPcmFeed> PcmRingFeeder::pcm_feed() noexcept {
@@ -274,40 +253,24 @@ infra::OptRef<cores::IPcmFeed> PcmRingFeeder::pcm_feed() noexcept {
 
 bool PcmRingFeeder::take_park_ask() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, A);
-    Park cur = park_.load(std::memory_order_acquire);
-    while (cur == Park::Owed || cur == Park::SwapOwed) {
-        const Park next = cur == Park::Owed ? Park::Releasing : Park::SwapReleasing;
-        if (!park_.compare_exchange_weak(
-                cur,
-                next,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire
-            )) {
-            continue;
-        }
-        work_.swap_taken = next == Park::SwapReleasing;
-        return true;
-    }
-    return false;
+    work_.taken = latch_.take();
+    return work_.taken.has_value();
 }
 
 void PcmRingFeeder::finish_park() noexcept {
-
-    if (work_.swap_taken) {
+    const bool spared = work_.taken.has_value()
+        && ring_.has_value()
+        && ring_stamp_.covers(work_.taken->gen);
+    if (work_.taken.has_value() && (work_.taken->kind == PcmRelease::Source || spared)) {
         release_source_();
     } else {
         release_media_();
     }
     publish_state_();
     parked_.store(true, std::memory_order_release);
-    Park cur = park_.load(std::memory_order_acquire);
-    while ((cur == Park::Releasing || cur == Park::SwapReleasing)
-           && !park_.compare_exchange_weak(
-               cur,
-               Park::Idle,
-               std::memory_order_acq_rel,
-               std::memory_order_acquire
-           )) {
+    if (work_.taken.has_value()) {
+        latch_.done(*work_.taken);
+        work_.taken.reset();
     }
 }
 
@@ -332,10 +295,10 @@ void PcmRingFeeder::on(const PcmCommand::AttachRing& a) noexcept {
     if (m->ring.has_value()) {
         drop_ring_();
         rp_seen_ = 0;
-        read_val_ = 0;
+        read_val_ = cores::PcmRingPoint{};
         ring_.swap(m->ring);
-        ring_len_ = static_cast<std::uint32_t>(ring_->region().len);
-        ring_mask_ = ring_len_ - 1u;
+        ring_geom_ = cores::PcmRing::of_length(ring_->region().len);
+        ring_stamp_ = m->stamp;
     }
     publish_state_();
 }
@@ -346,10 +309,16 @@ void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
         return;
     release_source_();
     rp_seen_ = 0;
-    read_val_ = 0;
+    read_val_ = cores::PcmRingPoint{};
     if (!m->sheet.empty() && vfs_) {
         src_ = cores::make_pcm_source(m->sheet.view(), *vfs_);
     }
+
+    if (!m->sheet.empty() && src_ == nullptr)
+        sources_ended_ = sources_ended_.next();
+
+    if (src_ != nullptr)
+        parked_.store(false, std::memory_order_release);
     publish_state_();
 }
 
@@ -362,8 +331,14 @@ std::optional<PcmMedia> PcmRingFeeder::take_media_(xthread::PoolSlot announced) 
     PcmMedia media{};
     media.ring.swap(job->ring);
     media.sheet = job->sheet;
+    media.stamp = job->stamp;
     if (job.slot() != announced) {
         misrouted_.add();
+
+        if (media.ring.has_value())
+            rings_ended_ = rings_ended_.next();
+        if (!media.sheet.empty())
+            sources_ended_ = sources_ended_.next();
         return std::nullopt;
     }
     job.complete();
@@ -390,8 +365,7 @@ void PcmRingFeeder::fill_pass() noexcept {
 }
 
 bool PcmRingFeeder::rest() const noexcept {
-    const Park p = park_.load(std::memory_order_acquire);
-    if (p == Park::Owed || p == Park::SwapOwed)
+    if (latch_.pending())
         return false;
     if (parked())
         return true;
@@ -406,7 +380,12 @@ infra::ParkTimeout PcmRingFeeder::rest_ms() const noexcept {
 
 void PcmRingFeeder::release() noexcept {
     release_media_();
+    publish_state_();
     parked_.store(true, std::memory_order_release);
+    if (work_.taken.has_value()) {
+        latch_.done(*work_.taken);
+        work_.taken.reset();
+    }
 }
 
 void PcmRingFeeder::park_now() noexcept {
@@ -414,17 +393,20 @@ void PcmRingFeeder::park_now() noexcept {
     release_media_();
     publish_state_();
     parked_.store(true, std::memory_order_release);
-    park_.store(Park::Idle, std::memory_order_release);
+    if (work_.taken.has_value()) {
+        latch_.done(*work_.taken);
+        work_.taken.reset();
+    }
 }
 
 std::uint32_t PcmRingFeeder::prefill_target_() const noexcept {
-    std::uint64_t target = ring_len_ / 2u;
+    std::uint64_t target = ring_geom_.bytes() / kPrefillParts;
     if (target > extent_.bytes)
         target = extent_.bytes;
     return static_cast<std::uint32_t>(target & ~static_cast<std::uint64_t>(kAlignMask));
 }
 
-void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) noexcept {
+void PcmRingFeeder::apply_play_(svc::TrackNumber track, [[maybe_unused]] bool loop) noexcept {
 
     ++served_;
     if (src_ != nullptr)
@@ -435,16 +417,16 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
     primed_ = false;
     playing_ = false;
     extent_ = cores::PcmExtent{};
-    position_ = 0;
-    wr_ = 0;
+    position_ = {};
+    wr_ = cores::PcmRingPoint{};
 
     if (src_ != nullptr && ring_.has_value()) {
 
-        const Ex<cores::PcmExtent> ex = src_->open(svc::TrackNumber{track});
+        const Ex<cores::PcmExtent> ex = src_->open(track);
         if (ex) {
             extent_ = *ex;
 
-            const std::span<std::byte> all = ring_->view(0, ring_len_);
+            const std::span<std::byte> all = ring_->view(0, ring_geom_.bytes());
             std::memset(all.data(), 0, all.size());
             ring_->publish();
 
@@ -455,7 +437,7 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
                 if (chunk > kPcmChunkBytes)
                     chunk = kPcmChunkBytes;
                 const Ex<std::span<std::byte>> got = src_->read_at(
-                    filled,
+                    proto::FileSize{filled},
                     std::span<std::byte>{staging_, chunk}
                 );
                 if (!got || got->empty())
@@ -467,8 +449,8 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
                     break;
                 filled += static_cast<std::uint32_t>(n);
             }
-            wr_ = filled & ring_mask_;
-            position_ = filled;
+            wr_ = ring_geom_.advanced(cores::PcmRingPoint{}, filled);
+            position_ = proto::FileSize{filled};
             playing_ = true;
         }
     }
@@ -477,13 +459,16 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
 }
 
 std::size_t PcmRingFeeder::write_ring_(std::size_t n) noexcept {
-    std::size_t first = ring_len_ - wr_;
+    std::size_t first = ring_geom_.run_to_end(wr_);
     if (first > n)
         first = n;
-    if (!ring_->write_at(wr_, std::span<const std::byte>{staging_, first}))
+    if (!ring_->write_at(wr_.byte_offset(), std::span<const std::byte>{staging_, first}))
         return 0;
     if (n > first) {
-        if (!ring_->write_at(0, std::span<const std::byte>{staging_ + first, n - first})) {
+        if (!ring_->write_at(
+                cores::PcmRingPoint{}.byte_offset(),
+                std::span<const std::byte>{staging_ + first, n - first}
+            )) {
             return first;
         }
     }
@@ -515,35 +500,34 @@ void PcmRingFeeder::fill_() noexcept {
         return;
     }
 
-    const std::uint32_t space = (read_val_ - wr_ - 1u) & ring_mask_;
+    const std::uint32_t space = ring_geom_.free_bytes({.write = wr_, .read = read_val_});
     if (space < kPcmWatermarkBytes)
         return;
     std::uint32_t to_write = space < kPcmChunkBytes ? space : kPcmChunkBytes;
 
-    std::uint64_t remaining = extent_.bytes - position_;
-    if (remaining == 0) {
+    const proto::FileSize total{extent_.bytes};
+    proto::FileSize remaining = total - position_;
+    if (remaining == proto::FileSize{}) {
         if (extent_.loops) {
-            std::uint64_t loop_byte = extent_.loop_byte;
-            if (loop_byte >= extent_.bytes)
-                loop_byte = 0;
-            position_ = loop_byte;
-            remaining = extent_.bytes - loop_byte;
+            proto::FileSize loop_at{extent_.loop_byte};
+            if (loop_at >= total)
+                loop_at = {};
+            position_ = loop_at;
+            remaining = total - loop_at;
         } else {
             draining_ = true;
             drain_until_ = now + kPcmDrainMs;
             return;
         }
     }
-    if (to_write > remaining)
-        to_write = static_cast<std::uint32_t>(remaining);
-    to_write &= ~static_cast<std::uint32_t>(kAlignMask);
-    if (to_write == 0)
-        return;
-
-    const Ex<std::span<std::byte>> got = src_->read_at(
-        position_,
+    const std::span<std::byte> chunk = proto::FileSize{to_write}.min(remaining).first_of(
         std::span<std::byte>{staging_, to_write}
     );
+    const std::span<std::byte> window = chunk.first(chunk.size() & ~kAlignMask);
+    if (window.empty())
+        return;
+
+    const Ex<std::span<std::byte>> got = src_->read_at(position_, window);
     if (!got || got->empty())
         return;
     std::size_t n = got->size() & ~kAlignMask;
@@ -553,8 +537,8 @@ void PcmRingFeeder::fill_() noexcept {
     n = write_ring_(n);
     if (n == 0)
         return;
-    wr_ = static_cast<std::uint32_t>((wr_ + n) & ring_mask_);
-    position_ += n;
+    wr_ = ring_geom_.advanced(wr_, n);
+    position_ += proto::FileSize{n};
     passes_.add();
 }
 
@@ -565,10 +549,25 @@ void PcmRingFeeder::publish_state_() noexcept {
     s.primed = primed_;
     s.drained = drained_;
     s.served = served_;
+    s.rings_ended = rings_ended_;
+    s.sources_ended = sources_ended_;
     if (s == published_ && state_.generation() != 0)
         return;
     published_ = s;
     state_.publish(s);
+}
+
+PcmRingFeeder::Ended PcmRingFeeder::sample_ended_() const noexcept {
+    const auto s = state_.sample();
+    if (s) {
+        ended_.rings = s.value.rings_ended;
+        ended_.sources = s.value.sources_ended;
+    }
+    return ended_;
+}
+
+bool PcmRingFeeder::source_live_() const noexcept {
+    return sources_handed_ != sample_ended_().sources;
 }
 
 }

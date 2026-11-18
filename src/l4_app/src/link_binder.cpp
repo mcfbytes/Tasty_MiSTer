@@ -2,7 +2,6 @@
 #include "app/link_binder.h"
 
 #include "app/link_rows.h"
-#include "app/log_clock.h"
 #include "app/pcm_ring_feeder.h"
 
 #include <optional>
@@ -16,9 +15,7 @@ LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
       spi_sink_(link, infra::OptRef<proto::SpiFioQueue>{fio_queue_}),
       feeder_(w.feeder),
       exec_(w.exec),
-      state_(w.state),
-      notifiers_(w.exec),
-      log_lane_(w.log_lane.producer()) {}
+      state_(w.state) {}
 
 proto::IImageSink& LinkBinder::grant_bulk() noexcept {
     return progress_sink_;
@@ -54,30 +51,9 @@ Ex<void> LinkBinder::bind_census(
     return r;
 }
 
-void LinkBinder::bind_doorbells_(
-    std::span<const proto::IrqBinding> irqs,
-    std::uint32_t declared,
-    const DoorbellLines& lines
-) noexcept {
-    notifiers_.release();
-    doorbells_declared_ = declared;
-    bound_classes_ = reactor::CauseSet{};
-    for (std::size_t i = 0; i < irqs.size(); ++i) {
-
-        if (i >= lines.count) {
-            fall_back(irqs[i], Errc::dt_missing);
-            continue;
-        }
-        bind_one_doorbell(irqs[i], lines.rows[i]);
-    }
-}
-
 Ex<void> LinkBinder::bind_session(
     std::span<const reactor::LinkDecoderDecl> rows,
-    infra::OptRef<cores::Core> owner,
-    std::span<const proto::IrqBinding> irqs,
-    std::uint32_t declared,
-    const DoorbellLines& lines
+    infra::OptRef<cores::Core> owner
 ) {
     for (const LinkRow& row : kLinkRows) {
         if (row.phase != BindPhase::Bind)
@@ -88,9 +64,6 @@ Ex<void> LinkBinder::bind_session(
                     return r;
                 break;
             }
-            case RtAct::BindDoorbells:
-                bind_doorbells_(irqs, declared, lines);
-                break;
             case RtAct::None:
                 break;
             case RtAct::kCount:
@@ -100,69 +73,7 @@ Ex<void> LinkBinder::bind_session(
     return {};
 }
 
-void LinkBinder::bind_one_doorbell(
-    const proto::IrqBinding& b,
-    const DoorbellLines::Line& line
-) noexcept {
-
-    if (!(line.binding == b))
-        return fall_back(b, Errc::stale);
-
-    if (line.gate)
-        return fall_back(b, *line.gate);
-
-    if (bound_classes_.has(b.klass))
-        return fall_back(b, Errc::negotiation);
-
-    if (line.why)
-        return fall_back(b, *line.why);
-
-    auto slot = notifiers_.bind_doorbell(
-        line.handle.borrow(),
-        b.klass,
-        line.cause ? infra::OptRef<const hal::RegisterWindow<hal::CauseReg>>{*line.cause}
-                   : infra::OptRef<const hal::RegisterWindow<hal::CauseReg>>{}
-    );
-    if (!slot)
-        return fall_back(b, slot.error().code);
-    bound_classes_ |= reactor::CauseSet{b.klass};
-    log_lane_.push(
-        LogRec::DoorbellBound{
-            .cause_base = b.cause_base.v,
-            .klass = static_cast<std::uint8_t>(b.klass),
-            .line = static_cast<std::uint8_t>(b.line)
-        },
-        log_stamp(log_now())
-    );
-}
-
-void LinkBinder::fall_back(const proto::IrqBinding& b, Errc why) noexcept {
-    ++fallbacks_;
-    log_lane_.push(
-        LogRec::DoorbellPolling{
-            .why = why,
-            .klass = static_cast<std::uint8_t>(b.klass),
-            .line = static_cast<std::uint8_t>(b.line)
-        },
-        log_stamp(log_now())
-    );
-}
-
-DoorbellStats LinkBinder::doorbell_stats() const noexcept {
-    DoorbellStats d{};
-    d.declared = doorbells_declared_;
-    d.bound = static_cast<std::uint32_t>(notifiers_.size());
-    d.refusals = fallbacks_;
-    d.fallbacks = exec_.doorbell_fallbacks();
-    d.retirements = exec_.doorbell_retirements();
-    d.release_failures = notifiers_.release_failures();
-    return d;
-}
-
 bool LinkBinder::bridge_windows_live() const noexcept {
-
-    if (notifiers_.size() != 0)
-        return true;
 
     if (feeder_ && feeder_->attached())
         return true;
@@ -170,11 +81,7 @@ bool LinkBinder::bridge_windows_live() const noexcept {
 }
 
 Ex<void> LinkBinder::unbind_session() {
-    auto r = bind_census({}, {});
-    notifiers_.release();
-    doorbells_declared_ = 0;
-    bound_classes_ = reactor::CauseSet{};
-    return r;
+    return bind_census({}, {});
 }
 
 }

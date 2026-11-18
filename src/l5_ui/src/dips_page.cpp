@@ -7,7 +7,6 @@
 
 #include "app/hd_window.h"
 #include "ui/draw_classic.h"
-#include "ui/menu_model.h"
 #include "ui/page_ask.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"

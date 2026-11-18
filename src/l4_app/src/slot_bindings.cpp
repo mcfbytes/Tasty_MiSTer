@@ -3,11 +3,12 @@
 
 namespace mister::app {
 
+static_assert(std::tuple_size_v<svc::SaveSlotBackends> == SaveImageSource::kSlots);
+
 SlotBindings::SlotBindings(const Wiring& g) noexcept
     : link_(g.link),
       binder_(g.binder),
       clock_(g.clock),
-      ops_(g.ops),
       cheats_(g.cheats),
       bindings_(g.bindings),
       machine_(g.machine),
@@ -18,10 +19,11 @@ SlotBindings::SlotBindings(const Wiring& g) noexcept
       vfs_(g.vfs),
       storage_life_(g.storage_life),
       disc_backend_(g.disc_backend),
+      save_backends_(g.save_backends),
       prefetch_(g.prefetch),
       owed_mount_(mount_status_cell_, g.link_rx),
       owed_save_(make_owed_saves<SaveImageSource::kSlots + 1>(save_extent_cell_, g.link_rx)),
-      save_src_(vfs_ ? std::make_unique<SaveImageSource>(*vfs_) : nullptr),
+      save_src_(vfs_ ? std::make_unique<SaveImageSource>() : nullptr),
       slots_(
           proto::BlockSlots::Wiring{
               .link = link_,
@@ -88,7 +90,7 @@ ILinkEncoder::Outcome SlotBindings::on(
         if (a.sends_index && kind != proto::LinkOp::SlotBind::MountCd) {
             (void)binder_.fio_queue().flush();
             proto::SpiFrame frame{link_};
-            if (auto r = proto::DownloadSession::set_index(frame, proto::IoIndex{a.index_word}); !r)
+            if (auto r = proto::DownloadSession::set_index(frame, a.index_word); !r)
                 return ILinkEncoder::Outcome::Dropped;
         }
         if (auto r = apply_bind_slot_(si, kind, size, path_id, roles); !r) {
@@ -109,6 +111,8 @@ ILinkEncoder::Outcome SlotBindings::on(
         return ILinkEncoder::Outcome::Dropped;
     const auto bound = apply_bind_slot_(si, kind, size, path_id, bracketed_roles);
     const auto closed = frame->end();
+    if (closed)
+        save_bracket_gen_ = save_bracket_gen_.next();
     if (!bound || !closed)
         return ILinkEncoder::Outcome::Dropped;
     return ILinkEncoder::Outcome::Encoded;
@@ -220,6 +224,7 @@ void SlotBindings::drop_bindings() noexcept {
 void SlotBindings::note_drop_park() noexcept {
     TASTY_SEAT_BODY(SlotBindings);
     if (prefetch_) {
+        prefetch_->request_park();
         if (!prefetch_->park_acked()) {
             session_tally_.last_error = Error{Errc::would_block, ERR_SITE(), 0};
             ++tally_.prefetch_park_deferrals;
@@ -296,7 +301,7 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
         save_src_->note_attached(si, false, proto::FileSize{});
         return SaveBind::Ready;
     }
-    const auto backend = save_src_->backend(si);
+    const auto backend = save_backend_(si);
     if (!backend)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), si.detail()});
 
@@ -314,6 +319,12 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     }
     save_src_->mark(si, Attach::Attaching);
     return SaveBind::Waiting;
+}
+
+infra::OptRef<svc::IStorageBackend> SlotBindings::save_backend_(proto::SlotIndex si) noexcept {
+    if (!SaveImageSource::holds(si))
+        return {};
+    return infra::OptRef<svc::IStorageBackend>{infra::at_index(save_backends_, si)};
 }
 
 proto::FileSize SlotBindings::save_extent_of_(proto::SlotIndex slot) const noexcept {
@@ -363,7 +374,6 @@ ILinkEncoder::Outcome SlotBindings::perform_bound_mount_(
         machine_.advise(Event::InfoRequest{.id = InfoId::ImageMountFailed}, advise_site_);
         return ILinkEncoder::Outcome::Dropped;
     }
-    RtRelaxScope scope(ops_);
     Ex<void> r{};
     if (bm.image == proto::FileId{}) {
         r = core->mount(bm.index, cores::MountedPath{});
@@ -647,12 +657,9 @@ void SlotBindings::mount_save_channel(
         if (!storage_life_) {
             channel.descriptor().note_attached(si, false, proto::FileSize{});
         } else {
-            const bool staged = storage_life_->stage_backend(
-                si,
-                channel.backend(),
-                channel.compose_order(m->row, part),
-                {}
-            );
+            const auto port = channel.backend();
+            const bool staged = port
+                && storage_life_->stage_backend(si, *port, channel.compose_order(m->row, part), {});
             if (staged)
                 channel_borrows_ = channel_borrows_.with(si);
             if (!staged || !slots_.submit_attach(si, roles)) {

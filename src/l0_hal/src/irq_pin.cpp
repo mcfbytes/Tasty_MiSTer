@@ -85,7 +85,13 @@ struct IrqPath {
 
 IrqPath irq_path(const char* root, os::KernelIrq irq, const char* leaf) noexcept {
     IrqPath p{};
-    p.fits = os::format_path(std::span<char>(p.text), "%s/irq/%u/%s", root, irq.v, leaf);
+    p.fits = os::format_path(
+        std::span<char>(p.text),
+        "%s/irq/%s/%s",
+        root,
+        irq.text().c_str(),
+        leaf
+    );
     return p;
 }
 
@@ -104,7 +110,7 @@ IrqPath irq_path(const char* root, os::KernelIrq irq, const char* leaf) noexcept
 
 [[nodiscard]] Ex<void> write_mask(const char* path, os::CpuMask mask) noexcept {
     std::array<char, 16> text{};
-    if (!os::format_path(std::span<char>(text), "%s\n", infra::HexText{mask.v}.c_str())) {
+    if (!os::format_path(std::span<char>(text), "%s\n", mask.hex().c_str())) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     const std::string_view line{text.data()};

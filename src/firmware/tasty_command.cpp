@@ -215,7 +215,7 @@ class RecStartCommand final : public TastyCommand {
 public:
     [[nodiscard]] std::optional<TastyRefusal> refuse(const TastyArgs& a) const noexcept override {
 
-        if (a.rec.from_frame >= app::MovieFrame{} || a.rec.to_frame >= app::MovieFrame{}) {
+        if (a.rec.from_frame >= app::MoviePosition{} || a.rec.to_frame >= app::MoviePosition{}) {
             return TastyRefusal::SliceOnRecStart;
         }
         return refuse_save_outside_play(a);

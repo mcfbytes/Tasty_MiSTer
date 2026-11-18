@@ -115,9 +115,7 @@ bool PsxCore::finish_mount_() {
     plan_.data_first_track = toc.last != svc::TrackCount{}
         && toc.at(svc::TrackIndex{}).type != svc::TrackType::Cdda;
     plan_.game_id = geom_.identity.id;
-    plan_.disc_size_bytes = proto::FileSize{
-        static_cast<std::uint64_t>(toc.end.v) * svc::kRawFrameBytes
-    };
+    plan_.disc_size_bytes = kPsxDiscRules.block_size().image_bytes(toc.end);
     return true;
 }
 

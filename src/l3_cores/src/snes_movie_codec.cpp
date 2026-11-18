@@ -73,11 +73,11 @@ IReplayCore::PowerOn SnesMovieCodec::power_on(const MovieFacts&) const noexcept 
 
 std::optional<IMovieFormat::DigestSpan> SnesMovieCodec::past_header(
     proto::FileSize size,
-    proto::FileSize header
+    proto::FileOffset from
 ) noexcept {
-    if (size.after_header(header) < proto::FileSize{kRomMin})
+    if (from.remaining_in(size) < kRomMin)
         return std::nullopt;
-    return span_past(size, header);
+    return span_past(size, from);
 }
 
 }

@@ -8,13 +8,14 @@
 #include "app/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 #include "os/raw_monotonic_clock.h"
 
 namespace mister::app {
 
 struct FabricState {
     FabricGeneration gen{};
-    std::uint16_t cookie = 0;
+    proto::MemSizeCookie cookie{};
     bool configured = false;
     bool bridges_down = false;
     bool load_ok = false;
@@ -41,7 +42,7 @@ public:
         return last_.bridges_down && !last_.load_ok;
     }
 
-    [[nodiscard]] std::uint16_t cookie() const noexcept { return last_.cookie; }
+    [[nodiscard]] proto::MemSizeCookie cookie() const noexcept { return last_.cookie; }
 
     [[nodiscard]] FabricGeneration gen() const noexcept { return last_.gen; }
 

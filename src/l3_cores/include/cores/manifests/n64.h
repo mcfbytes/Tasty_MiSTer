@@ -75,4 +75,9 @@ std::unique_ptr<Core> make_n64(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<ILoader> make_n64_loader(const LoaderContext& ctx);
 
+std::unique_ptr<svc::IStorageBackend> make_n64_save_store(
+    const svc::Vfs& vfs,
+    infra::OptRef<xthread::WakeFlag> activity
+);
+
 }

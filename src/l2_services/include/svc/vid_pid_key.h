@@ -22,6 +22,12 @@ struct VidPidKey {
         };
     }
 
+    [[nodiscard]] constexpr Vid vid() const noexcept {
+        return Vid{static_cast<std::uint16_t>(v >> kVidShift)};
+    }
+
+    [[nodiscard]] constexpr Pid pid() const noexcept { return Pid{static_cast<std::uint16_t>(v)}; }
+
     [[nodiscard]] static std::optional<VidPidKey> parse_hex(std::string_view text) noexcept {
         constexpr std::size_t kDigits = 8;
         constexpr std::size_t kPrefix = 2;
@@ -46,6 +52,10 @@ static_assert(sizeof(VidPidKey) == sizeof(std::uint32_t), "the packed key is one
 static_assert(
     VidPidKey::of(Vid{0x054C}, Pid{0x05C4}) == VidPidKey{0x054C05C4u},
     "vid occupies the high half"
+);
+static_assert(
+    VidPidKey{0x054C05C4u}.vid() == Vid{0x054C} && VidPidKey{0x054C05C4u}.pid() == Pid{0x05C4},
+    "vid() and pid() are the halves `of` packs"
 );
 
 }

@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 
+#include "app/fb_tenancy.h"
 #include "app/hd_flip_slot.h"
 #include "app/hd_look.h"
 #include "app/hd_osd_ask.h"
@@ -62,6 +63,9 @@ public:
     [[nodiscard]] std::uint32_t stale_drops() const noexcept;
 
 private:
+    enum class Phase : std::uint8_t { Closed, Open, Intends, Covers };
+
+    [[nodiscard]] bool owns_() const noexcept;
     void close_() noexcept;
     void retry_drop_() noexcept;
     void publish_ask_(bool is_open) noexcept;
@@ -81,6 +85,7 @@ private:
     HdOsdStatus status_{};
     std::optional<HdFlipChannel::Job> shown_{};
     std::optional<HdFlipChannel::Job> owed_{};
+    std::optional<FbLease> lease_{};
     PageDescription page_{};
     PageDescription page_sent_{};
     HdOsdStatus::Badge badge_ = HdOsdStatus::Badge::Unknown;
@@ -107,10 +112,7 @@ private:
 
     std::optional<os::VtNumber> guarded_vt_{};
     std::optional<os::VtNumber> hushed_vt_{};
-    bool open_ = false;
-    bool intends_ = false;
-    bool covers_ = false;
-    bool ours_ = false;
+    Phase phase_ = Phase::Closed;
     bool reraise_owed_ = false;
     bool drop_owed_ = false;
 };

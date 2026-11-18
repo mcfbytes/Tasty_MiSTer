@@ -35,7 +35,7 @@ Ex<LoadPlan> N64Loader::plan(const LoadAsk& ask, const proto::StatusWord& status
         LoadPlan p{};
         p.count = 1;
         if (ask.load_addr == hal::FabricAddr{} || !ipl_.plan_row(p.rows[0], ask.path, true)) {
-            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ask.load_addr.v});
+            return std::unexpected(ask.load_addr.refusal(Errc::bad_format, ERR_SITE()));
         }
         p.rows[0].addr = ask.load_addr.v;
         p.rows[0].index = ask.index;
@@ -165,7 +165,7 @@ n64::IRowPass* N64Loader::pass_(n64::PassKind kind) noexcept {
     return nullptr;
 }
 
-void N64Loader::shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) {
+void N64Loader::shape(const TransferRow& row, std::span<std::uint8_t> piece, proto::FileOffset at) {
     TASTY_SEAT_BODY(N64Loader);
     const auto kind = n64::pass_kind_of(row.shape);
     n64::IRowPass* const pass = kind ? pass_(*kind) : nullptr;
@@ -173,27 +173,28 @@ void N64Loader::shape(const TransferRow& row, std::span<std::uint8_t> piece, std
         bad_row_ = true;
         return;
     }
-    const n64::PiecePlace at = off == 0 ? n64::PiecePlace::First : n64::PiecePlace::Later;
+    const n64::PiecePlace placed = at == proto::kFileStart ? n64::PiecePlace::First
+                                                           : n64::PiecePlace::Later;
     bad_row_ = false;
     current_ = kind;
-    if (at == n64::PiecePlace::First)
+    if (placed == n64::PiecePlace::First)
         concluded_ = false;
-    pass->shape(row, slab_, piece, at);
+    pass->shape(row, slab_, piece, placed);
 }
 
 Ex<void> N64Loader::place(
     const TransferRow& row,
     std::span<const std::uint8_t> piece,
-    std::uint64_t,
+    proto::FileOffset,
     ICoreWindow& window
 ) {
     TASTY_SEAT_BODY(N64Loader);
     const auto kind = n64::pass_kind_of(row.shape);
     if (!kind)
-        return std::unexpected(row.shape.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(row.shape.refusal(Errc::bad_format, ERR_SITE()));
     n64::IRowPass* const pass = pass_(*kind);
     if (pass == nullptr)
-        return std::unexpected(row.shape.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(row.shape.refusal(Errc::bad_format, ERR_SITE()));
     bad_row_ = false;
     current_ = kind;
     return pass->place(piece, window);
@@ -203,7 +204,7 @@ Ex<bool> N64Loader::conclude(const TransferRow& row, ICoreWindow& window) {
     TASTY_SEAT_BODY(N64Loader);
     const auto kind = n64::pass_kind_of(row.shape);
     if (!kind)
-        return std::unexpected(row.shape.refused(Errc::bad_format, ERR_SITE()));
+        return std::unexpected(row.shape.refusal(Errc::bad_format, ERR_SITE()));
     n64::IRowPass* const pass = pass_(*kind);
     if (pass == nullptr)
         return false;

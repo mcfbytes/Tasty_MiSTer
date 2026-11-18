@@ -68,15 +68,10 @@ public:
     std::span<const LinkDecoderDecl> services() const noexcept { return profile_->services; }
 
     [[nodiscard]] Ex<void> mount(IoIndex slot, const MountedPath& p);
-    [[nodiscard]] Ex<void> file_tx(IoIndex index, std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] Ex<void> osd_closed();
 
     void status_changed() noexcept { on_status_changed(); }
-
-    void set_pending_file_ext(std::string_view ext) noexcept { on_set_pending_file_ext(ext); }
-
-    void set_pending_file_path(std::string_view path) noexcept { on_set_pending_file_path(path); }
 
     [[nodiscard]] std::uint64_t last_tx_bytes() const noexcept { return on_last_tx_bytes(); }
 
@@ -163,17 +158,9 @@ private:
 
     [[nodiscard]] virtual Ex<void> on_mount(IoIndex, const MountedPath&) { return {}; }
 
-    [[nodiscard]] virtual Ex<void> on_file_tx(IoIndex, std::span<const std::uint8_t>) {
-        return unimplemented(ERR_SITE());
-    }
-
     [[nodiscard]] virtual Ex<void> on_osd_closed() { return {}; }
 
     virtual void on_status_changed() noexcept {}
-
-    virtual void on_set_pending_file_ext(std::string_view) noexcept {}
-
-    virtual void on_set_pending_file_path(std::string_view) noexcept {}
 
     virtual std::uint64_t on_last_tx_bytes() const noexcept { return 0; }
 

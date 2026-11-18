@@ -29,14 +29,10 @@ public:
 
     std::uint32_t mount_refusals() const noexcept { return stream_.mount_refusals(); }
 
-    proto::IoIndex last_index() const noexcept { return stream_.last_index(); }
+    proto::FioIndexByte last_index() const noexcept { return stream_.last_index(); }
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
-
-    void on_set_pending_file_ext(std::string_view ext) noexcept override {
-        stream_.set_pending_ext(ext);
-    }
 
     std::uint64_t on_last_tx_bytes() const noexcept override { return stream_.bytes(); }
 

@@ -45,7 +45,7 @@ public:
 
     Transition launch(const app::RecentGames::Record& r);
 
-    [[nodiscard]] bool ask(
+    [[nodiscard]] Transition ask(
         IConfirmHost& host,
         std::string_view title,
         std::span<const std::string_view> body

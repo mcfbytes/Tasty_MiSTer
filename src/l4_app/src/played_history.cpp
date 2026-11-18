@@ -65,20 +65,22 @@ Ex<void> PlayedHistory::load() {
         loaded_ = true;
         return {};
     }
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = (*f)->read_at(off, std::span{buf}.subspan(off));
+    proto::FileOffset at = proto::kFileStart;
+    const proto::FileSize total = proto::FileSize::of(std::span{buf});
+    while (total.holds(at)) {
+        auto n = (*f)->read_at(at, at.skip_in(std::span{buf}));
         if (!n) {
             ++errors_;
             return std::unexpected(n.error());
         }
         if (*n == 0)
             break;
-        off += *n;
+        at += proto::FileSize{*n};
     }
     ++loads_;
+    const proto::FileSize got = at - proto::kFileStart;
 
-    if (off < sizeof(Header)) {
+    if (got < proto::FileSize{sizeof(Header)}) {
         ++rejected_;
         loaded_ = true;
         return {};
@@ -94,7 +96,7 @@ Ex<void> PlayedHistory::load() {
     if (h.count > kMax)
         clamped_ += static_cast<std::uint32_t>(h.count - kMax);
     const std::size_t count = std::min<std::size_t>(h.count, kMax);
-    if (off < kHeaderBytes + count * sizeof(Stored)) {
+    if (got < proto::FileSize{kHeaderBytes + count * sizeof(Stored)}) {
         ++rejected_;
         loaded_ = true;
         return {};

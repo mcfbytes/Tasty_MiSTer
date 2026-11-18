@@ -28,7 +28,12 @@ public:
         SaveStateEngine::ISlotMap& map;
     };
 
-    [[nodiscard]] Ex<void> begin(const Env& env, const SaveTarget& target, const SaveStateDecl& ss);
+    [[nodiscard]] Ex<void> begin(
+        const Env& env,
+        const SaveTarget& target,
+        const SaveStateDecl& ss,
+        const hal::FpgaAperture& aperture
+    );
 
     [[nodiscard]] Ex<bool> step(const Env& env);
 

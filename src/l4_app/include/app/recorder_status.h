@@ -88,8 +88,8 @@ constexpr void to_json(infra::JsonOut& o, const RecorderStatus& s) noexcept {
     o.field("copy_us_max", s.copy_us.max.count());
     o.field("arena_kib", s.arena_kib);
     o.field("depth", s.depth);
-    o.field("first", s.first_core_frame.number());
-    o.field("last", s.last_core_frame.number());
+    o.field("first", s.first_core_frame);
+    o.field("last", s.last_core_frame);
 }
 
 using RecorderStatusCell = xthread::Telemetry<RecorderStatus, SeatTag::Capture>;

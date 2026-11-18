@@ -7,6 +7,7 @@
 #include "app/hd_osd_screen.h"
 #include "app/hps_framebuffer.h"
 #include "app/info_origin.h"
+#include "app/info_plane.h"
 #include "app/page_description.h"
 #include "app/link_event_dispatch.h"
 #include "app/recents_store.h"
@@ -55,7 +56,7 @@ void UiRound::on(const app::RawKeyEdge& edge) noexcept {
 
 bool UiRound::on(const proto::LinkEvent::OsdMask& m) noexcept {
     TASTY_SEAT_BODY(UiRound);
-    model_.on_hd_mask(HdMask{m.mask.v}, m.front_end, ctx_.ui_requests);
+    model_.on_hd_mask(m.mask.widened<HdMask>(), m.front_end, ctx_.ui_requests);
     return false;
 }
 
@@ -247,6 +248,61 @@ void UiRound::publish_page_record() {
     page_cell_.publish(rec);
 }
 
+bool UiRound::host_board_(std::chrono::nanoseconds now) {
+    bool moved = false;
+    if (board_.active().any() && model_.stack().empty()) {
+        moved = model_.open_indicators(ctx_, board_);
+    }
+    const bool up = model_.stack().top_id() == PageId::Indicators;
+
+    const bool shown_on_hd = hd_ && model_.hd_tree();
+    const bool changed = board_.round(
+        now,
+        up || shown_on_hd ? board_.active() : app::IndicatorSet{}
+    );
+    if (up && !board_.active().any())
+        moved = model_.close_indicators(ctx_) || moved;
+    if (changed && up)
+        model_.request_repaint();
+    return moved || changed;
+}
+
+std::optional<app::InfoPlane> UiRound::info_plane_() const noexcept {
+    if (!video_)
+        return std::nullopt;
+    const app::VideoGeometryRecord geo = video_->geometry_record();
+    return app::info_plane_for(
+        app::InfoPlaneFacts{
+            .rotation = ctx_.osd_rotation,
+            .direct_video = video_->direct_video(),
+            .hd_style = hd_ && model_.style().hd(),
+            .output = video_->output_size(),
+            .core_lines = geo.valid ? std::optional{app::OutputPixels::of(geo.height)}
+                                    : std::nullopt,
+        }
+    );
+}
+
+void UiRound::tick_autosave_([[maybe_unused]] std::chrono::nanoseconds now) {
+
+    if (menu_focus_) {
+        const bool focus = model_.menu_has_focus();
+        if (!last_menu_focus_ || *last_menu_focus_ != focus) {
+            last_menu_focus_ = focus;
+            menu_focus_->publish(focus);
+        }
+    }
+    if (!autosave_ || !save_director_)
+        return;
+    const app::AutosaveKnobsCell::Sample knobs = autosave_->sample();
+    const app::SaveDirectorCell::Sample status = save_director_->sample();
+    const AutosaveClock::Inputs in{
+        .knobs = knobs ? knobs.value : app::AutosaveKnobs{},
+        .status = status ? std::optional<app::SaveDirectorStatus>{status.value} : std::nullopt,
+    };
+    (void)autosave_clock_.round(in, board_);
+}
+
 app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
     const PublishOnExit republish{this};
     ++ticks_;
@@ -262,6 +318,9 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
             drained = true;
     }
 
+    if (host_board_(clock_.now().time_since_epoch()))
+        drained = true;
+
     const bool deadline_due = model_.deadline_due(clock_.now().time_since_epoch());
     const auto top = model_.stack().top();
     const bool page_poll = top && top->facts().wake_every_round;
@@ -270,10 +329,19 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
     if (hd_switchable != ctx_.session.hd_switchable)
         model_.request_repaint();
 
+    bool autosave_on = false;
+    if (autosave_) {
+        const app::AutosaveKnobsCell::Sample sampled = autosave_->sample();
+        autosave_on = sampled && sampled.value.enabled;
+    }
+    if (autosave_on != ctx_.session.autosave)
+        model_.request_repaint();
+
     ctx_.session.info_origin = app::info_origin_y(
         video_ && video_->direct_video(),
         fb_ && fb_->raised()
     );
+    ctx_.session.info_plane = info_plane_();
     const bool idle = !drained
         && !page_poll
         && !decoder_.pending()
@@ -288,6 +356,7 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         ctx_.sys = host.sys;
         ctx_.status = host.bar;
         ctx_.session.hd_switchable = hd_switchable;
+        ctx_.session.autosave = autosave_on;
         ++samples_;
 
         (void)model_.pump(ctx_, renderer_);
@@ -323,6 +392,8 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         idle_clock_.ctl_pushed(landed);
     }
 
+    tick_autosave_(now);
+
     if (hd_) {
         app::PageDescription described{};
         const app::PageDescription* page = nullptr;
@@ -330,7 +401,8 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
             page = &described;
         const app::HdStatusSlots slots{
             .bluetooth = ctx_.status.bluetooth,
-            .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt
+            .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt,
+            .indicators = page ? board_.active() : app::IndicatorSet{}
         };
         hd_->tick(
             infra::opt_ref_of(page),
@@ -343,9 +415,12 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         );
         model_.set_hd_root(hd_->available());
     }
+
+    const proto::OsdTarget menu_target = hd_ && hd_->intends_hdmi() ? proto::OsdTarget::Vga
+                                                                    : proto::OsdTarget::All;
     return app::UiRoundEdge{
         .pumped = !idle,
-        .target = hd_ && hd_->intends_hdmi() ? proto::OsdTarget::Vga : proto::OsdTarget::All,
+        .target = model_.stack().top_id() == PageId::Indicators ? board_.target() : menu_target,
         .menu_present = model_.menu_present()
     };
 }

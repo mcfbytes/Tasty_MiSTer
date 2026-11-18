@@ -85,12 +85,12 @@ private:
 
     [[nodiscard]] Ex<reg::Block> lead_of(WindowId id, std::size_t need) const;
 
-    template <reg::Access A>
-    [[nodiscard]] Ex<reg::Reg<A>> mailbox_reg(FactField field) const;
+    template <class Layout>
+    [[nodiscard]] Ex<BlockView<Layout>> mailbox_reg(FactField field) const;
 
     [[nodiscard]] Ex<void> bind_slot(WindowId id, reg::Lend lend);
-    [[nodiscard]] Ex<reg::Reg<reg::WO>> mailbox_gpo() const;
-    [[nodiscard]] Ex<reg::Reg<reg::RO>> mailbox_gpi() const;
+    [[nodiscard]] Ex<BlockView<GpoBlock>> mailbox_gpo() const;
+    [[nodiscard]] Ex<BlockView<GpiBlock>> mailbox_gpi() const;
 
     const BoardProfile* profile_;
     std::array<std::optional<detail::MappedRegs>, kMaxWindows> pages_{};

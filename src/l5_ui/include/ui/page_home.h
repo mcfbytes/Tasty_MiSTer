@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/message_sum.h"
+#include "ui/osd_tree.h"
 #include "ui/page_arg.h"
 #include "ui/page_id.h"
 
@@ -20,6 +21,7 @@ struct PageHome {
     PageBuilder builder;
     std::optional<std::string_view> owner;
     PageArg::Kind takes = PageArg::Kind::None;
+    OsdTree tree = OsdTree::Classic;
 };
 
 inline constexpr std::array<PageHome, static_cast<std::size_t>(PageId::kCount)> kPageHome{{
@@ -54,30 +56,40 @@ inline constexpr std::array<PageHome, static_cast<std::size_t>(PageId::kCount)> 
     {PageId::AdvancedMapButtons, PageBuilder::None, std::nullopt},
     {PageId::AdvancedMapCapture, PageBuilder::None, std::nullopt},
     {PageId::Mt32Pi, PageBuilder::None, std::nullopt},
-    {PageId::HdMenu, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdCoreSettings, PageBuilder::MakePage, "CoreOptionsPage", PageArg::Kind::Submenu},
-    {PageId::HdCoreAbout, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdSettings, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdControllers, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdDisplay, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdAbout, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdMedia, PageBuilder::MakePage, "HdListPage"},
-    {PageId::HdSlotSheet, PageBuilder::MakePage, "HdListPage", PageArg::Kind::Slot},
-    {PageId::HdRecentGames, PageBuilder::MakePage, "HdListPage"},
+    {PageId::HdMenu, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdCoreSettings,
+     PageBuilder::MakePage,
+     "CoreOptionsPage",
+     PageArg::Kind::Submenu,
+     OsdTree::Hd},
+    {PageId::HdCoreAbout, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdSettings, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdControllers, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdDisplay, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdAbout, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdMedia, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::HdSlotSheet, PageBuilder::MakePage, "HdListPage", PageArg::Kind::Slot, OsdTree::Hd},
+    {PageId::HdRecentGames, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
     {PageId::TextEntry, PageBuilder::MakePage, "TextEntryPage"},
-    {PageId::Network, PageBuilder::MakePage, "HdListPage"},
-    {PageId::WifiNetworks, PageBuilder::MakePage, "HdListPage"},
-    {PageId::WifiSaved, PageBuilder::MakePage, "HdListPage"},
-    {PageId::WifiAdvanced, PageBuilder::MakePage, "HdListPage"},
-    {PageId::CountryPick, PageBuilder::MakePage, "HdListPage"},
-    {PageId::Bluetooth, PageBuilder::MakePage, "HdListPage"},
-    {PageId::BtPair, PageBuilder::MakePage, "HdListPage", PageArg::Kind::Pair},
-    {PageId::BtDevices, PageBuilder::MakePage, "HdListPage"},
+    {PageId::Network, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::WifiNetworks, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::WifiSaved, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::WifiAdvanced, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::CountryPick, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::Bluetooth, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::BtPair, PageBuilder::MakePage, "HdListPage", PageArg::Kind::Pair, OsdTree::Hd},
+    {PageId::BtDevices, PageBuilder::MakePage, "HdListPage", PageArg::Kind::None, OsdTree::Hd},
+    {PageId::Indicators, PageBuilder::FreeFactory, "IndicatorPage"},
 }};
 
 [[nodiscard]] constexpr PageArg::Kind page_takes(PageId id) noexcept {
     return infra::ordinal(id) < kPageHome.size() ? kPageHome[infra::ordinal(id)].takes
                                                  : PageArg::Kind::None;
+}
+
+[[nodiscard]] constexpr OsdTree tree_of(PageId id) noexcept {
+    return infra::ordinal(id) < kPageHome.size() ? kPageHome[infra::ordinal(id)].tree
+                                                 : OsdTree::Classic;
 }
 
 consteval bool page_homes_are_indexed_by_id() {

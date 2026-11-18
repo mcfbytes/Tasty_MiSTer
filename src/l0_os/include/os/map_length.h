@@ -4,6 +4,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace mister::os {
@@ -24,6 +25,15 @@ struct MapLength {
     void release(const volatile void* base) const noexcept;
 
     [[nodiscard]] std::span<std::byte> plain_bytes(void* base) const noexcept;
+
+    [[nodiscard]] constexpr std::optional<MapLength> less(MapLength head) const noexcept {
+        if (head.v > v)
+            return std::nullopt;
+        return MapLength{v - head.v};
+    }
+
+    [[nodiscard]] std::byte* into(std::byte* base) const noexcept { return base + v; }
+
     friend constexpr bool operator==(MapLength, MapLength) = default;
     friend constexpr auto operator<=>(MapLength, MapLength) = default;
 

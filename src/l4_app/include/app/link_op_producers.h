@@ -95,12 +95,7 @@ using LinkOpProducers = std::tuple<
     OpUnproduced<proto::LinkOp::Kind::BlockAnswer, kOwedBlockAnswer>,
     OpProducer<proto::LinkOp::Kind::BindDecoders, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindSlot, LoadLadder, LoadWalk, MountQueue, cores::BootLadder>,
-    OpProducer<
-        proto::LinkOp::Kind::FileTx,
-        ContentPick,
-        FileTxPieces,
-        LoadLadder,
-        cores::StMediaLadder>,
+    OpProducer<proto::LinkOp::Kind::FileTx, ContentPick, FileTxPieces, LoadLadder>,
     OpProducer<proto::LinkOp::Kind::BindFacts, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindConfig, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindUart, BindTail>,
@@ -110,7 +105,6 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::ApplyCore, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::AbortSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindIdentity, BindTail>,
-    OpProducer<proto::LinkOp::Kind::BindDoorbells, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindJoy, BindTail>,
     OpProducer<proto::LinkOp::Kind::JoyRelease, JoyLevelEmitter>,
     OpProducer<proto::LinkOp::Kind::SaveUpload, ConfigSaves>,
@@ -125,7 +119,6 @@ using LinkOpProducers = std::tuple<
         LoadLadder,
         LoadWalk,
         ManifestLadder,
-        cores::BootLadder,
         cores::PayloadPieces>,
     OpProducer<proto::LinkOp::Kind::StageReset, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::StageDiscPayload, cores::BootLadder>,
@@ -143,7 +136,8 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk>,
     OpProducer<proto::LinkOp::Kind::AttachSave, LoadWalk, MountQueue, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>,
-    OpProducer<proto::LinkOp::Kind::MenuCtl, ui::UiRound>>;
+    OpProducer<proto::LinkOp::Kind::MenuCtl, ui::UiRound>,
+    OpProducer<proto::LinkOp::Kind::PlainDownload, cores::PayloadPieces>>;
 
 namespace detail {
 template <class T>

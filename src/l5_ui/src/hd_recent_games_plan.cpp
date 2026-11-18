@@ -16,7 +16,7 @@ HdRecentGamesPlan::HdRecentGamesPlan(const HdPlanInputs& in) : launch_(in) {
         refs_.emplace_back(rows_.back());
     }
 
-    refusals_ = svc::Tally{in.recent_games.hidden()};
+    refusals_ = in.recent_games.hidden();
 }
 
 PageId HdRecentGamesPlan::id() const {

@@ -9,6 +9,7 @@
 #include <span>
 
 #include "cores/cd_cadence_gate.h"
+#include "cores/cd_command_words.h"
 #include "cores/cd_drive_state.h"
 #include "cores/cd_link.h"
 #include "cores/cd_engine_stats.h"
@@ -31,8 +32,6 @@ class CdEngine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::size_t kMaxCommandWords = 7;
-
     static constexpr std::size_t kMaxStatusWords = 6;
 
     static constexpr std::size_t kMaxDescriptorBytes = 2048;
@@ -63,7 +62,7 @@ public:
 
     bool command_wanted() const noexcept { return command_wanted_; }
 
-    [[nodiscard]] Ex<void> accept_command(std::span<const std::uint16_t> words, CdDialectPorts& p);
+    [[nodiscard]] Ex<void> accept_command(const CdCommandWords& cmd, CdDialectPorts& p);
 
     void seed_edge_memo(std::uint8_t req) noexcept {
         last_req_ = req;
@@ -94,7 +93,7 @@ public:
 
     std::size_t command_word_count() const noexcept {
         const std::size_t n = do_command_word_count();
-        return n < kMaxCommandWords ? n : kMaxCommandWords;
+        return n < CdCommandWords::kMaxWords ? n : CdCommandWords::kMaxWords;
     }
 
     std::optional<cdwire::Selector> command_selector() const noexcept {
@@ -138,10 +137,7 @@ protected:
     }
 
 private:
-    [[nodiscard]] virtual Ex<void> do_accept(
-        std::span<const std::uint16_t> words,
-        CdDialectPorts& p
-    ) = 0;
+    [[nodiscard]] virtual Ex<void> do_accept(const CdCommandWords& cmd, CdDialectPorts& p) = 0;
     [[nodiscard]] virtual Ex<void> do_tick(CdDialectPorts& p) = 0;
     [[nodiscard]] virtual Ex<void> do_push_sector(CdDialectPorts& p) = 0;
     virtual void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept = 0;

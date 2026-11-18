@@ -43,7 +43,7 @@ struct FrameStampRun;
 struct FrameStamp {
     WideCoreFrame core_frame{};
     std::int64_t capture_ns = 0;
-    MovieFrame movie_frame = kNoMovieFrame;
+    MoviePosition movie_frame = kNoMovieFrame;
     hal::HeaderCtr header_ctr{};
     DupReason dup = DupReason::None;
     std::uint8_t pad_[2]{};

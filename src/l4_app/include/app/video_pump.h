@@ -41,6 +41,20 @@ class Vfs;
 
 namespace mister::app {
 
+struct RunPolicy;
+
+struct CoreIdentity {
+    std::string_view core;
+    std::string_view home;
+    proto::RotationDir rotation = proto::RotationDir::None;
+
+    [[nodiscard]] static CoreIdentity of(const std::optional<SessionIdentity>& id) noexcept {
+        if (!id)
+            return {};
+        return CoreIdentity{id->core.view(), home_name(*id), id->rotation};
+    }
+};
+
 class VideoPump : public IOutputGeometry {
     TASTY_SEAT_RESIDENT(Ui);
 
@@ -53,6 +67,8 @@ public:
         LinkTxChannel<SeatTag::Ui>& link_tx;
         proto::ILinkRouter& replies;
         const IniCell& ini;
+
+        infra::OptRef<UiWriteLane> writes{};
     };
 
     VideoPump(
@@ -80,7 +96,7 @@ public:
 
     [[nodiscard]] bool i2c_held() const noexcept { return i2c_held_; }
 
-    void on_core_loaded(bool front_end);
+    void on_core_loaded(const CoreIdentity& id, bool front_end);
     void on_session_over();
 
     VideoWire& wire() noexcept { return wire_; }
@@ -119,9 +135,7 @@ public:
 
     void set_support_fhd(bool v) noexcept { support_fhd_ = v; }
 
-    void force_vsync_adjust(VsyncAdjust v) noexcept;
-
-    void arm_replay_ini(bool strict) noexcept;
+    void apply_run_policy(const RunPolicy& policy) noexcept;
 
     [[nodiscard]] VsyncAdjust vsync_adjust() const noexcept { return ini_.vsync_adjust; }
 
@@ -135,10 +149,6 @@ public:
         TASTY_SEAT_BODY(VideoPump);
         return OutputSize{OutputPixels::of(scrw_), OutputPixels::of(scrh_)};
     }
-
-    void set_core_name(std::string_view name) noexcept;
-
-    void set_spd_identity(std::string_view name, proto::RotationDir dir) noexcept;
 
     void note_menu_present(bool present) noexcept;
 
@@ -172,9 +182,19 @@ public:
 
     std::string_view resolved_spec() const noexcept { return spec_.view(); }
 
+    [[nodiscard]] std::string_view core_name() const noexcept { return core_name_.view(); }
+
+    [[nodiscard]] std::string_view spd_name() const noexcept { return spd_name_.view(); }
+
+    [[nodiscard]] proto::RotationDir spd_rotation() const noexcept { return spd_dir_; }
+
     std::int64_t last_apply_ns() const noexcept { return last_apply_ns_; }
 
 private:
+    void set_core_name(std::string_view name) noexcept;
+    void set_spd_identity(std::string_view name, proto::RotationDir dir) noexcept;
+    void arm_load_edge(bool front_end);
+
     struct FamilyMode {
         bool configured = false;
         VideoModeIndex index = kVideoModeIndexCustom;

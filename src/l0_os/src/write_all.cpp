@@ -4,26 +4,20 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <optional>
 
 namespace mister::os {
 
 namespace {
 
-[[nodiscard]] Ex<void> transfer(
-    const UniqueFd& fd,
-    std::span<const std::byte> bytes,
-    std::optional<FileOffset> at
-) noexcept {
+[[nodiscard]] constexpr off_t head_offset(std::size_t done) noexcept {
+    return static_cast<off_t>(done);
+}
+
+template <class Step>
+[[nodiscard]] Ex<void> transfer(std::span<const std::byte> bytes, Step step) noexcept {
     std::size_t off = 0;
     while (off < bytes.size()) {
-        const ssize_t n = at ? ::pwrite(
-                                   fd.get(),
-                                   bytes.data() + off,
-                                   bytes.size() - off,
-                                   at->at(static_cast<std::uint64_t>(off))
-                               )
-                             : ::write(fd.get(), bytes.data() + off, bytes.size() - off);
+        const ssize_t n = step(bytes.subspan(off));
         if (n < 0) {
             if (errno == EINTR)
                 continue;
@@ -39,21 +33,21 @@ namespace {
 }
 
 [[nodiscard]] Ex<void> write_all(const UniqueFd& fd, std::span<const std::byte> bytes) noexcept {
-    return transfer(fd, bytes, std::nullopt);
+    return transfer(bytes, [&](std::span<const std::byte> rest) {
+        return ::write(fd.get(), rest.data(), rest.size());
+    });
 }
 
 [[nodiscard]] Ex<void> rewrite_head(const UniqueFd& fd, std::span<const std::byte> bytes) noexcept {
 
-    constexpr FileOffset kHeadOffset{0};
-    return pwrite_all(fd, bytes, kHeadOffset);
-}
-
-[[nodiscard]] Ex<void> pwrite_all(
-    const UniqueFd& fd,
-    std::span<const std::byte> bytes,
-    std::optional<FileOffset> offset
-) noexcept {
-    return transfer(fd, bytes, offset);
+    return transfer(bytes, [&](std::span<const std::byte> rest) {
+        return ::pwrite(
+            fd.get(),
+            rest.data(),
+            rest.size(),
+            head_offset(bytes.size() - rest.size())
+        );
+    });
 }
 
 }

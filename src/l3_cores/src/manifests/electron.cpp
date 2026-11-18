@@ -33,7 +33,7 @@ static_assert(
     "stock Electron has no staging ladder and no blank-fill arm"
 );
 static_assert(
-    kElectron.staging.order == StageOrder::None,
+    !kElectron.staging.staged,
     "no boot ladder: UEF_FileSend runs inline in user_io_file_tx (req's "
     "leaked tmpfile has no host-side mount step to stage)"
 );

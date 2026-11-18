@@ -5,13 +5,9 @@
 #include <cstdint>
 
 #include "infra/error.h"
-#include "infra/opt_ref.h"
 #include "infra/unique_fd.h"
-#include "hal/cause_reg.h"
 #include "reactor/cause_decode.h"
 #include "reactor/cause_set.h"
-#include "hal/register_window.h"
-#include "os/uio_handle.h"
 #include "infra/seat.h"
 
 namespace mister::reactor {
@@ -56,12 +52,6 @@ class Notifier {
     TASTY_SEAT_MEDIATOR(Main, RT);
 
 public:
-    [[nodiscard]] static Ex<Notifier> doorbell_adopt(
-        os::UioLineRef uio,
-        infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> cause,
-        Cause klass
-    );
-
     [[nodiscard]] static Ex<Notifier> ticker(std::chrono::nanoseconds period);
 
     [[nodiscard]] static Ex<Notifier> test(int eventfd, Cause injected);
@@ -69,7 +59,7 @@ public:
     Notifier(Notifier&&) noexcept = default;
     Notifier& operator=(Notifier&&) noexcept = default;
 
-    int fd() const noexcept { return kind_ == Kind::Doorbell ? uio_.fd() : fd_.get(); }
+    int fd() const noexcept { return fd_.get(); }
 
     CauseSet delivers() const noexcept { return CauseSet{delivers_}; }
 
@@ -78,24 +68,15 @@ public:
     Cause drain() { return drain_checked().cause(); }
 
 private:
-    enum class Kind : std::uint8_t { Doorbell, Ticker, Test };
-    using CauseWindow = hal::RegisterWindow<hal::CauseReg>;
+    enum class Kind : std::uint8_t { Ticker, Test };
 
     Notifier(Kind k, UniqueFd fd, Cause delivers)
         : kind_(k),
           fd_(static_cast<UniqueFd&&>(fd)),
           delivers_(delivers) {}
 
-    Notifier(os::UioLineRef uio, infra::OptRef<const CauseWindow> cause, Cause klass)
-        : kind_(Kind::Doorbell),
-          uio_(uio),
-          cause_(cause),
-          delivers_(klass) {}
-
     Kind kind_;
     UniqueFd fd_;
-    os::UioLineRef uio_;
-    infra::OptRef<const CauseWindow> cause_{};
     Cause delivers_ = Cause::None;
 };
 

@@ -126,8 +126,6 @@ namespace {
 std::uint32_t device_key(const svc::InputDevice& d) noexcept {
     constexpr std::uint32_t kFnvOffsetBasis = 2166136261u;
     constexpr std::uint32_t kFnvPrime = 16777619u;
-    constexpr unsigned kByteBits = 8;
-    constexpr unsigned kByteMask = 0xFFu;
     const svc::DeviceIdentity& id = d.identity();
     std::uint32_t h = kFnvOffsetBasis;
     auto mix = [&h](std::uint8_t b) noexcept {
@@ -137,10 +135,10 @@ std::uint32_t device_key(const svc::InputDevice& d) noexcept {
     const std::string& s = !id.merge_id.empty() ? id.merge_id : id.id;
     for (const char c : s)
         mix(static_cast<std::uint8_t>(c));
-    mix(static_cast<std::uint8_t>(id.vid.v & kByteMask));
-    mix(static_cast<std::uint8_t>(id.vid.v >> kByteBits));
-    mix(static_cast<std::uint8_t>(id.pid.v & kByteMask));
-    mix(static_cast<std::uint8_t>(id.pid.v >> kByteBits));
+    for (const std::uint8_t b : id.vid.bytes_le())
+        mix(b);
+    for (const std::uint8_t b : id.pid.bytes_le())
+        mix(b);
     return h != 0u ? h : 1u;
 }
 }
@@ -386,7 +384,7 @@ void InputDecode::on(const proto::LinkEvent::PolledWord& w) noexcept {
             rumble_.on(w);
             return;
         case proto::user_io::PollShape::F12ModPoll:
-            f12_mod_needed_ = w.word != 0;
+            f12_mod_needed_ = w.word != hal::SpiWord{};
             return;
         case proto::user_io::PollShape::InfoPoll:
         case proto::user_io::PollShape::kCount:
@@ -445,10 +443,10 @@ bool InputDecode::push_ui_edge(const RawKeyEdge& e) {
     keys_.menu_keys_dropped.add();
     diag_.appendf(
         "{\"t\":\"input_drop\",\"ring\":\"ui_keys\",\"cap\":%u,"
-        "\"dropped\":%s,\"code\":%u,\"pressed\":%u}",
+        "\"dropped\":%s,\"code\":%s,\"pressed\":%u}",
         static_cast<unsigned>(kMenuKeySlots),
         keys_.menu_keys_dropped.text().c_str(),
-        static_cast<unsigned>(e.code.v),
+        e.code.decimal_text().c_str(),
         static_cast<unsigned>(e.pressed)
     );
     return false;
@@ -460,7 +458,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, svc::D
     const bool osd_visible = focus != KeyFocus::Core;
     DeviceInputState& state = devices_[slot];
     for (std::size_t i = 0; i < r.keys.count(); ++i) {
-        const svc::KeyEdge e = r.keys.at(i);
+        const svc::KeyEvent e = r.keys.at(i);
 
         const svc::EvdevCode code = e.code;
         if (!code.is_key())
@@ -546,7 +544,7 @@ void InputDecode::maybe_capture(const svc::InputDevice& d, svc::DeviceSlot slot)
         return;
     const svc::DeviceReport& r = d.report();
     for (std::size_t i = 0; i < r.keys.count(); ++i) {
-        const svc::KeyEdge e = r.keys.at(i);
+        const svc::KeyEvent e = r.keys.at(i);
         if (!e.pressed || e.code.is_key())
             continue;
         const svc::DeviceIdentity& id = d.identity();

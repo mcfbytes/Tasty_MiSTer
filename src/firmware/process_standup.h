@@ -21,6 +21,7 @@
 
 namespace mister::app {
 class BoardReboot;
+class BootHandoff;
 class LinkSession;
 }
 
@@ -63,11 +64,15 @@ public:
             SessionStage(
                 app::LinkSession& sup,
                 app::BoardReboot& reboot,
+                app::BootHandoff& handoff,
                 const SessionMode& mode
             ) noexcept
                 : sup_(sup),
                   reboot_(reboot),
+                  handoff_(handoff),
                   mode_(mode) {}
+
+            void settle_save_lane() const;
 
             void reboot_at_exit(ColdRebootCause why) const;
 
@@ -77,6 +82,7 @@ public:
             friend class ExitPath;
             std::reference_wrapper<app::LinkSession> sup_;
             std::reference_wrapper<app::BoardReboot> reboot_;
+            std::reference_wrapper<app::BootHandoff> handoff_;
             std::reference_wrapper<const SessionMode> mode_;
         };
 
@@ -88,10 +94,11 @@ public:
             hal::ILinkPort& link,
             app::LinkSession& sup,
             app::BoardReboot& reboot,
+            app::BootHandoff& handoff,
             const SessionMode& mode
         ) noexcept
             : link_(link),
-              session_(std::in_place, sup, reboot, mode) {}
+              session_(std::in_place, sup, reboot, handoff, mode) {}
 
         [[nodiscard]] int fail() const;
 

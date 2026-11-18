@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "app/autosave_knobs.h"
 #include "app/idle_knobs.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
@@ -41,5 +42,7 @@ using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>;
 [[nodiscard]] proto::ConfSwitches default_conf_switches() noexcept;
 
 [[nodiscard]] IdleKnobs idle_knobs_of(const svc::ConfigSnapshot& cfg) noexcept;
+
+[[nodiscard]] AutosaveKnobs autosave_knobs_of(const svc::ConfigSnapshot& cfg) noexcept;
 
 }

@@ -60,7 +60,7 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
         return {};
     }
 
-    auto data = link_->transfer_or_post(hal::SpiWord{cookie.v});
+    auto data = link_->transfer_or_post(cookie.word());
     if (!data) {
         link_->deselect();
         return fail(data.error());
@@ -99,7 +99,7 @@ Ex<bool> CoreSession::settle_configure() {
 
     if (memsz_post_ == MemSizePost::Opcode) {
         memsz_post_ = MemSizePost::None;
-        auto data = link_->transfer_or_post(hal::SpiWord{cookie_.v});
+        auto data = link_->transfer_or_post(cookie_.word());
         if (!data) {
             link_->deselect();
             (void)fail(data.error());
@@ -143,10 +143,6 @@ Ex<void> CoreSession::pulse(StatusBit bit) {
     if (auto r = apply(StatusEdit::bit(bit, true)); !r)
         return r;
     return apply(StatusEdit::bit(bit, false));
-}
-
-Ex<void> CoreSession::pulse_reset() {
-    return pulse(kResetBit);
 }
 
 Ex<void> CoreSession::adopt_from_core(const StatusWord& core) {

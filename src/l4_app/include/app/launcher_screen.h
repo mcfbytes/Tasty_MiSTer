@@ -2,10 +2,13 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
+#include "app/fb_tenancy.h"
 #include "app/launcher_fb_ack.h"
 #include "app/launcher_state.h"
 #include "app/osd_close.h"
+#include "app/video_pump_stats.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
@@ -13,7 +16,6 @@
 namespace mister::app {
 
 class HpsFramebuffer;
-class VideoPump;
 
 class LauncherScreen {
     TASTY_SEAT_RESIDENT(Ui);
@@ -24,7 +26,7 @@ public:
         LauncherFbAckCell& fb_ack;
         xthread::WakeFlag& launcher_wake;
         HpsFramebuffer& fb;
-        const VideoPump& video;
+        const VideoStatsCell& video_stats;
         IOsdClose& osd;
     };
 
@@ -40,13 +42,19 @@ public:
 private:
     [[nodiscard]] bool raise_() noexcept;
 
+    void drop_lease_() noexcept;
+
+    void retry_drop_() noexcept;
+
     Wiring w_;
     LauncherStateCell::Reader seen_{};
     LauncherState last_{};
     std::uint32_t applies_seen_ = 0;
     std::uint32_t raises_ = 0;
     std::uint32_t acked_gen_ = 0;
+    std::optional<FbLease> lease_{};
     bool raise_owed_ = false;
+    bool drop_owed_ = false;
     bool ack_owed_ = false;
 };
 

@@ -12,16 +12,20 @@
 #include <vector>
 
 #include "app/act_keys.h"
+#include "app/autosave_cells.h"
 #include "app/bind_tail.h"
 #include "app/board_ops.h"
 #include "app/board_reboot.h"
+#include "app/boot_handoff.h"
 #include "app/boot_restore.h"
 #include "app/cheat_catalog_cell.h"
 #include "app/companion_slot.h"
 #include "app/config_saves.h"
+#include "app/ui_admission.h"
 #include "app/content_pick.h"
 #include "app/core_builder.h"
 #include "app/core_switch.h"
+#include "app/doorbell_cell.h"
 #include "app/fabric_state.h"
 #include "app/fallback_counts.h"
 #include "app/identity_record.h"
@@ -34,15 +38,19 @@
 #include "app/manifest_ladder.h"
 #include "app/mount_queue.h"
 #include "app/mount_status_cell.h"
+#include "app/option_cell.h"
 #include "app/negotiated_core.h"
 #include "app/owner_ladder.h"
 #include "app/owner_tally.h"
 #include "app/readiness_watch.h"
 #include "app/load_belt.h"
 #include "app/main_pass.h"
+#include "app/save_director_status.h"
 #include "app/save_extent_cell.h"
 #include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
+#include "app/save_stage_director.h"
+#include "app/stdout_router.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "app/sys_grant.h"
@@ -55,11 +63,16 @@
 #include "cores/companion_load.h"
 #include "infra/counter.h"
 #include "infra/log_lane.h"
+#include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "os/clock.h"
+#include "proto/reset_edge.h"
 #include "proto/status_cell.h"
+#include "svc/card_writer.h"
 
 namespace mister::app {
+
+struct RunPolicy;
 
 class SessionOwner : private LoadBelt::Host,
                      private MountQueue::Host,
@@ -84,6 +97,8 @@ public:
         xthread::WakeFlag& main_wake;
         BoardOps ops{};
         infra::OptRef<hal::IBootHandoff> boot_handoff{};
+
+        bool stdout_routing = false;
         infra::OptRef<LauncherDemandCell> launcher_demand{};
         infra::OptRef<xthread::WakeFlag> launcher_wake{};
         BitstreamProgrammer& programmer;
@@ -94,6 +109,7 @@ public:
         const MountStatusCell& mount_status_cell;
         const SaveExtentCell& save_extent_cell;
         const FileTxLevelCell& file_tx_level_cell;
+        const OptionCell& option_cell;
         const hal::PinLevelCell& pin_levels;
 
         const os::IClock& clock;
@@ -110,8 +126,13 @@ public:
         std::optional<CoreBuilder::SysCells> sys{};
 
         infra::OptRef<xthread::WakeFlag> io_wake{};
+
+        std::optional<SaveStageDirector::Ends> save_stages{};
         infra::OptRef<xthread::MainLogLane> log_lane{};
-        hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
+        hal::FpgaAperture aperture{};
+
+        infra::OptRef<const OsdMaskCell> osd_mask_cell{};
+        infra::OptRef<const MenuFocusCell> menu_focus_cell{};
     };
     template <class T>
     using Cell = xthread::Telemetry<T, SeatTag::Main>;
@@ -135,6 +156,8 @@ public:
 
     [[nodiscard]] const BoardReboot& board_reboot() const noexcept { return reboot_; }
 
+    [[nodiscard]] BootHandoff& handoff() noexcept { return exec_handoff_; }
+
     static constexpr std::chrono::milliseconds kStartBoundMs{5000};
 
     void set_identity_poll_budget(std::uint32_t n) noexcept;
@@ -143,19 +166,25 @@ public:
 
     bool set_front_end_image(std::string_view rel) noexcept { return front_end_image_.assign(rel); }
 
-    void set_replay_save_root(std::string_view rel) noexcept;
-
     using RememberedFiles = MountQueue::RememberedFiles;
 
-    void set_remembered_files(RememberedFiles r) noexcept { remembered_files_ = r; }
+    void apply_run_policy(const RunPolicy& policy) noexcept;
 
-    void arm_replay_ini(bool strict) noexcept;
+    static constexpr std::string_view kReplaySeedName = "seed.sav";
 
     void set_boot_cookie(proto::MemSizeCookie c);
 
     void latch_boot_companion(std::string_view xml) noexcept;
 
     void grant_pause(const hal::ThreadRole& row, xthread::PauseLatch& latch) noexcept;
+
+    void enable_stdout_routing(std::optional<StdoutPaths> paths = std::nullopt) noexcept {
+        stdout_armed_ = true;
+        if (paths)
+            stdout_router_.set_paths(*paths);
+    }
+
+    [[nodiscard]] infra::OptRef<StdoutRouter> boot_stdout_router() noexcept;
 
     void service_boot(const UiRequest::LoadCore& req);
 
@@ -172,9 +201,8 @@ public:
     [[nodiscard]] bool rung_pending() const noexcept;
 
     void on(const UiRequest::LoadCore& req, const UiRequest::Head& head);
-    void on(const UiRequest::SaveConfig& req, const UiRequest::Head& head);
-    void on(const UiRequest::SaveDips& req, const UiRequest::Head& head);
-    void on(const UiRequest::SaveCoreConfig& req, const UiRequest::Head& head);
+    template <SavesRouted A>
+    void on(const A& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadCoreConfig& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadFile& req, const UiRequest::Head& head);
     void on(const UiRequest::MountImage& req, const UiRequest::Head& head);
@@ -183,10 +211,9 @@ public:
     void on(const UiRequest::Reboot& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadFileByDigit& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head);
-    void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
     void on(const UiRequest::SdramDetected& req, const UiRequest::Head& head);
-    void on(const UiRequest::SetHdLook& req, const UiRequest::Head& head);
     void on(const UiRequest::SwitchIni& req, const UiRequest::Head& head);
+    void on(const UiRequest::SetAutosave& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;
@@ -232,6 +259,8 @@ public:
 
     [[nodiscard]] const xthread::Counter& mgl_row0_cell() const noexcept { return tally_.mgl_row0; }
 
+    [[nodiscard]] const DoorbellStatsCell& doorbell_cell() const noexcept { return doorbell_cell_; }
+
     [[nodiscard]] const xthread::Counter& save_write_failures_cell() const noexcept {
         return saves_.save_write_failures_cell();
     }
@@ -257,6 +286,18 @@ public:
     }
 
     [[nodiscard]] const IdleKnobsCell& idle_cell() const noexcept { return ini_.idle_cell(); }
+
+    [[nodiscard]] const AutosaveKnobsCell& autosave_cell() const noexcept {
+        return ini_.autosave_cell();
+    }
+
+    [[nodiscard]] const SaveDirectorCell& save_director_cell() const noexcept {
+        return save_director_cell_;
+    }
+
+    [[nodiscard]] infra::OptRef<const SaveStageDirector> save_director() const noexcept;
+
+    void order_exit_commits() noexcept;
 
     [[nodiscard]] bool switch_standing() const noexcept;
     [[nodiscard]] bool reboot_owed() const noexcept;
@@ -362,6 +403,13 @@ private:
 
     void watch_bridge_() noexcept;
     void end_bridge_session_() noexcept;
+
+    [[nodiscard]] SaveStageDirector::Facts save_facts_() const noexcept;
+
+    void order_probe_(const proto::ResetEdge& edge);
+
+    enum class ResetBar : std::uint8_t { Switch, NoCore, Stale, Loading, Busy };
+    [[nodiscard]] std::optional<ResetBar> reset_bar_(CoreScope scope) const noexcept;
     void give_up_start_(Errc why, phase::Stimulus on) noexcept;
 
     [[nodiscard]] bool owe_front_end_(const UiRequest::LoadCore& pending) noexcept;
@@ -395,7 +443,7 @@ private:
     ) const;
     [[nodiscard]] std::string start_rbf_() const;
     void order_start_chain_(const StartChain& chain);
-    void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, proto::FileSize offset);
+    void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, proto::FileOffset at);
 
     struct RememberedFile {
         proto::ConfStrFileRow row;
@@ -424,7 +472,10 @@ private:
     void finish_boot_restore_() noexcept;
 
     void phase_edge_(phase::Stimulus on, Errc why = Errc::negotiation) noexcept;
-    void phase_after_watch_(bool reboot) noexcept;
+
+    void minted_(phase::Stimulus cause) noexcept;
+
+    void phase_after_watch_(const std::optional<ReadinessWatch::End>& end) noexcept;
 
     void judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on) noexcept;
 
@@ -432,9 +483,13 @@ private:
     void end_rebooting_switch_() noexcept;
     void refuse_rebooting_(phase::Stimulus on) noexcept;
     void log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept;
-    [[nodiscard]] std::chrono::nanoseconds log_now_() const noexcept;
 
-    [[nodiscard]] bool failed_apply_() const noexcept;
+    void answer_irq_rows_(
+        const proto::ConfStr& cs,
+        std::span<const proto::AxiLwDecl> lw,
+        std::optional<hal::LwOffset> owned
+    ) noexcept;
+    [[nodiscard]] std::chrono::nanoseconds log_now_() const noexcept;
 
     SwitchPark& park_;
     LinkTxChannel<SeatTag::Main>& inbox_;
@@ -448,6 +503,11 @@ private:
     const MountStatusCell& mount_status_cell_;
     const SaveExtentCell& save_extent_cell_;
     const os::IClock& clock_;
+
+    StdoutRouter stdout_router_{};
+    bool stdout_armed_ = false;
+
+    bool seats_live_ = false;
     std::uint32_t identity_poll_budget_ = 0;
     std::chrono::milliseconds start_bound_ = kStartBoundMs;
 
@@ -456,8 +516,10 @@ private:
     bool front_end_armed_ = false;
     FallbackCounts fallbacks_{};
     Cell<FallbackCounts> fallback_cell_{};
+    SaveDirectorCell save_director_cell_{};
     std::optional<proto::LinkOp::CoreReset> reset_owed_{};
     OwnerTally tally_{};
+    DoorbellStatsCell doorbell_cell_{};
     FixedStr<64, StrFit::Reject> replay_save_root_{};
     RememberedFiles remembered_files_ = RememberedFiles::AsStock;
 
@@ -468,6 +530,7 @@ private:
     BitstreamProgrammer& programmer_;
     ReadinessWatch readiness_;
     const svc::Vfs& vfs_;
+    svc::CardWriter card_;
     OwnerLadder ladder_;
     NegotiatedCore negotiated_;
     MountQueue mounts_;
@@ -475,7 +538,7 @@ private:
     FabricCell& cell_;
     proto::MemSizeCookie cookie_{};
     FabricGeneration fabric_gen_{};
-    const hal::PhysRegion aperture_;
+    const hal::FpgaAperture aperture_;
     BootRestore boot_restore_ = BootRestore::None;
     const BoardOps ops_{};
     BindTail bind_;
@@ -497,11 +560,15 @@ private:
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
     LadderHostAdapter ladder_host_;
     CoreBuilder builder_;
+
+    infra::OptRef<const OsdMaskCell> osd_mask_cell_{};
+    infra::OptRef<const MenuFocusCell> menu_focus_cell_{};
+    std::optional<SaveStageDirector> director_;
     BoardReboot reboot_;
     CoreSwitch switch_;
+    BootHandoff exec_handoff_;
     PathText boot_companion_{};
     phase::SwitchPhase phase_{};
-    phase::Stimulus ask_cause_ = phase::Stimulus::LoadCore;
     std::optional<xthread::MainLogLane::Producer> log_{};
 };
 

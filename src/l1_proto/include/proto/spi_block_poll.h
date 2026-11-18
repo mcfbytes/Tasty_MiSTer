@@ -29,7 +29,7 @@ class SpiBlockPoll {
 public:
     struct Wiring {
         hal::ISpiTransport& link;
-        infra::OptRef<const std::uint64_t> slot0_file_bytes{};
+        infra::OptRef<const FileSize> slot0_file_bytes{};
     };
 
     explicit SpiBlockPoll(Wiring w) noexcept : wiring_(w) {}

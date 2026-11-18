@@ -138,7 +138,7 @@ bool zip_size_is_possible(const unz_file_info64& fi) noexcept {
 
 [[nodiscard]] ArchiveLocator zip_locator_of(const unz64_file_pos& pos) noexcept {
     return ArchiveLocator{
-        .directory_offset = proto::FileSize{pos.pos_in_zip_directory},
+        .directory_at = proto::FileOffset{pos.pos_in_zip_directory},
         .ordinal = MemberOrdinal{pos.num_of_file}
     };
 }
@@ -242,17 +242,17 @@ public:
     ZipFile(
         ZipHandle handle,
         std::string member,
-        std::uint64_t size,
+        FileSize size,
         std::string archive,
-        std::uint64_t packed_off,
-        std::uint64_t packed_len,
+        proto::FileOffset packed_at,
+        FileSize packed_len,
         std::optional<ArchiveLocator> at = std::nullopt
     )
         : uf_(std::move(handle)),
           member_(std::move(member)),
           size_(size),
           archive_(std::move(archive)),
-          packed_off_(packed_off),
+          packed_at_(packed_at),
           packed_len_(packed_len),
           at_(at) {}
 
@@ -264,21 +264,18 @@ public:
     ZipFile(const ZipFile&) = delete;
     ZipFile& operator=(const ZipFile&) = delete;
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        if (off >= size_)
+    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+        if (!size_.holds(at))
             return std::size_t{0};
-        if (off < pos_) {
+        if (at < pos_) {
             if (auto r = rewind(); !r)
                 return std::unexpected(r.error());
         }
-        if (off > pos_) {
-            if (auto r = skip_to(off); !r)
+        if (at > pos_) {
+            if (auto r = skip_to(at); !r)
                 return std::unexpected(r.error());
-            if (pos_ != off) {
-                return std::unexpected(
-                    Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(pos_)}
-                );
-            }
+            if (pos_ != at)
+                return std::unexpected(pos_.refusal(Errc::short_read, ERR_SITE()));
         }
         std::size_t done = 0;
         while (done < dst.size()) {
@@ -294,29 +291,29 @@ public:
             if (n == 0)
                 break;
             done += static_cast<std::size_t>(n);
-            pos_ += static_cast<std::uint64_t>(n);
+            pos_ += proto::FileSize{static_cast<std::uint64_t>(n)};
         }
         return done;
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
-    [[nodiscard]] Ex<FileSize> size() const override { return FileSize{size_}; }
+    [[nodiscard]] Ex<FileSize> size() const override { return size_; }
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
-        if (a != Access::Sequential || packed_len_ == 0)
+    [[nodiscard]] Ex<void> advise(Access a, proto::FileOffset, FileSize) override {
+        if (a != Access::Sequential || packed_len_.empty())
             return {};
         UniqueFd fd{::open(archive_.c_str(), O_RDONLY | O_CLOEXEC)};
         if (fd.get() < 0)
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         const int rc = ::posix_fadvise(
             fd.get(),
-            static_cast<::off_t>(packed_off_),
-            static_cast<::off_t>(packed_len_),
+            packed_at_.seek_offset(),
+            packed_len_.file_word<::off_t>(),
             POSIX_FADV_WILLNEED
         );
         if (rc != 0)
@@ -345,32 +342,32 @@ private:
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
         stream_open_ = true;
-        pos_ = 0;
+        pos_ = proto::kFileStart;
         return {};
     }
 
-    [[nodiscard]] Ex<void> skip_to(std::uint64_t target) {
+    [[nodiscard]] Ex<void> skip_to(proto::FileOffset target) {
         std::byte scratch[4096];
         while (pos_ < target) {
-            const std::uint64_t want = std::min<std::uint64_t>(target - pos_, sizeof scratch);
-            const int n = ::unzReadCurrentFile(uf_.get(), scratch, static_cast<unsigned>(want));
+            const FileSize want = (target - pos_).min(FileSize{sizeof scratch});
+            const int n = ::unzReadCurrentFile(uf_.get(), scratch, want.file_word<unsigned>());
             if (n < 0) {
                 return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(n)});
             }
             if (n == 0)
                 break;
-            pos_ += static_cast<std::uint64_t>(n);
+            pos_ += proto::FileSize{static_cast<std::uint64_t>(n)};
         }
         return {};
     }
 
     ZipHandle uf_;
     std::string member_;
-    std::uint64_t size_ = 0;
+    FileSize size_{};
     std::string archive_;
-    std::uint64_t packed_off_ = 0;
-    std::uint64_t packed_len_ = 0;
-    std::uint64_t pos_ = 0;
+    proto::FileOffset packed_at_{};
+    FileSize packed_len_{};
+    proto::FileOffset pos_{};
     std::optional<ArchiveLocator> at_;
     bool stream_open_ = true;
 };
@@ -393,14 +390,14 @@ Ex<std::unique_ptr<IFile>> zip_wrap_current(
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     std::string stored = entry.name.empty() ? std::string(fallback_name) : entry.name;
-    const std::uint64_t packed_off = ::unzGetCurrentFileZStreamPos64(handle.get());
+    const proto::FileOffset packed_at{::unzGetCurrentFileZStreamPos64(handle.get())};
     return std::unique_ptr<IFile>(new ZipFile(
         std::move(handle),
         std::move(stored),
-        entry.size,
+        FileSize{entry.size},
         archive,
-        packed_off,
-        entry.packed,
+        packed_at,
+        FileSize{entry.packed},
         at
     ));
 }

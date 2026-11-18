@@ -40,7 +40,8 @@ public:
         std::string_view path,
         proto::FileSize size,
         svc::Crc32 crc = {},
-        std::uint32_t aux = 0
+        std::uint32_t aux = 0,
+        ContentEdge edge = ContentEdge::Content
     );
 
     void unstage_path(proto::FileId file) noexcept;

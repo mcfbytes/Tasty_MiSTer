@@ -14,7 +14,7 @@ struct CoreFrameRecord {
     std::int64_t edge_ns = 0;
     std::uint32_t epoch = 0;
     std::uint32_t core_seq = 0;
-    MovieFrame movie_frame = kNoMovieFrame;
+    MoviePosition movie_frame = kNoMovieFrame;
     bool supported = false;
     std::uint8_t pad_[3]{};
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -70,6 +71,13 @@ private:
     ) noexcept;
 
     void ensure_dim_(DimTable& table, const HdRect& shown, const HdRect& game) noexcept;
+
+    void gather_flat_(
+        std::span<const std::byte> line,
+        DimQ8 dim,
+        const ColumnMap& map,
+        std::span<std::uint16_t> out
+    ) noexcept;
     void paint_band_(
         RgbRows src,
         std::uint16_t src_w,
@@ -88,6 +96,7 @@ private:
     ColumnMap target_cols_{};
     std::vector<std::uint16_t> row_px_{};
     std::vector<std::uint16_t> target_px_{};
+    std::vector<std::uint16_t> packed_src_{};
 };
 
 }

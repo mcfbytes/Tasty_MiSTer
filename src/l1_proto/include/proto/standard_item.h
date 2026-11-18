@@ -46,6 +46,8 @@ namespace detail {
     switch (shape) {
         case ItemShape::Toggle:
             return standard_toggle_probe_of(bits, value_count, v0, v1);
+        case ItemShape::Trigger:
+            return std::nullopt;
     }
     return std::nullopt;
 }

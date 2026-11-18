@@ -25,12 +25,10 @@ public:
         : wake_(wake),
           stop_(stop),
           extra_(extra) {
-        if constexpr (kSeatChecksEnabled) {
-            if (wake_.fd() < 0)
-                fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark over a flag with no fd");
-            if (stop_.fd() < 0)
-                fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark over a stop with no fd");
-        }
+        if (wake_.fd() < 0)
+            fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark over a flag with no fd");
+        if (stop_.fd() < 0)
+            fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark over a stop with no fd");
     }
 
     SeatPark(const SeatPark&) = delete;
@@ -65,13 +63,11 @@ public:
             ++timeouts_;
             return;
         }
-        if constexpr (kSeatChecksEnabled) {
-            if (n < 0)
-                fatal(infra::errno_error(Errc::os, ERR_SITE(), errno), "SeatPark poll");
-            for (const pollfd& f : fds)
-                if ((f.revents & POLLNVAL) != 0)
-                    fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark polls a closed fd");
-        }
+        if (n < 0)
+            fatal(infra::errno_error(Errc::os, ERR_SITE(), errno), "SeatPark poll");
+        for (const pollfd& f : fds)
+            if ((f.revents & POLLNVAL) != 0)
+                fatal(Error{Errc::contract, ERR_SITE(), 0}, "SeatPark polls a closed fd");
         extra_ready_ = n > 0 && (fds[kExtraSlot].revents & POLLIN) != 0;
         if (n > 0 && (fds[0].revents & POLLIN) != 0) {
             ++wakes_;

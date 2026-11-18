@@ -24,6 +24,10 @@ namespace mister::svc {
 struct Msf;
 }
 
+namespace mister::hal {
+struct SpiHalves;
+}
+
 namespace mister::cores {
 
 using ::mister::infra::affine::operator+;
@@ -92,6 +96,10 @@ struct AcsiTarget {
         return AcsiTarget{drive.v};
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
+    }
+
     friend constexpr bool operator==(AcsiTarget, AcsiTarget) = default;
     friend constexpr auto operator<=>(AcsiTarget, AcsiTarget) = default;
 };
@@ -105,6 +113,8 @@ struct ConfigSlot {
 
     friend constexpr bool operator==(ConfigSlot, ConfigSlot) = default;
 };
+
+inline constexpr ConfigSlot kStartupSlot{0};
 
 struct WordId {
     std::uint8_t v = 0;
@@ -132,6 +142,10 @@ struct OptionTag {
 
     [[nodiscard]] constexpr std::uint8_t wire() const noexcept { return v; }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
+    }
+
     friend constexpr bool operator==(OptionTag, OptionTag) = default;
     friend constexpr auto operator<=>(OptionTag, OptionTag) = default;
 };
@@ -151,13 +165,10 @@ struct JoyBit {
 struct BaudRate {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr std::uint16_t low_word() const noexcept {
-        return static_cast<std::uint16_t>(v);
-    }
+    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept;
 
-    [[nodiscard]] constexpr std::uint16_t high_word() const noexcept {
-        constexpr unsigned kWordBits = 16;
-        return static_cast<std::uint16_t>(v >> kWordBits);
+    [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
+        return infra::DecimalText{v};
     }
 
     friend constexpr bool operator==(BaudRate, BaudRate) = default;
@@ -173,16 +184,16 @@ struct SaveRow {
         return SaveRow{static_cast<std::uint8_t>(v + 1u)};
     }
 
-    [[nodiscard]] constexpr Error refused(Errc code, infra::ErrorSite site) const noexcept {
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
         return Error{code, site, v};
+    }
+
+    [[nodiscard]] constexpr proto::SlotIndex block_slot() const noexcept {
+        return proto::SlotIndex{v};
     }
 
     friend constexpr bool operator==(SaveRow, SaveRow) = default;
 };
-
-[[nodiscard]] constexpr std::uint32_t detail_of(SaveRow row) noexcept {
-    return static_cast<std::uint32_t>(row.v);
-}
 
 struct SectorBytes {
     std::uint32_t v = 0;
@@ -237,6 +248,15 @@ struct HeadLba {
         if (v < 0)
             return std::nullopt;
         return proto::Lba{static_cast<std::uint32_t>(v)};
+    }
+
+    constexpr void store_be24(std::span<std::uint8_t, 3> dst) const noexcept {
+        constexpr unsigned kByteBits = 8;
+        constexpr unsigned kTopShift = 2 * kByteBits;
+        const std::uint32_t fad = static_cast<std::uint32_t>(v);
+        dst.front() = static_cast<std::uint8_t>(fad >> kTopShift);
+        dst[1] = static_cast<std::uint8_t>(fad >> kByteBits);
+        dst.back() = static_cast<std::uint8_t>(fad);
     }
 
     template <class Row>
@@ -332,6 +352,8 @@ struct LateFrames {
 
     friend constexpr bool operator==(LateFrames, LateFrames) = default;
 };
+
+struct DipSetting;
 
 namespace mra {
 
@@ -443,10 +465,12 @@ struct RomOffset {
         return RomOffset{static_cast<std::uint32_t>(offset)};
     }
 
-    [[nodiscard]] constexpr std::optional<RomOffset> read_from(std::uint64_t off) const noexcept {
-        if (off >= v)
+    [[nodiscard]] constexpr std::optional<RomOffset> read_from(
+        proto::FileOffset at
+    ) const noexcept {
+        if (!FileSize{v}.holds(at))
             return std::nullopt;
-        return RomOffset{static_cast<std::uint32_t>(off)};
+        return RomOffset{(at - proto::kFileStart).file_word<std::uint32_t>()};
     }
 
     [[nodiscard]] constexpr RomLength span_to(RomOffset cap) const noexcept {
@@ -503,9 +527,7 @@ struct DipWord {
         };
     }
 
-    [[nodiscard]] constexpr DipWord with(DipWord mask, DipWord val) const noexcept {
-        return DipWord{(v & ~mask.v) | val.v};
-    }
+    [[nodiscard]] constexpr DipWord with(DipSetting setting) const noexcept;
 
     [[nodiscard]] constexpr DipWord masked(DipWord mask) const noexcept {
         return DipWord{v & mask.v};

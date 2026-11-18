@@ -26,6 +26,7 @@ concept UiRequestSink = requires(S& s, const UiRequest& m, const UiRequest::Head
     s.on(std::declval<const UiRequest::SdramDetected&>(), h);
     s.on(std::declval<const UiRequest::SetHdLook&>(), h);
     s.on(std::declval<const UiRequest::SwitchIni&>(), h);
+    s.on(std::declval<const UiRequest::SetAutosave&>(), h);
     s.misrouted(m);
 };
 

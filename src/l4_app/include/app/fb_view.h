@@ -6,10 +6,11 @@
 
 #include "app/picture_size.h"
 #include "app/row_bytes.h"
+#include "hal/fpga_memory.h"
 
 namespace mister::app {
 
-inline constexpr std::uint32_t kFramebufferPageBytes = 4096;
+inline constexpr std::uint32_t kFramebufferPageBytes = hal::kFramebufferHeader.bytes();
 
 inline constexpr std::uint32_t kFramebufferSlotAlign = 4096;
 

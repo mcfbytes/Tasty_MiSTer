@@ -9,6 +9,7 @@
 #include <span>
 #include <utility>
 
+#include "cores/cd_command_words.h"
 #include "cores/types.h"
 #include "infra/seat.h"
 #include "svc/track.h"
@@ -102,12 +103,9 @@ struct SaturnCddFrame {
     [[nodiscard]] static constexpr std::array<std::uint8_t, kFadBytes> fad_bytes(
         HeadLba head
     ) noexcept {
-        const auto fad = static_cast<std::uint32_t>((head + kPregap).v);
-        return {
-            static_cast<std::uint8_t>(fad >> 16),
-            static_cast<std::uint8_t>(fad >> 8),
-            static_cast<std::uint8_t>(fad)
-        };
+        std::array<std::uint8_t, kFadBytes> out{};
+        (head + kPregap).store_be24(out);
+        return out;
     }
 
     struct Checksum {
@@ -153,12 +151,7 @@ struct SaturnCddFrame {
         return bytes[static_cast<std::size_t>(f)];
     }
 
-    constexpr void load_words(std::span<const std::uint16_t> words) noexcept {
-        for (std::size_t i = 0; i < words.size() && 2 * i + 1 < kBytes; ++i) {
-            bytes[2 * i] = static_cast<std::uint8_t>(words[i]);
-            bytes[2 * i + 1] = static_cast<std::uint8_t>(words[i] >> 8);
-        }
-    }
+    constexpr void load(const CdCommandWords& cmd) noexcept { cmd.store_le(bytes); }
 
     [[nodiscard]] constexpr std::uint16_t word(std::size_t i) const noexcept {
         return static_cast<std::uint16_t>(bytes[2 * i] | (bytes[2 * i + 1] << 8));

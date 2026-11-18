@@ -45,7 +45,7 @@ inline constexpr CdTickPeriods kThreeDoTicks{
     .idle = std::chrono::microseconds{3'000},
     .stream = std::chrono::microseconds{3'000},
     .caller = std::chrono::microseconds{3'000},
-    .speeds = 0,
+    .speeds = CdSpeedCount{},
     .speed = {},
 };
 
@@ -165,7 +165,7 @@ inline constexpr svc::BlankSaveSpec kThreeDoBlankSave{
 };
 
 inline constexpr StagingPolicy kThreeDoStaging{
-    .order = StageOrder::ThreeDo,
+    .staged = true,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kThreeDoSlots),
     .save = SaveMountPolicy{
@@ -190,6 +190,8 @@ inline constexpr CoreProfile kThreeDo{
     .cheats = {.reset_on_mount = false},
 
     .reset = {.toggle_reacts = true, .button_reacts = true},
+
+    .grants = {Grant::Lamp, Grant::Discs},
 };
 
 std::unique_ptr<Core> make_threedo(const CoreProfile& p, const CoreGrant& g);

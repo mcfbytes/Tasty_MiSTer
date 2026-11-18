@@ -5,7 +5,7 @@
 
 #include "infra/indexed_array.h"
 #include "svc/analog_xy.h"
-#include "svc/key_edge.h"
+#include "svc/key_event.h"
 #include "svc/stick_index.h"
 #include "svc/types.h"
 
@@ -21,7 +21,7 @@ struct DeviceReport {
     proto::MouseButtons mouse_buttons{};
     bool mouse_changed = false;
 
-    KeyEdgeBatch keys{};
+    KeyEventBatch keys{};
     std::uint16_t axis_edges = 0;
     std::uint16_t mouse_remainder = 0;
     std::uint16_t quirk_drops = 0;

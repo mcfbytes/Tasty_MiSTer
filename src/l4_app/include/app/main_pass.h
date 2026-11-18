@@ -15,6 +15,7 @@ struct MainPassStep {
         LastOrder,
         HeldLoad,
         Belt,
+        SaveStages,
         ParkAcks,
         Program,
         StartBound,
@@ -52,6 +53,11 @@ inline constexpr std::array kMainPassSteps{
         MainPassStep::Step::Belt,
         "one rung per pass, after every ring this pass drained: a mount that arrived "
         "this pass is armed by its pop and takes its first rung here"
+    },
+    MainPassStep{
+        MainPassStep::Step::SaveStages,
+        "the save policy before the park answer: a commit ordered for a dropped core is "
+        "in T-IO's inbox before the pause that follows it"
     },
     MainPassStep{
         MainPassStep::Step::ParkAcks,
@@ -112,6 +118,7 @@ consteval bool main_pass_order_holds(const std::array<MainPassStep, kMainPassSte
         S::LastOrder,
         S::HeldLoad,
         S::Belt,
+        S::SaveStages,
         S::ParkAcks,
         S::Program,
         S::StartBound,

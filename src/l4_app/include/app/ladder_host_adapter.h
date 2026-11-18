@@ -14,6 +14,7 @@
 #include "app/link_tx_channel.h"
 #include "app/load_belt.h"
 #include "app/mount_status_cell.h"
+#include "app/option_cell.h"
 #include "app/owner_tally.h"
 #include "app/path_text.h"
 #include "app/save_extent_cell.h"
@@ -47,6 +48,7 @@ public:
         const proto::StatusCell& status_cell;
         const MountStatusCell& mount_status_cell;
         const SaveExtentCell& save_extent_cell;
+        const OptionCell& option_cell;
         infra::OptRef<SaveStateAttach::AskInbox> save_state_asks;
         infra::OptRef<const SaveStateFactsCell> save_state_facts;
         const LoadBelt& belt;
@@ -77,16 +79,17 @@ public:
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
         proto::FileSize whole,
-        std::uint64_t offset
+        proto::FileOffset at
     ) override;
     [[nodiscard]] Ex<proto::FileId> intern_whole(
         std::vector<std::uint8_t>&& bytes,
         std::string_view path
     ) override;
     [[nodiscard]] cores::FileTxAnswer file_tx_answer(proto::ActKey act) override;
+    [[nodiscard]] cores::FileTxAnswer payload_answer(proto::ActKey16 act) override;
     [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override;
-    [[nodiscard]] cores::WireWordBytes link_word_bytes() const noexcept override;
+    [[nodiscard]] hal::Width link_width() const noexcept override;
     [[nodiscard]] proto::ActKey next_generation() noexcept override;
     [[nodiscard]] cores::MountStatus mount_status() override;
     [[nodiscard]] bool order_walk(
@@ -99,6 +102,7 @@ public:
     [[nodiscard]] proto::ActKey savestates_answered() override;
     [[nodiscard]] cores::SaveExtent save_extent() override;
     [[nodiscard]] proto::StatusWord status_word() override;
+    [[nodiscard]] std::optional<proto::FieldValue> option_choice(cores::OptionTag tag) override;
 
 private:
     const Edges edges_;

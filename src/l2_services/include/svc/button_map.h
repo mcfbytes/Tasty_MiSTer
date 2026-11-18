@@ -22,8 +22,7 @@
 namespace mister::svc {
 
 [[nodiscard]] constexpr std::uint32_t packed_word(PackedKeys k) noexcept {
-    constexpr unsigned kHalfBits = 16;
-    return static_cast<std::uint32_t>(k.lo.v) | (static_cast<std::uint32_t>(k.hi.v) << kHalfBits);
+    return k.lo.stored_with(k.hi);
 }
 
 [[nodiscard]] constexpr PackedKeys packed_keys_of(std::uint32_t w) noexcept {

@@ -77,7 +77,7 @@ public:
         ControlGeneration gen,
         bool real,
         WideCoreFrame core_frame,
-        MovieFrame movie_frame
+        MoviePosition movie_frame
     ) noexcept;
 
     [[nodiscard]] bool chunk(
@@ -85,7 +85,7 @@ public:
         ControlGeneration gen,
         bool real,
         WideCoreFrame core_frame,
-        MovieFrame movie_frame
+        MoviePosition movie_frame
     ) noexcept;
 
     [[nodiscard]] ChunkPlace place() const noexcept { return place_; }
@@ -126,7 +126,7 @@ private:
     void note_governor_(const ScaleGovernor::Change& ch) noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
     [[nodiscard]] std::chrono::nanoseconds cpu_now_() const noexcept;
-    [[nodiscard]] bool kept_(WideCoreFrame core, MovieFrame movie) const noexcept;
+    [[nodiscard]] bool kept_(WideCoreFrame core, MoviePosition movie) const noexcept;
     [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
     [[nodiscard]] bool chunk_one_(
         IFrameCodec& codec,

@@ -110,22 +110,22 @@ bool AviEncoder::close(const RawFrameSlot::Close&, ControlGeneration gen) noexce
     return true;
 }
 
-bool AviEncoder::kept_(WideCoreFrame core, MovieFrame movie) const noexcept {
+bool AviEncoder::kept_(WideCoreFrame core, MoviePosition movie) const noexcept {
     const RecOptions& o = opt_;
-    if (o.from_frame >= MovieFrame{} || o.to_frame >= MovieFrame{}) {
-        if (movie < MovieFrame{})
+    if (o.from_frame >= MoviePosition{} || o.to_frame >= MoviePosition{}) {
+        if (movie < MoviePosition{})
             return false;
-        if (o.from_frame >= MovieFrame{} && movie < o.from_frame)
+        if (o.from_frame >= MoviePosition{} && movie < o.from_frame)
             return false;
-        if (o.to_frame >= MovieFrame{} && movie >= o.to_frame)
+        if (o.to_frame >= MoviePosition{} && movie >= o.to_frame)
             return false;
     }
     const std::uint32_t every = o.every.count<std::uint32_t>();
     if (every <= 1)
         return true;
 
-    if (o.from_frame >= MovieFrame{})
-        return (movie - o.from_frame).multiple_of(FrameCount{o.every.count<std::int32_t>()});
+    if (o.from_frame >= MoviePosition{})
+        return (movie - o.from_frame).multiple_of(MovieFrameCount{o.every.count<std::int32_t>()});
     return core.on_every(every);
 }
 
@@ -272,7 +272,7 @@ bool AviEncoder::chunk(
     ControlGeneration gen,
     bool real,
     WideCoreFrame core,
-    MovieFrame movie
+    MoviePosition movie
 ) noexcept {
     TASTY_SEAT_BODY(AviEncoder);
     place_ = ChunkPlace::none();
@@ -307,7 +307,7 @@ bool AviEncoder::chunk(
     ControlGeneration gen,
     bool real,
     WideCoreFrame core,
-    MovieFrame movie
+    MoviePosition movie
 ) noexcept {
     RawFrameSlot::Frame view{};
     view.width = s.width;

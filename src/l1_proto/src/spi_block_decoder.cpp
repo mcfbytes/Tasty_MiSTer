@@ -25,7 +25,7 @@ void SpiBlockDecoder::service(IBlockRoles& roles) {
             ++counters_.deferred;
             break;
         }
-        const std::uint32_t bytes = d->req.block_count.v * d->block_size.v;
+        const std::uint32_t bytes = d->block_size.request_bytes(d->req.block_count);
 
         (void)out_.push(
             LinkEvent::BlockRequest{.slot = d->req.slot, .lba = d->req.lba, .bytes = bytes}

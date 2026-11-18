@@ -105,8 +105,8 @@ struct RecOptions {
     std::array<std::byte, 1> pad_{};
     RecEvery every{};
     std::array<std::byte, 2> pad2_{};
-    MovieFrame from_frame = kNoMovieFrame;
-    MovieFrame to_frame = kNoMovieFrame;
+    MoviePosition from_frame = kNoMovieFrame;
+    MoviePosition to_frame = kNoMovieFrame;
     proto::FileSize segment_bytes{};
 
     [[nodiscard]] friend bool operator==(const RecOptions&, const RecOptions&) = default;
@@ -130,7 +130,9 @@ static_assert(kRecSegmentMax == proto::FileSize{1ull << 31});
 [[nodiscard]] inline bool rec_bounds_ok(const RecOptions& o) noexcept {
     if (o.from_frame < kNoMovieFrame || o.to_frame < kNoMovieFrame)
         return false;
-    return o.from_frame < MovieFrame{} || o.to_frame < MovieFrame{} || o.to_frame > o.from_frame;
+    return o.from_frame < MoviePosition{}
+    || o.to_frame < MoviePosition{}
+    || o.to_frame > o.from_frame;
 }
 
 [[nodiscard]] const char* rec_codec_name(RecCodec c) noexcept;

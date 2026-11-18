@@ -16,14 +16,14 @@ class MsuDataLoader final : public ILoader {
 public:
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
 
-    void shape(const TransferRow&, std::span<std::uint8_t>, std::uint64_t) override {
+    void shape(const TransferRow&, std::span<std::uint8_t>, proto::FileOffset) override {
         TASTY_SEAT_BODY(MsuDataLoader);
     }
 
     [[nodiscard]] Ex<void> place(
         const TransferRow& row,
         std::span<const std::uint8_t> piece,
-        std::uint64_t off,
+        proto::FileOffset at,
         ICoreWindow& window
     ) override;
 

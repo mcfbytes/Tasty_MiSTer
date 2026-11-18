@@ -89,7 +89,7 @@ public:
 
     void settle() noexcept;
 
-    void note_download_end(proto::IoIndex wire_index) noexcept;
+    void note_download_end(proto::FioIndexByte wire_index) noexcept;
 
     void note_core_reset() noexcept;
 
@@ -115,7 +115,8 @@ private:
         FrameReference::Dating dating{};
 
         [[nodiscard]] static std::optional<ArmFacts> of(const ReplayMsg::Arm& a) noexcept;
-        [[nodiscard]] bool admits(proto::IoIndex wire) const noexcept;
+
+        [[nodiscard]] bool admits(proto::FioIndexByte wire) const noexcept;
         [[nodiscard]] bool untimed(const EpochRule::Pick& p) const noexcept;
     };
 
@@ -130,7 +131,7 @@ private:
         WideMovieFrame covered = kNoWideMovieFrame;
         WideMovieFrame underrun_at = kNoWideMovieFrame;
         std::optional<ReplayMsg::Input> held{};
-        std::optional<MovieFrame> end{};
+        std::optional<MoviePosition> end{};
     };
 
     void sample_control_() noexcept;
@@ -149,11 +150,11 @@ private:
     ) noexcept;
     void force_release_(svc::PlayerMask ports) noexcept;
     void count_write_(const Ex<bool>& out, std::uint32_t held_before) noexcept;
-    void note_late_(MovieFrame first) noexcept;
+    void note_late_(MoviePosition first) noexcept;
     void note_gap_() noexcept;
     void note_depth_() noexcept;
     void disarm_(ReplayEnd why, bool release) noexcept;
-    [[nodiscard]] bool pre_epoch_(MovieFrame frame) const noexcept;
+    [[nodiscard]] bool pre_epoch_(MoviePosition frame) const noexcept;
     [[nodiscard]] bool live_() const noexcept;
 
     [[nodiscard]] std::chrono::nanoseconds end_to_edge_() const noexcept;

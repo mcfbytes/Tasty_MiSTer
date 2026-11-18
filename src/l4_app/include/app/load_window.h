@@ -13,6 +13,7 @@
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "infra/seat_owner_main.h"
+#include "hal/fpga_aperture.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
 #include "os/types.h"
@@ -26,7 +27,7 @@ class LoadWindow final : public cores::ICoreWindow {
 public:
     [[nodiscard]] static Ex<LoadWindow> open(
         ILoadWindowMap<Owner>& map,
-        const hal::PhysRegion& aperture,
+        const hal::FpgaAperture& aperture,
         os::PhysAddr addr,
         std::uint64_t len
     );
