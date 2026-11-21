@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

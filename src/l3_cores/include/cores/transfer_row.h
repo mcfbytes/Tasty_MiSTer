@@ -1,21 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 
 #include "cores/core_window_decl.h"
 #include "cores/row_shape_key.h"
 #include "cores/types.h"
+#include "cores/window_spot.h"
 #include "cores/post_notify.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
+#include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
 namespace mister::cores {
+
+enum class PlaceKind : std::uint8_t { Fabric, Window, kCount };
+using RowPlace = std::variant<hal::FabricAddr, WindowSpot>;
+static_assert(
+    std::variant_size_v<RowPlace> == infra::ordinal(PlaceKind::kCount),
+    "RowPlace: one PlaceKind name per arm"
+);
+template <PlaceKind K, class T>
+inline constexpr bool
+    kPlaceArmIs = std::is_same_v<std::variant_alternative_t<infra::ordinal(K), RowPlace>, T>;
+static_assert(
+    kPlaceArmIs<PlaceKind::Fabric, hal::FabricAddr> && kPlaceArmIs<PlaceKind::Window, WindowSpot>
+);
 
 enum class RowDest : std::uint8_t { Window, Fio, Notify, Payload };
 
@@ -29,8 +48,7 @@ struct TransferRow {
     RowShapeKey shape{};
     bool byte_words = false;
     proto::WideIoIndex index{};
-    std::uint32_t addr = 0;
-    WindowRef window = WindowRef::physical();
+    RowPlace place = hal::FabricAddr{};
     RowBracket bracket = RowBracket::AroundWithLength;
     std::uint8_t stride = 1;
     std::uint8_t lane = 0;
@@ -73,17 +91,11 @@ struct TransferRow {
     std::span<const CoreWindowDecl> windows,
     os::PhysAddr aperture
 ) {
-    const auto slot = r.window.slot();
-    if (!slot)
-        return hal::FabricAddr{r.addr};
-    const auto window = slot->in(windows);
-    if (!window)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r.addr});
-    const os::PhysAddr at = aperture.advanced(window->region.offset).advanced(r.addr);
-    const auto fabric = hal::FabricAddr::of(at);
-    if (!fabric)
-        return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), r.addr});
-    return fabric.value_or(hal::FabricAddr{});
+    if (const auto* fabric = std::get_if<hal::FabricAddr>(&r.place))
+        return *fabric;
+    if (const auto* spot = std::get_if<WindowSpot>(&r.place))
+        return spot->address_in(windows, aperture);
+    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
 }
 
 }

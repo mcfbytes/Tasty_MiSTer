@@ -8,21 +8,19 @@
 
 #include "app/lw_grant_stamp.h"
 #include "app/lw_lend_key.h"
-#include "app/types.h"
 #include "infra/error.h"
-#include "infra/grant_lease.h"
+#include "infra/xthread/grant_lease.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 
 namespace mister::app {
 
 template <class B>
-concept LwBlockRecord = requires(B b, const B c) {
+concept LwBlockRecord = requires(const B c) {
     typename B::Grant;
-    { B::kHasEnable } -> std::convertible_to<bool>;
     { c.lend() } noexcept -> std::same_as<typename B::Grant>;
-    { b.disable() } noexcept;
     { c.stamp } -> std::convertible_to<LwGrantStamp>;
 };
 
@@ -108,23 +106,7 @@ public:
         lent_ = held_->stamp.gen();
     }
 
-    [[nodiscard]] bool retire(bool fabric_ok) noexcept
-        requires(Block::kHasEnable)
-    {
-        return retire_(fabric_ok);
-    }
-
-    [[nodiscard]] bool retire() noexcept
-        requires(!Block::kHasEnable)
-    {
-        return retire_(true);
-    }
-
-    [[nodiscard]] bool retire_on(FabricGeneration now) noexcept
-        requires(Block::kHasEnable)
-    {
-        return retire_(held_ && held_->stamp.granted_on(now));
-    }
+    [[nodiscard]] bool retire() noexcept { return retire_(); }
 
     void abandon() noexcept {
         if (!held_)
@@ -147,15 +129,12 @@ public:
     }
 
 private:
-    [[nodiscard]] bool retire_(bool fabric_ok) noexcept {
+    [[nodiscard]] bool retire_() noexcept {
         if (!held_)
             return true;
         revoke_();
         if (leased_())
             return false;
-
-        if (fabric_ok && !held_->stamp.lost())
-            held_->disable();
         held_.reset();
         return true;
     }

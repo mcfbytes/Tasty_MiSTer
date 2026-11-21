@@ -29,10 +29,6 @@ struct PicturePixels {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr PicturePixels halved() const noexcept {
-        return PicturePixels{static_cast<std::uint16_t>(v / kHalfDivisor)};
-    }
-
     template <std::integral I>
     [[nodiscard]] constexpr PicturePixels divided_by(I divisor) const noexcept {
         return PicturePixels{static_cast<std::uint16_t>(v / divisor)};
@@ -89,8 +85,8 @@ public:
         return line.subspan(pixel_bytes.span(v));
     }
 
-    [[nodiscard]] constexpr std::uint16_t wire_word() const noexcept {
-        return count<std::uint16_t>();
+    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
+        return hal::SpiWord{count<std::uint16_t>()};
     }
 
     constexpr void store_le16(std::span<std::byte, sizeof(std::uint16_t)> dst) const noexcept {

@@ -9,7 +9,7 @@
 namespace mister::app {
 
 static_assert(
-    proto::user_io::poll_row(proto::user_io::PollShape::InfoPoll).mask == hal::SpiWord{0x00FF},
+    proto::user_io::poll_row(proto::user_io::PollShape::InfoPoll).mask == proto::ReplyMask{0x00FF},
     "the info index is the reply's low byte"
 );
 
@@ -45,7 +45,8 @@ void InfoDecoder::refresh_() {
 }
 
 std::string_view InfoDecoder::info_text_(const proto::LinkEvent::PolledWord& w) {
-    const unsigned index = w.word.masked(proto::user_io::poll_row(w.shape).mask).low_byte();
+    const unsigned index = w.word.masked(proto::user_io::poll_row(w.shape).mask.wire_word())
+                               .low_byte();
     if (index == 0)
         return {};
     if (w.bind_gen != gen_) {

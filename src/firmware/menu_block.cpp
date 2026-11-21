@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "menu_block.h"
 
-#include "app/hd_look_ini.h"
+#include "app/hd/hd_look_ini.h"
 #include "hal/axi.h"
 #include "hal/board_regions.h"
 #include "infra/opt_ref.h"
 #include "infra/path_text.h"
+#include "infra/prelude.h"
 #include "os/process_title.h"
 #include "proto/osd_rotation.h"
 #include "report.h"
@@ -77,14 +78,14 @@ MenuBlock::MenuBlock(
       }},
 
       ui_context_{
-          .recents = infra::OptRef<app::RecentsStore>{stores_.recents_},
+          .recents = infra::OptRef<app::recents::RecentsStore>{stores_.recents_},
           .names = infra::OptRef<app::NameConfig>{stores_.names_},
-          .played = infra::OptRef<app::PlayedHistory>{stores_.played_},
+          .played = infra::OptRef<app::recents::PlayedHistory>{stores_.played_},
           .cheats = infra::OptRef<app::CheatStore>{stores_.cheats_},
           .ui_requests = infra::OptRef<app::UiRequestRing>{parts.session.owner.ui_requests()},
           .connect = infra::OptRef<ui::ConnectPort>{connect_.port()},
           .files = infra::OptRef<const svc::Vfs>{plat.vfs},
-          .writes = infra::OptRef<app::UiWriteLane>{parts.wires.ui_writes},
+          .writes = infra::OptRef<app::recents::UiWriteLane>{parts.wires.ui_writes},
           .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()},
           .disk_activity = parts.cells.disk_activity,
           .ini = parts.cells.ini
@@ -107,7 +108,7 @@ MenuBlock::MenuBlock(
           ui::UiRound::InputEnds{
               .key_focus = parts.wires.key_focus,
               .binding = parts.wires.core_input,
-              .joymap = infra::OptRef<const app::JoyMapEnds>{parts.wires.joymap}
+              .joymap = infra::OptRef<const app::input::JoyMapEnds>{parts.wires.joymap}
           },
           parts.wires.clock,
           ui_model_,
@@ -121,7 +122,7 @@ MenuBlock::MenuBlock(
               .idle = parts.session.owner.idle_cell(),
               .ini = parts.cells.ini,
               .hd = hd_.screen(),
-              .writes = infra::OptRef<app::UiWriteLane>{parts.wires.ui_writes},
+              .writes = infra::OptRef<app::recents::UiWriteLane>{parts.wires.ui_writes},
               .video = infra::OptRef<const app::VideoPump>{parts.wires.video},
               .fb = infra::OptRef<const app::HpsFramebuffer>{hps_fb_},
               .autosave = infra::opt_ref_of(&parts.session.owner.autosave_cell()),
@@ -141,7 +142,7 @@ MenuBlock::MenuBlock(
           .io_wake = parts.wires.io_wake,
           .toast = infra::OptRef<app::IEventSink>{ui_sink_}
       }},
-      launcher_screen_{app::LauncherScreen::Wiring{
+      launcher_screen_{app::launcher::LauncherScreen::Wiring{
           .state = launcher.launcher_state_,
           .fb_ack = launcher.launcher_fb_ack_,
           .launcher_wake = launcher.launcher_wake_,
@@ -165,13 +166,13 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
         .verdicts =
-            app::VerdictSinks{
-                .played = infra::OptRef<app::IWriteVerdict>{stores_.played_},
-                .recents = infra::OptRef<app::IWriteVerdict>{stores_.recents_},
-                .maps = infra::OptRef<app::IWriteVerdict>{map_saves_}
+            app::recents::VerdictSinks{
+                .played = infra::OptRef<app::recents::IWriteVerdict>{stores_.played_},
+                .recents = infra::OptRef<app::recents::IWriteVerdict>{stores_.recents_},
+                .maps = infra::OptRef<app::recents::IWriteVerdict>{map_saves_}
             },
         .ui_pages = infra::OptRef{ui_round_.page_cell()},
-        .hd = infra::OptRef<const app::HdOsdStatusCell>{hd_.hd_status_},
+        .hd = infra::OptRef<const app::hd::HdOsdStatusCell>{hd_.hd_status_},
     };
 }
 
@@ -197,7 +198,7 @@ void MenuBlock::latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& m
     stores_.latch(c);
 
     ui_model_.set_osd_style(c.osd_style == 1);
-    ui_model_.set_hd_look(app::hd_look_from_ini(c));
+    ui_model_.set_hd_look(app::hd::hd_look_from_ini(c));
     (void)hd_.open_seat(c, mains);
     connect_.open_seat(clock_, mains);
 }

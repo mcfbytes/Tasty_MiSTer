@@ -6,8 +6,9 @@
 #include <type_traits>
 
 #include "app/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 #include "os/raw_monotonic_clock.h"
 

@@ -10,6 +10,7 @@
 #include "app/types.h"
 #include "hal/types.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/types.h"

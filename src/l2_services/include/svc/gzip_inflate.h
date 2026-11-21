@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

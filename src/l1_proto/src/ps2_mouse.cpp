@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/endian.h"
+#include "infra/prelude.h"
 #include "proto/mouse_delta.h"
 
 namespace mister::proto {

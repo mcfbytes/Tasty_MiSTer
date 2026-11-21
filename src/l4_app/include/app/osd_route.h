@@ -4,9 +4,10 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "infra/grant_gen.h"
+#include "infra/cell_gen.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 
@@ -15,12 +16,12 @@ struct OsdRoute {
     std::uint32_t frames = 0;
     std::uint32_t rows = 0;
     std::uint32_t revoked = 0;
-    std::uint32_t ctrl = 0;
+    std::uint32_t restores = 0;
 };
 
 static_assert(std::is_trivially_copyable_v<OsdRoute>);
 using OsdRouteCell = xthread::Telemetry<OsdRoute, SeatTag::Ui>;
 
-using OsdLeaseCell = xthread::Telemetry<xthread::GrantGen, SeatTag::Ui>;
+using OsdLeaseCell = xthread::Telemetry<infra::CellGen, SeatTag::Ui>;
 
 }

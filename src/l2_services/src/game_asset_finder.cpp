@@ -9,6 +9,7 @@
 
 #include "infra/ascii.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/asset_name.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"

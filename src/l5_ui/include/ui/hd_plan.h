@@ -7,9 +7,10 @@
 #include <string_view>
 
 #include "infra/opt_ref.h"
+#include "infra/tally.h"
 #include "ui/connect_demand.h"
 #include "ui/types.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 #include "ui/page_id.h"
 #include "svc/types.h"
 
@@ -26,7 +27,9 @@ public:
     [[nodiscard]] virtual PageId id() const = 0;
     [[nodiscard]] virtual std::string_view title() const = 0;
 
-    [[nodiscard]] virtual std::span<const std::reference_wrapper<IHdRow>> rows() const = 0;
+    [[nodiscard]] virtual std::span<const std::reference_wrapper<IRow>> rows() const = 0;
+
+    [[nodiscard]] virtual RowCx row_cx() const { return RowCx{}; }
 
     [[nodiscard]] virtual RowCount pinned() const noexcept { return RowCount{}; }
 
@@ -39,7 +42,7 @@ public:
 
     virtual infra::OptRef<IHdRewalk> rewalker() { return {}; }
 
-    [[nodiscard]] virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
+    [[nodiscard]] virtual infra::Tally refusals() const noexcept { return infra::Tally{}; }
 
     [[nodiscard]] virtual ConnectDemand connect_demand() const { return ConnectDemand{}; }
 

@@ -1,0 +1,491 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "svc/input/input_device.h"
+#include "svc/input/analog_reshape.h"
+
+#include <fcntl.h>
+
+#include <cerrno>
+#include <cmath>
+#include <utility>
+
+#include "infra/indexed_array.h"
+#include "infra/prelude.h"
+#include "input_rules.h"
+#include "input_service_detail.h"
+#include "proto/paddle_pos.h"
+#include "proto/spinner_travel.h"
+#include "svc/input/sys_button.h"
+
+namespace mister::svc::input {
+
+namespace {
+
+const AxisCal kNullAxis{};
+
+}
+
+namespace {
+
+AxisSlots cache_slots(const os::Evdev& ev) {
+    AxisSlots slots{};
+    for (unsigned code = 0; code < kAxisCount; ++code) {
+        const std::optional<input_absinfo> info = ev.abs_info(code);
+        if (!info)
+            continue;
+        AxisCal& cal = slots[AxisPosition{code}].cal;
+        cal.min = info->minimum;
+        cal.max = info->maximum;
+        cal.flat = info->flat;
+        cal.fuzz = info->fuzz;
+    }
+    return slots;
+}
+
+OsdCombo::Claim claim_of(
+    SysButton word,
+    const SysWords& sys,
+    EvdevCode code,
+    bool pressed
+) noexcept {
+    return OsdCombo::Claim{sys[word] == PackedKeys::lone(code), pressed};
+}
+
+}
+
+Ex<InputDevice> InputDevice::open(std::string_view devnode) {
+    if (devnode.empty()) {
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    }
+    std::string path(devnode);
+
+    os::Evdev ev = os::Evdev::adopt(
+        UniqueFd{::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC)}
+    );
+    if (!ev.valid())
+        return std::unexpected(os_error(ERR_SITE()));
+
+    InputDevice dev;
+    dev.facts_.devname = path;
+    dev.facts_.mouse = rules::is_mouse_node(path);
+    if (!dev.facts_.mouse) {
+        if (const auto id = ev.id()) {
+            dev.facts_.id.vid = Vid{id->vendor};
+            dev.facts_.id.pid = Pid{id->product};
+            dev.facts_.id.version = id->version;
+            dev.facts_.id.bustype = id->bustype;
+        }
+        char name[128] = {};
+        if (const auto got = ev.name(name))
+            dev.facts_.id.name = *got;
+
+        char uniq[32] = {};
+        if (const auto got = ev.uniq(uniq))
+            dev.facts_.uniq = *got;
+        dev.axes_ = cache_slots(ev);
+        dev.rumble_ = RumbleChannel::probe(ev);
+    }
+    dev.ev_ = std::move(ev);
+    return dev;
+}
+
+Ex<InputDevice> InputDevice::adopt(
+    int fd,
+    std::string_view devnode,
+    const DeviceIdentity& id,
+    bool mouse
+) {
+    if (fd < 0)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    InputDevice dev;
+    dev.ev_ = os::Evdev::adopt(UniqueFd{fd});
+    dev.facts_.devname = devnode;
+    dev.facts_.mouse = mouse;
+    dev.facts_.id = id;
+    return dev;
+}
+
+const AxisCal& InputDevice::axis(EvdevCode code) const {
+    const auto slot = AxisPosition::of<kAxisCount>(code);
+    if (!slot)
+        return kNullAxis;
+    return axes_[*slot].cal;
+}
+
+void InputDevice::replace_axes(const AxisTable& table) noexcept {
+    for (std::size_t row = 0; row < kAxisCount; ++row) {
+        axes_[AxisPosition{row}].cal = table[row];
+    }
+}
+
+StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
+    const auto s = sticks_.find(stick);
+    return s ? s->cal() : StickCal{};
+}
+
+const SysWords& DeviceMaps::install_sys(const SysWords& words) noexcept {
+    sys = words;
+    if (packed_word(sys[kSysBtnCntEsc]) == 0)
+        sys[kSysBtnCntEsc] = sys[kSysBtnCntOk];
+    return sys;
+}
+
+std::span<const PackedKeys> DeviceMaps::wire_view() const noexcept {
+    static constexpr WireWords kUnset{};
+    return wire ? std::span<const PackedKeys>{*wire} : std::span<const PackedKeys>{kUnset};
+}
+
+void InputDevice::install_sys_map(const SysWords& words) noexcept {
+    const SysWords& fixed = maps_.install_sys(words);
+
+    maps_.set_menu(rules::derive_menu_map(fixed, facts_.quirk != QuirkId::Wheel));
+}
+
+bool InputDevice::matches_sys_button(EvdevCode code) const noexcept {
+    if (code.is_unset())
+        return false;
+    for (SysButton word{}; is_pad_control(word); word = word.next()) {
+        const PackedKeys packed = maps_.sys[word];
+        if (packed == PackedKeys{})
+            continue;
+        if (packed.lo == code || packed.hi == code)
+            return true;
+    }
+    return false;
+}
+
+bool InputDevice::has_nonzero_joy_map() const noexcept {
+    if (!maps_.wire_present())
+        return false;
+    for (const PackedKeys w : *maps_.wire) {
+        if (w != PackedKeys{})
+            return true;
+    }
+    return false;
+}
+
+Ex<void> InputDevice::set_grabbed(bool on) {
+    if (!ev_.valid())
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    const Ex<void> grabbed = ev_.grab(on);
+    if (!grabbed)
+        return grabbed;
+    grabbed_ = on;
+    return {};
+}
+
+bool InputDevice::release_for_handover() noexcept {
+    bool ok = rumble_.release(ev_);
+    if (grabbed_) {
+        ok = ev_.valid() && ev_.grab(false).has_value() && ok;
+        grabbed_ = false;
+    }
+    return ok;
+}
+
+void InputDevice::mark_down(EvdevCode code, bool on) noexcept {
+    down_ = on ? down_.with_or_unchanged(code) : down_.without_or_unchanged(code);
+}
+
+void InputDevice::push_key_edge(EvdevCode code, bool pressed) noexcept {
+    mark_down(code, pressed);
+    keys_changed_ = true;
+    report_.keys.push(KeyEvent{code, pressed});
+}
+
+void InputDevice::track_osd_combo(EvdevCode code, bool pressed) noexcept {
+    if (code.is_unset())
+        return;
+    const OsdCombo::Claims claims{
+        .escape = claim_of(kSysBtnCntEsc, maps_.sys, code, pressed),
+        .ok = claim_of(kSysBtnCntOk, maps_.sys, code, pressed)
+    };
+    const OsdCombo::Turn turn = osd_.update(claims);
+
+    if (code.is_key())
+        return;
+    if (turn == OsdCombo::Turn::made) {
+        if (report_.osd_makes != 0xFFu)
+            ++report_.osd_makes;
+    } else if (turn == OsdCombo::Turn::broken) {
+        if (report_.osd_breaks != 0xFFu)
+            ++report_.osd_breaks;
+    }
+}
+
+void InputDevice::synth_axis(AxisPosition slot, EvdevCode code, std::int32_t value) noexcept {
+
+    if (is_pdsp_like(facts_.quirk))
+        return;
+    AxisSlot& state = axes_[slot];
+    const AxisCal& cal = state.cal;
+
+    AxisSlot::Edge edge = AxisSlot::Edge::none;
+    if ((cal.max == 1 && cal.min == -1) || (cal.max == 2 && cal.min == 0)) {
+
+        if (value == cal.min)
+            edge = AxisSlot::Edge::low;
+        if (value == cal.max)
+            edge = AxisSlot::Edge::high;
+    } else {
+
+        const std::int32_t range = cal.max - cal.min + 1;
+        const std::int32_t center = cal.min + (range / 2);
+        const std::int32_t threshold = range / 4;
+
+        bool only_max = true;
+        for (const SysButton axis : kSysAxisCluster) {
+            const PackedKeys w = maps_.sys[axis];
+            if (w != PackedKeys{} && w.lo == code)
+                only_max = false;
+        }
+        if (value < center - threshold && !only_max)
+            edge = AxisSlot::Edge::low;
+        if (value > center + threshold)
+            edge = AxisSlot::Edge::high;
+    }
+
+    const AxisSlot::Edge last = state.edge;
+    if (last == edge)
+        return;
+    state.edge = edge;
+    if (last != AxisSlot::Edge::none) {
+        push_key_edge(AxisSlot::code_of(last, code), false);
+        if (report_.axis_edges != 0xFFFFu)
+            ++report_.axis_edges;
+    }
+    if (edge != AxisSlot::Edge::none) {
+        push_key_edge(AxisSlot::code_of(edge, code), true);
+        if (report_.axis_edges != 0xFFFFu)
+            ++report_.axis_edges;
+    }
+}
+
+namespace {
+
+struct PersonalityFilter {
+    QuirkId quirk = QuirkId::None;
+
+    static constexpr EvdevCode kLastDsAxis{40};
+
+    [[nodiscard]] bool drops(const input_event& ev) const noexcept {
+
+        if (quirk == QuirkId::Ds4Touch
+            && ev.type == EV_KEY
+            && (ev.code == BTN_TOOL_FINGER
+                || ev.code == BTN_TOUCH
+                || ev.code == BTN_TOOL_DOUBLETAP)) {
+            return true;
+        }
+        if (ev.type != EV_ABS || !is_dualshock_like(quirk))
+            return false;
+
+        const EvdevCode code{ev.code};
+        if (code > kLastDsAxis)
+            return true;
+
+        return quirk == QuirkId::Ds4Touch && (code == EvdevCode{ABS_X} || code == EvdevCode{ABS_Y});
+    }
+};
+
+std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
+    const std::int32_t hrange = (cal.max - cal.min) / 2;
+    if (hrange == 0)
+        return 0;
+    std::int32_t v = value;
+    if (v < cal.min)
+        v = cal.min;
+    else if (v > cal.max)
+        v = cal.max;
+    v -= (cal.min + cal.max) / 2;
+    v = (v * AnalogXy::kAxisMax) / hrange;
+    if (v < -AnalogXy::kAxisMax)
+        v = -AnalogXy::kAxisMax;
+    else if (v > AnalogXy::kAxisMax)
+        v = AnalogXy::kAxisMax;
+    return v;
+}
+
+struct StickAxis {
+    StickIndex stick;
+    AnalogXy::Axis axis;
+};
+
+constexpr EvdevCode kPaddleAxis{ABS_WHEEL};
+constexpr EvdevCode kSpinnerAxis{REL_DIAL};
+
+std::optional<StickAxis> stick_of(EvdevCode code) {
+    if (code == EvdevCode{ABS_X})
+        return StickAxis{kLeftStick, AnalogXy::Axis::X};
+    if (code == EvdevCode{ABS_Y})
+        return StickAxis{kLeftStick, AnalogXy::Axis::Y};
+    if (code == EvdevCode{ABS_RX})
+        return StickAxis{kRightStick, AnalogXy::Axis::X};
+    if (code == EvdevCode{ABS_RY})
+        return StickAxis{kRightStick, AnalogXy::Axis::Y};
+    return std::nullopt;
+}
+
+}
+
+void InputDevice::decode_key(const input_event& ev) noexcept {
+    const EvdevCode code{ev.code};
+    const bool pressed = ev.value != 0;
+    track_osd_combo(code, pressed);
+    push_key_edge(code, pressed);
+    if (ev.code >= BTN_LEFT && ev.code <= BTN_MIDDLE) {
+        const proto::MouseButtons bit = proto::MouseButtons::nth(ev.code - BTN_LEFT);
+        report_.mouse_buttons = pressed ? report_.mouse_buttons.with(bit)
+                                        : report_.mouse_buttons.without(bit);
+        report_.mouse_changed = true;
+    }
+}
+
+void InputDevice::decode_rel(const input_event& ev) noexcept {
+
+    if (EvdevCode{ev.code} == kSpinnerAxis) {
+        report_.dials = report_.dials.with_spin(proto::SpinnerTravel{ev.value});
+        return;
+    }
+    if (ev.code == REL_X)
+        report_.motion.dx += ev.value;
+    else if (ev.code == REL_Y)
+        report_.motion.dy += ev.value;
+    else if (ev.code == REL_WHEEL)
+        report_.motion.wheel += ev.value;
+    else
+        return;
+    report_.mouse_changed = true;
+}
+
+void InputDevice::decode_abs(const input_event& ev) noexcept {
+    const EvdevCode code{ev.code};
+    const auto pos = AxisPosition::of<kAxisCount>(code);
+    const auto sa = stick_of(code);
+
+    const AxisCal& cal = pos ? axes_[*pos].cal : kNullAxis;
+
+    if (code == kPaddleAxis && facts_.quirk != QuirkId::Wheel) {
+        const auto range = cal.paddle_range();
+        report_.dials = range
+            ? report_.dials.with_paddle(proto::PaddlePos::scaled(ev.value, *range))
+            : report_.dials.with_range_fault();
+    }
+    if (!sa) {
+        if (pos)
+            synth_axis(*pos, code, ev.value);
+        return;
+    }
+    const StickIndex stick = sa->stick;
+    const AnalogXy::Axis axis = sa->axis;
+    StickState& st = sticks_[stick];
+    const std::int32_t v = normalize_axis(ev.value, cal);
+    st.raw = axis == AnalogXy::Axis::X ? AnalogXy{v, st.raw.y} : AnalogXy{st.raw.x, v};
+
+    st.learn(rules::is_diagonal(st.raw));
+    if (pos) {
+        const auto seen = static_cast<std::int32_t>(magnitude(st.raw, axis));
+        AxisCal& cached = axes_[*pos].cal;
+        if (seen > cached.seen_max)
+            cached.seen_max = seen;
+    }
+
+    const StickCal sc = st.cal();
+
+    AnalogXy xy = rules::apply_deadzone(st.raw, rules::DeadzoneParams{deadzone_, sc});
+
+    if (reshape_)
+        xy = reshape_->reshape(xy, cal, sc);
+    if (!(xy == st.published)) {
+        report_.stick_changed[stick] = true;
+        st.published = xy;
+    }
+    report_.stick[stick] = xy;
+
+    if (pos)
+        synth_axis(*pos, code, ev.value);
+}
+
+Ex<unsigned> InputDevice::drain() {
+    if (!ev_.valid())
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+
+    report_ = DeviceReport{};
+    report_.buttons = joy_prev_;
+    report_.menu_buttons = menu_prev_;
+    report_.mouse_buttons = mouse_buttons_;
+
+    for (const StickIndex i : kSticks)
+        report_.stick[i] = sticks_[i].published;
+    unsigned decoded = 0;
+    keys_changed_ = false;
+    const PersonalityFilter filter{facts_.quirk};
+
+    struct input_event evs[32];
+    bool more = true;
+    while (more) {
+        const Ex<std::size_t> got = ev_.read(evs);
+        if (!got) {
+
+            const auto err = static_cast<int>(got.error().detail);
+            if (err == EINTR)
+                continue;
+            if (err == EAGAIN || err == EWOULDBLOCK)
+                break;
+            return std::unexpected(got.error());
+        }
+        const std::size_t n = *got;
+        if (n == 0)
+            break;
+        const auto whole = n / sizeof(struct input_event);
+
+        const std::size_t rem = n - whole * sizeof(struct input_event);
+        if (rem != 0) {
+            const std::uint32_t sum = static_cast<std::uint32_t>(report_.mouse_remainder)
+                + static_cast<std::uint32_t>(rem);
+            report_.mouse_remainder = static_cast<std::uint16_t>(sum > 0xFFFFu ? 0xFFFFu : sum);
+        }
+        if (whole < (sizeof evs / sizeof evs[0]))
+            more = false;
+
+        for (std::size_t i = 0; i < whole; ++i) {
+            const struct input_event& ev = evs[i];
+            ++decoded;
+
+            if (filter.drops(ev)) {
+                if (report_.quirk_drops != 0xFFFFu)
+                    ++report_.quirk_drops;
+                continue;
+            }
+            switch (ev.type) {
+                case EV_KEY:
+                    decode_key(ev);
+                    break;
+                case EV_REL:
+                    decode_rel(ev);
+                    break;
+                case EV_ABS:
+                    decode_abs(ev);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    mouse_buttons_ = report_.mouse_buttons;
+    if (keys_changed_ && maps_.wire_present()) {
+
+        const JoyMask now = rules::mask_for(*maps_.wire, down_);
+        report_.buttons = now;
+        report_.buttons_changed = !(now == joy_prev_);
+        joy_prev_ = now;
+    }
+    if (keys_changed_) {
+        const JoyMask menu_now = rules::mask_for(maps_.menu, down_);
+        report_.menu_buttons = menu_now;
+        menu_prev_ = menu_now;
+    }
+    return decoded;
+}
+
+}

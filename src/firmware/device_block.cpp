@@ -10,10 +10,12 @@
 #include "app/flat_save_servant.h"
 #include "app/sector_route.h"
 #include "cores/disk_servant.h"
+#include "cores/servant_factories.h"
 #include "cores/servant_id.h"
 #include "hal/board_regions.h"
 #include "hal/boards_table.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "reactor/notifier.h"
 
 namespace mister::fw {
@@ -42,7 +44,7 @@ std::optional<app::CmdFifo> DeviceBlock::open_cmd_fifo(
     return std::optional<app::CmdFifo>{std::in_place, std::move(*f)};
 }
 
-std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
+std::optional<app::capture::ScalerFrameSource> DeviceBlock::open_frame_source_(
     const BootParts& plat
 ) noexcept {
     const auto region = hal::BoardRegions::aperture_region(plat.regions, hal::RegionId::ScalerOut);
@@ -53,49 +55,51 @@ std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
         opened_.refuse("screenshot: FpgaMemory::map(scaler-out)", w.error());
         return std::nullopt;
     }
-    return std::optional<app::ScalerFrameSource>{
+    return std::optional<app::capture::ScalerFrameSource>{
         std::in_place,
         std::move(*w),
         video_pump_.geometry_cell()
     };
 }
 
-std::optional<app::HostLedWatch> DeviceBlock::open_led_watch_(const BootParts& plat) noexcept {
+std::optional<app::input::HostLedWatch> DeviceBlock::open_led_watch_(
+    const BootParts& plat
+) noexcept {
     const std::string_view node = plat.kernel.activity_led;
     if (node.empty())
         return std::nullopt;
-    auto watch = app::HostLedWatch::open(node, disk_activity_);
+    auto watch = app::input::HostLedWatch::open(node, disk_activity_);
     if (!watch) {
         opened_.refuse("T-INPUT: HostLedWatch::open", watch.error());
         return std::nullopt;
     }
-    return std::optional<app::HostLedWatch>{std::in_place, std::move(*watch)};
+    return std::optional<app::input::HostLedWatch>{std::in_place, std::move(*watch)};
 }
 
-std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
+std::optional<app::input::InputPipeline> DeviceBlock::open_input_pipeline_(
     const Parts::Frontend& front
 ) noexcept {
-    const std::optional<app::HostLedWatch>& watch = led_watch_;
-    const auto led = watch ? infra::OptRef<const app::HostLedWatch>{*watch}
-                           : infra::OptRef<const app::HostLedWatch>{};
-    auto fds = app::InputDecode::Fds::create(input_ctrl_, led);
+    const std::optional<app::input::HostLedWatch>& watch = led_watch_;
+    const auto led = watch ? infra::OptRef<const app::input::HostLedWatch>{*watch}
+                           : infra::OptRef<const app::input::HostLedWatch>{};
+    auto fds = app::input::InputDecode::Fds::create(input_ctrl_, led);
     if (!fds) {
         opened_.refuse("T-INPUT: InputDecode::Fds::create", fds.error());
         return std::nullopt;
     }
-    auto service = svc::InputService::open(input_build_.enumerator().input_dir());
+    auto service = svc::input::InputService::open(input_build_.enumerator().input_dir());
     if (!service) {
         opened_.refuse("T-INPUT: HotplugWatch::open", service.error());
         return std::nullopt;
     }
-    return std::optional<app::InputPipeline>{
+    return std::optional<app::input::InputPipeline>{
         std::in_place,
         std::move(*fds),
         input_build_,
         input_emit_,
         std::move(*service),
         clock_,
-        app::InputDecode::Wiring{
+        app::input::InputDecode::Wiring{
             .diag = diag_log_,
             .inbox = input_inbox_,
             .rt_kick = rt_input_kick_,
@@ -111,11 +115,12 @@ std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
             .capture_arm = capture_arm_,
             .capture_hit = capture_hit_,
             .rumble_players = rumble_players_,
+            .pads = infra::OptRef<app::input::LwPadEndpoint>{lw_pad_},
         }
     };
 }
 
-std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
+std::optional<app::input::InputMain> DeviceBlock::open_input_main_() noexcept {
     if (!input_pipeline_)
         return std::nullopt;
     auto park = xthread::ParkFds::create(input_wake_);
@@ -127,7 +132,7 @@ std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
         opened_.refuse("T-INPUT: InputDecode::watch", w.error());
         return std::nullopt;
     }
-    return std::optional<app::InputMain>{
+    return std::optional<app::input::InputMain>{
         std::in_place,
         input_pipeline_->decode(),
         input_rx_,
@@ -183,7 +188,9 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .osd_lease = infra::OptRef<const app::OsdLeaseCell>{osd_lease_},
         .sys_lease = infra::OptRef<const app::SysLeaseCell>{sys_lease_},
         .io_pass = infra::OptRef<const svc::IoPassCell>{io_pass_},
-        .main_log = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
+        .pad_route = infra::OptRef<const app::PadRouteCell>{pad_route_},
+        .pad_lease = infra::OptRef<const app::PadLeaseCell>{pad_lease_},
+        .main_log = infra::OptRef<app::MainLogLane>{main_log_lane_},
     };
 }
 
@@ -232,9 +239,9 @@ void DeviceBlock::grant_pauses(
     if (ui)
         grant_pause(SeatTag::Ui, ui->pause_latch());
     static_assert(
-        HasPauseLatch<app::InputMain>
-            && HasPauseLatch<app::PcmMain>
-            && HasPauseLatch<svc::PrefetchMain>
+        HasPauseLatch<app::input::InputMain>
+            && HasPauseLatch<app::pcm::PcmMain>
+            && HasPauseLatch<svc::disc::PrefetchMain>
             && HasPauseLatch<svc::IoMain>,
         "a renamed pause_latch() would silently drop that seat's grant"
     );
@@ -250,10 +257,10 @@ DeviceBlock::DeviceBlock(
       io_doorbells_(open_io_doorbells_()),
 
       disk_relay_{io_wake_, cores::make_disk_servant(plat.vfs, infra::OptRef{disk_activity_})},
-      save_relay_{plat.link, io_wake_, std::make_unique<app::FlatSaveServant>(plat.vfs)},
       events_(),
       owner_events_(),
       clock_(),
+      input_rx_{input_ctrl_},
       main_rx_{main_wake_},
       link_router_{main_rx_, ui_rx_, input_rx_},
       ui_writes_{plat.vfs, io_wake_},
@@ -269,13 +276,29 @@ DeviceBlock::DeviceBlock(
               .link_tx = ui_inbox_,
               .replies = link_router_,
               .ini = ini_cell_,
-              .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
+              .writes = infra::OptRef<app::recents::UiWriteLane>{ui_writes_},
           }
       },
-      input_emit_{edge_reset_, plat.link, link_router_},
+      input_emit_{
+          edge_reset_,
+          plat.link,
+          link_router_,
+          app::input::PadRelayEnds{
+              .input_rx = infra::OptRef<app::LinkRxChannel<SeatTag::Input>>{input_rx_},
+              .route = infra::OptRef<const app::PadRouteCell>{pad_route_}
+          }
+      },
+      lw_pad_(
+          app::input::LwPadEndpoint::Wiring{
+              .grant = pad_grant_,
+              .route = pad_route_,
+              .lease = pad_lease_,
+              .relay = input_emit_.relay_cell()
+          }
+      ),
       input_build_{
           plat.vfs,
-          app::InputBuild::Ends{core_facts_, hotplug_, input_ctrl_.kicker()},
+          app::input::InputBuild::Ends{core_facts_, hotplug_, input_ctrl_.kicker()},
           plat.input_dir
       },
       rt_input_kick_(plat.exec.kicker()),
@@ -293,14 +316,15 @@ DeviceBlock::DeviceBlock(
       save_stage_orders_{io_wake_},
       save_stage_keeper_{plat.vfs, clock_, save_stage_orders_, save_stage_cell_},
       save_backends_{svc::make_save_slot_backends(plat.vfs, save_stage_keeper_)},
+      save_relay_{plat.link, io_wake_, std::make_unique<app::FlatSaveServant>(save_stage_keeper_)},
       storage_(io_wake_),
       disc_store_{plat.vfs, disc_geometry_, disc_counters_, prefetch_},
       discs_(
           io_wake_,
           {.geometry = disc_geometry_,
            .counters = disc_counters_,
-           .reader = infra::OptRef<svc::IDiscReader>{disc_store_},
-           .mounter = infra::OptRef<svc::IDiscMounter>{disc_store_}}
+           .reader = infra::OptRef<svc::disc::IDiscReader>{disc_store_},
+           .mounter = infra::OptRef<svc::disc::IDiscMounter>{disc_store_}}
       ),
       lw_sector_(
           app::LwSectorEndpoint::Wiring{
@@ -371,7 +395,8 @@ DeviceBlock::DeviceBlock(
           .lw_window = plat.lw_window,
           .doorbell_nodes = plat.doorbell_nodes,
           .doorbell_cpus = hal::cpus_off_rt(plat.threads),
-          .status_snapshots = infra::OptRef<const proto::StatusSnapshotCell>{status_snapshots_},
+          .status_snapshots = infra::OptRef<
+              const proto::link::StatusSnapshotCell>{status_snapshots_},
 
           .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
           .lamp = plat.disk_lamp,
@@ -419,7 +444,8 @@ DeviceBlock::DeviceBlock(
               .bay = bay_,
               .bay_releases = bay_releases_,
               .core_terms = session_.core_terms(),
-              .companion_binds = infra::OptRef<app::CompanionHost::Binds>{companion_host_.binds()},
+              .companion_binds = infra::OptRef<app::pcm::CompanionHost::Binds>{companion_host_
+                                                                                   .binds()},
               .sectors =
                   app::CoreBuilder::SectorCells{
                       .grant = sector_grant_,
@@ -435,10 +461,16 @@ DeviceBlock::DeviceBlock(
                       .lease = sys_lease_,
                       .wake = infra::OptRef<xthread::WakeFlag>{io_wake_}
                   },
+              .pads =
+                  app::CoreBuilder::PadCells{
+                      .grant = pad_grant_,
+                      .lease = pad_lease_,
+                      .wake = infra::OptRef<xthread::WakeFlag>{input_ctrl_}
+                  },
               .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
               .save_stages = app::SaveStageDirector::
                   Ends{.orders = save_stage_orders_, .report = save_stage_cell_},
-              .log_lane = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
+              .log_lane = infra::OptRef<app::MainLogLane>{main_log_lane_},
               .aperture = plat.fpga_mem,
               .osd_mask_cell = infra::OptRef<const app::OsdMaskCell>{osd_mask_cell_},
               .menu_focus_cell = infra::OptRef<const app::MenuFocusCell>{menu_focus_cell_}
@@ -503,13 +535,13 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
     };
 }
 
-std::optional<svc::PrefetchMain> DeviceBlock::open_prefetch_main_() {
+std::optional<svc::disc::PrefetchMain> DeviceBlock::open_prefetch_main_() {
     if (auto po = prefetch_.open(); !po) {
         opened_.refuse("T-PREFETCH: ChdPrefetch::open", po.error());
     } else if (auto fds = xthread::ParkFds::create(prefetch_.wake()); !fds) {
         opened_.refuse("T-PREFETCH: ParkFds::create", fds.error());
     } else {
-        return std::optional<svc::PrefetchMain>{
+        return std::optional<svc::disc::PrefetchMain>{
             std::in_place,
             prefetch_,
             std::move(*fds),
@@ -519,17 +551,17 @@ std::optional<svc::PrefetchMain> DeviceBlock::open_prefetch_main_() {
     return std::nullopt;
 }
 
-std::optional<app::PcmMain> DeviceBlock::open_pcm_main_() {
+std::optional<app::pcm::PcmMain> DeviceBlock::open_pcm_main_() {
     if (auto fds = xthread::ParkFds::create(pcm_wake_); !fds) {
         opened_.refuse("T-PCM: ParkFds::create", fds.error());
         return std::nullopt;
     } else {
-        return std::optional<app::PcmMain>{
+        return std::optional<app::pcm::PcmMain>{
             std::in_place,
             pcm_feeder_,
             std::move(*fds),
             pcm_commands_,
-            app::PcmMain::Mailbox{mailbox_relay_, companion_host_},
+            app::pcm::PcmMain::Mailbox{mailbox_relay_, companion_host_},
             infra::OptRef{main_wake_}
         };
     }
@@ -583,15 +615,15 @@ app::SupervisorParts::Services DeviceBlock::services_() noexcept {
 
 DiagSampler::Services DeviceBlock::diag_services() noexcept {
     return DiagSampler::Services{
-        .frame_source = frame_src_ ? infra::OptRef<app::IFrameSource>{*frame_src_}
-                                   : infra::OptRef<app::IFrameSource>{},
+        .frame_source = frame_src_ ? infra::OptRef<app::capture::IFrameSource>{*frame_src_}
+                                   : infra::OptRef<app::capture::IFrameSource>{},
         .input_sample = input_main_
-            ? infra::OptRef<const app::InputSample>{input_pipeline_->sample()}
-            : infra::OptRef<const app::InputSample>{},
-        .input_build = input_main_ ? infra::OptRef<app::InputBuild>{input_build_}
-                                   : infra::OptRef<app::InputBuild>{},
-        .prefetch = prefetch_main_ ? infra::OptRef<const svc::ChdPrefetch>{prefetch_}
-                                   : infra::OptRef<const svc::ChdPrefetch>{},
+            ? infra::OptRef<const app::input::InputSample>{input_pipeline_->sample()}
+            : infra::OptRef<const app::input::InputSample>{},
+        .input_build = input_main_ ? infra::OptRef<app::input::InputBuild>{input_build_}
+                                   : infra::OptRef<app::input::InputBuild>{},
+        .prefetch = prefetch_main_ ? infra::OptRef<const svc::disc::ChdPrefetch>{prefetch_}
+                                   : infra::OptRef<const svc::disc::ChdPrefetch>{},
     };
 }
 

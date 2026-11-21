@@ -6,10 +6,11 @@
 #include <optional>
 #include <utility>
 
-#include "infra/byte_view.h"
 #include "infra/errno.h"
 #include "infra/message_sum.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
+#include "infra/span_cut.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
@@ -27,14 +28,6 @@ consteval std::array<SaveStageSlot, sizeof...(I)> slots_of(std::index_sequence<I
 }
 
 constexpr auto kSlots = slots_of(std::make_index_sequence<proto::kMaxStagedSaves.size()>{});
-
-std::span<std::byte> file_bytes(std::span<std::uint8_t> s) noexcept {
-    return infra::byte_cast<std::byte>(s);
-}
-
-std::span<const std::byte> file_bytes(std::span<const std::uint8_t> s) noexcept {
-    return infra::byte_cast<const std::byte>(s);
-}
 
 bool errno_is(const Error& e, infra::Errno want) noexcept {
     return e.code == Errc::os && e.os_errno() == want;
@@ -73,8 +66,8 @@ SaveStageKeeper::SaveStageKeeper(
       clock_(clock),
       orders_(orders),
       cell_(report),
-      commit_buf_(proto::kStagedSaveMaxBytes.file_word<std::size_t>()),
-      chunk_buf_(proto::kCommitChunkBytes.file_word<std::size_t>()) {}
+      commit_buf_(proto::kStagedSaveMaxBytes.zeroed<std::vector<std::byte>>()),
+      chunk_buf_(proto::kCommitChunkBytes.zeroed<std::vector<std::byte>>()) {}
 
 infra::OptRef<StagedSave> SaveStageKeeper::staged_(proto::StageKey key) noexcept {
     auto st = pool_.find(key.slot);
@@ -141,7 +134,7 @@ Ex<std::optional<SaveStageKeeper::Grant>> SaveStageKeeper::adopt(std::string_vie
 
     auto f = card_.open(path, OpenMode::ReadWrite);
     if (!f) {
-        if (!errno_is(f.error(), infra::Errno{ENOENT}))
+        if (f.error().code != Errc::not_found)
             return std::unexpected(f.error());
         if (vfs_.name_kind(path) != Vfs::NameKind::Absent)
             return decline_();
@@ -167,10 +160,10 @@ std::optional<SaveStageKeeper::Grant> SaveStageKeeper::decline_() noexcept {
     return std::nullopt;
 }
 
-Ex<std::span<std::uint8_t>> SaveStageKeeper::read(
+Ex<infra::ByteCount> SaveStageKeeper::read(
     proto::StageKey key,
     proto::FileOffset at,
-    std::span<std::uint8_t> dst
+    std::span<std::byte> dst
 ) {
     TASTY_SEAT_BODY(SaveStageKeeper);
     auto st = staged_(key);
@@ -179,10 +172,10 @@ Ex<std::span<std::uint8_t>> SaveStageKeeper::read(
     return st->read(at, dst);
 }
 
-Ex<std::span<const std::uint8_t>> SaveStageKeeper::write(
+Ex<infra::ByteCount> SaveStageKeeper::write(
     proto::StageKey key,
     proto::FileOffset at,
-    std::span<const std::uint8_t> src
+    std::span<const std::byte> src
 ) {
     TASTY_SEAT_BODY(SaveStageKeeper);
     auto st = staged_(key);
@@ -197,7 +190,7 @@ Ex<std::span<const std::uint8_t>> SaveStageKeeper::write(
     return r;
 }
 
-Ex<FileSize> SaveStageKeeper::create(proto::StageKey key, std::span<const std::uint8_t> first) {
+Ex<FileSize> SaveStageKeeper::create(proto::StageKey key, std::span<const std::byte> first) {
     TASTY_SEAT_BODY(SaveStageKeeper);
     auto st = staged_(key);
     if (!st || st->state() == StageState::Retiring)
@@ -209,6 +202,11 @@ Ex<FileSize> SaveStageKeeper::create(proto::StageKey key, std::span<const std::u
     auto r = st->create(first, clock_.now());
     publish_();
     return r;
+}
+
+Ex<void> SaveStageKeeper::commit_image(std::string_view path, std::span<const std::byte> image) {
+    TASTY_SEAT_BODY(SaveStageKeeper);
+    return card_.replace_file(path, image);
 }
 
 void SaveStageKeeper::retire(proto::StageKey key) noexcept {
@@ -426,12 +424,15 @@ void SaveStageKeeper::after_compare_(Job& j) noexcept {
 void SaveStageKeeper::step_compare_(Job& j, StagedSave& st) noexcept {
     const FileSize n = ((proto::kFileStart + j.size) - j.at).min(proto::kCommitChunkBytes);
     if (!n.empty()) {
-        const std::span<std::uint8_t> card = n.first_of(std::span(chunk_buf_));
-        if (!read_exact(*j.src, j.at, file_bytes(card))) {
+        const std::span<std::byte> card = infra::affine::first(std::span(chunk_buf_), n);
+        if (!j.src->read_exact_at(j.at, card)) {
             after_compare_(j);
             return;
         }
-        if (!std::ranges::equal(card, n.first_of(j.at.skip_in(std::span(commit_buf_))))) {
+        if (!std::ranges::equal(
+                card,
+                infra::affine::first(infra::affine::from(std::span(commit_buf_), j.at), n)
+            )) {
             after_compare_(j);
             return;
         }
@@ -456,10 +457,10 @@ void SaveStageKeeper::step_backup_(Job& j, StagedSave& st) noexcept {
     }
     const FileSize n = ((proto::kFileStart + j.card) - j.at).min(proto::kCommitChunkBytes);
     if (!n.empty()) {
-        const std::span<std::uint8_t> chunk = n.first_of(std::span(chunk_buf_));
-        if (!read_exact(*j.src, j.at, file_bytes(chunk)))
+        const std::span<std::byte> chunk = infra::affine::first(std::span(chunk_buf_), n);
+        if (!j.src->read_exact_at(j.at, chunk))
             return skip_backup_(j);
-        if (!write_all(*j.dst, j.at, file_bytes(std::span<const std::uint8_t>(chunk))))
+        if (!j.dst->write_all_at(j.at, chunk))
             return skip_backup_(j);
         if (!j.dst->flush())
             return skip_backup_(j);
@@ -504,10 +505,11 @@ void SaveStageKeeper::step_write_(Job& j, StagedSave& st) noexcept {
     }
     const FileSize n = ((proto::kFileStart + j.size) - j.at).min(proto::kCommitChunkBytes);
     if (!n.empty()) {
-        const std::span<const std::uint8_t> chunk = n.first_of(
-            j.at.skip_in(std::span<const std::uint8_t>(commit_buf_))
+        const std::span<const std::byte> chunk = infra::affine::first(
+            infra::affine::from(std::span<const std::byte>(commit_buf_), j.at),
+            n
         );
-        if (auto w = write_all(*j.dst, j.at, file_bytes(chunk)); !w)
+        if (auto w = j.dst->write_all_at(j.at, chunk); !w)
             return write_refused_(j, st, w.error());
         if (auto s = j.dst->flush(); !s)
             return write_refused_(j, st, s.error());
@@ -529,10 +531,11 @@ void SaveStageKeeper::step_in_place_(Job& j, StagedSave& st) noexcept {
     }
     const FileSize n = ((proto::kFileStart + j.size) - j.at).min(proto::kCommitChunkBytes);
     if (!n.empty()) {
-        const std::span<const std::uint8_t> chunk = n.first_of(
-            j.at.skip_in(std::span<const std::uint8_t>(commit_buf_))
+        const std::span<const std::byte> chunk = infra::affine::first(
+            infra::affine::from(std::span<const std::byte>(commit_buf_), j.at),
+            n
         );
-        if (auto w = write_all(*j.dst, j.at, file_bytes(chunk)); !w)
+        if (auto w = j.dst->write_all_at(j.at, chunk); !w)
             return fail_(st, w.error());
         if (auto s = j.dst->flush(); !s)
             return fail_(st, s.error());

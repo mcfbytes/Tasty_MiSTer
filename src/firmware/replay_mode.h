@@ -10,12 +10,13 @@
 #include <string>
 #include <string_view>
 
-#include "app/replay_feeder.h"
+#include "app/replay/replay_feeder.h"
 #include "app/run_policy.h"
 #include "boot_parts.h"
 #include "device_block.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "recorder_block.h"
 #include "replay_block.h"
@@ -123,10 +124,10 @@ private:
     struct FeederReplay final : IReplayPort {
         TASTY_SEAT_RESIDENT(Ui);
 
-        explicit FeederReplay(app::ReplayFeeder& feeder) noexcept : f(feeder) {}
+        explicit FeederReplay(app::replay::ReplayFeeder& feeder) noexcept : f(feeder) {}
 
-        app::ReplayFeeder& f;
-        bool take_play(const app::ReplayFeeder::Play& play) noexcept override;
+        app::replay::ReplayFeeder& f;
+        bool take_play(const app::replay::ReplayFeeder::Play& play) noexcept override;
         void take_stop() noexcept override;
         [[nodiscard]] app::MovieFrameCount movie_frames() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
@@ -145,7 +146,9 @@ private:
             return DeviceBlock::Parts::Frontend{.policy = policy_};
         }
 
-        [[nodiscard]] infra::OptRef<app::ScanoutRelay> scanout() noexcept override { return {}; }
+        [[nodiscard]] infra::OptRef<app::launcher::ScanoutRelay> scanout() noexcept override {
+            return {};
+        }
 
         [[nodiscard]] std::unique_ptr<Face> face(
             const BootParts& plat,
@@ -195,8 +198,8 @@ private:
             TastyStatusFile& status
         );
 
-        [[nodiscard]] infra::OptRef<app::IOwnerTick> owner_tick() noexcept override {
-            return infra::OptRef<app::IOwnerTick>{session_};
+        [[nodiscard]] infra::OptRef<xthread::ICoworker> owner_tick() noexcept override {
+            return infra::OptRef<xthread::ICoworker>{session_};
         }
 
     private:

@@ -10,6 +10,7 @@
 #include "cores/types.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::cores {

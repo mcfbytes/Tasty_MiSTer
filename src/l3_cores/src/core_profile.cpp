@@ -3,6 +3,8 @@
 
 #include <cstring>
 
+#include "infra/prelude.h"
+
 namespace mister::cores {
 
 [[nodiscard]] Ex<void> assert_services_match_census(

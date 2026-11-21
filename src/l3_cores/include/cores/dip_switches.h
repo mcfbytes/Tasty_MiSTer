@@ -8,6 +8,7 @@
 
 #include "cores/dip_row_view.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 
 namespace mister::cores {

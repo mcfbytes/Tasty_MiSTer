@@ -22,7 +22,25 @@ jobs:
       - name: Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-15 cmake ninja-build zlib1g-dev libchdr-dev libminizip-dev liblzo2-dev python3
+          sudo apt-get install -y g++-15 cmake ninja-build zlib1g-dev libchdr-dev libminizip-dev liblzo2-dev python3 zstd curl patch
+      # The pinned static Slint SDK is built once per Slint version, patch set and recipe, then reused.
+      - name: Slint SDK (cached)
+        id: sdk
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/slint-sdk-1.19.0
+          key: slint-sdk-1.19.0-host-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
+      - name: Slint SDK (build)
+        if: steps.sdk.outputs.cache-hit != 'true'
+        env:
+          SLINT_SDK_ANYWHERE: "1"
+          SLINT_SDK_TRIPLES: x86_64-linux-gnu
+        run: |
+          src/tools/build-slint-sdk.sh "$RUNNER_TEMP/slint-sdk-out"
+          mkdir -p "$HOME/slint-sdk-1.19.0"
+          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.0"
+      - name: Slint SDK (path)
+        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.0" >> "$GITHUB_ENV"
       - name: Configure
         run: cmake --preset host -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_C_COMPILER=gcc-15
       - name: Build
@@ -36,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Packages
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build python3 wget xz-utils
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build python3 wget xz-utils zstd curl patch
       - name: Bootlin glibc toolchain
         run: |
           mkdir -p "$HOME/toolchains"
@@ -47,16 +65,25 @@ jobs:
           echo "TASTY_TOOLCHAIN_ROOT=$HOME/toolchains/armv7-eabihf--glibc--stable-2026.08-1" >> "$GITHUB_ENV"
       - name: Static deps
         run: python3 src/tools/build-static-deps.py
-      # The static Slint archive is built once per Slint version, patch set and recipe, then reused.
-      - name: Static Slint (cached)
-        id: slint
+      # The pinned static Slint SDK is built once per Slint version, patch set and recipe, then reused.
+      - name: Slint SDK (cached)
+        id: sdk
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/toolchains/armv7-eabihf--glibc--stable-2026.08-1/opt/slint
-          key: slint-1.19.0-${{ hashFiles('src/tools/build-static-slint.sh', 'src/tools/slint/*.patch', 'cmake/arm-linux-gnueabihf-static.cmake') }}
-      - name: Static Slint (build)
-        if: steps.slint.outputs.cache-hit != 'true'
-        run: src/tools/build-static-slint.sh
+          path: ~/slint-sdk-1.19.0
+          key: slint-sdk-1.19.0-armhf-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
+      - name: Slint SDK (build)
+        if: steps.sdk.outputs.cache-hit != 'true'
+        env:
+          SLINT_SDK_ANYWHERE: "1"
+          SLINT_SDK_TRIPLES: "armv7-linux-gnueabihf x86_64-linux-gnu"
+          SLINT_TOOLCHAIN_ROOT: ${{ env.TASTY_TOOLCHAIN_ROOT }}
+        run: |
+          src/tools/build-slint-sdk.sh "$RUNNER_TEMP/slint-sdk-out"
+          mkdir -p "$HOME/slint-sdk-1.19.0"
+          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.0"
+      - name: Slint SDK (path)
+        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.0" >> "$GITHUB_ENV"
       - name: Configure
         run: cmake --preset armhf-static -DTASTY_TOOLCHAIN_ROOT="$TASTY_TOOLCHAIN_ROOT" -DTASTY_STATIC_DEPS="$TASTY_TOOLCHAIN_ROOT/opt"
       - name: Build

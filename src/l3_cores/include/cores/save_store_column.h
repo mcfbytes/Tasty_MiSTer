@@ -4,7 +4,8 @@
 #include <memory>
 
 #include "infra/opt_ref.h"
-#include "infra/wake_flag.h"
+#include "infra/prelude.h"
+#include "infra/xthread/wake_flag.h"
 #include "svc/storage_backend.h"
 
 namespace mister::svc {

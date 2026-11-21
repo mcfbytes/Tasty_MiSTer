@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "svc/types.h"
@@ -27,16 +28,16 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    svc::Tally refusals() const noexcept override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
+    infra::Tally refusals() const noexcept override;
 
 private:
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     HdPushRow pair_;
     HdPushRow bluetooth_;
     std::string define_label_;
     HdPushRow define_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

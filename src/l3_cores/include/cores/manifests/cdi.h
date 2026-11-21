@@ -3,21 +3,21 @@
 
 #include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
-#include "cores/cdi_block.h"
+#include "cores/cdi/cdi_block.h"
 
 #include <array>
 #include <memory>
 
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
-#include "svc/cue_policy.h"
+#include "svc/disc/cue_policy.h"
 
 namespace mister::cores::manifests {
 
-inline constexpr svc::CuePolicy kCdiCuePolicy{
-    .sub_naming = svc::CuePolicy::SubNaming::ImageSubOrCdg,
-    .program = svc::CuePolicy::Program::IndexPair,
-    .frame_shaping = svc::CuePolicy::FrameShaping::DescrambleByHeader,
+inline constexpr svc::disc::CuePolicy kCdiCuePolicy{
+    .sub_naming = svc::disc::CuePolicy::SubNaming::ImageSubOrCdg,
+    .program = svc::disc::CuePolicy::Program::IndexPair,
+    .frame_shaping = svc::disc::CuePolicy::FrameShaping::DescrambleByHeader,
 };
 
 inline constexpr auto kCdiSlots = std::to_array<FileSlot>({
@@ -58,10 +58,9 @@ inline constexpr CoreProfile kCdi{
     .staging = kCdiStaging,
     .block_drain_budget = 1,
     .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{cdi::kBlockBytes}),
-    .image_rows_no_zip = true,
-    .cheats = {},
     .no_stream_role = true,
     .reset = {},
+    .host = {.image_rows_no_zip = true, .cheats = {}},
 
     .grants = {Grant::Discs},
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/companion_walk.h"
 
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -10,7 +11,7 @@ Ex<CompanionWalk> CompanionWalk::start(
     proto::CompanionBindGen gen,
     std::unique_ptr<cores::ILoader> loader,
     std::span<const cores::CoreWindowDecl> windows,
-    infra::OptRef<CompanionHost::Binds> binds
+    infra::OptRef<pcm::CompanionHost::Binds> binds
 ) {
     if (gen.is_none() || (plan.load && loader == nullptr))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -61,8 +62,8 @@ CompanionWalk::Pass CompanionWalk::step(Host& h) {
 
 CompanionWalk::Pass CompanionWalk::bind_(Host& h) {
     if (h.binds) {
-        const CompanionBind m = infra::make<CompanionBind>(
-            CompanionBind::Bind{.stem = stem_, .gen = gen_, .present = plan_.present}
+        const pcm::CompanionBind m = infra::make<pcm::CompanionBind>(
+            pcm::CompanionBind::Bind{.stem = stem_, .gen = gen_, .present = plan_.present}
         );
         if (!h.binds->push(m))
             return Pass::Waiting;
@@ -121,7 +122,7 @@ Rung::Pass CompanionWalk::step(const RungEdges& edges, cores::ILadderHost& owner
                 .map = edges.window_map,
                 .aperture = edges.aperture,
                 .vfs = edges.vfs,
-                .now_ns = edges.clock.now().time_since_epoch()
+                .now = edges.clock.now()
             },
         .binds = binds_
     };

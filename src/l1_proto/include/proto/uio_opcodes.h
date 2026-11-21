@@ -72,6 +72,9 @@ enum class UioOp : std::uint16_t {
     GetFrCnt = 0x42,
     GetF12Mod = 0x43,
     HdmiInt = 0x44,
+    Scanout57 = 0x57,
+    Scanout59 = 0x59,
+    Scanout5B = 0x5B,
     DmaWrite = 0x61,
     DmaRead = 0x62,
     DmaSdio = 0x63,
@@ -82,13 +85,13 @@ enum class UioOp : std::uint16_t {
 }
 
 template <class WordSet>
-[[nodiscard]] constexpr std::array<std::uint16_t, 1 + WordSet::kCount> command_words(
+[[nodiscard]] constexpr std::array<hal::SpiWord, 1 + WordSet::kCount> command_words(
     UioOp op,
     const WordSet& data
 ) noexcept {
-    std::array<std::uint16_t, 1 + WordSet::kCount> words{};
-    words[0] = word(op).v;
-    const std::span<const std::uint16_t, WordSet::kCount> tail = data.data();
+    std::array<hal::SpiWord, 1 + WordSet::kCount> words{};
+    words[0] = word(op);
+    const std::span<const hal::SpiWord, WordSet::kCount> tail = data.data();
     for (std::size_t i = 0; i < tail.size(); ++i)
         words[i + 1] = tail[i];
     return words;
@@ -158,6 +161,9 @@ static_assert(word(UioOp::SetYcPar) == hal::SpiWord{0x41});
 static_assert(word(UioOp::GetFrCnt) == hal::SpiWord{0x42});
 static_assert(word(UioOp::GetF12Mod) == hal::SpiWord{0x43});
 static_assert(word(UioOp::HdmiInt) == hal::SpiWord{0x44});
+static_assert(word(UioOp::Scanout57) == hal::SpiWord{0x57});
+static_assert(word(UioOp::Scanout59) == hal::SpiWord{0x59});
+static_assert(word(UioOp::Scanout5B) == hal::SpiWord{0x5B});
 static_assert(word(UioOp::DmaWrite) == hal::SpiWord{0x61});
 static_assert(word(UioOp::DmaRead) == hal::SpiWord{0x62});
 static_assert(word(UioOp::DmaSdio) == hal::SpiWord{0x63});

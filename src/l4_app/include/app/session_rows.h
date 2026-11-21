@@ -8,27 +8,28 @@
 #include <span>
 #include <string_view>
 
-#include "app/block_poll_route.h"
+#include "app/carrier.h"
 #include "app/core_block_row.h"
-#include "app/rumble_players_cell.h"
-#include "app/sys_grant.h"
+#include "app/input/rumble_players_cell.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
-#include "infra/rt_stats.h"
+#include "infra/prelude.h"
+#include "infra/xthread/rt_stats.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
-#include "proto/axi_status_decoder.h"
-#include "proto/decoder_row.h"
-#include "proto/spi_block_decoder.h"
-#include "proto/spi_conf_str_decoder.h"
-#include "proto/spi_identify_decoder.h"
-#include "proto/spi_status_decoder.h"
+#include "infra/xthread/telemetry.h"
+#include "proto/link/axi_status_decoder.h"
+#include "proto/link/block_poll_route.h"
+#include "proto/link/decoder_row.h"
+#include "proto/link/spi_block_decoder.h"
+#include "proto/link/spi_conf_str_decoder.h"
+#include "proto/link/spi_identify_decoder.h"
+#include "proto/link/spi_status_decoder.h"
 #include "proto/status_cell.h"
-#include "proto/status_decoder.h"
-#include "proto/status_snapshot.h"
+#include "proto/link/status_decoder.h"
+#include "proto/link/status_snapshot.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_params.h"
-#include "proto/user_io/poll_reader.h"
+#include "proto/link/poll_reader.h"
 #include "reactor/link_decoder.h"
 
 namespace mister::cores {
@@ -41,10 +42,13 @@ class ISpiTransport;
 }
 
 namespace mister::proto {
-class BlockSlots;
-class CoreSession;
 class ILinkRouter;
 class ISessionLive;
+}
+
+namespace mister::proto::link {
+class BlockSlots;
+class CoreSession;
 }
 
 namespace mister::app {
@@ -67,14 +71,14 @@ public:
         hal::ICoreSignals& signals;
         proto::ILinkRouter& router;
         const proto::ISessionLive& live;
-        proto::CoreSession& session;
+        proto::link::CoreSession& session;
         SessionBindings& bindings;
         LinkBinder& binder;
-        proto::BlockSlots& slots;
+        proto::link::BlockSlots& slots;
         OsdWire& osd;
-        const RumblePlayersCell& rumble_players;
+        const input::RumblePlayersCell& rumble_players;
 
-        infra::OptRef<const proto::StatusSnapshotCell> status_lw{};
+        infra::OptRef<const proto::link::StatusSnapshotCell> status_lw{};
     };
 
     explicit SessionRows(const Wiring& w) noexcept;
@@ -91,7 +95,7 @@ public:
         infra::OptRef<cores::Core> owner
     );
 
-    void bind_status_route(StatusRoute route, proto::BuildGeneration gen) noexcept;
+    void bind_status_route(Carrier route, proto::BuildGeneration gen) noexcept;
 
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows(
         std::array<reactor::LinkDecoderDecl, kMaxServices>& out,
@@ -102,11 +106,16 @@ public:
 
     void publish_status_word() noexcept;
 
+    void on_fabric_reprogrammed() noexcept;
+
     void disarm_polls() noexcept;
 
     void arm_session_polls(bool front_end) noexcept;
 
-    void bind_block_poll(BlockPollRoute route) noexcept { block_poll_ = route; }
+    void bind_block_poll(proto::link::BlockPollRoute route) noexcept {
+        block_poll_ = route;
+        block_decoder_.bind_route(route);
+    }
 
     void bind_block_drain(infra::OptRef<cores::Core> current) noexcept;
 
@@ -114,29 +123,27 @@ public:
 
     [[nodiscard]] const proto::StatusCell& status_cell() const noexcept { return status_cell_; }
 
-    [[nodiscard]] const proto::StatusDecoder& status_decoder() const noexcept {
+    [[nodiscard]] const proto::link::StatusDecoder& status_decoder() const noexcept {
         return status_decoder_;
     }
 
-    [[nodiscard]] const proto::AxiStatusSource& axi_status_source() const noexcept {
+    [[nodiscard]] const proto::link::AxiStatusSource& axi_status_source() const noexcept {
         return axi_status_source_;
     }
 
-    [[nodiscard]] StatusRoute status_route() const noexcept { return status_route_; }
+    [[nodiscard]] Carrier status_route() const noexcept { return status_route_; }
 
-    [[nodiscard]] const proto::SpiConfStrDecoder& conf_str_decoder() const noexcept {
+    [[nodiscard]] const proto::link::SpiConfStrDecoder& conf_str_decoder() const noexcept {
         return conf_str_decoder_;
     }
 
-    [[nodiscard]] const proto::SpiBlockDecoder& block_decoder() const noexcept {
+    [[nodiscard]] const proto::link::SpiBlockDecoder& block_decoder() const noexcept {
         return block_decoder_;
     }
 
-    [[nodiscard]] const proto::user_io::PollReader& info_poll() const noexcept {
-        return info_poll_;
-    }
+    [[nodiscard]] const proto::link::PollReader& info_poll() const noexcept { return info_poll_; }
 
-    [[nodiscard]] const proto::user_io::PollReader& rumble_poll() const noexcept {
+    [[nodiscard]] const proto::link::PollReader& rumble_poll() const noexcept {
         return rumble_poll_;
     }
 
@@ -151,36 +158,36 @@ private:
         const reactor::LinkDecoderDecl& row
     ) noexcept;
 
-    proto::CoreSession& session_;
+    proto::link::CoreSession& session_;
     SessionBindings& bindings_;
     LinkBinder& binder_;
     OsdWire& osd_;
-    const RumblePlayersCell& rumble_players_;
+    const input::RumblePlayersCell& rumble_players_;
 
     proto::StatusWord status_scratch_{};
     proto::StatusCell status_cell_{};
 
-    proto::SpiIdentifyDecoder identify_decoder_;
-    proto::DecoderRow<proto::SpiIdentifyDecoder> identify_row_{identify_decoder_};
-    proto::StatusDecoder status_decoder_;
-    proto::DecoderRow<proto::StatusDecoder> status_row_{status_decoder_};
-    proto::SpiStatusSource spi_status_source_;
-    proto::AxiStatusSource axi_status_source_;
-    infra::OptRef<const proto::StatusSnapshotCell> status_lw_{};
-    StatusRoute status_route_ = StatusRoute::Link;
-    proto::SpiConfStrDecoder conf_str_decoder_;
-    proto::DecoderRow<proto::SpiConfStrDecoder> conf_str_row_{conf_str_decoder_};
-    proto::SpiBlockDecoder block_decoder_;
+    proto::link::SpiIdentifyDecoder identify_decoder_;
+    proto::link::DecoderRow<proto::link::SpiIdentifyDecoder> identify_row_{identify_decoder_};
+    proto::link::StatusDecoder status_decoder_;
+    proto::link::DecoderRow<proto::link::StatusDecoder> status_row_{status_decoder_};
+    proto::link::SpiStatusSource spi_status_source_;
+    proto::link::AxiStatusSource axi_status_source_;
+    infra::OptRef<const proto::link::StatusSnapshotCell> status_lw_{};
+    Carrier status_route_ = Carrier::Link;
+    proto::link::SpiConfStrDecoder conf_str_decoder_;
+    proto::link::DecoderRow<proto::link::SpiConfStrDecoder> conf_str_row_{conf_str_decoder_};
+    proto::link::SpiBlockDecoder block_decoder_;
 
     CoreBlockRow block_row_{block_decoder_};
-    proto::user_io::PollReader info_poll_;
-    proto::DecoderRow<proto::user_io::PollReader> info_row_{info_poll_};
-    proto::user_io::PollReader rumble_poll_;
+    proto::link::PollReader info_poll_;
+    proto::link::DecoderRow<proto::link::PollReader> info_row_{info_poll_};
+    proto::link::PollReader rumble_poll_;
 
-    RumblePlayersCell::Reader rumble_pads_reader_{};
+    input::RumblePlayersCell::Reader rumble_pads_reader_{};
     svc::PlayerMask rumble_pads_{};
-    proto::DecoderRow<proto::user_io::PollReader> rumble_row_{rumble_poll_};
-    BlockPollRoute block_poll_ = BlockPollRoute::Link;
+    proto::link::DecoderRow<proto::link::PollReader> rumble_row_{rumble_poll_};
+    proto::link::BlockPollRoute block_poll_ = proto::link::BlockPollRoute::Link;
 
     bool osd_visible_last_ = false;
     Tally tally_{};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/key_injector.h"

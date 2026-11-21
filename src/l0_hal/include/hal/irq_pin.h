@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "hal/thread_map.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 
 namespace mister::hal {
@@ -32,7 +33,7 @@ constexpr bool irq_pins_well_formed(std::span<const IrqPin> pins, const ThreadMa
     for (const IrqPin& p : pins) {
         if (p.action.empty())
             return false;
-        if (p.cpus.empty() || !p.cpus.subset_of(known))
+        if (p.cpus.empty() || !known.contains(p.cpus))
             return false;
         if (p.cpus.intersects(rt))
             return false;

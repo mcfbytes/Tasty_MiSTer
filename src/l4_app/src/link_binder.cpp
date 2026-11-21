@@ -2,17 +2,18 @@
 #include "app/link_binder.h"
 
 #include "app/link_rows.h"
-#include "app/pcm_ring_feeder.h"
+#include "app/pcm/pcm_ring_feeder.h"
 
 #include <optional>
 #include <utility>
 
 #include "cores/core_support.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
-    : fio_queue_(link, proto::SpiFioQueue::kPieceWords, w.tenant),
-      spi_sink_(link, infra::OptRef<proto::SpiFioQueue>{fio_queue_}),
+    : fio_queue_(link, proto::link::SpiFioQueue::kPieceWords, w.tenant),
+      spi_sink_(link, infra::OptRef<proto::link::SpiFioQueue>{fio_queue_}),
       feeder_(w.feeder),
       exec_(w.exec),
       state_(w.state) {}

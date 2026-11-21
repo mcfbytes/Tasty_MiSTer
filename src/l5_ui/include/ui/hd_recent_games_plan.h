@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/recent_row.h"
 #include "svc/types.h"
@@ -26,14 +27,14 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    svc::Tally refusals() const noexcept override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
+    infra::Tally refusals() const noexcept override;
 
 private:
     RecentLaunch launch_;
     std::vector<RecentRow> rows_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
-    svc::Tally refusals_{};
+    std::vector<std::reference_wrapper<IRow>> refs_;
+    infra::Tally refusals_{};
 };
 
 }

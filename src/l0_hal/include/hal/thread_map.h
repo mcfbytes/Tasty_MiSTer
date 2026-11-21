@@ -10,6 +10,7 @@
 #include "hal/stack_bytes.h"
 #include "hal/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_role.h"
 #include "os/types.h"
@@ -22,20 +23,35 @@ enum class DdrMapping : std::uint8_t { None, Owner };
 
 enum class PauseEdge : std::uint8_t { Ask, Receipt };
 
-struct ThreadRole {
-    TASTY_SEAT_EXEMPT(const_shared);
+inline constexpr std::size_t kThreadSeats = kSeatTagCount - 2;
+static_assert(static_cast<std::size_t>(SeatTag::Main) == kSeatTagCount - 1, "Main is the last tag");
+
+struct SeatPolicy {
     SeatTag seat;
-    os::CpuId cpu;
     SchedPolicy policy;
     int prio;
     StackBytes stack_bytes;
     SpawnKind spawn;
     DdrMapping ddr = DdrMapping::None;
     PauseEdge pause_at = PauseEdge::Ask;
+    friend constexpr bool operator==(const SeatPolicy&, const SeatPolicy&) = default;
 };
 
-inline constexpr std::size_t kThreadSeats = kSeatTagCount - 2;
-static_assert(static_cast<std::size_t>(SeatTag::Main) == kSeatTagCount - 1, "Main is the last tag");
+using SeatPolicyTable = std::array<SeatPolicy, kThreadSeats>;
+
+struct SeatPlacement {
+    SeatTag seat;
+    os::CpuId cpu;
+};
+
+using PlacementTable = std::array<SeatPlacement, kThreadSeats>;
+
+struct ThreadRole : SeatPolicy {
+    TASTY_SEAT_EXEMPT(const_shared);
+    os::CpuId cpu;
+    friend constexpr bool operator==(const ThreadRole&, const ThreadRole&) = default;
+};
+
 using ThreadMap = std::array<ThreadRole, kThreadSeats>;
 
 inline constexpr std::size_t kCommNameMax = 15;
@@ -75,53 +91,45 @@ inline constexpr StackBytes kHdOsdStackBytes = StackBytes::mib(2);
 
 inline constexpr StackBytes kConnectStackBytes = StackBytes::kib(512);
 
-inline constexpr ThreadMap kDe10ThreadMap{{
+inline constexpr SeatPolicyTable kSeatPolicyTable{{
     {.seat = SeatTag::RT,
-     .cpu = os::CpuId{1},
      .policy = SchedPolicy::Fifo,
      .prio = 40,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Frame,
-     .cpu = os::CpuId{1},
      .policy = SchedPolicy::Fifo,
      .prio = 35,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Input,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 25,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Pcm,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 22,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create,
      .ddr = DdrMapping::Owner},
     {.seat = SeatTag::Prefetch,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 20,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Diag,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Ui,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create,
      .ddr = DdrMapping::Owner},
     {.seat = SeatTag::Io,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 23,
      .stack_bytes = kFifoStackBytes,
@@ -129,41 +137,52 @@ inline constexpr ThreadMap kDe10ThreadMap{{
      .ddr = DdrMapping::Owner,
      .pause_at = PauseEdge::Receipt},
     {.seat = SeatTag::Capture,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 21,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Encode,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::RecWrite,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Launcher,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kLauncherStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::HdOsd,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kHdOsdStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Connect,
-     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kConnectStackBytes,
      .spawn = SpawnKind::Create},
+}};
+
+inline constexpr PlacementTable kDe10Placement{{
+    {.seat = SeatTag::RT, .cpu = os::CpuId{1}},
+    {.seat = SeatTag::Frame, .cpu = os::CpuId{1}},
+    {.seat = SeatTag::Input, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Pcm, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Prefetch, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Diag, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Ui, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Io, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Capture, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Encode, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::RecWrite, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Launcher, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::HdOsd, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Connect, .cpu = os::CpuId{0}},
 }};
 
 constexpr bool has_row(SeatTag tag) noexcept {
@@ -176,7 +195,8 @@ constexpr std::size_t row_index(SeatTag tag) noexcept {
     return static_cast<std::size_t>(tag) - 1;
 }
 
-constexpr const ThreadRole& seat_of(const ThreadMap& m, SeatTag tag) noexcept {
+template <class Row>
+constexpr const Row& seat_of(const std::array<Row, kThreadSeats>& m, SeatTag tag) noexcept {
     return m[row_index(tag)];
 }
 
@@ -187,7 +207,8 @@ constexpr std::size_t name_len(const char* s) noexcept {
     return n;
 }
 
-constexpr bool well_formed(const ThreadMap& m) noexcept {
+template <class Row>
+constexpr bool well_formed(const std::array<Row, kThreadSeats>& m) noexcept {
     for (std::size_t i = 0; i < m.size(); ++i) {
         if (static_cast<std::size_t>(m[i].seat) != i + 1)
             return false;
@@ -195,11 +216,39 @@ constexpr bool well_formed(const ThreadMap& m) noexcept {
     return true;
 }
 
-constexpr bool rt_holds_highest_fifo_prio(const ThreadMap& m) noexcept {
-    const ThreadRole& rt = seat_of(m, SeatTag::RT);
+constexpr ThreadMap join_threads(
+    const SeatPolicyTable& seats,
+    const PlacementTable& placed
+) noexcept {
+    ThreadMap m{};
+    for (const SeatPolicy& p : seats) {
+        const SeatPlacement& at = seat_of(placed, p.seat);
+        if (at.seat != p.seat)
+            __builtin_trap();
+        m[row_index(p.seat)] = ThreadRole{p, at.cpu};
+    }
+    return m;
+}
+
+inline constexpr ThreadMap kDe10ThreadMap = join_threads(kSeatPolicyTable, kDe10Placement);
+
+constexpr bool carries_seat_table(
+    const ThreadMap& m,
+    const SeatPolicyTable& seats = kSeatPolicyTable
+) noexcept {
+    for (const ThreadRole& r : m) {
+        const SeatPolicy& half = r;
+        if (half != seat_of(seats, r.seat))
+            return false;
+    }
+    return true;
+}
+
+constexpr bool rt_holds_highest_fifo_prio(const SeatPolicyTable& m) noexcept {
+    const SeatPolicy& rt = seat_of(m, SeatTag::RT);
     if (rt.policy != SchedPolicy::Fifo)
         return false;
-    for (const ThreadRole& r : m) {
+    for (const SeatPolicy& r : m) {
         if (r.seat == SeatTag::RT)
             continue;
         if (r.policy == SchedPolicy::Fifo && r.prio >= rt.prio)
@@ -221,18 +270,18 @@ inline constexpr std::array kFifoOrder{
 inline constexpr std::array kRtCpuSeats{SeatTag::RT, SeatTag::Frame};
 
 constexpr bool fifo_order_holds(
-    const ThreadMap& m,
+    const SeatPolicyTable& m,
     std::span<const SeatTag> order = kFifoOrder
 ) noexcept {
     std::size_t fifo_rows = 0;
-    for (const ThreadRole& r : m) {
+    for (const SeatPolicy& r : m) {
         if (r.policy == SchedPolicy::Fifo)
             ++fifo_rows;
     }
     if (fifo_rows != order.size())
         return false;
     for (std::size_t i = 0; i < order.size(); ++i) {
-        const ThreadRole& r = seat_of(m, order[i]);
+        const SeatPolicy& r = seat_of(m, order[i]);
         if (r.policy != SchedPolicy::Fifo)
             return false;
         if (i > 0 && r.prio >= seat_of(m, order[i - 1]).prio)
@@ -261,10 +310,10 @@ constexpr bool rt_cpu_reserved(
 inline constexpr std::array kDdrMappingOwners{SeatTag::Pcm, SeatTag::Ui, SeatTag::Io};
 
 constexpr bool ddr_owners_are(
-    const ThreadMap& m,
+    const SeatPolicyTable& m,
     std::span<const SeatTag> owners = kDdrMappingOwners
 ) noexcept {
-    for (const ThreadRole& r : m) {
+    for (const SeatPolicy& r : m) {
         bool listed = false;
         for (const SeatTag t : owners)
             listed = listed || t == r.seat;
@@ -277,10 +326,10 @@ constexpr bool ddr_owners_are(
 inline constexpr std::array kReceiptPauseSeats{SeatTag::Io};
 
 constexpr bool pause_edges_are(
-    const ThreadMap& m,
+    const SeatPolicyTable& m,
     std::span<const SeatTag> receipt = kReceiptPauseSeats
 ) noexcept {
-    for (const ThreadRole& r : m) {
+    for (const SeatPolicy& r : m) {
         bool listed = false;
         for (const SeatTag t : receipt)
             listed = listed || t == r.seat;
@@ -290,8 +339,8 @@ constexpr bool pause_edges_are(
     return true;
 }
 
-constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
-    for (const ThreadRole& r : m) {
+constexpr bool policy_prio_consistent(const SeatPolicyTable& m) noexcept {
+    for (const SeatPolicy& r : m) {
         if (r.policy == SchedPolicy::Fifo) {
             if (r.prio < 1 || r.prio > 99)
                 return false;
@@ -302,8 +351,8 @@ constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
     return true;
 }
 
-constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
-    for (const ThreadRole& r : m) {
+constexpr bool spawn_stack_consistent(const SeatPolicyTable& m) noexcept {
+    for (const SeatPolicy& r : m) {
         if (r.spawn == SpawnKind::Create && r.stack_bytes.is_main())
             return false;
         if (r.spawn == SpawnKind::PromoteInPlace && !r.stack_bytes.is_main())
@@ -312,9 +361,9 @@ constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
     return true;
 }
 
-constexpr SeatTag highest_fifo_seat(const ThreadMap& m) noexcept {
-    const ThreadRole* best = nullptr;
-    for (const ThreadRole& r : m) {
+constexpr SeatTag highest_fifo_seat(const SeatPolicyTable& m) noexcept {
+    const SeatPolicy* best = nullptr;
+    for (const SeatPolicy& r : m) {
         if (r.policy != SchedPolicy::Fifo)
             continue;
         if (best == nullptr || r.prio > best->prio)
@@ -332,6 +381,88 @@ constexpr bool names_fit_comm(const std::array<SeatRoleRow, kSeatTagCount>& rows
     }
     return true;
 }
+
+static_assert(
+    well_formed(kSeatPolicyTable) && well_formed(kDe10Placement),
+    "The seat table's and the DE10 placement's rows must be in SeatTag order, one row "
+    "per real seat. seat_of() indexes by row_index and the evidence record does too; "
+    "a reordered or duplicated row would silently hand a call site the wrong seat's "
+    "policy, priority and CPU."
+);
+
+static_assert(
+    rt_holds_highest_fifo_prio(kSeatPolicyTable),
+    "T-RT must hold the strictly "
+    "highest SCHED_FIFO priority of any seat. If you raised another "
+    "seat to or above T-RT, that seat can now preempt the sole GPO "
+    "owner mid-SPI-transaction — the gpo_copy shadow hazard by its "
+    "real name."
+);
+
+static_assert(
+    fifo_order_holds(kSeatPolicyTable),
+    "Exactly the kFifoOrder seats are SCHED_FIFO, at strictly "
+    "falling priority (T-RT, T-FRAME, T-INPUT, T-IO, T-PCM, T-CAPTURE, T-PREFETCH), and "
+    "every other seat is SCHED_OTHER. Deadline-monotonic: each edge is a deadline, and "
+    "inverting one queues the shorter deadline behind the longer. A tie is the "
+    "kernel's run-queue accident; a seat moved to SCHED_OTHER loses the bounded wake it "
+    "exists to buy. Change the order and the row together, never the number alone."
+);
+
+static_assert(
+    ddr_owners_are(kSeatPolicyTable),
+    "the seat table's DdrMapping::Owner rows are exactly kDdrMappingOwners: a late owner "
+    "refuses the program, so an unmarked seat holding a DDR mapping would be programmed "
+    "under, and a marked seat that never parks would wedge every switch."
+);
+
+static_assert(
+    pause_edges_are(kSeatPolicyTable),
+    "the seat table's PauseEdge::Receipt rows are exactly kReceiptPauseSeats: a seat that "
+    "pauses at the ask before T-RT queued the teardown's jobs drains nothing, and a seat "
+    "that waits for a receipt after the jobs would hold every switch to its deadline."
+);
+
+static_assert(
+    policy_prio_consistent(kSeatPolicyTable),
+    "`policy` and `prio` are ONE decision. A "
+    "SchedPolicy::Fifo row must carry a POSIX priority in 1..99 and "
+    "a SchedPolicy::Other row must carry 0. Both `{Fifo, 0}` and "
+    "`{Fifo, 120}` used to compile and then fail at runtime as an "
+    "EINVAL from pthread_attr_setschedparam, taking spawn_seat's "
+    "rung-2 degrade with no witness but an evidence row nobody "
+    "reads. If you meant to move a seat off SCHED_FIFO, change BOTH "
+    "fields and re-read the SCHED_FIFO ordering rule first."
+);
+
+static_assert(
+    spawn_stack_consistent(kSeatPolicyTable),
+    "`spawn` and `stack_bytes` are ONE decision. A "
+    "SpawnKind::Create row with stack_bytes == 0 is an EINVAL from "
+    "pthread_attr_setstacksize that spawn_seat's rung-2 degrade "
+    "swallows with no witness (the attr is discarded and the seat is "
+    "born on glibc's default stack, unpinned by this table); a "
+    "PromoteInPlace row with a stack owns memory nothing allocates. "
+    "Change BOTH fields or neither."
+);
+
+static_assert(
+    seat_of(kSeatPolicyTable, SeatTag::RT).spawn == SpawnKind::Create,
+    "pass ST (c): T-RT is a CREATED thread on its own row-declared "
+    "stack, spawned LAST, and ::main is the supervisor that joins it "
+    "under a deadline. A PromoteInPlace T-RT IS main, and a thread "
+    "cannot time-join itself — a wedged executive would then have no "
+    "witness but a silent hang."
+);
+
+static_assert(
+    names_fit_comm(kSeatRoles),
+    "Every seat's comm ROLE must be non-empty and <= 15 chars, "
+    "because pthread_setname_np takes 16 bytes INCLUDING the NUL "
+    "(glibc returns ERANGE; the kernel truncates). A role that does "
+    "not survive is a /proc witness that no longer matches this "
+    "table, which is the only channel RT engagement is verified on."
+);
 
 constexpr os::CpuId max_cpu(const ThreadMap& m) noexcept {
     os::CpuId hi{0};

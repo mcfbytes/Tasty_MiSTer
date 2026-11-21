@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "reactor/executive.h"
 
+#include "infra/prelude.h"
+#include "os/timespec.h"
 #include "reactor/core_state.h"
 #include "reactor/link_decoder.h"
 
@@ -17,12 +19,8 @@ namespace mister::reactor {
 
 namespace {
 
-constexpr std::int64_t kNsPerSec = 1'000'000'000;
-
-std::int64_t now_ns() noexcept {
-    timespec ts{};
-    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::int64_t>(ts.tv_sec) * kNsPerSec + static_cast<std::int64_t>(ts.tv_nsec);
+[[nodiscard]] std::int64_t timer_ns(MonoInstant at) noexcept {
+    return os::since_boot(at).count();
 }
 
 enum class FdKind : std::uint32_t { Kick = 2, Borrowed = 3 };
@@ -84,7 +82,7 @@ Executive::Executive(Executive&& o) noexcept
       tick_count_(o.tick_count_),
       tick_(o.tick_),
       tick_held_(o.tick_held_),
-      log_lane_(o.log_lane_),
+      miss_log_(o.miss_log_),
       round_timer_(o.round_timer_),
       bound_in_round_(o.bound_in_round_),
       round_claimed_(o.round_claimed_),
@@ -95,7 +93,7 @@ Executive::Executive(Executive&& o) noexcept
       caller_pass_refusals_(o.caller_pass_refusals_),
       stop_seen_(o.stop_seen_) {
 
-    if (o.entered_.generation() != 0u)
+    if (o.entered_.generation().held())
         entered_.publish(true);
     claim_yields_ = o.claim_yields_;
     services_ = o.services_;
@@ -203,18 +201,17 @@ Ex<void> Executive::remove_fd(int fd) {
 
 void Executive::enter() noexcept {
 
-    if (entered_.generation() == 0u)
+    if (!entered_.generation().held())
         entered_.publish(true);
     fault_ = {};
 
-    const MonoInstant now{std::chrono::nanoseconds{now_ns()}};
-    tick_ = tick_held_ ? TickDeadline::held() : TickDeadline::after(now);
+    tick_ = tick_held_ ? TickDeadline::held() : TickDeadline::after(os::steady_now());
 }
 
 void Executive::block() noexcept {
     for (;;) {
 
-        const auto rel = tick_.timeout(MonoInstant{std::chrono::nanoseconds{now_ns()}});
+        const auto rel = tick_.timeout(os::steady_now());
         const timespec ts = rel.value_or(timespec{});
         const int n = ::epoll_pwait2(epfd_.get(), evs_, kMaxEvents, rel ? &ts : nullptr, nullptr);
         if (n >= 0) {
@@ -234,17 +231,16 @@ bool Executive::dispatch_ready() noexcept {
     if (!fault_)
         return false;
     stats_.heartbeat.fetch_add(1, std::memory_order_relaxed);
-    t_wake_ = now_ns();
+    t_wake_ = os::steady_now();
     if (round_timer_)
-        round_timer_->begin(t_wake_);
+        round_timer_->begin(timer_ns(t_wake_));
     round_claimed_ = false;
     swept_ = false;
 
-    const MonoInstant wake{std::chrono::nanoseconds{t_wake_}};
-    if (const auto due = tick_.take_due(wake)) {
+    if (const auto due = tick_.take_due(t_wake_)) {
 
         const auto jit = std::max(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(wake - due->latest),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(t_wake_ - due->latest),
             std::chrono::nanoseconds::zero()
         );
         latency_.tick_jitter.record(jit);
@@ -285,48 +281,50 @@ bool Executive::take_stop() noexcept {
 
 void Executive::service_round() noexcept {
     if (round_timer_)
-        round_timer_->mark(RoundSegment::Steps, now_ns());
+        round_timer_->mark(RoundSegment::Steps, timer_ns(os::steady_now()));
     if (!bound_in_round_)
-        service_round(swept_, t_wake_);
+        service_round(swept_);
 }
 
 void Executive::end_round(bool wrote) noexcept {
     if (round_timer_)
-        (void)round_timer_->end(wrote ? now_ns() : 0);
+        (void)round_timer_->end(wrote ? timer_ns(os::steady_now()) : 0);
 }
 
 void Executive::settle() noexcept {
     if (round_timer_)
-        round_timer_->flush(now_ns());
+        round_timer_->flush(timer_ns(os::steady_now()));
 }
 
 static_assert(kTickNs == 1'000'000);
 
-void Executive::service_on_caller(std::int64_t now_ns) noexcept {
+void Executive::service_on_caller() noexcept {
 
     if (run_entered()) {
         ++caller_pass_refusals_;
         return;
     }
+
+    t_wake_ = os::steady_now();
     if (!bound_in_round_)
-        service_round(true, now_ns);
+        service_round(true);
     bound_in_round_ = false;
 }
 
-void Executive::service_round(bool swept, std::int64_t wake_ns) {
+void Executive::service_round(bool swept) {
 
     for (ServiceSlot row{}; row < live_end(); row = row.next()) {
         const LinkDecoderDecl& s = services_[row];
         RowState& state = rows_[row];
         if (s.period == kEveryRound) {
-            run_service(row, wake_ns, RoundSegment::RowSwept);
+            run_service(row, RoundSegment::RowSwept);
         } else if (swept && tick_count_ >= state.next_due) {
-            run_service(row, wake_ns, RoundSegment::RowSwept);
+            run_service(row, RoundSegment::RowSwept);
         }
     }
 }
 
-void Executive::run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment seg) {
+void Executive::run_service(ServiceSlot row, RoundSegment seg) {
     if (!core_state_)
         return;
     const LinkDecoderDecl& s = services_[row];
@@ -351,31 +349,32 @@ void Executive::run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment 
             round_claimed_ = true;
         state.claim_streak = claim ? static_cast<std::uint8_t>(state.claim_streak + 1u) : 0u;
     }
-    const std::int64_t t_done = now_ns();
+    const MonoInstant t_done = os::steady_now();
     if (round_timer_)
-        round_timer_->mark(seg, row, t_done);
-    std::int64_t d = t_done - wake_ns;
-    if (d < 0)
-        d = 0;
-    latency_.service_latency[row].record(std::chrono::nanoseconds{d});
+        round_timer_->mark(seg, row, timer_ns(t_done));
+    const std::chrono::nanoseconds d = std::max(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t_done - t_wake_),
+        std::chrono::nanoseconds::zero()
+    );
+    latency_.service_latency[row].record(d);
 
     if (s.period != kEveryRound) {
-        const std::int64_t budget_ns = std::chrono::nanoseconds{s.period}.count();
-        if (d > budget_ns) {
+        const std::chrono::nanoseconds budget{s.period};
+        if (d > budget) {
             if (stats_.deadline_miss[row].get() != std::numeric_limits<std::uint32_t>::max()) {
                 stats_.deadline_miss[row].add();
             }
 
-            if (log_lane_) {
-                const std::int64_t over = d - budget_ns;
+            if (miss_log_) {
+                const std::int64_t over = (d - budget).count();
                 constexpr std::uint32_t kSat = std::numeric_limits<std::uint32_t>::max();
                 const std::uint32_t over_sat = over > std::int64_t{kSat}
                     ? kSat
                     : static_cast<std::uint32_t>(over);
                 using OverNanos = std::chrono::duration<std::uint32_t, std::nano>;
-                log_lane_->push(
-                    LogRec::DeadlineMiss{.over = OverNanos{over_sat}, .slot = row},
-                    std::chrono::nanoseconds{wake_ns}
+                miss_log_->on(
+                    DeadlineMiss{.over = OverNanos{over_sat}, .slot = row},
+                    os::since_boot(t_wake_)
                 );
             }
         }

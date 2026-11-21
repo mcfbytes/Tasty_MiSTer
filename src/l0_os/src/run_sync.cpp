@@ -5,7 +5,6 @@
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -20,6 +19,8 @@
 #include <vector>
 
 #include "child_spawn.h"
+#include "infra/prelude.h"
+#include "os/delay.h"
 
 namespace mister::os {
 namespace {
@@ -31,15 +32,6 @@ constexpr std::chrono::milliseconds kGraceSlice{10};
 constexpr std::chrono::nanoseconds::rep kRampFactor = 2;
 
 constexpr ChildProcessExit::ExitStatus kExecFailed{127};
-
-void sleep_ns(std::chrono::nanoseconds d) noexcept {
-    const auto secs = std::chrono::duration_cast<std::chrono::seconds>(d);
-    timespec ts{};
-    ts.tv_sec = static_cast<std::time_t>(secs.count());
-    ts.tv_nsec = static_cast<long>((d - secs).count());
-    while (::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR) {
-    }
-}
 
 constexpr std::chrono::nanoseconds ramp(std::chrono::nanoseconds d) noexcept {
     return d >= kPollMax / kRampFactor ? kPollMax : d * kRampFactor;
@@ -243,7 +235,7 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
         if (re.state == ReapOutcome::State::failed) {
             return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), re.error));
         }
-        sleep_ns(ivl);
+        sleep_for(ivl);
     }
 
     if (const ReapOutcome re = try_reap(pid); re.state == ReapOutcome::State::reaped)
@@ -254,7 +246,7 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
         if (try_reap(pid).state == ReapOutcome::State::reaped) {
             return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
         }
-        sleep_ns(kPollMax);
+        sleep_for(kPollMax);
     }
     (void)::kill(pid, SIGKILL);
 

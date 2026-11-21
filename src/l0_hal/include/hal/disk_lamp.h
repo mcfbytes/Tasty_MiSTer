@@ -4,8 +4,9 @@
 #include <chrono>
 
 #include "hal/spi_bus.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 
 namespace mister::hal {
 
@@ -27,7 +28,7 @@ public:
         if (tick && left_ > decltype(left_)::zero())
             left_ -= kTick;
         const bool lit = left_ > decltype(left_)::zero();
-        if (bus_.gpo_shadow().has(gpo::kDiskLed) != lit)
+        if (bus_.gpo_shadow().contains(gpo::kDiskLed) != lit)
             bus_.set_disk_led(lit);
     }
 

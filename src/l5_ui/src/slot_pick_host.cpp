@@ -67,7 +67,7 @@ BrowserSession::Request SlotPickHost::browser_request(
         }
     );
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(this));
-    r.recents = app::RecentsStore::ListId::of(row);
+    r.recents = app::recents::RecentsStore::ListId::of(row);
 
     if (offer_recent && b_.recents && !b_.recents->load(r.recents_core, *r.recents).empty()) {
         r.recent_entry = true;
@@ -93,7 +93,7 @@ std::optional<SlotPickHost::RecentsRef> SlotPickHost::recents_ref(const OptionIt
     if (!row)
         return std::nullopt;
     return RecentsRef{
-        .id = app::RecentsStore::ListId::of(*row),
+        .id = app::recents::RecentsStore::ListId::of(*row),
         .core = std::string{browse_home_(it)}
     };
 }
@@ -169,7 +169,9 @@ Transition SlotPickHost::on_picked(const BrowserEntry& e, std::string_view path)
     }
 
     if (b_.recents) {
-        const app::RecentsStore::ListId id = app::RecentsStore::ListId::of(*pending_row_);
+        const app::recents::RecentsStore::ListId id = app::recents::RecentsStore::ListId::of(
+            *pending_row_
+        );
         if (!b_.recents->update(env_.core_dir, id, path, e.altname))
             refusals_.add();
     }

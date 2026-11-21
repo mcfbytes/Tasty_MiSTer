@@ -6,12 +6,14 @@
 
 #include "app/event_sink.h"
 #include "app/screenshot_queue.h"
+#include "infra/xthread/coworker.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {
 
-class ScreenshotPump {
+class ScreenshotPump : public xthread::ICoworker {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -23,7 +25,9 @@ public:
     explicit ScreenshotPump(Wiring w) noexcept : shots_(w.queue), sink_(w.sink) {}
 
     [[nodiscard]] bool take(std::string_view path, bool scaled) noexcept;
-    void tick() noexcept;
+    void serve() noexcept override;
+
+    void on_stop() noexcept override;
 
     std::uint32_t armed() const noexcept {
         TASTY_SEAT_BODY(ScreenshotPump);

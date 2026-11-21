@@ -10,6 +10,7 @@
 #include "cores/load_plan.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "proto/status_word.h"
 #include "svc/file.h"
 

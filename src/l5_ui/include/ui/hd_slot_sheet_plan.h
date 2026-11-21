@@ -9,9 +9,10 @@
 #include <string>
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rewalk.h"
 #include "ui/hd_page0_walk.h"
@@ -40,50 +41,50 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
-    class ChooseRow final : public IHdRow {
+    class ChooseRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit ChooseRow(HdSlotSheetPlan& plan) noexcept : plan_(plan) {}
 
         bool shown() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdSlotSheetPlan& plan_;
     };
 
-    class RecentFilesRow final : public IHdRow {
+    class RecentFilesRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit RecentFilesRow(HdSlotSheetPlan& plan) noexcept : plan_(plan) {}
 
         bool shown() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdSlotSheetPlan& plan_;
     };
 
-    class EjectRow final : public IHdRow {
+    class EjectRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit EjectRow(HdSlotSheetPlan& plan) noexcept : plan_(plan) {}
 
         bool shown() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdSlotSheetPlan& plan_;
@@ -108,12 +109,12 @@ private:
     infra::OptRef<const OptionItem> slot_{};
     std::string title_;
     bool has_recent_ = false;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 
     ChooseRow choose_{*this};
     RecentFilesRow recent_{*this};
     EjectRow eject_{*this};
-    std::array<std::reference_wrapper<IHdRow>, 3> refs_{choose_, recent_, eject_};
+    std::array<std::reference_wrapper<IRow>, 3> refs_{choose_, recent_, eject_};
 };
 
 }

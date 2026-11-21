@@ -6,7 +6,7 @@
 namespace mister::reactor {
 
 void RoundRecorder::record(MonoInstant finish, RoundTiming::Blame blame) noexcept {
-    if (!blame.lifecycle_marks.empty())
+    if (!blame.lifecycle_marks.is_empty())
         push_<RoundTrace::SlowLifecycle>(finish, blame);
     else
         push_<RoundTrace::SlowSteady>(finish, blame);

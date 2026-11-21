@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::svc {
 class Vfs;

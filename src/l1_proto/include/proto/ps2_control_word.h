@@ -14,7 +14,7 @@ struct Ps2ControlWord {
     static constexpr hal::SpiWord kBytePresent = hal::SpiWord{}.with_high_byte(1);
 
     [[nodiscard]] constexpr std::optional<std::uint8_t> byte() const noexcept {
-        if (!word.any_of(kBytePresent))
+        if (!word.intersects(kBytePresent))
             return std::nullopt;
         return word.low_byte();
     }

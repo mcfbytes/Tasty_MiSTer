@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "app/event.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -54,7 +55,7 @@ void LoadBelt::hold(const SaveStateHold& h) {
 
 void LoadBelt::refuse_walk(proto::ActKey gen) noexcept {
     TASTY_SEAT_BODY(LoadBelt);
-    walk_status_ = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
+    walk_status_ = cores::MountStatus{.act = gen, .state = cores::MountState::Failed};
 }
 
 void LoadBelt::step(Host& host, cores::ILadderHost& ladder) {
@@ -171,21 +172,21 @@ RungMask LoadBelt::live() const noexcept {
     TASTY_SEAT_BODY(LoadBelt);
     RungMask m{};
     if (addons_)
-        m.set(RungSlot::Addons);
+        m.insert(RungSlot::Addons);
     if (addons_after_)
-        m.set(RungSlot::AddonsAfter);
+        m.insert(RungSlot::AddonsAfter);
     if (ss_hold_)
-        m.set(RungSlot::SavestateHold);
+        m.insert(RungSlot::SavestateHold);
     if (pieces_)
-        m.set(RungSlot::Pieces);
+        m.insert(RungSlot::Pieces);
     if (load_)
-        m.set(RungSlot::Load);
+        m.insert(RungSlot::Load);
     if (manifest_)
-        m.set(RungSlot::Manifest);
+        m.insert(RungSlot::Manifest);
     if (walk_)
-        m.set(RungSlot::Walk);
+        m.insert(RungSlot::Walk);
     if (companion_walk_)
-        m.set(RungSlot::Companion);
+        m.insert(RungSlot::Companion);
     return m;
 }
 
@@ -346,7 +347,7 @@ void LoadBelt::close_walk_(Rung::Pass pass, Host& host) {
     }
     if (walk_gen_) {
         walk_status_ = cores::MountStatus{
-            .generation = walk_gen_,
+            .act = walk_gen_,
             .state = pass == Rung::Pass::Done ? cores::MountState::Done : cores::MountState::Failed
         };
         walk_answered_ = Answered<cores::MountStatus>{.gen = walk_gen_, .value = walk_status_};

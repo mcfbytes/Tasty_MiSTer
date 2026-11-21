@@ -5,12 +5,13 @@
 #include <optional>
 
 #include "app/park_receipt.h"
-#include "infra/observed.h"
+#include "infra/xthread/observed.h"
 #include "infra/opt_ref.h"
-#include "infra/pause_latch.h"
-#include "infra/polled.h"
+#include "infra/xthread/pause_latch.h"
+#include "infra/xthread/polled.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 
 namespace mister::app {
 

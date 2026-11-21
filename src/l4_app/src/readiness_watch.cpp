@@ -66,7 +66,7 @@ std::optional<ReadinessWatch::End> ReadinessWatch::probe_for_recovery_(SwitchVie
             (void)host.ask_recovery_switch();
         return Recovered{};
     }
-    recover_polls_cell_.publish(++tally_.recover_polls);
+    tally_.recover_polls.add();
     ++recover_tries_;
     if (readiness_poll_budget_ == 0 || recover_tries_ < readiness_poll_budget_) {
         return std::nullopt;

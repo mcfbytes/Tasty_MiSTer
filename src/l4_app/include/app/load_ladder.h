@@ -18,6 +18,7 @@
 #include "cores/loader.h"
 #include "cores/transfer_row.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/file.h"

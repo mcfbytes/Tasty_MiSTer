@@ -3,14 +3,14 @@
 
 #include <ctime>
 
-#include "clock_bridge.h"
+#include "os/timespec.h"
 
 namespace mister::os {
 
 RawMonotonicClock::time_point ThreadCpuClock::now() const {
     timespec ts{};
     ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-    return RawMonotonicClock::time_point{detail::to_ns(ts)};
+    return RawMonotonicClock::time_point{of_timespec(ts)};
 }
 
 }

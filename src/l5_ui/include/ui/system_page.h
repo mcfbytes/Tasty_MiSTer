@@ -12,6 +12,7 @@
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/cores_entry.h"
 #include "ui/page.h"
 #include "ui/page_context.h"
@@ -64,10 +65,10 @@ inline constexpr infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> kSy
     };
     infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> t;
     for (std::size_t i = 0; i < kSystemItemTotal; ++i)
-        t[RowIndex::of(i)] = order[i];
+        t[RowIndex::truncating(i)] = order[i];
     return t;
 }();
-inline constexpr RowCount kSystemItemCount = RowCount::of(kSystemItemTotal);
+inline constexpr RowCount kSystemItemCount = RowCount::truncating(kSystemItemTotal);
 
 [[nodiscard]] constexpr std::optional<SystemItem> system_item_of(RowIndex row) noexcept {
     const auto item = kSystemItems.find(row);
@@ -78,16 +79,16 @@ inline constexpr RowCount kSystemItemCount = RowCount::of(kSystemItemTotal);
 
 [[nodiscard]] constexpr RowIndex system_row_of(SystemItem it) noexcept {
     for (std::size_t i = 0; i < kSystemItemTotal; ++i)
-        if (kSystemItems[RowIndex::of(i)] == it)
-            return RowIndex::of(i);
-    return RowIndex::of(kSystemItemTotal);
+        if (kSystemItems[RowIndex::truncating(i)] == it)
+            return RowIndex::truncating(i);
+    return RowIndex::truncating(kSystemItemTotal);
 }
 
 consteval bool system_items_are_dense() {
     for (std::size_t i = 0; i < kSystemItemTotal; ++i)
-        if (system_row_of(kSystemItems[RowIndex::of(i)]) != RowIndex::of(i))
+        if (system_row_of(kSystemItems[RowIndex::truncating(i)]) != RowIndex::truncating(i))
             return false;
-    return !system_item_of(RowIndex::of(kSystemItemTotal)).has_value();
+    return !system_item_of(RowIndex::truncating(kSystemItemTotal)).has_value();
 }
 
 static_assert(system_items_are_dense());
@@ -157,7 +158,7 @@ public:
         scripts_.on_facts(s);
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(SystemPage);
         return refusals_.sum(scripts_.refusals()).sum(cores_.refusals());
     }
@@ -178,7 +179,7 @@ private:
     SystemFacts facts_{};
     SessionFacts session_{};
     RowIndex sel_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     RebootHold reboot_{};

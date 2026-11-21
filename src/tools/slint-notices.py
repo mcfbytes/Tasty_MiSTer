@@ -3,7 +3,7 @@
 
     slint-notices.py <patched slint source> <out.md>
 
-The crate set is cargo's for the archive build-static-slint.sh makes: slint-cpp, no default features,
+The crate set is cargo's for the archives build-slint-sdk.sh makes: slint-cpp, no default features,
 renderer-software + std, armv7-unknown-linux-gnueabihf, normal edges, no proc-macros (those run in the
 compiler and are not linked). Each crate's own licence files are copied verbatim, one copy per distinct
 text; a crate that ships none is listed under its SPDX expression.
@@ -38,11 +38,11 @@ USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 
 def rust_pin() -> str:
-    """build-static-slint.sh's Rust pin: the toolchain the archive (and so this crate set) is built with."""
-    script = (Path(__file__).resolve().parent / "build-static-slint.sh").read_text(encoding="utf-8")
+    """build-slint-sdk.sh's Rust pin: the toolchain the archive (and so this crate set) is built with."""
+    script = (Path(__file__).resolve().parent / "build-slint-sdk.sh").read_text(encoding="utf-8")
     m = re.search(r"^RUST_TOOLCHAIN=\$\{RUST_TOOLCHAIN:-([^}]+)\}", script, re.M)
     if m is None:
-        raise SystemExit("build-static-slint.sh: no RUST_TOOLCHAIN pin")
+        raise SystemExit("build-slint-sdk.sh: no RUST_TOOLCHAIN pin")
     return m.group(1)
 
 

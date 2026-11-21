@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

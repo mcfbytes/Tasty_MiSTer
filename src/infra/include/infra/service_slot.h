@@ -7,7 +7,7 @@
 
 #include "infra/json_out.h"
 
-namespace mister {
+namespace mister::infra {
 
 inline constexpr std::size_t kMaxServices = 24;
 

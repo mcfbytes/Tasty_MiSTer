@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "child_spawn.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 namespace {

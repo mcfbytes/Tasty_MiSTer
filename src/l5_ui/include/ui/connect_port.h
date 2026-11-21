@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <utility>
 
-#include "app/connect_channel.h"
+#include "app/connect/connect_channel.h"
 #include "infra/seat.h"
-#include "svc/connect_request.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_demand.h"
 #include "ui/connect_refusals.h"
 #include "ui/connect_views.h"
@@ -17,14 +17,17 @@ class ConnectPort {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    ConnectPort(app::ConnectChannel::Sender sender, app::ConnectChannel::Viewer viewer) noexcept
+    ConnectPort(
+        app::connect::ConnectChannel::Sender sender,
+        app::connect::ConnectChannel::Viewer viewer
+    ) noexcept
         : sender_(std::move(sender)),
           viewer_(std::move(viewer)) {}
 
     ConnectPort(const ConnectPort&) = delete;
     ConnectPort& operator=(const ConnectPort&) = delete;
 
-    [[nodiscard]] bool send(const svc::ConnectRequest& request) noexcept;
+    [[nodiscard]] bool send(const svc::connect::ConnectRequest& request) noexcept;
 
     bool pump(ConnectDemand wanted) noexcept;
 
@@ -39,8 +42,8 @@ public:
     [[nodiscard]] const ConnectRefusals& refusals() const noexcept { return refusals_; }
 
 private:
-    app::ConnectChannel::Sender sender_;
-    app::ConnectChannel::Viewer viewer_;
+    app::connect::ConnectChannel::Sender sender_;
+    app::connect::ConnectChannel::Viewer viewer_;
     ConnectViews views_{};
     ConnectDemand accepted_{};
     ConnectRefusals refusals_{};

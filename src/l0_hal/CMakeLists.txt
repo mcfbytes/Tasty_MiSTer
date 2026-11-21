@@ -13,10 +13,11 @@ add_library(mister_hal STATIC
 )
 target_include_directories(mister_hal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_hal
-  PUBLIC mister_os
+  PUBLIC mister_os mister_infra_xthread
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
+  hal/aperture_node_decl.h
   hal/aperture_region.h
   hal/axi.h
   hal/block_view.h
@@ -29,7 +30,6 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/cause_reg.h
   hal/compatible_blob.h
   hal/core_capabilities.h
-  hal/core_identity.h
   hal/core_signals.h
   hal/doorbell_policy.h
   hal/doorbell_source.h
@@ -51,6 +51,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/kernel_contract.h
   hal/link_port.h
   hal/link_timing.h
+  hal/lw_presence.h
   hal/mailbox.h
   hal/memory_model.h
   hal/observer_view.h
@@ -59,9 +60,9 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/pin_levels.h
   hal/program_geometry.h
   hal/reboot_flag.h
-  hal/read_window_port.h
   hal/reg_access.h
   hal/reg_block.h
+  hal/reg_field.h
   hal/reg_port.h
   hal/reg_word.h
   hal/region_id.h
@@ -79,8 +80,14 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/spi_transport.h
   hal/sector_block.h
   hal/osd_block.h
+  hal/osd_status.h
   hal/sys_block.h
   hal/sys_directory.h
+  hal/dir_count.h
+  hal/dir_layout.h
+  hal/enable_word.h
+  hal/entry_mask.h
+  hal/reset_counts.h
   hal/taken_window.h
   hal/stack_bytes.h
   hal/thread_map.h
@@ -96,5 +103,6 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/lw_sys_window.h
   hal/reg_lend.h
   hal/spi_halves.h
+  hal/spi_words.h
 )
 

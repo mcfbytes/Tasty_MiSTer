@@ -3,6 +3,8 @@
 
 #include <memory>
 
+#include "infra/prelude.h"
+
 namespace mister::cores {
 
 Ex<void> GenericCore::do_adopt(const CoreAdopt&) {

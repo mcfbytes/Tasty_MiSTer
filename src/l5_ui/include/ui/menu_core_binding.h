@@ -3,6 +3,7 @@
 
 #include <string_view>
 
+#include "app/core_name.h"
 #include "app/launcher_state.h"
 #include "app/session_identity.h"
 #include "infra/fixed_str.h"
@@ -40,7 +41,7 @@ private:
     proto::CoreType core_type_ = proto::CoreType::Unknown;
     bool front_end_ = false;
     cores::PauseOnOsd pause_rule_ = cores::PauseOnOsd::Option;
-    FixedStr<app::SessionIdentity::kMax, StrFit::Clip> browse_home_{};
+    app::CoreName browse_home_{};
     app::RememberedStem file_stem_{};
 };
 

@@ -3,7 +3,7 @@
 
 #include <optional>
 
-#include "svc/disc_counters.h"
+#include "svc/disc/disc_counters.h"
 
 namespace mister::cores {
 
@@ -13,7 +13,7 @@ class ICdDiagnostics {
 public:
     virtual ~ICdDiagnostics() = default;
 
-    [[nodiscard]] virtual std::optional<svc::DiscCounters> disc_counters() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<svc::disc::DiscCounters> disc_counters() const noexcept = 0;
     [[nodiscard]] virtual std::optional<CdFlow> cd_flow() const noexcept = 0;
 
 protected:

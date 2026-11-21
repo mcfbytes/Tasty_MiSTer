@@ -9,6 +9,7 @@
 #include "app/boot_args.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "launcher_block.h"
 #include "os/process_title.h"
@@ -77,8 +78,8 @@ private:
             return launcher_.device_front();
         }
 
-        [[nodiscard]] infra::OptRef<app::ScanoutRelay> scanout() noexcept override {
-            return infra::OptRef<app::ScanoutRelay>{launcher_.scanout_relay_};
+        [[nodiscard]] infra::OptRef<app::launcher::ScanoutRelay> scanout() noexcept override {
+            return infra::OptRef<app::launcher::ScanoutRelay>{launcher_.scanout_relay_};
         }
 
         [[nodiscard]] std::unique_ptr<Face> face(
@@ -110,7 +111,9 @@ private:
         TASTY_SEAT_EXEMPT(boot);
 
     public:
-        [[nodiscard]] infra::OptRef<app::IOwnerTick> owner_tick() noexcept override { return {}; }
+        [[nodiscard]] infra::OptRef<xthread::ICoworker> owner_tick() noexcept override {
+            return {};
+        }
     };
 
     StderrVoice voice_{};

@@ -4,36 +4,36 @@
 #include "support/unlinked_plat.h"
 #include "support/video_quiet.h"
 
-#include "app/encode_status.h"
-#include "app/step_count.h"
+#include "app/capture/encode_status.h"
+#include "app/capture/step_count.h"
 #include "app/event.h"
 #include "app/identity_latch.h"
 #include "app/link_tx_channel.h"
 #include "app/bitstream_resolve.h"
-#include "app/rec_control.h"
+#include "app/capture/rec_control.h"
 #include "app/recorder_control.h"
-#include "app/recorder_status.h"
-#include "infra/diag_log.h"
-#include "app/replay_feeder.h"
+#include "app/capture/recorder_status.h"
+#include "infra/xthread/diag_log.h"
+#include "app/replay/replay_feeder.h"
 #include "app/replay_status.h"
 #include "app/run_policy.h"
 #include "app/ui_request_ring.h"
 #include "app/video_pump.h"
 #include "cores/md5.h"
-#include "cores/movie_codec.h"
-#include "cores/movie_system.h"
+#include "cores/tas/movie_codec.h"
+#include "cores/tas/movie_system.h"
 #include "cores/registry.h"
-#include "cores/rom_digest.h"
+#include "cores/tas/rom_digest.h"
 #include "hal/boards_table.h"
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
-#include "proto/link.h"
+#include "proto/link/link.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "os/child_process.h"
 #include "os/clock.h"
 #include "proto/link_op.h"
-#include "svc/video_service.h"
+#include "svc/video/video_service.h"
 #include "svc/vfs.h"
 #include "tasty_cli.h"
 #include "tasty_cli_refusal.h"
@@ -89,6 +89,7 @@
 
 #include <minizip/zip.h>
 #include "support/stand_ini.h"
+#include "infra/prelude.h"
 #include "testing/recording_transport.h"
 #include "testing/step_clock.h"
 
@@ -103,10 +104,10 @@ struct FakeReplay final : fw::IReplayPort {
     std::optional<fw::ReplayRefusal> ref{};
     unsigned plays = 0;
     unsigned stops = 0;
-    app::ReplayFeeder::Play last{};
+    app::replay::ReplayFeeder::Play last{};
     std::vector<std::string> lines{};
 
-    bool take_play(const app::ReplayFeeder::Play& play) noexcept override {
+    bool take_play(const app::replay::ReplayFeeder::Play& play) noexcept override {
         TASTY_SEAT_BODY(FakeReplay);
         ++plays;
         last = play;
@@ -185,8 +186,10 @@ void publish_id(app::IdentityLatch& ident, std::string_view rbf) {
     const SeatScope rt{SeatTag::RT};
     app::SessionIdentity published{};
     (void)published.core.assign(rbf);
-    (void)published.rbf.assign(rbf);
+    (void)published.conf_name.assign(rbf);
     published.stem = app::RememberedStem::of(rbf, {});
+
+    published.host = infra::OptRef<const cores::HostPolicy>{cores::profile_for(rbf).host};
     ident.publish(published);
 }
 
@@ -213,7 +216,7 @@ struct Sess {
 
     struct Binds {
         app::RecorderControl* rec = nullptr;
-        const app::EncodeStatusCell* encstat = nullptr;
+        const app::capture::EncodeStatusCell* encstat = nullptr;
         const xthread::Telemetry<std::uint8_t, SeatTag::Main>* direct_video_ini = nullptr;
     };
 
@@ -228,18 +231,18 @@ struct Sess {
     FakeReplay replay{};
     app::IdentityLatch ident{};
     app::ReplayStatusCell play{};
-    app::RecorderStatusCell recstat{};
-    app::EncodeStatusCell encstat{};
+    app::capture::RecorderStatusCell recstat{};
+    app::capture::EncodeStatusCell encstat{};
     app::UiRequestRing asks{};
     app::LinkTxChannel<mister::SeatTag::Ui> tx{};
-    app::RecControlChannel rec_control{xthread::Polled{}, xthread::Polled{}};
-    app::RecControlChannel::Worker capture{rec_control.worker()};
-    app::RecWriteStatusCell rec_write{};
+    app::capture::RecControlChannel rec_control{xthread::Polled{}, xthread::Polled{}};
+    app::capture::RecControlChannel::Worker capture{rec_control.worker()};
+    app::capture::RecWriteStatusCell rec_write{};
 
     app::RecorderControl rec{app::RecorderControl::Wiring{
-        .control = infra::OptRef<app::RecControlChannel>{rec_control},
-        .status = infra::OptRef<const app::RecorderStatusCell>{recstat},
-        .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write},
+        .control = infra::OptRef<app::capture::RecControlChannel>{rec_control},
+        .status = infra::OptRef<const app::capture::RecorderStatusCell>{recstat},
+        .writer = infra::OptRef<const app::capture::RecWriteStatusCell>{rec_write},
         .root = "/"
     }};
     xthread::WakeFlag main_stop{};
@@ -289,18 +292,18 @@ struct Sess {
     }
 
     void tick() {
-        w.rec.tick();
-        s->tick();
+        w.rec.serve();
+        s->serve();
     }
 
     void capture_level(
-        app::RecState state,
-        app::RecVerdict verdict,
-        app::RecVerdict end = app::RecVerdict::None
+        app::capture::RecState state,
+        app::capture::RecVerdict verdict,
+        app::capture::RecVerdict end = app::capture::RecVerdict::None
     ) {
         {
             const SeatScope cap{SeatTag::Capture};
-            if (verdict != app::RecVerdict::None) {
+            if (verdict != app::capture::RecVerdict::None) {
                 for (;;) {
                     auto job = capture.take();
                     if (!job)
@@ -309,13 +312,13 @@ struct Sess {
                     job.complete();
                 }
             }
-            app::RecorderStatus r{};
+            app::capture::RecorderStatus r{};
             r.gen = app::ControlGeneration{1};
             r.state = state;
             r.end = end;
             recstat.publish(r);
         }
-        rec.tick();
+        rec.serve();
     }
 
     [[nodiscard]] int exit_code() const { return fw::process_status(run_exit.sample().value); }
@@ -334,7 +337,7 @@ struct Sess {
 
 struct VresLink final : mister::testing::RecordingTransport {
 
-    proto::Link view{*this};
+    proto::link::Link view{*this};
     std::uint32_t vtime = 0;
 
     void select(hal::ChipSelect cs) override {
@@ -401,7 +404,7 @@ struct PumpRig {
                 *vfs,
                 clock,
                 hal::board_by_id(hal::BoardId::De10Nano).video,
-                infra::OptRef<svc::adv7513::II2cAdapter>{},
+                infra::OptRef<svc::video::adv7513::II2cAdapter>{},
                 quiet.hdmi,
                 mister::testing::video_wiring(quiet.activity, quiet.gates, tx, replies)
             );
@@ -419,7 +422,7 @@ struct PumpRig {
             const SeatScope rt{SeatTag::RT};
             link.vtime = vtime;
             pump->wire().bind_core(app::CoreEdgeSeq{seq}, gen, now);
-            pump->wire().reset_geometry(seq);
+            pump->wire().reset_geometry(app::CoreEdgeSeq{seq});
         }
         {
             const SeatScope ui{SeatTag::Ui};
@@ -434,7 +437,7 @@ struct PumpRig {
 
     app::VideoGeometryRecord tick() {
         const SeatScope ui{SeatTag::Ui};
-        pump->tick();
+        pump->serve();
         return pump->geometry_record();
     }
 };
@@ -482,9 +485,9 @@ void test_cli_rec() {
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
     CHECK(a.has_value() && a->verb == fw::TastyVerb::RecStart);
     CHECK(a->record && a->record->view() == "/media/fat/cap");
-    CHECK(a->rec.codec == app::RecCodec::Cscd && a->rec.every.count<std::uint16_t>() == 1);
-    CHECK(a->rec.motion == app::RecMotion::Auto);
-    CHECK(a->rec.from_frame == app::MoviePosition{-1} && a->rec.to_frame == app::MoviePosition{-1});
+    CHECK(a->rec.codec == app::capture::RecCodec::Cscd && a->rec.every.count<std::uint16_t>() == 1);
+    CHECK(a->rec.motion == app::capture::RecMotion::Auto);
+    CHECK(!a->rec.from_frame.has_value() && !a->rec.to_frame.has_value());
 }
 
 void test_cli_record_options() {
@@ -496,11 +499,14 @@ void test_cli_record_options() {
     CHECK(a.has_value());
     if (!a)
         return;
-    CHECK(a->rec.codec == app::RecCodec::Zmbv);
-    CHECK(a->rec.motion == app::RecMotion::Full);
-    CHECK(a->rec.scale == app::RecScale::Half);
+    CHECK(a->rec.codec == app::capture::RecCodec::Zmbv);
+    CHECK(a->rec.motion == app::capture::RecMotion::Full);
+    CHECK(a->rec.scale == app::capture::RecScale::Half);
     CHECK(a->rec.every.count<std::uint16_t>() == 4);
-    CHECK(a->rec.from_frame == app::MoviePosition{10} && a->rec.to_frame == app::MoviePosition{20});
+    CHECK(
+        a->rec.from_frame.value_or(app::kNoMovieFrame) == app::MoviePosition{10}
+        && a->rec.to_frame.value_or(app::kNoMovieFrame) == app::MoviePosition{20}
+    );
     CHECK(a->rec.segment_bytes == proto::FileSize{32ull << 20});
     const char* const bad_codec[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "ffv1"};
     const auto bc = fw::parse_tasty_args(std::span<const char* const>(bad_codec));
@@ -587,17 +593,17 @@ void test_session_passes_record_options() {
     const std::string fat = media + "/fat";
     CHECK(::mkdir(media.c_str(), 0755) == 0);
     CHECK(::mkdir(fat.c_str(), 0755) == 0);
-    app::RecControlChannel control{xthread::Polled{}, xthread::Polled{}};
+    app::capture::RecControlChannel control{xthread::Polled{}, xthread::Polled{}};
     auto capture = control.worker();
     app::RecorderControl rec(
         app::RecorderControl::Wiring{
-            .control = infra::OptRef<app::RecControlChannel>{control},
+            .control = infra::OptRef<app::capture::RecControlChannel>{control},
             .root = media
         }
     );
     Sess x{nullptr, nullptr, {.rec = &rec}};
-    x.args.rec.codec = app::RecCodec::Zmbv;
-    x.args.rec.motion = app::RecMotion::Full;
+    x.args.rec.codec = app::capture::RecCodec::Zmbv;
+    x.args.rec.motion = app::capture::RecMotion::Full;
     x.args.rec.every = *app::RecEvery::of(3);
     x.args.rec.from_frame = app::MoviePosition{4};
     x.args.rec.to_frame = app::MoviePosition{9};
@@ -605,7 +611,7 @@ void test_session_passes_record_options() {
     (void)x.args.record->assign(fat + "/cap");
     x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
-    app::RecRequest got{};
+    app::capture::RecRequest got{};
     {
         const SeatScope cap{SeatTag::Capture};
         auto job = capture.take();
@@ -613,12 +619,15 @@ void test_session_passes_record_options() {
         if (job)
             got = *job;
     }
-    CHECK(got.op == app::RecOp::Arm);
-    CHECK(got.mode == app::RecMode::Avi);
-    CHECK(got.opt.codec == app::RecCodec::Zmbv);
-    CHECK(got.opt.motion == app::RecMotion::Full);
+    CHECK(got.op == app::capture::RecOp::Arm);
+    CHECK(got.mode == app::capture::RecMode::Avi);
+    CHECK(got.opt.codec == app::capture::RecCodec::Zmbv);
+    CHECK(got.opt.motion == app::capture::RecMotion::Full);
     CHECK(got.opt.every.count<std::uint16_t>() == 3);
-    CHECK(got.opt.from_frame == app::MoviePosition{4} && got.opt.to_frame == app::MoviePosition{9});
+    CHECK(
+        got.opt.from_frame.value_or(app::kNoMovieFrame) == app::MoviePosition{4}
+        && got.opt.to_frame.value_or(app::kNoMovieFrame) == app::MoviePosition{9}
+    );
     (void)::rmdir(fat.c_str());
     (void)::rmdir(media.c_str());
 }
@@ -655,7 +664,7 @@ void test_cli_play_needs_rom() {
 void test_cli_loop_and_ram_init() {
     const char* const av[] = {"tasty", "play", "m.fm2", "--loop", "--ram-init", "zero"};
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
-    CHECK(a.has_value() && a->loop && a->ram_fill == cores::IReplayCore::RamFill::Zero);
+    CHECK(a.has_value() && a->loop && a->ram_fill == cores::tas::IReplayCore::RamFill::Zero);
     const char* const bad[] = {"tasty", "play", "m.fm2", "--ram-init", "nope"};
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(bad)).has_value());
 }
@@ -706,10 +715,10 @@ void test_registry() {
 }
 
 void test_codec_path() {
-    CHECK(cores::movie_codec_for_path("a.fm2").has_value());
-    CHECK(cores::movie_codec_for_path("a.lsmv").has_value());
-    CHECK(cores::movie_codec_for_path("a.gmv").has_value());
-    CHECK(!cores::movie_codec_for_path("a.bk2").has_value());
+    CHECK(cores::tas::movie_codec_for_path("a.fm2").has_value());
+    CHECK(cores::tas::movie_codec_for_path("a.lsmv").has_value());
+    CHECK(cores::tas::movie_codec_for_path("a.gmv").has_value());
+    CHECK(!cores::tas::movie_codec_for_path("a.bk2").has_value());
 }
 
 void test_null_osd() {
@@ -719,31 +728,30 @@ void test_null_osd() {
 }
 
 void test_movie_system_path() {
-    const auto nes = cores::movie_system_for_path("a.fm2");
+    const auto nes = cores::tas::movie_system_for_path("a.fm2");
     CHECK(nes.has_value());
     if (nes) {
-        CHECK(nes->kind == cores::CoreKind::Generic);
         CHECK(nes->conf_str_name == "NES");
         CHECK(nes->codec.has_value());
-        CHECK(cores::movie_system_supported(*nes));
+        CHECK(cores::tas::movie_system_supported(*nes));
     }
-    CHECK(cores::movie_system_for_path("a.lsmv").has_value());
-    CHECK(cores::movie_system_for_path("a.gmv").has_value());
-    CHECK(!cores::movie_system_for_path("a.bk2").has_value());
-    CHECK(cores::movie_system_plays("NES"));
-    CHECK(cores::movie_system_plays("PSX"));
-    CHECK(!cores::movie_system_plays("MENU"));
-    CHECK(!cores::movie_system_plays("N64"));
+    CHECK(cores::tas::movie_system_for_path("a.lsmv").has_value());
+    CHECK(cores::tas::movie_system_for_path("a.gmv").has_value());
+    CHECK(!cores::tas::movie_system_for_path("a.bk2").has_value());
+    CHECK(cores::tas::movie_system_plays("NES"));
+    CHECK(cores::tas::movie_system_plays("PSX"));
+    CHECK(!cores::tas::movie_system_plays("MENU"));
+    CHECK(!cores::tas::movie_system_plays("N64"));
 
     bool saw_disk_core = false;
     for (const cores::CoreFactory& f : cores::core_table()) {
         if (f.profile.disk_formats.empty())
             continue;
         saw_disk_core = true;
-        CHECK(!cores::movie_system_plays(f.profile.name));
+        CHECK(!cores::tas::movie_system_plays(f.profile.name));
     }
     CHECK(saw_disk_core);
-    CHECK(!cores::movie_system_plays("AtariST"));
+    CHECK(!cores::tas::movie_system_plays("AtariST"));
 }
 
 void test_splash_pixel() {
@@ -1010,7 +1018,7 @@ void test_info_missing() {
     CHECK(fw::tasty_info_movie(*vfs, "missing.fm2") == fw::tasty::Exit::Code::Refused);
 }
 
-void test_manifest_doc_role_follows_the_core_set() {
+void test_manifest_doc_role_is_declared() {
     CHECK(cores::manifest_doc_role().has_value());
 }
 
@@ -1267,7 +1275,7 @@ void test_load_edge_rereads_geometry() {
     auto g = r.tick();
     CHECK(g.valid);
     CHECK(g.rate == app::FrameTicks::plausible(1'671'559));
-    CHECK_EQ(g.core_seq, 1u);
+    CHECK(g.core_seq == app::CoreEdgeSeq{1});
     {
         const SeatScope ui{SeatTag::Ui};
         r.pump->on_pause();
@@ -1284,7 +1292,7 @@ void test_load_edge_rereads_geometry() {
         g = r.tick();
     CHECK(g.valid);
     CHECK(g.rate == app::FrameTicks::plausible(1'663'934));
-    CHECK_EQ(g.core_seq, 3u);
+    CHECK(g.core_seq == app::CoreEdgeSeq{3});
     CHECK_EQ(r.pump->stats().edges, 1u);
 }
 
@@ -1298,7 +1306,7 @@ void test_load_edge_sets_name_identity_then_edge() {
         const SeatScope rt{SeatTag::RT};
         app::SessionIdentity published{};
         (void)published.core.assign("NES");
-        (void)published.rbf.assign("NES_RBF");
+        (void)published.conf_name.assign("NES_RBF");
         published.setname_same_dir = true;
         published.rotation = proto::RotationDir::Cw;
         published.stem = app::RememberedStem::of("NES", {});
@@ -1366,7 +1374,7 @@ void test_take_play_refusal() {
 
 void test_a_port_that_forgets_a_verb_is_abstract() {
     struct Full final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1400,7 +1408,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoTakeStop final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         app::MovieFrameCount movie_frames() const noexcept override {
             return app::MovieFrameCount{};
@@ -1416,7 +1424,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoMovieFrames final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1430,7 +1438,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoActive final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1446,7 +1454,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoRefusal final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1462,7 +1470,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoSettingsSet final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1478,7 +1486,7 @@ void test_a_port_that_forgets_a_verb_is_abstract() {
     };
 
     struct NoSettingLine final : fw::IReplayPort {
-        bool take_play(const app::ReplayFeeder::Play&) noexcept override { return true; }
+        bool take_play(const app::replay::ReplayFeeder::Play&) noexcept override { return true; }
 
         void take_stop() noexcept override {}
 
@@ -1753,10 +1761,10 @@ void test_loop_wins_over_stay() {
 
 void test_session_passes_ram_init() {
     Sess x;
-    x.args.ram_fill = cores::IReplayCore::RamFill::Random;
+    x.args.ram_fill = cores::tas::IReplayCore::RamFill::Random;
     x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
-    CHECK(x.replay.last.ram_fill == cores::IReplayCore::RamFill::Random);
+    CHECK(x.replay.last.ram_fill == cores::tas::IReplayCore::RamFill::Random);
 }
 
 void test_stay_finished_holds() {
@@ -1803,19 +1811,19 @@ void test_rec_only_leaves_when_its_recording_ends() {
         x.tick();
         if (refused) {
             x.capture_level(
-                app::RecState::Idle,
-                app::RecVerdict::NoLiveBuffer,
-                app::RecVerdict::NoLiveBuffer
+                app::capture::RecState::Idle,
+                app::capture::RecVerdict::NoLiveBuffer,
+                app::capture::RecVerdict::NoLiveBuffer
             );
         } else {
-            x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
+            x.capture_level(app::capture::RecState::Recording, app::capture::RecVerdict::Started);
             for (int i = 0; i < 4; ++i)
                 x.tick();
             CHECK(x.replay.stops == 0);
             x.capture_level(
-                app::RecState::Idle,
-                app::RecVerdict::Stopped,
-                app::RecVerdict::Stopped
+                app::capture::RecState::Idle,
+                app::capture::RecVerdict::Stopped,
+                app::capture::RecVerdict::Stopped
             );
         }
         x.tick();
@@ -1833,11 +1841,15 @@ void test_rec_only_reports_a_failure_after_it_started() {
     x.s.emplace(x.w, x.args, x.rec_run);
     StderrTo err;
     x.tick();
-    x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
+    x.capture_level(app::capture::RecState::Recording, app::capture::RecVerdict::Started);
     for (int i = 0; i < 4; ++i)
         x.tick();
     CHECK(x.replay.stops == 0);
-    x.capture_level(app::RecState::Idle, app::RecVerdict::None, app::RecVerdict::WriterFailed);
+    x.capture_level(
+        app::capture::RecState::Idle,
+        app::capture::RecVerdict::None,
+        app::capture::RecVerdict::WriterFailed
+    );
     x.tick();
     x.tick();
     home(x);
@@ -1858,10 +1870,14 @@ void test_rec_only_a_stopped_recording_after_it_started_is_clean() {
     x.s.emplace(x.w, x.args, x.rec_run);
     StderrTo err;
     x.tick();
-    x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
+    x.capture_level(app::capture::RecState::Recording, app::capture::RecVerdict::Started);
     for (int i = 0; i < 4; ++i)
         x.tick();
-    x.capture_level(app::RecState::Idle, app::RecVerdict::Stopped, app::RecVerdict::Stopped);
+    x.capture_level(
+        app::capture::RecState::Idle,
+        app::capture::RecVerdict::Stopped,
+        app::capture::RecVerdict::Stopped
+    );
     x.tick();
     home(x);
     const std::string said = err.text();
@@ -1883,12 +1899,16 @@ void test_a_recorded_replay_reports_a_failure_while_it_runs() {
     StderrTo err;
     to_run(x);
     CHECK(x.replay.plays == 1);
-    x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
+    x.capture_level(app::capture::RecState::Recording, app::capture::RecVerdict::Started);
     for (int i = 0; i < 4; ++i)
         x.tick();
     CHECK(x.replay.stops == 0);
     CHECK(x.exit_code() == 0);
-    x.capture_level(app::RecState::Idle, app::RecVerdict::None, app::RecVerdict::WriterFailed);
+    x.capture_level(
+        app::capture::RecState::Idle,
+        app::capture::RecVerdict::None,
+        app::capture::RecVerdict::WriterFailed
+    );
     for (int i = 0; i < 10; ++i)
         x.tick();
     CHECK(x.replay.stops == 0);
@@ -1912,12 +1932,16 @@ void test_a_recorded_replay_reports_a_failure_as_it_closes() {
     x.s.emplace(x.w, x.args, x.play_run);
     StderrTo err;
     to_run(x);
-    x.capture_level(app::RecState::Recording, app::RecVerdict::Started);
+    x.capture_level(app::capture::RecState::Recording, app::capture::RecVerdict::Started);
     x.tick();
     publish_end(x.play, app::ReplayEnd::Finished);
     x.tick();
     CHECK(x.exit_code() == 0);
-    x.capture_level(app::RecState::Idle, app::RecVerdict::None, app::RecVerdict::WriterFailed);
+    x.capture_level(
+        app::capture::RecState::Idle,
+        app::capture::RecVerdict::None,
+        app::capture::RecVerdict::WriterFailed
+    );
     x.tick();
     home(x);
     CHECK(x.exit_code() == 1);
@@ -1929,7 +1953,8 @@ void test_a_recorded_replay_reports_a_failure_as_it_closes() {
 }
 
 void test_rec_only_probe_refusal_fails_the_run() {
-    for (const auto v : {app::RecVerdict::NoLiveBuffer, app::RecVerdict::ScalerPortStuck}) {
+    for (const auto v :
+         {app::capture::RecVerdict::NoLiveBuffer, app::capture::RecVerdict::ScalerPortStuck}) {
         Sess x;
         x.args.no_splash = true;
         x.args.record.emplace();
@@ -1938,17 +1963,17 @@ void test_rec_only_probe_refusal_fails_the_run() {
         StderrTo err;
         x.tick();
         x.tick();
-        x.capture_level(app::RecState::Probing, app::RecVerdict::None);
+        x.capture_level(app::capture::RecState::Probing, app::capture::RecVerdict::None);
         for (int i = 0; i < 3; ++i)
             x.tick();
         CHECK(x.replay.stops == 0);
-        x.capture_level(app::RecState::Idle, v, v);
+        x.capture_level(app::capture::RecState::Idle, v, v);
         x.tick();
         home(x);
         const std::string said = err.text();
         CHECK(x.replay.stops >= 1);
         CHECK(x.exit_code() == 1);
-        if (v == app::RecVerdict::NoLiveBuffer) {
+        if (v == app::capture::RecVerdict::NoLiveBuffer) {
             CHECK(said.find("did not start (no_live_buffer)") != std::string::npos);
         } else {
             CHECK(said.find("reboot the MiSTer to clear it") != std::string::npos);
@@ -1962,18 +1987,24 @@ void test_a_stuck_port_ends_a_replay() {
     x.s.emplace(x.w, x.args, x.play_run);
     to_run(x);
     StderrTo err;
-    x.capture_level(app::RecState::Idle, app::RecVerdict::None, app::RecVerdict::ScalerPortStuck);
+    x.capture_level(
+        app::capture::RecState::Idle,
+        app::capture::RecVerdict::None,
+        app::capture::RecVerdict::ScalerPortStuck
+    );
     for (int i = 0; i < 4; ++i)
         x.tick();
     home(x);
     const std::string said = err.text();
     CHECK(x.replay.stops >= 1);
     CHECK(x.exit_code() == 1);
-    const std::string remedy = app::rec_verdict_remedy(app::RecVerdict::ScalerPortStuck);
+    const std::string remedy = app::capture::rec_verdict_remedy(
+        app::capture::RecVerdict::ScalerPortStuck
+    );
     const auto first = said.find(remedy);
     CHECK(first != std::string::npos);
     CHECK(first == std::string::npos || said.find(remedy, first + 1) == std::string::npos);
-    CHECK(app::rec_verdict_remedy(app::RecVerdict::NoLiveBuffer) == nullptr);
+    CHECK(app::capture::rec_verdict_remedy(app::capture::RecVerdict::NoLiveBuffer) == nullptr);
 }
 
 void test_the_verdict_line_names_the_remedy() {
@@ -1981,12 +2012,12 @@ void test_the_verdict_line_names_the_remedy() {
     CHECK(!t.root.empty());
     xthread::DiagLog diag;
     CHECK(diag.open(t.p("diag").c_str()));
-    app::RecorderStatusCell status{};
-    app::RecControlChannel control{xthread::Polled{}, xthread::Polled{}};
+    app::capture::RecorderStatusCell status{};
+    app::capture::RecControlChannel control{xthread::Polled{}, xthread::Polled{}};
     auto capture = control.worker();
     app::RecorderControl rc{app::RecorderControl::Wiring{
-        .control = infra::OptRef<app::RecControlChannel>{control},
-        .status = infra::OptRef<const app::RecorderStatusCell>{status},
+        .control = infra::OptRef<app::capture::RecControlChannel>{control},
+        .status = infra::OptRef<const app::capture::RecorderStatusCell>{status},
         .diag = infra::OptRef<xthread::DiagLog>{diag}
     }};
     {
@@ -1998,13 +2029,13 @@ void test_the_verdict_line_names_the_remedy() {
         auto job = capture.take();
         CHECK(job);
         if (job) {
-            job->verdict = app::RecVerdict::ScalerPortStuck;
+            job->verdict = app::capture::RecVerdict::ScalerPortStuck;
             job.complete();
         }
     }
     {
         const SeatScope ui{SeatTag::Ui};
-        rc.tick();
+        rc.serve();
     }
     std::string line;
     if (std::FILE* f = std::fopen(t.p("diag").c_str(), "rb")) {
@@ -2204,13 +2235,13 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
         return;
     const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    app::EncodeStatusCell enc{};
+    app::capture::EncodeStatusCell enc{};
     Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     {
         const SeatScope enc_seat{SeatTag::Encode};
-        app::EncodeStatus body{};
-        body.video.scale = app::PictureScale::Half;
-        body.video.steps = app::StepCount{1};
+        app::capture::EncodeStatus body{};
+        body.video.scale = app::capture::PictureScale::Half;
+        body.video.steps = app::capture::StepCount{1};
         body.video.fell_behind = fell;
         enc.publish(body);
     }
@@ -2245,19 +2276,19 @@ void test_status_scale_step_warns_per_recording() {
         return;
     const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    app::EncodeStatusCell enc{};
+    app::capture::EncodeStatusCell enc{};
     Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     const auto step = [&](std::uint16_t gen) {
         {
             const SeatScope cap{SeatTag::Capture};
-            app::RecorderStatus r{};
+            app::capture::RecorderStatus r{};
             r.gen = app::ControlGeneration{gen};
             x.recstat.publish(r);
         }
         const SeatScope enc_seat{SeatTag::Encode};
-        app::EncodeStatus body{};
-        body.video.scale = app::PictureScale::Half;
-        body.video.steps = app::StepCount{1};
+        app::capture::EncodeStatus body{};
+        body.video.scale = app::capture::PictureScale::Half;
+        body.video.steps = app::capture::StepCount{1};
         enc.publish(body);
     };
     const auto said = [&] {
@@ -2306,14 +2337,15 @@ void test_status_scale_return_is_said() {
         return;
     const fw::TastyRuntime rt = runtime_in(t.root);
     const std::string st = t.p("status");
-    app::EncodeStatusCell enc{};
+    app::capture::EncodeStatusCell enc{};
     Sess x{nullptr, nullptr, {.encstat = &enc}, rt};
     const auto publish = [&](std::uint8_t steps, std::uint8_t recovered, std::uint8_t held = 0) {
         const SeatScope enc_seat{SeatTag::Encode};
-        app::EncodeStatus body{};
-        body.video.scale = steps > recovered ? app::PictureScale::Half : app::PictureScale::Native;
-        body.video.steps = app::StepCount{steps};
-        body.video.recovered = app::StepCount{recovered};
+        app::capture::EncodeStatus body{};
+        body.video.scale = steps > recovered ? app::capture::PictureScale::Half
+                                             : app::capture::PictureScale::Native;
+        body.video.steps = app::capture::StepCount{steps};
+        body.video.recovered = app::capture::StepCount{recovered};
         body.video.fell_behind = 1;
         body.video.held = held;
         enc.publish(body);
@@ -2388,7 +2420,7 @@ void test_check_exits() {
     rom[6] = 0;
     rom[7] = 0;
     CHECK(t.put("r.nes", std::string_view(reinterpret_cast<const char*>(rom.data()), rom.size())));
-    cores::mra::Md5 h;
+    cores::Md5 h;
     h.update(std::span<const std::uint8_t>(rom.data() + 16, 32 * 1024));
     const auto d = h.digest();
     static constexpr char k[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2467,7 +2499,7 @@ bool write_bk2(const std::string& path, std::string_view platform) {
     );
 }
 
-std::string upper_hex(const cores::DigestValue& d) {
+std::string upper_hex(const cores::tas::DigestValue& d) {
     static constexpr char k[] = "0123456789ABCDEF";
     std::string out;
     for (const std::uint8_t c : d.view()) {
@@ -2492,7 +2524,7 @@ void test_nes_bk2_check_header_forms() {
         "NES\x1a\x08\x00\x21\x08\x20\x00\x00\x07\x00\x00\x00\x01",
         16
     );
-    cores::RomDigest h{cores::DigestKind::Sha1};
+    cores::tas::RomDigest h{cores::tas::DigestKind::Sha1};
     const std::string good = ines1 + body;
     h.update(std::span(reinterpret_cast<const std::uint8_t*>(good.data()), good.size()));
     const std::string log = "[Input]\nLogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 "
@@ -2511,7 +2543,7 @@ void test_nes_bk2_check_header_forms() {
         == fw::tasty::Exit::Code::Mismatch
     );
 
-    cores::RomDigest hb{cores::DigestKind::Sha1};
+    cores::tas::RomDigest hb{cores::tas::DigestKind::Sha1};
     hb.update(std::span(reinterpret_cast<const std::uint8_t*>(body.data()), body.size()));
     (void)::unlink(t.p("nes.bk2").c_str());
     CHECK(write_bk2_text(
@@ -2552,17 +2584,17 @@ void test_bk2_sniff() {
     CHECK(write_bk2(t.p("psx.bk2"), "PSX"));
     CHECK(write_bk2(t.p("nes.bk2"), "NES"));
     CHECK(write_bk2(t.p("n64.bk2"), "N64"));
-    const auto snes = cores::movie_system_for(*vfs, "snes.bk2");
-    const auto gen = cores::movie_system_for(*vfs, "gen.bk2");
-    const auto psx = cores::movie_system_for(*vfs, "psx.bk2");
-    const auto nes = cores::movie_system_for(*vfs, "nes.bk2");
-    const auto n64 = cores::movie_system_for(*vfs, "n64.bk2");
+    const auto snes = cores::tas::movie_system_for(*vfs, "snes.bk2");
+    const auto gen = cores::tas::movie_system_for(*vfs, "gen.bk2");
+    const auto psx = cores::tas::movie_system_for(*vfs, "psx.bk2");
+    const auto nes = cores::tas::movie_system_for(*vfs, "nes.bk2");
+    const auto n64 = cores::tas::movie_system_for(*vfs, "n64.bk2");
     CHECK(snes && snes->conf_str_name == "SNES");
     CHECK(gen && gen->conf_str_name == "MegaDrive");
     CHECK(psx && psx->conf_str_name == "PSX");
     CHECK(nes && nes->conf_str_name == "NES");
     CHECK(!n64);
-    const auto n64p = cores::movie_bk2_platform(*vfs, "n64.bk2");
+    const auto n64p = cores::tas::movie_bk2_platform(*vfs, "n64.bk2");
     CHECK(n64p.has_value() && *n64p == "N64");
 
     CHECK(t.put("junk.cue", "not a sheet\n"));
@@ -2881,7 +2913,7 @@ void test_session_prints_settings_once() {
 void test_refusal_sentences() {
     struct Case {
         app::PlayRefusal::Why why{};
-        std::optional<cores::MovieRefusal> movie{};
+        std::optional<cores::tas::MovieRefusal> movie{};
         std::string_view setting{};
         std::string_view path{};
         bool strict{};
@@ -2922,19 +2954,19 @@ void test_refusal_sentences() {
          .offered = false,
          .want = "tasty: replay refused: this build of tasty cannot read .chd disc images\n"},
         {.why = app::PlayRefusal::Why::Movie,
-         .movie = cores::MovieRefusal::Savestate,
+         .movie = cores::tas::MovieRefusal::Savestate,
          .strict = false,
          .offered = false,
          .want = "tasty: replay refused: m.fm2 starts from a savestate or saved game, not from "
                  "power-on\n"},
         {.why = app::PlayRefusal::Why::Movie,
-         .movie = cores::MovieRefusal::PortType,
+         .movie = cores::tas::MovieRefusal::PortType,
          .strict = false,
          .offered = false,
          .want = "tasty: replay refused: this movie uses a controller other than the standard "
                  "pad, which tasty does not replay\n"},
         {.why = app::PlayRefusal::Why::Movie,
-         .movie = cores::MovieRefusal::Setting,
+         .movie = cores::tas::MovieRefusal::Setting,
          .strict = false,
          .offered = false,
          .want = "tasty: replay refused: this movie was recorded with an emulator setting, such "
@@ -2965,7 +2997,7 @@ void test_refusal_sentences() {
 }
 
 void test_movie_refusals_have_sentences() {
-    using R = cores::MovieRefusal;
+    using R = cores::tas::MovieRefusal;
     for (std::uint32_t r = 1; r < static_cast<std::uint32_t>(R::kCount); ++r) {
         const R why = static_cast<R>(r);
         CHECK(fw::tasty_movie_refusal_sentence(why) != nullptr);
@@ -3164,7 +3196,7 @@ struct Gone {
 };
 
 std::string nes_checksum_line(std::string_view body) {
-    cores::RomDigest dig{cores::DigestKind::Md5};
+    cores::tas::RomDigest dig{cores::tas::DigestKind::Md5};
     dig.update(
         std::span<const std::uint8_t>(
             reinterpret_cast<const std::uint8_t*>(body.data()),
@@ -3228,22 +3260,23 @@ void test_loop_with_record_is_refused() {
 }
 
 void test_rerecords_need_a_whole_decimal() {
-    CHECK(!cores::rerecord_count("rerecordCount", "12x"));
-    CHECK(!cores::rerecord_count("rerecordCount", "-1"));
-    CHECK(!cores::rerecord_count("rerecordCount", "99999999999"));
-    CHECK(!cores::rerecord_count("comment", "5"));
+    CHECK(!cores::tas::rerecord_count("rerecordCount", "12x"));
+    CHECK(!cores::tas::rerecord_count("rerecordCount", "-1"));
+    CHECK(!cores::tas::rerecord_count("rerecordCount", "99999999999"));
+    CHECK(!cores::tas::rerecord_count("comment", "5"));
     CHECK(
-        cores::rerecord_count("rerecords", "4294967295") == cores::MovieRerecordCount{4294967295u}
+        cores::tas::rerecord_count("rerecords", "4294967295")
+        == cores::tas::MovieRerecordCount{4294967295u}
     );
 }
 
 void test_ram_fill_is_the_codecs() {
-    const auto nes = cores::movie_codec_for("NES", "m.fm2");
-    const auto snes = cores::movie_codec_for("SNES", "m.lsmv");
+    const auto nes = cores::tas::movie_codec_for("NES", "m.fm2");
+    const auto snes = cores::tas::movie_codec_for("SNES", "m.lsmv");
     CHECK(nes.has_value() && snes.has_value());
     if (!nes || !snes)
         return;
-    using Fill = cores::IReplayCore::RamFill;
+    using Fill = cores::tas::IReplayCore::RamFill;
     CHECK(!snes->core().ram_fill_need(Fill::Zero).has_value());
     CHECK(!snes->core().setting_needs_for({}, Fill::Zero).has_value());
     const auto ff = nes->core().ram_fill_need(Fill::Ff);
@@ -3319,7 +3352,7 @@ void test_prepare_play_lead_rom_and_ram() {
     a.lead.reset();
     CHECK(fw::TastyPreflight{*vfs}.play_rom(a).has_value());
     a.rom = {};
-    a.ram_fill = cores::IReplayCore::RamFill::Zero;
+    a.ram_fill = cores::tas::IReplayCore::RamFill::Zero;
     CHECK(a.movie.assign("x.lsmv"));
     {
         StderrTo err;
@@ -3404,9 +3437,9 @@ void test_tasty_refusal_round_trips() {
         Error{Errc::bad_format, infra::kNoSite, fw::TastyRefusal{fw::TastyRefusal::kCount}.detail()}
     ));
     CHECK(!fw::TastyRefusal::of(Error{Errc::bad_format, infra::kNoSite, 7}));
-    CHECK(
-        !fw::TastyRefusal::of(cores::movie_refusal(cores::MovieRefusal::BadLine, infra::kNoSite))
-    );
+    CHECK(!fw::TastyRefusal::of(
+        cores::tas::movie_refusal(cores::tas::MovieRefusal::BadLine, infra::kNoSite)
+    ));
     CHECK(!fw::TastyRefusal::of(
         Error{Errc::os, infra::kNoSite, fw::TastyRefusal{fw::TastyRefusal::NoVerb}.detail()}
     ));
@@ -3470,7 +3503,7 @@ void test_prepare_play_names_its_refusal() {
     );
 
     CHECK(a.movie.assign("x.lsmv"));
-    a.ram_fill = cores::IReplayCore::RamFill::Zero;
+    a.ram_fill = cores::tas::IReplayCore::RamFill::Zero;
     refused(
         [&] { return fw::TastyPreflight{*vfs}.play_rom(a); },
         fw::TastyRefusal::RamInitUnsupported,
@@ -4753,7 +4786,7 @@ int main(int argc, char** argv) {
     test_cli_save_is_play_only();
     test_save_seed_copied();
     test_save_seed_refusals();
-    test_manifest_doc_role_follows_the_core_set();
+    test_manifest_doc_role_is_declared();
     test_registry();
     test_codec_path();
     test_null_osd();

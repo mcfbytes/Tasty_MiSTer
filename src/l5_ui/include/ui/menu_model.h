@@ -17,8 +17,8 @@
 #include "app/dip_cell.h"
 #include "app/launcher_state.h"
 #include "app/event.h"
-#include "app/hd_osd_status.h"
-#include "app/recent_games.h"
+#include "app/hd/hd_osd_status.h"
+#include "app/recents/recent_games.h"
 #include "app/session_identity.h"
 #include "proto/status_cell.h"
 #include "app/tx_digest_cell.h"
@@ -47,6 +47,7 @@
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -64,7 +65,7 @@ struct BuildEnv;
 struct HdPlanInputs;
 struct PageContext;
 
-inline constexpr HdMask kMt32Present{1};
+inline constexpr proto::OsdMask kMt32Present{1};
 
 class MenuModel : public app::IOsdClose {
     TASTY_SEAT_RESIDENT(Ui);
@@ -74,7 +75,7 @@ public:
 
     void on_core_loaded(proto::CoreType type, bool front_end, PageContext& ctx);
 
-    void on_hd_mask(HdMask m, bool front_end, infra::OptRef<app::UiRequestRing> asks);
+    void on_hd_mask(proto::OsdMask m, bool front_end, infra::OptRef<app::UiRequestRing> asks);
     void on_info(app::InfoId id, PageContext& ctx);
     void on_progress(cores::Progress progress, PageContext& ctx);
 
@@ -114,7 +115,7 @@ public:
 
     std::uint32_t bt_refusals() const noexcept { return bt_refusals_; }
 
-    const app::RecentGames& recent_games() const noexcept { return recent_games_; }
+    const app::recents::RecentGames& recent_games() const noexcept { return recent_games_; }
 
     bool bt_pairing_active() const noexcept { return stack_.any_bt_pairing(); }
 
@@ -214,7 +215,7 @@ public:
 
     proto::BindGeneration conf_gen() const noexcept { return mirror_.conf_gen(); }
 
-    [[nodiscard]] app::HdOsdStatus::Badge pause_badge() const noexcept;
+    [[nodiscard]] app::hd::HdOsdStatus::Badge pause_badge() const noexcept;
 
     proto::LinkOp::OsdShow osd_show() const noexcept {
         if (!osd_open())
@@ -258,17 +259,17 @@ public:
 
     static constexpr std::size_t kHdWindowDepths = 16;
 
-    bool describe_top(app::PageDescription& out);
+    bool describe_top(app::hd::PageDescription& out);
 
     void request_repaint() noexcept { repaint_ = true; }
 
     bool repaint_pending() const noexcept { return repaint_; }
 
-    bool status_due(std::chrono::nanoseconds now) const noexcept {
+    bool status_due(os::RawMonotonicClock::time_point now) const noexcept {
         return binding_.front_end() && binding_.ui_capable() && deadlines_.status_due(now);
     }
 
-    bool deadline_due(std::chrono::nanoseconds now) const noexcept {
+    bool deadline_due(os::RawMonotonicClock::time_point now) const noexcept {
         return status_due(now) || deadlines_.fired(now);
     }
 
@@ -283,13 +284,13 @@ public:
 
     std::uint32_t show_edges() const noexcept { return show_latch_.edges(); }
 
-    HdMask hd_mask() const noexcept { return hd_mask_; }
+    proto::OsdMask hd_mask() const noexcept { return hd_mask_; }
 
     proto::OsdMask sdram_cfg() const noexcept {
         return sdram_latch_.cfg().value_or(proto::OsdMask{});
     }
 
-    svc::Tally sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
+    infra::Tally sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
 
     std::uint32_t pump_calls() const noexcept { return pumps_; }
 
@@ -305,7 +306,7 @@ public:
 
     std::uint32_t progress_refusals() const noexcept { return progress_refusals_; }
 
-    svc::Tally page_refusals() const noexcept { return stack_.page_refusals(); }
+    infra::Tally page_refusals() const noexcept { return stack_.page_refusals(); }
 
 private:
     void open_root_(PageContext& ctx, bool hd_allowed);
@@ -352,8 +353,10 @@ private:
 
     void refresh_recent_(PageContext& ctx);
 
-    [[nodiscard]] std::span<const app::PlayedHistory::Record> played_records_(PageContext& ctx);
-    [[nodiscard]] app::RecentGames::Played played_record_() const noexcept;
+    [[nodiscard]] std::span<const app::recents::PlayedHistory::Record> played_records_(
+        PageContext& ctx
+    );
+    [[nodiscard]] app::recents::RecentGames::Played played_record_() const noexcept;
 
     [[nodiscard]] std::unique_ptr<Page> make_hd_list_(
         std::unique_ptr<IHdPlan> plan,
@@ -363,7 +366,7 @@ private:
     PageStack stack_;
     NowPlaying now_playing_{};
 
-    app::RecentGames recent_games_{};
+    app::recents::RecentGames recent_games_{};
 
     infra::IndexedArray<RowIndex, kHdWindowDepths, StackDepth> hd_window_first_{};
     Navigator nav_;
@@ -381,7 +384,7 @@ private:
     std::optional<StackDepth> classic_entry_{};
     bool repaint_ = false;
     bool bootcore_armed_ = false;
-    HdMask hd_mask_{};
+    proto::OsdMask hd_mask_{};
 
     SdramLatch sdram_latch_{};
     proto::ItemTable items_{};

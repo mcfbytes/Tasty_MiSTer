@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "infra/seat.h"
 #include "os/types.h"

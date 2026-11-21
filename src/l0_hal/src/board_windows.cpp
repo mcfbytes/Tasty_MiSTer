@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <utility>
 
+#include "infra/prelude.h"
+
 namespace mister::hal {
 
 Ex<BoardWindows> BoardWindows::open(const BoardProfile& profile, FallbackNotice notice) {

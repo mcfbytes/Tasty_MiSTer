@@ -46,11 +46,13 @@
 #include "infra/message_sum.h"
 #include "infra/path_parts.h"
 #include "hal/boot_handoff.h"
+#include "infra/prelude.h"
 #include "proto/conf_str.h"
 #include "proto/types.h"
 #include "proto/link_op.h"
 #include "proto/rtc_image.h"
 #include "svc/alt_ini_index.h"
+#include "svc/card_dirs.h"
 #include "svc/file.h"
 #include "svc/search_policy.h"
 #include "svc/vfs.h"
@@ -91,7 +93,8 @@ namespace {
         .terms = link.core_terms,
         .sectors = link.sectors,
         .osds = link.osds,
-        .sys = link.sys
+        .sys = link.sys,
+        .pads = link.pads
     };
     return link.doorbell_source ? CoreBuilder::over_source(wiring, *link.doorbell_source)
                                 : CoreBuilder::on_board(wiring);
@@ -204,7 +207,9 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .option_cell = link.option_cell,
               .save_state_asks = link.save_state_asks,
               .save_state_facts = save_state_facts_,
-              .belt = belt_
+              .belt = belt_,
+              .config_cell = link.config_cell,
+              .game_id_cell = game_id_cell_
           }
       ),
       builder_(builder_over(link)),
@@ -290,7 +295,7 @@ void SessionOwner::on_seats_live() noexcept {
     seats_live_ = true;
 }
 
-infra::OptRef<const LauncherProfile> SessionOwner::launcher() const noexcept {
+infra::OptRef<const launcher::LauncherProfile> SessionOwner::launcher() const noexcept {
     return launcher_.profile();
 }
 
@@ -298,7 +303,7 @@ const xthread::Counter& SessionOwner::pause_expiries_cell() const noexcept {
     return switch_.pause_expiries_cell();
 }
 
-const SessionOwner::Count& SessionOwner::recover_polls_cell() const noexcept {
+const xthread::Counter& SessionOwner::recover_polls_cell() const noexcept {
     return readiness_.recover_polls_cell();
 }
 
@@ -645,7 +650,7 @@ void SessionOwner::order_probe_(const proto::ResetEdge& edge) {
         const cores::ResetRow& reset = row->profile.reset;
         if (reset.ejects(edge) || (reset.ladders && reset.reacts(edge)))
             return refuse();
-        if (row->profile.saves_by_channel)
+        if (row->saves_by_channel())
             return refuse();
     }
     if (!director_->open_window())
@@ -931,11 +936,7 @@ void SessionOwner::finish_pick_(UiRequest::Kind asked, CorrelationTag tag, Conte
 
 void SessionOwner::run_load_(const PickedLoad& load) {
     if (const auto gen = attach_row_savestates(load.opensave, load.content.path.view())) {
-        hold_for_savestates(
-            load,
-            *gen,
-            clock_.now().time_since_epoch() + cores::kSaveStateHoldBound
-        );
+        hold_for_savestates(load, *gen, clock_.now() + cores::kSaveStateHoldBound);
         return;
     }
     after_content_(content_.run_attached_load(load, *this));
@@ -946,7 +947,7 @@ void SessionOwner::step_savestate_hold_() {
     if (!hold)
         return;
     if (!savestates_answered_(hold->gen)) {
-        if (clock_.now().time_since_epoch() < hold->due)
+        if (clock_.now() < hold->due)
             return;
         ++tally_.savestate_hold_expiries;
     }
@@ -967,7 +968,7 @@ std::optional<proto::ActKey> SessionOwner::attach_row_savestates(
     const auto& conf = negotiated_.conf_str();
     if (!opensave || !conf || !conf->savestate().has_value())
         return std::nullopt;
-    const proto::ActKey gen = ladder_host_.next_generation();
+    const proto::ActKey gen = ladder_host_.next_act();
     if (!ladder_host_.order_savestates(rom, gen))
         return std::nullopt;
     return gen;
@@ -976,7 +977,7 @@ std::optional<proto::ActKey> SessionOwner::attach_row_savestates(
 void SessionOwner::hold_for_savestates(
     const PickedLoad& load,
     proto::ActKey gen,
-    std::chrono::nanoseconds due
+    os::RawMonotonicClock::time_point due
 ) {
     TASTY_SEAT_BODY(SessionOwner);
     belt_.hold(LoadBelt::SaveStateHold{.load = load, .gen = gen, .due = due});
@@ -1029,7 +1030,7 @@ std::optional<PathText> SessionOwner::open_save_path_(
     const bool replay = choice != UiRequest::SaveChoice::User;
     if (replay && replay_save_root_.empty())
         return std::nullopt;
-    std::string dir(replay ? replay_save_root_.view() : std::string_view{"saves"});
+    std::string dir(replay ? replay_save_root_.view() : svc::kSavesDir);
     dir += '/';
     dir.append(core_name.view());
     if (!card_.ensure_dir(dir))
@@ -1180,7 +1181,7 @@ void SessionOwner::plan_walk_(const LadderHostAdapter::WalkAsk& walk) {
     content_.content_owed() = Owed{};
     belt_.refuse_walk(walk.gen);
     const auto row = cores::find_core(negotiated_.core_name().view());
-    if (!row || row->make_loader == nullptr)
+    if (!row || !row->has_loader())
         return;
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = row->make_loader(
@@ -1364,9 +1365,11 @@ void SessionOwner::order_make_core_(const MakeCoreFacts& facts, const svc::Confi
             .manifest = {.path = built_from, .text = negotiated_.manifest_text()},
             .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{},
             .lw = conf ? conf->lw_windows() : std::span<const proto::AxiLwDecl>{},
+            .lw_presence = negotiated_.lw_presence(),
             .fabric = facts.fabric,
             .fabric_gen = fabric_gen_,
-            .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{}
+            .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{},
+            .terms = negotiated_.terms()
         }
     );
 
@@ -1396,7 +1399,7 @@ void SessionOwner::order_make_core_(const MakeCoreFacts& facts, const svc::Confi
     if (negotiated_.made_with_manifest() && conf && conf->savestate().has_value()) {
         (void)ladder_host_.order_savestates(
             negotiated_.manifest_rel().view(),
-            ladder_host_.next_generation()
+            ladder_host_.next_act()
         );
     }
 
@@ -1632,6 +1635,11 @@ void SessionOwner::finish_core_made_() noexcept {
 void SessionOwner::order_session_up_() noexcept {
     if (rebooting_())
         return refuse_rebooting_(phase::Stimulus::SessionUp);
+
+    if (auto took = builder_.lw_enable().take(); !took) {
+        end_bridge_session_();
+        return;
+    }
     phase_edge_(phase::Stimulus::SessionUp);
 
     saves_.publish_slot_previews();
@@ -1664,6 +1672,14 @@ void SessionOwner::order_session_up_() noexcept {
     builder_.sector().raise(builder_.generation());
 
     builder_.sys().raise(builder_.generation());
+
+    builder_.pad().raise(builder_.generation());
+
+    builder_.lw_enable().arm_lines();
+    if (auto held = builder_.lw_enable().confirm(); !held) {
+        end_bridge_session_();
+        return;
+    }
 
     const bool ladder = ladder_.arm_start(negotiated_.core_name(), index0_taken, ladder_host_);
     const std::string rbf = start_rbf_();
@@ -1747,7 +1763,7 @@ StartChain::Facts SessionOwner::start_facts_(std::string_view rbf, const Session
         .home = home,
         .rbf = rbf,
         .manifest_load = negotiated_.made_with_manifest(),
-        .generic_identity = negotiated_.generic_identity(),
+        .generic_identity = negotiated_.terms().takes_start_chain,
         .index0_taken = up.index0_taken,
         .remembered = up.remembered,
         .ladder = up.ladder,
@@ -1881,14 +1897,16 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
 
     const bool manifest = build_has_manifest_(cs);
     const bool fabric = CoreBuilder::fabric_route(name, manifest);
-    const std::optional<hal::LwOffset> owned = fabric ? builder_.claim_sector(
-                                                            {.name = name,
-                                                             .manifest = manifest,
-                                                             .irqs = cs.irq_bindings(),
-                                                             .lw = lw,
-                                                             .fabric_gen = fabric_gen_}
-                                                        )
-                                                      : std::nullopt;
+    const std::optional<hal::LwOffset> owned = fabric
+        ? builder_.claim_sector(
+              {.name = name,
+               .manifest = manifest,
+               .irqs = cs.irq_bindings(),
+               .lw = lw,
+               .lw_presence = negotiated_.lw_presence(),
+               .fabric_gen = fabric_gen_}
+          )
+        : std::nullopt;
     answer_irq_rows_(cs, lw, owned);
     bind_.joy(name);
 
@@ -1917,13 +1935,13 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
         switch_.pending().path.view()
     );
     if (cs.savestate().has_value() && !name.empty()) {
-        (void)card_.ensure_dir(std::string("savestates/") + std::string(name));
+        (void)card_.ensure_dir(svc::card_rel({svc::kSaveStateDir, name}));
     }
 
     op.cfg = negotiated_.key_names(cs, switch_.pending());
     op.savestate_dir_ready = cs.savestate().has_value();
     (void)push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(op));
-    if (cores::profile_for(name).is_front_end)
+    if (cores::profile_for(name).host.front_end)
         (void)bind_.front_end_pal(cfg.menu_pal != 0);
     bind_.facts(negotiated_.pending_facts());
     bind_.uart(effective_name(name, negotiated_.pending_facts()), &cs);
@@ -1978,6 +1996,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
 
     if (phase_.in_stage<phase::AwaitIdentity>() == nullptr) {
         negotiated_.note_width(w.width);
+        negotiated_.note_lw_presence(w.lw);
         return;
     }
 
@@ -2029,7 +2048,9 @@ void SessionOwner::forget_core() noexcept {
 void SessionOwner::release_and_await_identity_(proto::BindGeneration gen) noexcept {
     order_(proto::LinkOp::ReleaseReset{});
     order_bind_decoders_(proto::LinkOp::DecoderTable::PreSession, gen);
+
     negotiated_.note_width(hal::Width::Byte);
+    negotiated_.note_lw_presence(hal::LwPresence{});
 }
 
 void SessionOwner::pause_wedged() noexcept {
@@ -2048,19 +2069,12 @@ void SessionOwner::programmed(bool ok) {
 
 void SessionOwner::retire_lw_at_exit() noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    if (builder_.sector().mapped())
-        (void)builder_.sector().retire(readiness_.fabric_configured());
-    if (builder_.osd().mapped())
-        (void)builder_.osd().retire(readiness_.fabric_configured());
-    if (builder_.sys().mapped())
-        (void)builder_.sys().retire();
+    (void)builder_.lends().retire_all();
 }
 
 void SessionOwner::fabric_suspect() noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    builder_.sector().abandon();
-    builder_.osd().abandon();
-    builder_.sys().abandon();
+    builder_.lends().abandon_all();
 }
 
 bool SessionOwner::ask_recovery_switch() {
@@ -2094,13 +2108,8 @@ bool SessionOwner::program_owed() const noexcept {
 }
 
 infra::ParkTimeout SessionOwner::wake_hint_ms(infra::ParkTimeout floor_ms) const noexcept {
-    using Wide = std::chrono::duration<std::int64_t, std::milli>;
     const auto until = [this](const os::Deadline& d, infra::ParkTimeout floor) noexcept {
-        const std::int64_t left_ns = d.remaining(clock_.now()).count();
-        if (left_ns <= 0)
-            return infra::kNoWait;
-        const Wide ms = std::chrono::ceil<Wide>(std::chrono::nanoseconds{left_ns});
-        return ms < floor ? std::chrono::duration_cast<infra::ParkTimeout>(ms) : floor;
+        return infra::park_timeout_for(d.remaining(clock_.now()), floor);
     };
 
     if (const auto& owed = reboot_.owed()) {
@@ -2150,10 +2159,10 @@ void SessionOwner::judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on
     if (log_) {
         (void)log_->push(
             LogRec::PhaseTolerated{
-                .gen = t.pause_gen(),
-                .phase = static_cast<std::uint8_t>(t.at),
-                .under = static_cast<std::uint8_t>(t.under),
-                .stimulus = static_cast<std::uint8_t>(on)
+                .gen = t.log_gen(),
+                .phase = t.at,
+                .under = t.under,
+                .stimulus = on
             },
             log_now_()
         );
@@ -2243,9 +2252,9 @@ void SessionOwner::log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept {
     const bool awaited = owes_switch_(c.bind_gen) && wait != nullptr && wait->loaded;
     (void)log_->push(
         LogRec::ConfStrArrived{
-            .bind_gen = c.bind_gen.pause_gen(),
-            .phase = static_cast<std::uint8_t>(phase::kind(phase_.now)),
-            .under = static_cast<std::uint8_t>(phase::kind(phase_.stage())),
+            .bind_gen = c.bind_gen,
+            .phase = phase::kind(phase_.now),
+            .under = phase::kind(phase_.stage()),
             .awaited = awaited
         },
         log_now_()
@@ -2253,7 +2262,7 @@ void SessionOwner::log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept {
 }
 
 std::chrono::nanoseconds SessionOwner::log_now_() const noexcept {
-    return clock_.now().time_since_epoch();
+    return os::since_boot(clock_.now());
 }
 
 void SessionOwner::phase_after_watch_(const std::optional<ReadinessWatch::End>& end) noexcept {

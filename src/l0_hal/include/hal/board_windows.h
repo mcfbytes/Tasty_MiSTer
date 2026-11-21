@@ -9,7 +9,7 @@
 #include <span>
 #include <utility>
 
-#include "infra/claim_set.h"
+#include "infra/xthread/claim_set.h"
 #include "infra/error.h"
 #include "hal/axi.h"
 #include "hal/board_profile.h"
@@ -19,6 +19,7 @@
 #include "hal/register_window.h"
 #include "hal/taken_window.h"
 #include "hal/window_decl.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 
@@ -65,11 +66,11 @@ public:
 
     [[nodiscard]] Ex<Mailbox> take_mailbox();
 
-    [[nodiscard]] infra::ClaimSetCounts window_counts() const noexcept {
+    [[nodiscard]] xthread::ClaimSetCounts window_counts() const noexcept {
         return window_claims_->counts();
     }
 
-    [[nodiscard]] infra::ClaimSetCounts mailbox_counts() const noexcept {
+    [[nodiscard]] xthread::ClaimSetCounts mailbox_counts() const noexcept {
         return mailbox_claims_->counts();
     }
 

@@ -9,6 +9,9 @@
 #include <iterator>
 
 #include "app/ui_request.h"
+#include "infra/prelude.h"
+#include "os/clock.h"
+#include "os/timespec.h"
 
 namespace mister::ui {
 
@@ -112,7 +115,7 @@ const char* request_name(app::UiRequest::Kind k) noexcept {
 }
 
 std::int64_t monotonic_ns() noexcept {
-    return std::chrono::steady_clock::now().time_since_epoch().count();
+    return os::since_boot(os::steady_now()).count();
 }
 
 }

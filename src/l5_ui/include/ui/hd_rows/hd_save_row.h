@@ -4,14 +4,14 @@
 #include <optional>
 
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
 class IOptionsSurface;
 class SavedBaseline;
 
-class HdSaveRow final : public IHdRow {
+class HdSaveRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -20,8 +20,8 @@ public:
           baseline_(baseline) {}
 
     std::optional<RowKey> key() const override;
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
+    Transition select(const RowCx&) override;
 
 private:
     IOptionsSurface& host_;

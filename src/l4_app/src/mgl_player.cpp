@@ -10,9 +10,11 @@
 #include <span>
 
 #include "app/mgl_item_dispatch.h"
+#include "cores/boot_asset.h"
 #include "cores/stock_scan.h"
 #include "infra/ascii.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
 
@@ -22,6 +24,14 @@ namespace xml = svc::xml;
 using cores::stock_scan::Radix;
 using cores::stock_scan::scan_ul;
 using infra::ieq;
+
+static_assert(
+    InternedFile::kMaxLiveFiles
+    == cores::kMaxStartAssets
+        + (MglPlayer::kMaxItems - 1)
+        + cores::kMaxBootBuffers
+        + InternedFile::kHeldOps
+);
 
 namespace {
 

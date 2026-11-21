@@ -21,8 +21,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "TASTY_TESTS": "OFF",
-        "TASTY_WERROR": "OFF",
-        "TASTY_WITH_HDOSD": "ON"
+        "TASTY_WERROR": "OFF"
       }
     }
   ],

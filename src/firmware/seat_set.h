@@ -7,24 +7,46 @@
 #include <span>
 
 #include "seat_row.h"
+#include "infra/prelude.h"
 #include "seat_slots.h"
 #include "hal/thread_map.h"
 
 namespace mister::app {
 class RtMain;
-class InputMain;
-class PcmMain;
+}
+
+namespace mister::app::capture {
 class CaptureMain;
 class EncodeMain;
 class RecWriteMain;
+}
+
+namespace mister::app::launcher {
 class LauncherMain;
+}
+
+namespace mister::app::hd {
 class HdOsdMain;
+}
+
+namespace mister::app::input {
+class InputMain;
+}
+
+namespace mister::app::connect {
 class ConnectMain;
 }
 
+namespace mister::app::pcm {
+class PcmMain;
+}
+
 namespace mister::svc {
-class PrefetchMain;
 class IoMain;
+}
+
+namespace mister::svc::disc {
+class PrefetchMain;
 }
 
 namespace mister::reactor {
@@ -39,18 +61,18 @@ class UiMain;
 using SeatMainList = SeatList<
     SeatRow<SeatTag::RT, app::RtMain>,
     SeatRow<SeatTag::Frame, reactor::FrameMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::Input, app::InputMain>,
-    SeatRow<SeatTag::Pcm, app::PcmMain>,
-    SeatRow<SeatTag::Prefetch, svc::PrefetchMain>,
+    SeatRow<SeatTag::Input, app::input::InputMain>,
+    SeatRow<SeatTag::Pcm, app::pcm::PcmMain>,
+    SeatRow<SeatTag::Prefetch, svc::disc::PrefetchMain>,
     SeatRow<SeatTag::Diag, DiagMain>,
     SeatRow<SeatTag::Ui, UiMain>,
     SeatRow<SeatTag::Io, svc::IoMain>,
-    SeatRow<SeatTag::Capture, app::CaptureMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::Encode, app::EncodeMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::RecWrite, app::RecWriteMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::Launcher, app::LauncherMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::HdOsd, app::HdOsdMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::Connect, app::ConnectMain, Presence::ConfigDependent>>;
+    SeatRow<SeatTag::Capture, app::capture::CaptureMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Encode, app::capture::EncodeMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::RecWrite, app::capture::RecWriteMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Launcher, app::launcher::LauncherMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::HdOsd, app::hd::HdOsdMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Connect, app::connect::ConnectMain, Presence::ConfigDependent>>;
 
 constexpr std::size_t seat_index(SeatTag s) noexcept {
     return hal::row_index(s);

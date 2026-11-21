@@ -4,24 +4,25 @@
 #include <optional>
 
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
-class HdGatedRow final : public IHdRow {
+class HdGatedRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    HdGatedRow(IHdRow& row, const bool& when) noexcept : row_(row), when_(when) {}
+    HdGatedRow(IRow& row, const bool& when) noexcept : row_(row), when_(when) {}
 
     bool shown() const override;
     std::optional<RowKey> key() const override;
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
-    Transition step(CycleDir dir) override;
+
+    app::hd::PageDescription::Row describe(const RowCx& cx) const override;
+    Transition select(const RowCx& cx) override;
+    Transition step(CycleDir dir, const RowCx& cx) override;
 
 private:
-    IHdRow& row_;
+    IRow& row_;
     const bool& when_;
 };
 

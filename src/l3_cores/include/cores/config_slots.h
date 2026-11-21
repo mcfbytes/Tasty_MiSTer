@@ -9,6 +9,7 @@
 #include "cores/config_codec.h"
 #include "cores/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

@@ -8,11 +8,12 @@
 #include "app/board_ops.h"
 #include "app/ini_cell.h"
 #include "app/ini_parse.h"
-#include "app/launcher_profile.h"
+#include "app/launcher/launcher_profile.h"
 #include "app/mra_facts.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::svc {
 class Vfs;
@@ -31,7 +32,7 @@ public:
     struct Resolved {
         svc::ConfigSnapshot cfg{};
         bool waitmount_exhausted = false;
-        infra::OptRef<const LauncherProfile> launcher{};
+        infra::OptRef<const launcher::LauncherProfile> launcher{};
     };
 
     CoreIni(

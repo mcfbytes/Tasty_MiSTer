@@ -5,9 +5,9 @@
 
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
-#include "svc/bt_device_view.h"
-#include "svc/bt_page_mode.h"
-#include "svc/connect_request.h"
+#include "svc/connect/bt_device_view.h"
+#include "svc/connect/bt_page_mode.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/slot_range.h"
@@ -15,19 +15,24 @@
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 
 constexpr std::array<std::string_view, 3> kWhenIdle{"Connect", "Remove", "Back"};
 constexpr std::array<std::string_view, 3> kWhenConnected{"Disconnect", "Remove", "Back"};
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
-constexpr SlotRange kPaired = SlotRange::table(RowCount::of(svc::BtDeviceView::kRows));
-constexpr RowIndex kAct = RowIndex::of(0);
-constexpr RowIndex kRemove = RowIndex::of(1);
-constexpr RowIndex kYes = RowIndex::of(0);
-constexpr RowIndex kOnNo = RowIndex::of(1);
+constexpr SlotRange kPaired = SlotRange::table(
+    RowCount::truncating(svc::connect::BtDeviceView::kRows)
+);
+constexpr RowIndex kAct = RowIndex::truncating(0);
+constexpr RowIndex kRemove = RowIndex::truncating(1);
+constexpr RowIndex kYes = RowIndex::truncating(0);
+constexpr RowIndex kOnNo = RowIndex::truncating(1);
 
-infra::OptRef<const svc::BtDeviceViewRow> paired_at(const ConnectViews& views, SlotId slot) {
+infra::OptRef<const svc::connect::BtDeviceViewRow> paired_at(
+    const ConnectViews& views,
+    SlotId slot
+) {
     const std::optional<std::size_t> want = kPaired.subscript_of(slot);
     if (!views.devices || !want)
         return std::nullopt;
@@ -38,7 +43,7 @@ infra::OptRef<const svc::BtDeviceViewRow> paired_at(const ConnectViews& views, S
         if (!row->paired)
             continue;
         if (seen++ == *want)
-            return infra::OptRef<const svc::BtDeviceViewRow>{*row};
+            return infra::OptRef<const svc::connect::BtDeviceViewRow>{*row};
     }
     return std::nullopt;
 }
@@ -66,7 +71,7 @@ bool BtDevicesPlan::remembers_focus() const noexcept {
 
 ConnectDemand BtDevicesPlan::connect_demand() const {
     TASTY_SEAT_BODY(BtDevicesPlan);
-    return ConnectDemand::bluetooth(svc::BtPageMode::Paired, PairStart::Pick);
+    return ConnectDemand::bluetooth(svc::connect::BtPageMode::Paired, PairStart::Pick);
 }
 
 bool BtDevicesPlan::slot_shown(SlotId slot) const {
@@ -74,9 +79,9 @@ bool BtDevicesPlan::slot_shown(SlotId slot) const {
     return paired_at(views(), slot).has_value();
 }
 
-app::PageDescription::Row BtDevicesPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row BtDevicesPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(BtDevicesPlan);
-    const infra::OptRef<const svc::BtDeviceViewRow> row = paired_at(views(), slot);
+    const infra::OptRef<const svc::connect::BtDeviceViewRow> row = paired_at(views(), slot);
     if (!row)
         return connect_row(RowKind::Action, {});
     const std::string name{row->name.empty() ? row->addr.format().view() : row->name.view()};
@@ -85,7 +90,7 @@ app::PageDescription::Row BtDevicesPlan::slot_describe(SlotId slot) const {
 
 Transition BtDevicesPlan::slot_select(SlotId slot) {
     TASTY_SEAT_BODY(BtDevicesPlan);
-    const infra::OptRef<const svc::BtDeviceViewRow> row = paired_at(views(), slot);
+    const infra::OptRef<const svc::connect::BtDeviceViewRow> row = paired_at(views(), slot);
     if (!row)
         return Transition{};
     asked_ = row->addr;

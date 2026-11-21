@@ -3,20 +3,20 @@
 
 #include <optional>
 
-#include "app/avi_write_status.h"
-#include "app/encode_status.h"
-#include "app/rec_write_status.h"
-#include "app/recorder_status.h"
+#include "app/capture/avi_write_status.h"
+#include "app/capture/encode_status.h"
+#include "app/capture/rec_write_status.h"
+#include "app/capture/recorder_status.h"
 #include "infra/json_out.h"
 #include "record_ctx.h"
 
 namespace mister::fw {
 
 struct RecView {
-    app::RecorderStatus capture{};
-    app::EncodeStatus encode{};
-    app::RecWriteStatus write{};
-    app::AviWriteStatus avi{};
+    app::capture::RecorderStatus capture{};
+    app::capture::EncodeStatus encode{};
+    app::capture::RecWriteStatus write{};
+    app::capture::AviWriteStatus avi{};
 };
 
 constexpr void to_json(infra::JsonOut& o, const RecView& v) noexcept {
@@ -30,10 +30,10 @@ constexpr void to_json(infra::JsonOut& o, const RecView& v) noexcept {
 struct RecRecord {
     static constexpr infra::JsonName kKey{"rec"};
     using View = RecView;
-    const app::RecorderStatusCell& capture;
-    const app::EncodeStatusCell& encode;
-    const app::RecWriteStatusCell& write;
-    const app::AviWriteStatusCell& avi;
+    const app::capture::RecorderStatusCell& capture;
+    const app::capture::EncodeStatusCell& encode;
+    const app::capture::RecWriteStatusCell& write;
+    const app::capture::AviWriteStatusCell& avi;
 
     [[nodiscard]] std::optional<View> sample(const RecordCtx&) const noexcept {
         View v;

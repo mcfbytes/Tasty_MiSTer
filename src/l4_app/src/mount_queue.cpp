@@ -8,6 +8,7 @@
 #include "app/remembered_path.h"
 #include "cores/core_profile.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "proto/conf_str.h"
 #include "svc/vfs.h"
 
@@ -79,7 +80,7 @@ void MountQueue::arm_mount(Host& host, const MountAsk& ask) {
         save_mount_.emplace(
             SaveMount{
                 .ask = routed,
-                .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
+                .due = os::Deadline::in(clock_, kSaveMountBound),
                 .bracketed = framed
             }
         );
@@ -150,7 +151,7 @@ void MountQueue::step_save_mount(Host& host) {
 
     if (m.gen && on_known_(host, slot))
         return;
-    if (clock_.now().time_since_epoch().count() >= m.due_ns) {
+    if (m.due.expired(clock_)) {
         on_timeout_(host, slot);
         return;
     }
@@ -169,9 +170,9 @@ bool MountQueue::on_known_(Host& host, proto::SlotIndex slot) {
     SaveMount& m = *save_mount_;
     const std::string_view path = m.ask.path.view();
     const cores::SaveExtent e = host.ladder_host().save_extent();
-    if (e.generation == m.gen && e.answer == cores::SaveAnswer::Declined)
+    if (e.act == m.gen && e.answer == cores::SaveVerdict::Declined)
         m.gen = {};
-    if (e.generation != m.gen || e.answer != cores::SaveAnswer::Known)
+    if (e.act != m.gen || e.answer != cores::SaveVerdict::Known)
         return false;
     if (path.empty()) {
         finish_save_mount_(host, true);
@@ -217,7 +218,7 @@ void MountQueue::on_timeout_(Host& host, proto::SlotIndex slot) {
     const std::string_view path = m.ask.path.view();
     if (!path.empty() && m.gen)
         (void)host.ladder_host().order(
-            proto::LinkOp::DetachSave{.slot = slot, .act = host.ladder_host().next_generation()}
+            proto::LinkOp::DetachSave{.slot = slot, .act = host.ladder_host().next_act()}
         );
     if (m.then_load) {
 
@@ -247,7 +248,7 @@ void MountQueue::advance_unmount_(Host& host, proto::SlotIndex slot) {
             return;
         m.unmounted = true;
     }
-    const proto::ActKey g = host.ladder_host().next_generation();
+    const proto::ActKey g = host.ladder_host().next_act();
     if (!host.ladder_host().order(proto::LinkOp::DetachSave{.slot = slot, .act = g}))
         return;
     m.gen = g;
@@ -261,7 +262,7 @@ void MountQueue::advance_attach_(Host& host, proto::SlotIndex slot) {
     const auto id = host.ladder_host().intern_path(path, proto::FileSize{});
     if (!id)
         return;
-    const proto::ActKey g = host.ladder_host().next_generation();
+    const proto::ActKey g = host.ladder_host().next_act();
 
     if (!host.ladder_host().order(
             proto::LinkOp::AttachSave{
@@ -344,7 +345,7 @@ void MountQueue::arm_start_mount_(Host& host, const MountAsk& ask) {
             save_mount_.emplace(
                 SaveMount{
                     .ask = ask,
-                    .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
+                    .due = os::Deadline::in(clock_, kSaveMountBound),
                     .bracketed = false,
                     .start = true
                 }
@@ -426,7 +427,7 @@ void MountQueue::arm_boot_image_(const MountAsk& ask) {
             save_mount_.emplace(
                 SaveMount{
                     .ask = ask,
-                    .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
+                    .due = os::Deadline::in(clock_, kSaveMountBound),
                     .bracketed = false,
                     .start = true
                 }
@@ -443,11 +444,7 @@ void MountQueue::arm_boot_image_(const MountAsk& ask) {
 void MountQueue::arm_load_save(const MountAsk& ask, const ContentRequest& load) {
     TASTY_SEAT_BODY(MountQueue);
     save_mount_.emplace(
-        SaveMount{
-            .ask = ask,
-            .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
-            .then_load = load
-        }
+        SaveMount{.ask = ask, .due = os::Deadline::in(clock_, kSaveMountBound), .then_load = load}
     );
 }
 

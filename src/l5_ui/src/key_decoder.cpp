@@ -132,14 +132,14 @@ void KeyDecoder::reset() noexcept {
     ring_ = KeyRing{};
     last_seen_ = proto::KeyCode{};
     db_pending_.reset();
-    db_at_ = std::chrono::nanoseconds{};
-    repeat_at_ = std::chrono::nanoseconds{};
+    db_at_ = os::RawMonotonicClock::time_point{};
+    repeat_at_ = os::RawMonotonicClock::time_point{};
     hold_cnt_ = 0;
 }
 
 std::optional<UiEvent> KeyDecoder::deliver_(
     proto::KeyCode code,
-    std::chrono::nanoseconds now,
+    os::RawMonotonicClock::time_point now,
     bool first
 ) noexcept {
     std::optional<proto::KeyCode> c;
@@ -170,7 +170,7 @@ std::optional<UiEvent> KeyDecoder::deliver_(
 
 std::optional<UiEvent> KeyDecoder::accept_(
     proto::KeyCode code,
-    std::chrono::nanoseconds now
+    os::RawMonotonicClock::time_point now
 ) noexcept {
     last_seen_ = code;
     db_at_ = now + kDebounce;
@@ -178,12 +178,12 @@ std::optional<UiEvent> KeyDecoder::accept_(
 }
 
 std::optional<UiEvent> KeyDecoder::pop() noexcept {
-    const std::chrono::nanoseconds now = clock_->now().time_since_epoch();
+    const os::RawMonotonicClock::time_point now = clock_->now();
 
     if (db_pending_.has_value() && now >= db_at_) {
         const proto::KeyCode bounced = *db_pending_;
         db_pending_.reset();
-        db_at_ = std::chrono::nanoseconds{};
+        db_at_ = os::RawMonotonicClock::time_point{};
 
         if (held_make(bounced) && ring_.empty()) {
             (void)ring_.push(QueuedKey{.code = bounced, .synth = false});

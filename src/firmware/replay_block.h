@@ -2,10 +2,10 @@
 #pragma once
 
 #include "app/osd_close.h"
-#include "app/replay_control.h"
-#include "app/replay_feeder.h"
-#include "app/replay_gate.h"
-#include "app/replay_msg.h"
+#include "app/replay/replay_control.h"
+#include "app/replay/replay_feeder.h"
+#include "app/replay/replay_gate.h"
+#include "app/replay/replay_msg.h"
 #include "app/replay_status.h"
 #include "app/screenshot_pump.h"
 #include "boot_parts.h"
@@ -27,11 +27,11 @@ public:
     ReplayBlock(const ReplayBlock&) = delete;
     ReplayBlock& operator=(const ReplayBlock&) = delete;
 
-    app::ReplayRing replay_ring_{};
-    app::ReplayControlCell replay_control_{};
+    app::replay::ReplayRing replay_ring_{};
+    app::replay::ReplayControlCell replay_control_{};
     app::ReplayStatusCell replay_status_{};
-    app::ReplayGate replay_gate_;
-    app::ReplayFeeder replay_feeder_;
+    app::replay::ReplayGate replay_gate_;
+    app::replay::ReplayFeeder replay_feeder_;
 };
 
 }

@@ -14,6 +14,7 @@
 
 #include "app/cheat_catalog_cell.h"
 #include "app/conf_str_cell.h"
+#include "app/core_name.h"
 #include "app/core_scope.h"
 #include "app/intern_exact.h"
 #include "app/link_rx_channel.h"
@@ -24,17 +25,20 @@
 #include "app/remembered_path.h"
 #include "app/ui_request.h"
 #include "app/xml_kind.h"
-#include "cores/ram_image_recipe.h"
+#include "cores/tas/ram_image_recipe.h"
 #include "cores/save_probe_rows.h"
+#include "hal/lw_presence.h"
 #include "hal/phys_region.h"
 #include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "proto/link_event.h"
 #include "proto/save_trigger.h"
+#include "proto/session_terms.h"
 #include "proto/types.h"
 #include "svc/vfs.h"
 
@@ -126,12 +130,12 @@ public:
 
     void forget() noexcept;
 
-    void hold_ram_image(const cores::RamImageRecipe& recipe) noexcept {
+    void hold_ram_image(const cores::tas::RamImageRecipe& recipe) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         pending_ram_image_ = recipe;
     }
 
-    [[nodiscard]] cores::RamImageRecipe take_ram_image() noexcept {
+    [[nodiscard]] cores::tas::RamImageRecipe take_ram_image() noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return std::exchange(pending_ram_image_, {});
     }
@@ -150,17 +154,22 @@ public:
 
     void note_identity(const proto::LinkEvent::IdentityMatched& w) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
-        generic_identity_ = proto::fold_core_type(w.type_byte) == proto::CoreType::EightBit;
+        terms_ = proto::SessionTerms::of(proto::fold_core_type(w.type_byte));
     }
 
     void forget_identity() noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
-        generic_identity_ = false;
+        terms_ = proto::SessionTerms{};
     }
 
     void note_width(hal::Width width) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         link_width_ = width;
+    }
+
+    void note_lw_presence(hal::LwPresence lw) noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        lw_presence_ = lw;
     }
 
     void facts_sent() noexcept {
@@ -190,7 +199,7 @@ public:
         return s.gen == conf_str_gen_;
     }
 
-    [[nodiscard]] const FixedStr<64, StrFit::Clip>& core_name() const noexcept {
+    [[nodiscard]] const CoreName& core_name() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return core_name_;
     }
@@ -225,14 +234,19 @@ public:
         return defmra_rel_;
     }
 
-    [[nodiscard]] bool generic_identity() const noexcept {
+    [[nodiscard]] const proto::SessionTerms& terms() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
-        return generic_identity_;
+        return terms_;
     }
 
     [[nodiscard]] hal::Width link_width() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return link_width_;
+    }
+
+    [[nodiscard]] hal::LwPresence lw_presence() const noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        return lw_presence_;
     }
 
     [[nodiscard]] bool core_live() const noexcept {
@@ -280,8 +294,8 @@ private:
     LinkTxChannel<SeatTag::Main>& inbox_;
     CheatCatalog cheats_{};
 
-    FixedStr<64, StrFit::Clip> core_name_{};
-    bool generic_identity_ = false;
+    CoreName core_name_{};
+    proto::SessionTerms terms_{};
 
     PathText saved_cfg_stem_{};
 
@@ -294,8 +308,9 @@ private:
 
     bool core_live_ = false;
     hal::Width link_width_ = hal::Width::Byte;
+    hal::LwPresence lw_presence_{};
 
-    cores::RamImageRecipe pending_ram_image_{};
+    cores::tas::RamImageRecipe pending_ram_image_{};
     bool made_with_manifest_ = false;
     PathText manifest_rel_{};
     std::vector<std::uint8_t> manifest_doc_{};

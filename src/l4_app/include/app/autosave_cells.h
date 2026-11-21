@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 
 namespace mister::app {

@@ -4,7 +4,6 @@
 #include <pthread.h>
 
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -16,16 +15,17 @@
 #include "seat_set.h"
 #include "hal/thread_map.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/opt_ref.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "diag_main.h"
 #include "diag_sampler.h"
 #include "ui_main.h"
 #include "infra/seat.h"
 #include "os/kernel_tid.h"
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 class DiagLog;
 struct RtStats;
 }
@@ -39,6 +39,7 @@ class VideoPump;
 namespace mister::fw {
 
 struct SeatBirth {
+    os::KernelTid tid{};
     RtSetup name{};
     RtSetup affinity{};
 };
@@ -53,7 +54,7 @@ class ThreadAssembly {
 public:
     struct DiagWires {
         xthread::DiagLog& log;
-        xthread::LogLane& rt_lane;
+        app::LogLane& rt_lane;
     };
 
     ThreadAssembly(
@@ -110,9 +111,7 @@ public:
 
     xthread::WakeFlag& supervisor_wake() noexcept { return main_wake_; }
 
-    [[nodiscard]] bool rt_exited() const noexcept {
-        return rt_exited_.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] bool rt_exited() const noexcept { return rt_outcome_.generation().held(); }
 
     [[nodiscard]] Ex<void> join_rt_within(std::chrono::nanoseconds deadline);
     [[nodiscard]] Ex<void> join_io_within(std::chrono::nanoseconds deadline);
@@ -143,10 +142,13 @@ public:
     const RtEvidence& evidence() const noexcept { return ev_; }
 
     [[nodiscard]] std::optional<os::KernelTid> tid(SeatTag s) const noexcept {
-        const os::KernelTid published = seats_[seat_index(s)].tid.load(std::memory_order_acquire);
-        if (published == kNoTidPublished)
+        const xthread::Telemetry<SeatBirth>& cell = seats_[seat_index(s)].birth;
+        if (!cell.generation().held())
             return std::nullopt;
-        return published;
+        const auto birth = cell.sample();
+        if (!birth)
+            return std::nullopt;
+        return birth.value.tid;
     }
 
     [[nodiscard]] bool io_wedged() const noexcept { return io_poisoned_; }
@@ -191,12 +193,10 @@ private:
 
     struct LiveSeat {
         pthread_t handle{};
-        std::atomic<os::KernelTid> tid{};
         bool live = false;
         xthread::Telemetry<SeatBirth> birth{};
     };
 
-    static constexpr os::KernelTid kNoTidPublished{};
     std::array<LiveSeat, hal::kThreadSeats> seats_{};
     bool io_poisoned_ = false;
 
@@ -204,9 +204,6 @@ private:
     xthread::WakeFlag& main_wake_;
 
     xthread::DiagLog& diag_log_;
-
-    std::atomic<bool> rt_exited_{false};
-    std::atomic<bool> io_exited_{false};
     xthread::WakeFlag quiescing_;
     Ex<void> born_{};
 

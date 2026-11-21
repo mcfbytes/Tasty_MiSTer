@@ -9,7 +9,7 @@
 namespace mister::ui {
 
 static_assert(
-    proto::kInfoMaxWidth == proto::OsdColCount::of(IndicatorCanvas::Line::kCapacity),
+    proto::kInfoMaxWidth == proto::OsdColCount::saturating(IndicatorCanvas::Line::kCapacity),
     "a canvas line is as wide as the widest info line"
 );
 

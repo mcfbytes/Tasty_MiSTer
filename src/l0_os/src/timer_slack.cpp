@@ -5,6 +5,8 @@
 
 #include <cerrno>
 
+#include "infra/prelude.h"
+
 namespace mister::os {
 namespace {
 

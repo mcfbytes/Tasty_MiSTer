@@ -12,8 +12,8 @@
 #include <string_view>
 #include <utility>
 
-#include "app/input_gates_cell.h"
-#include "app/png_encoder.h"
+#include "app/input/input_gates_cell.h"
+#include "app/capture/png_encoder.h"
 #include "app/prelude_stats.h"
 
 #include "app/cmd_fifo.h"
@@ -31,43 +31,51 @@
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "app/osd_route.h"
+#include "app/pad_route.h"
 #include "app/sys_route.h"
 #include "app/load_window_counts.h"
 #include "app/video_pump.h"
-#include "app/avi_write_status.h"
-#include "app/encode_status.h"
-#include "app/rec_write_status.h"
-#include "app/recorder_status.h"
+#include "app/capture/avi_write_status.h"
+#include "app/capture/encode_status.h"
+#include "app/capture/rec_write_status.h"
+#include "app/capture/recorder_status.h"
 #include "app/replay_status.h"
-#include "app/hd_osd_status.h"
+#include "app/hd/hd_osd_status.h"
 #include "diag_records.h"
 #include "main_sess_cells.h"
 #include "rt_evidence.h"
 #include "sess_view.h"
-#include "infra/counter.h"
-#include "infra/diag_log.h"
-#include "infra/log_lane.h"
+#include "infra/prelude.h"
+#include "infra/xthread/counter.h"
+#include "infra/xthread/diag_log.h"
+#include "app/log_lane.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
-#include "infra/rt_stats.h"
+#include "infra/xthread/rt_stats.h"
 #include "infra/service_set.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "hal/thread_map.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 #include "svc/input_gates.h"
 #include "svc/io_pass.h"
 
 namespace mister::app {
-class IFrameSource;
-class InputBuild;
-struct InputSample;
 class ScreenshotQueue;
 class VideoWire;
+
+namespace input {
+class InputBuild;
+struct InputSample;
+}
 }
 
-namespace mister::svc {
+namespace mister::app::capture {
+class IFrameSource;
+}
+
+namespace mister::svc::disc {
 class ChdPrefetch;
 }
 
@@ -122,7 +130,9 @@ public:
         infra::OptRef<const app::OsdLeaseCell> osd_lease{};
         infra::OptRef<const app::SysLeaseCell> sys_lease{};
         infra::OptRef<const svc::IoPassCell> io_pass{};
-        infra::OptRef<xthread::MainLogLane> main_log{};
+        infra::OptRef<const app::PadRouteCell> pad_route{};
+        infra::OptRef<const app::PadLeaseCell> pad_lease{};
+        infra::OptRef<app::MainLogLane> main_log{};
     };
 
     struct Sources {
@@ -134,19 +144,19 @@ public:
         const app::VideoWire& video_wire;
         const xthread::Telemetry<app::PreludeStats, SeatTag::Ui>& prelude_stats;
         infra::OptRef<const app::UiPageCell> ui_pages{};
-        infra::OptRef<const app::HdOsdStatusCell> hd{};
+        infra::OptRef<const app::hd::HdOsdStatusCell> hd{};
         const app::ReplayStatusCell& replay;
-        const app::RecorderStatusCell& rec_capture;
-        const app::EncodeStatusCell& rec_encode;
-        const app::RecWriteStatusCell& rec_write;
-        const app::AviWriteStatusCell& rec_avi;
+        const app::capture::RecorderStatusCell& rec_capture;
+        const app::capture::EncodeStatusCell& rec_encode;
+        const app::capture::RecWriteStatusCell& rec_write;
+        const app::capture::AviWriteStatusCell& rec_avi;
     };
 
     struct Services {
-        infra::OptRef<app::IFrameSource> frame_source{};
-        infra::OptRef<const app::InputSample> input_sample{};
-        infra::OptRef<app::InputBuild> input_build{};
-        infra::OptRef<const svc::ChdPrefetch> prefetch{};
+        infra::OptRef<app::capture::IFrameSource> frame_source{};
+        infra::OptRef<const app::input::InputSample> input_sample{};
+        infra::OptRef<app::input::InputBuild> input_build{};
+        infra::OptRef<const svc::disc::ChdPrefetch> prefetch{};
     };
 
     struct Wiring {
@@ -155,7 +165,7 @@ public:
         const Main<RtEvidence>& ev;
         const xthread::WakeFlag& quiescing;
         xthread::DiagLog& diag;
-        xthread::LogLane& rt_lane;
+        app::LogLane& rt_lane;
     };
 
     DiagSampler(const Wiring& wiring, const Sources& sources, const Services& services) noexcept;
@@ -167,7 +177,7 @@ public:
 
     const xthread::DiagLog& diag() const noexcept { return diag_; }
 
-    xthread::LogLane* rt_log_lane() noexcept { return &lane_rt_; }
+    app::LogLane* rt_log_lane() noexcept { return &lane_rt_; }
 
     void set_screenshot_dir(std::string dir) noexcept { shot_dir_ = std::move(dir); }
 
@@ -210,20 +220,20 @@ public:
     void observe_rss(RssSample reading) noexcept;
     static constexpr unsigned kRssOverSamples = 2;
 
-    void on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::StagingRung& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::CoreLoad& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::CoreUnload& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::Mount& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::Unmount& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::Refusal& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noexcept;
-    void on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept;
-    void misrouted(const LogRec& r) noexcept;
+    void on(const app::LogRec::DeadlineMiss& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::SessionTransition& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::StagingRung& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::CoreLoad& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::CoreUnload& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::Mount& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::Unmount& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::Refusal& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::RingLoss& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::DoorbellBound& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::DoorbellPolling& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::PhaseTolerated& a, const app::LogRec::Head& h) noexcept;
+    void on(const app::LogRec::ConfStrArrived& a, const app::LogRec::Head& h) noexcept;
+    void misrouted(const app::LogRec& r) noexcept;
 
     void on(const reactor::RoundTrace::SlowSteady& a) noexcept;
     void on(const reactor::RoundTrace::SlowLifecycle& a) noexcept;
@@ -282,21 +292,27 @@ private:
     template <DiagRecord R>
     void emit_(const R& r, const RecordCtx& ctx) noexcept;
 
-    void render_log_rec(const LogRec& r) noexcept;
-    void line_(LogRec::Kind k, const LogRec::Head& h, std::uint32_t a, std::uint32_t b) noexcept;
+    void render_log_rec(const app::LogRec& r) noexcept;
+    void line_(
+        app::LogRec::Kind k,
+        const app::LogRec::Head& h,
+        std::uint32_t a,
+        std::uint32_t b
+    ) noexcept;
 
     struct LogWords {
         infra::DecimalText a;
         infra::DecimalText b;
     };
 
-    void line_(LogRec::Kind k, const LogRec::Head& h, const LogWords& w) noexcept;
+    void line_(app::LogRec::Kind k, const app::LogRec::Head& h, const LogWords& w) noexcept;
     void line_(
-        LogRec::Kind k,
-        const LogRec::Head& h,
+        app::LogRec::Kind k,
+        const app::LogRec::Head& h,
         std::chrono::duration<std::uint32_t, std::nano> a,
         ServiceSlot slot
     ) noexcept;
+    void line_(app::LogRec::Kind k, const app::LogRec::Head& h, proto::SlotIndex slot) noexcept;
 
     void drain_log_lane() noexcept;
 
@@ -345,10 +361,10 @@ private:
 
     static constexpr TraceLines kTraceLinesPerWindow{16};
 
-    using LossCounts = std::array<std::uint32_t, infra::ordinal(LogRec::Kind::kCount)>;
+    using LossCounts = std::array<std::uint32_t, infra::ordinal(app::LogRec::Kind::kCount)>;
 
     using LossMoves = std::
-        array<std::optional<std::uint32_t>, infra::ordinal(LogRec::Kind::kCount)>;
+        array<std::optional<std::uint32_t>, infra::ordinal(app::LogRec::Kind::kCount)>;
 
     struct LossWatch {
         TASTY_SEAT_RESIDENT(Diag);
@@ -396,18 +412,18 @@ private:
 
     const app::VideoWire& video_wire_;
     const xthread::Telemetry<app::PreludeStats, SeatTag::Ui>& prelude_stats_;
-    infra::OptRef<app::InputBuild> input_build_{};
-    infra::OptRef<const app::InputSample> input_{};
+    infra::OptRef<app::input::InputBuild> input_build_{};
+    infra::OptRef<const app::input::InputSample> input_{};
 
-    app::InputGatesCell::Reader gates_reader_{};
+    app::input::InputGatesCell::Reader gates_reader_{};
     svc::InputGates gates_seen_{};
-    infra::OptRef<const svc::ChdPrefetch> prefetch_{};
+    infra::OptRef<const svc::disc::ChdPrefetch> prefetch_{};
 
     infra::OptRef<const reactor::FrameCell> frames_{};
     app::ScreenshotQueue& shots_;
-    app::PngEncoder png_;
+    app::capture::PngEncoder png_;
 
-    infra::OptRef<app::IFrameSource> frame_src_{};
+    infra::OptRef<app::capture::IFrameSource> frame_src_{};
     std::string shot_dir_;
     std::uint32_t shots_written_ = 0;
     std::uint32_t shots_failed_ = 0;
@@ -422,8 +438,8 @@ private:
     infra::OptRef<xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask_;
 
     infra::OptRef<const app::LadderStateCell> ladder_;
-    const app::RecorderStatusCell& rec_capture_;
-    const app::EncodeStatusCell& rec_encode_;
+    const app::capture::RecorderStatusCell& rec_capture_;
+    const app::capture::EncodeStatusCell& rec_encode_;
     const app::DoorbellStatsCell& doorbell_cell_;
     const reactor::RoundTimingCell& round_timing_;
     reactor::RoundTraceLane& round_traces_;
@@ -435,10 +451,10 @@ private:
     TraceDrops trace_misroutes_{};
     infra::OptRef<const app::UiPageCell> ui_pages_{};
     xthread::DiagLog& diag_;
-    xthread::LogLane& lane_rt_;
-    xthread::LogLane::Consumer log_rx_;
-    infra::OptRef<xthread::MainLogLane> lane_main_{};
-    xthread::MainLogLane::Consumer main_rx_;
+    app::LogLane& lane_rt_;
+    app::LogLane::Consumer log_rx_;
+    infra::OptRef<app::MainLogLane> lane_main_{};
+    app::MainLogLane::Consumer main_rx_;
 
     std::array<LossWatch, 2> loss_watch_{};
     std::uint32_t log_misrouted_ = 0;

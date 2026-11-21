@@ -10,6 +10,7 @@
 #include "cores/types.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "proto/block_geometry.h"
 #include "proto/image_source.h"
 #include "proto/types.h"

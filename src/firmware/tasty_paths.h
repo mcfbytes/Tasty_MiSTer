@@ -7,6 +7,7 @@
 
 #include "infra/error.h"
 #include "infra/path_text.h"
+#include "infra/prelude.h"
 #include "os/process_name.h"
 
 namespace mister::fw {

@@ -10,13 +10,14 @@
 #include <cstdint>
 #include <memory>
 
-#include "cores/cd_census_rows.h"
-#include "cores/cd_core.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_core.h"
 #include "cores/core_profile.h"
-#include "cores/psx_disc_rules.h"
-#include "cores/psx_sector_program.h"
-#include "svc/cue_policy.h"
-#include "svc/track.h"
+#include "cores/psx/psx_disc_rules.h"
+#include "cores/psx/psx_sector_program.h"
+#include "cores/psx/psx_staging.h"
+#include "svc/disc/cue_policy.h"
+#include "svc/disc/track.h"
 
 namespace mister::cores::manifests {
 
@@ -87,9 +88,9 @@ inline constexpr svc::BlankSaveSpec kPsxBlankSave{
     .lba_bytes = proto::BlockSize{1024},
 };
 
-inline constexpr svc::CuePolicy kPsxCuePolicy{
-    .sub_naming = svc::CuePolicy::SubNaming::None,
-    .program = svc::CuePolicy::Program::IndexTriple,
+inline constexpr svc::disc::CuePolicy kPsxCuePolicy{
+    .sub_naming = svc::disc::CuePolicy::SubNaming::None,
+    .program = svc::disc::CuePolicy::Program::IndexTriple,
 };
 
 inline constexpr auto kPsxStartAssets = stock_start_chain("PSX");
@@ -111,37 +112,8 @@ inline constexpr auto kPsxBootAssets = std::to_array<BootAsset>({
      .exact_size = proto::FileSize{512 * 1024}},
 });
 
-inline constexpr auto kPsxSlots = std::to_array<FileSlot>({
-    {.index = IoIndex{1},
-     .extensions = "CUECHD",
-     .label = "Load CD",
-     .writable = false,
-     .required = false,
-     .role = SlotRole::Disc},
-    {.index = IoIndex{2},
-     .extensions = "SAVMCD",
-     .label = "Mount Memory Card 1",
-     .writable = true,
-     .required = false,
-     .role = SlotRole::Save},
-    {.index = IoIndex{3},
-     .extensions = "SAVMCD",
-     .label = "Mount Memory Card 2",
-     .writable = true,
-     .required = false,
-     .role = SlotRole::Save},
-});
-
-inline constexpr StagingPolicy kPsxStaging{
-    .staged = true,
-    .reset_pulse_us = 0,
-    .disc_slot = disc_slot_of(kPsxSlots),
-    .save = SaveMountPolicy{
-        .slot = IoIndex{2},
-        .pre_bytes = proto::FileSize{128 * 1024},
-
-    },
-};
+using psx::kPsxSlots;
+using psx::kPsxStaging;
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
     {"psx.sector_kick",
@@ -149,6 +121,12 @@ inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
      &kSectorKick<kPsx>,
      reactor::kEveryRound,
      RoundClaim::Never},
+});
+
+inline constexpr auto kPsxHostBits = std::to_array<HostBitRow>({
+    {.fact = HostFact::SaveAutomountInhibit,
+     .bits = {proto::StatusBit{63}, 1},
+     .dir = HostBitRow::Dir::Read},
 });
 
 inline constexpr const LinkDecoderDecl& kPsxSectorKick = kPsxServices[0];
@@ -165,17 +143,19 @@ inline constexpr CoreProfile kPsx{
     .signatures = {},
     .blank_save = kPsxBlankSave,
     .staging = kPsxStaging,
-    .suppress_stick_dpad = true,
     .tasty_playable = true,
 
     .block_drain_budget = 1,
-    .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{svc::kRawFrameBytes}),
-    .image_rows_no_zip = true,
-
-    .cheats = {.reset_on_remount = true},
+    .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{svc::disc::kRawFrameBytes}),
+    .host_bits = kPsxHostBits,
     .no_stream_role = true,
-    .sector_program = infra::OptRef<const svc::ISectorProgram>{kPsxSectorProgram},
-    .disc_rules = infra::OptRef<const svc::IDiscRules>{kPsxDiscRules},
+    .host =
+        {.suppress_stick_dpad = true,
+         .image_rows_no_zip = true,
+
+         .cheats = {.reset_on_remount = true}},
+    .sector_program = infra::OptRef<const svc::disc::ISectorProgram>{psx::kPsxSectorProgram},
+    .disc_rules = infra::OptRef<const svc::disc::IDiscRules>{psx::kPsxDiscRules},
 
     .grants = {Grant::SaveCopy, Grant::Discs},
 };

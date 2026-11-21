@@ -3,12 +3,13 @@
 
 #include <array>
 
-#include "app/hd_themes.h"
+#include "app/hd/hd_themes.h"
 #include "app/ui_request.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/osd_style_preference.h"
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
@@ -48,12 +49,12 @@ std::string_view HdDisplayPlan::title() const {
     return "Display";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdDisplayPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdDisplayPlan::rows() const {
     TASTY_SEAT_BODY(HdDisplayPlan);
     return refs_;
 }
 
-svc::Tally HdDisplayPlan::refusals() const noexcept {
+infra::Tally HdDisplayPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdDisplayPlan);
     return refusals_;
 }
@@ -76,25 +77,25 @@ Transition HdDisplayPlan::ClassicAction::on_yes() {
     return Transition::choose_classic_style();
 }
 
-app::PageDescription::Row HdDisplayPlan::LookRow::describe() const {
+app::hd::PageDescription::Row HdDisplayPlan::LookRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(LookRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Value;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Value;
     r.steps = true;
     (void)r.label.assign(label_);
-    (void)r.value.assign(app::hd_look_choice_name(field_, plan_.style_.look()));
+    (void)r.value.assign(app::hd::hd_look_choice_name(field_, plan_.style_.look()));
     return r;
 }
 
-Transition HdDisplayPlan::LookRow::select() {
+Transition HdDisplayPlan::LookRow::select(const RowCx& cx) {
     TASTY_SEAT_BODY(LookRow);
-    return step(CycleDir::Next);
+    return step(CycleDir::Next, cx);
 }
 
-Transition HdDisplayPlan::LookRow::step(CycleDir dir) {
+Transition HdDisplayPlan::LookRow::step(CycleDir dir, const RowCx&) {
     TASTY_SEAT_BODY(LookRow);
     const app::HdLook look = plan_.style_.look();
-    const std::uint8_t next = app::hd_look_step(field_, look, dir);
+    const std::uint8_t next = app::hd::hd_look_step(field_, look, dir);
     if (next == app::hd_look_get(look, field_))
         return Transition{};
     plan_.style_.choose_look(field_, next);

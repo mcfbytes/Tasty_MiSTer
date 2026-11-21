@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "infra/persist.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::fw {
@@ -35,7 +36,7 @@ void report(const char* what, const Error& e) {
             buf + n,
             sizeof buf - static_cast<std::size_t>(n),
             " seat=%s",
-            seat_name(seat::detail::tag_from_detail(e.detail))
+            seat_name(infra::seat::detail::tag_from_detail(e.detail))
         );
     }
     if (const IReportVoice* const voice = g_report_voice.load(std::memory_order_acquire)) {

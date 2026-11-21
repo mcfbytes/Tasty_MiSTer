@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/core_tenancy.h"
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 CoreTenancy::CoreTenancy(const Wiring& g) noexcept
@@ -104,7 +106,7 @@ void CoreTenancy::drop(LogInstant t0, proto::BlockSlotMask channel_borrows) {
         current_->retire();
         ++tally_.core_shutdowns;
 
-        if (retiring_.gen != 0)
+        if (retiring_.gen.built())
             abandon_retiring_(false);
         retiring_ = Retiree{
             .slot = adopted_slot_,
@@ -115,7 +117,7 @@ void CoreTenancy::drop(LogInstant t0, proto::BlockSlotMask channel_borrows) {
         };
         current_.reset();
         adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
-        adopted_gen_ = 0;
+        adopted_gen_ = {};
         retire_due_ = os::Deadline::in(clock(), kCoreRetireBoundNs);
         retire_t0_ = t0;
         retire_logs_ = true;
@@ -126,7 +128,7 @@ void CoreTenancy::drop(LogInstant t0, proto::BlockSlotMask channel_borrows) {
 void CoreTenancy::settle_retire(RetireEnd end) noexcept {
     TASTY_SEAT_BODY(CoreTenancy);
     const bool polling = end == RetireEnd::Poll || end == RetireEnd::Round;
-    if (retiring_.gen != 0) {
+    if (retiring_.gen.built()) {
         const bool home = poll_retiree_(retiring_);
         const bool expired = retire_due_.expired(clock());
         if (home) {
@@ -160,11 +162,11 @@ void CoreTenancy::drop_borrow_() noexcept {
     current_.reset();
     release_(adopted_slot_, adopted_gen_);
     adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
-    adopted_gen_ = 0;
+    adopted_gen_ = {};
 }
 
-void CoreTenancy::release_(proto::CoreBaySlot slot, std::uint16_t gen) noexcept {
-    if (!in_bay(slot) || gen == 0)
+void CoreTenancy::release_(proto::CoreBaySlot slot, proto::BuildGeneration gen) noexcept {
+    if (!in_bay(slot) || !gen.built())
         return;
     infra::at_index(released_.released_gen, slot) = gen;
     releases_.publish(released_);
@@ -175,9 +177,9 @@ bool CoreTenancy::poll_retiree_(Retiree& r) noexcept {
     proto::NoBlockRoles none;
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
         const proto::SlotIndex si{i};
-        if (!r.mask.has(si))
+        if (!r.mask.contains(si))
             continue;
-        if (!r.sent.has(si) && slots_.submit_detach(si, none)) {
+        if (!r.sent.contains(si) && slots_.submit_detach(si, none)) {
             r.sent = r.sent.with(si);
             continue;
         }
@@ -194,7 +196,7 @@ void CoreTenancy::abandon_retiring_(bool counted) noexcept {
         session_tally_.last_error = retiring_.mask.refusal(Errc::timeout, ERR_SITE());
     }
     for (Retiree& a : abandoned_) {
-        if (a.gen != 0)
+        if (a.gen.built())
             continue;
         a = retiring_;
         retiring_ = Retiree{};
@@ -209,13 +211,13 @@ void CoreTenancy::abandon_retiring_(bool counted) noexcept {
 void CoreTenancy::release_retiree_(const Retiree& r) noexcept {
     const BayGens gens = r.bay_gens();
     for (const proto::CoreBaySlot s : kAllBaySlots)
-        if (infra::at_index(gens, s) != 0)
+        if (infra::at_index(gens, s).built())
             release_(s, infra::at_index(gens, s));
 }
 
 void CoreTenancy::settle_abandoned_() noexcept {
     for (Retiree& a : abandoned_) {
-        if (a.gen == 0)
+        if (!a.gen.built())
             continue;
         if (!a.mask.empty() && !poll_retiree_(a))
             continue;

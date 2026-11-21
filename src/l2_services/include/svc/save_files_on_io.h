@@ -21,7 +21,7 @@ public:
         std::optional<proto::FileSize> extent{};
         bool growable = false;
         proto::MountClass mount = proto::MountClass::Image;
-        Generation gen{};
+        SaveServeGen gen{};
 
         infra::OptRef<const BlankSaveSpec> blank{};
     };

@@ -99,21 +99,21 @@ constexpr infra::OptRef<const LinkTarget> link_target_of(cores::OptionRow::Link 
 inline constexpr std::size_t kHostOffSlot = 0;
 inline constexpr std::size_t kHostOnSlot = 1;
 
-app::PageDescription::RowKind row_kind_of(cores::OptionRow::Kind k) noexcept {
+app::hd::PageDescription::RowKind row_kind_of(cores::OptionRow::Kind k) noexcept {
     switch (k) {
         case cores::OptionRow::Kind::Separator:
-            return app::PageDescription::RowKind::Separator;
+            return app::hd::PageDescription::RowKind::Separator;
         case cores::OptionRow::Kind::Link:
-            return app::PageDescription::RowKind::Submenu;
+            return app::hd::PageDescription::RowKind::Submenu;
         case cores::OptionRow::Kind::Cycle:
-            return app::PageDescription::RowKind::Value;
+            return app::hd::PageDescription::RowKind::Value;
         case cores::OptionRow::Kind::Action:
         case cores::OptionRow::Kind::File:
         case cores::OptionRow::Kind::Host:
         case cores::OptionRow::Kind::kCount:
             break;
     }
-    return app::PageDescription::RowKind::Action;
+    return app::hd::PageDescription::RowKind::Action;
 }
 
 }
@@ -185,7 +185,7 @@ void CoreSettingsPage::rebuild() {
 
 RowIndex CoreSettingsPage::exit_drawn() const noexcept {
     const RowCount rows = osd_height();
-    const RowCount content = RowCount::of(lines_.size());
+    const RowCount content = RowCount::truncating(lines_.size());
 
     return (content + kOneRow <= rows) ? row_after(rows - kOneRow) : row_after(content);
 }
@@ -289,7 +289,7 @@ std::string CoreSettingsPage::row_text(RowIndex at) const {
 template <class Visit>
 void CoreSettingsPage::for_each_row(Visit&& visit) const {
     const RowIndex exit_row = exit_drawn();
-    const RowCount content = RowCount::of(lines_.size());
+    const RowCount content = RowCount::truncating(lines_.size());
     const RowIndex last = std::max(row_after(content), exit_row + kOneRow);
     const RowSpan<const Line> lines{lines_};
     for (RowIndex drawn{}; drawn < last; drawn += kOneRow) {
@@ -309,15 +309,15 @@ void CoreSettingsPage::for_each_row(Visit&& visit) const {
     }
 }
 
-app::PageDescription::Row CoreSettingsPage::hd_row(
+app::hd::PageDescription::Row CoreSettingsPage::hd_row(
     infra::OptRef<const Line> line,
     std::string_view text,
     bool stippled
 ) const {
-    app::PageDescription::Row row;
+    app::hd::PageDescription::Row row;
     row.enabled = !stippled;
     if (!line) {
-        row.kind = app::PageDescription::RowKind::Action;
+        row.kind = app::hd::PageDescription::RowKind::Action;
         (void)row.label.assign(plain_label(text));
         return row;
     }
@@ -385,9 +385,9 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
             selected = row_after(total);
         total += kOneRow;
     }
-    const app::HdWindow win = out.window(selected, total);
+    const app::hd::HdWindow win = out.window(selected, total);
 
-    const RowRange window = ui::rows(win.first, win.count);
+    const RowRange window = ui::rows(win.start, win.len);
     RowIndex at{};
     for (std::size_t i = 0; i < drawn_rows.size(); ++i) {
         const Drawn& d = drawn_rows[i];
@@ -462,7 +462,7 @@ void CoreSettingsPage::track_viewport() noexcept {
         const infra::OptRef<const Line> l = line_for_ordinal(sel_);
         if (!l)
             return;
-        drawn = RowIndex::of(&*l - lines_.data());
+        drawn = RowIndex::truncating(&*l - lines_.data());
     }
     if (drawn < first_row_) {
         first_row_ = drawn;
@@ -498,7 +498,7 @@ BrowserSession::Request CoreSettingsPage::browser_request(const app::OptionTable
     req.policy.eject_on_backspace = file != nullptr && file->browse_unmount;
     req.games_dir = core_dir_;
     req.recents_core = core_dir_;
-    req.recents = app::RecentsStore::ListId::of(proto::FileRowId::mount(slot));
+    req.recents = app::recents::RecentsStore::ListId::of(proto::FileRowId::mount(slot));
     req.host = infra::opt_ref_of(static_cast<IBrowserHost*>(this));
     pending_slot_ = slot;
     return req;
@@ -590,7 +590,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
 
             const ResolvedLabels labels{*cycle, arc_};
 
-            const proto::FieldCount slots = proto::FieldCount::of(cycle->values.size());
+            const proto::FieldCount slots = proto::FieldCount::saturating(cycle->values.size());
             const proto::FieldValue cur = choice_slot(labels, proto::FieldValue{tr.current}, slots);
             proto::FieldValue next = minus ? cur.cycled_back(choices) : cur.cycled_forward(choices);
 
@@ -658,7 +658,7 @@ Transition CoreSettingsPage::on_picked(const BrowserEntry& e, std::string_view p
         refusals_.add();
         return Transition::pop();
     }
-    const app::RecentsStore::ListId id = app::RecentsStore::ListId::of(
+    const app::recents::RecentsStore::ListId id = app::recents::RecentsStore::ListId::of(
         proto::FileRowId::mount(pending_slot_)
     );
     if (recents_ && !recents_->update(core_dir_, id, path, e.altname))

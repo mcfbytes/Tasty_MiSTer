@@ -11,25 +11,25 @@ void PageDeadlines::arm(
     infra::OptRef<const os::IClock> clock
 ) noexcept {
     TASTY_SEAT_BODY(PageDeadlines);
-    auto_pop_at_ = std::chrono::nanoseconds::zero();
+    auto_pop_at_.reset();
     if (!top || !clock)
         return;
     const std::chrono::milliseconds pop = top->facts().auto_pop;
     if (pop.count() == 0)
         return;
-    auto_pop_at_ = clock->now().time_since_epoch() + std::chrono::nanoseconds{pop};
+    auto_pop_at_ = os::Deadline::at_point(clock->now() + std::chrono::nanoseconds{pop});
 }
 
-bool PageDeadlines::fired(std::chrono::nanoseconds now) const noexcept {
+bool PageDeadlines::fired(os::RawMonotonicClock::time_point now) const noexcept {
     TASTY_SEAT_BODY(PageDeadlines);
-    return auto_pop_at_ != std::chrono::nanoseconds::zero() && now >= auto_pop_at_;
+    return auto_pop_at_.has_value() && auto_pop_at_->expired_at(now);
 }
 
-bool PageDeadlines::take_status_tick(std::chrono::nanoseconds now) noexcept {
+bool PageDeadlines::take_status_tick(os::RawMonotonicClock::time_point now) noexcept {
     TASTY_SEAT_BODY(PageDeadlines);
-    if (now < status_due_)
+    if (!status_due_.expired_at(now))
         return false;
-    status_due_ = now + kStatusPeriod;
+    status_due_ = os::Deadline::at_point(now + kStatusPeriod);
     ++status_paints_;
     return true;
 }

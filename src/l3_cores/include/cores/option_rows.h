@@ -8,6 +8,7 @@
 #include "cores/option_row.h"
 #include "cores/option_row_view.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 
 namespace mister::cores {

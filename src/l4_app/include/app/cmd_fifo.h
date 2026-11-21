@@ -10,8 +10,9 @@
 #include "app/cmd_verb_sink.h"
 #include "infra/fixed_str.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "infra/unique_fd.h"
 
 namespace mister::app {

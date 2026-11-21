@@ -5,7 +5,9 @@
 #include <memory>
 #include <span>
 
+#include "infra/prelude.h"
 #include "svc/file.h"
+#include "infra/span_cut.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
@@ -24,9 +26,10 @@ Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap) {
         );
         if (!n)
             return std::unexpected(n.error());
-        if (*n == 0)
+        if (n->empty())
             break;
-        out.insert(out.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*n));
+        const std::span<const std::byte> got = n->first_in(std::span<const std::byte>(chunk));
+        out.insert(out.end(), got.begin(), got.end());
     }
     return out;
 }
@@ -42,12 +45,12 @@ std::span<std::byte> read_bounded_partial(IFile& file, std::span<std::byte> dst)
     proto::FileOffset at = proto::kFileStart;
     const proto::FileSize room = proto::FileSize::of(dst);
     while (room.holds(at)) {
-        auto n = file.read_at(at, at.skip_in(dst));
-        if (!n || *n == 0)
+        auto n = file.read_at(at, infra::affine::from(dst, at));
+        if (!n || n->empty())
             break;
-        at += proto::FileSize{*n};
+        at += proto::FileSize::of(*n);
     }
-    return (at - proto::kFileStart).first_of(dst);
+    return infra::affine::first(dst, at - proto::kFileStart);
 }
 
 }

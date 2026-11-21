@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/dev_mem_window_map.h"
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 template <class Owner>

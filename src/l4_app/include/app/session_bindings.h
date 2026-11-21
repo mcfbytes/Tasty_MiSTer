@@ -9,12 +9,14 @@
 #include <string_view>
 #include <type_traits>
 
+#include "app/core_name.h"
 #include "app/identity_record.h"
 #include "app/link_tx_reader.h"
 #include "app/mra_facts.h"
 #include "app/uart_binding.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/irq_binding.h"
 #include "proto/link_op.h"
@@ -29,17 +31,11 @@ class SessionBindings {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::size_t kIdentityNameCap = 64;
-
     static constexpr std::size_t kIdentityFields = 4;
     static constexpr std::size_t kButtonListCap = kLinkTxSlabBytes;
-    static_assert(
-        MraFacts::kSetnameCap == kIdentityNameCap,
-        "the setname and the latched identity name clip at one width"
-    );
 
     struct Identity {
-        FixedStr<kIdentityNameCap, StrFit::Clip> core_name{};
+        CoreName core_name{};
         FixedStr<kButtonListCap, StrFit::Clip> j{};
         FixedStr<kButtonListCap, StrFit::Clip> jn{};
         FixedStr<kButtonListCap, StrFit::Clip> jp{};

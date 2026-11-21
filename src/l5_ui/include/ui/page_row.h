@@ -6,8 +6,9 @@
 #include <optional>
 #include <type_traits>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "ui/osd_renderer.h"
 
@@ -29,7 +30,7 @@ struct PageRow {
         bool stippled = false;
     };
 
-    app::PageDescription::Row hd{};
+    app::hd::PageDescription::Row hd{};
     std::optional<Classic> classic{};
     bool has_hd = false;
     bool legend = false;

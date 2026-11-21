@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/bitstream_resolve.h"
+#include "infra/span_cut.h"
 
 #include <algorithm>
 #include <cstring>
@@ -10,6 +11,7 @@
 #include "cores/registry.h"
 #include "infra/ascii.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 #include "svc/xml_scan.h"
 
@@ -43,14 +45,17 @@ namespace {
     std::string doc = sz->zeroed<std::string>();
     proto::FileOffset at = proto::kFileStart;
     while (sz->holds(at)) {
-        auto r = (*f)->read_at(at, std::as_writable_bytes(at.skip_in(std::span<char>(doc))));
+        auto r = (*f)->read_at(
+            at,
+            std::as_writable_bytes(infra::affine::from(std::span<char>(doc), at))
+        );
         if (!r)
             return std::unexpected(r.error());
-        if (*r == 0)
+        if (r->empty())
             break;
-        at += proto::FileSize{*r};
+        at += proto::FileSize::of(*r);
     }
-    doc.resize((at - proto::kFileStart).file_word<std::size_t>());
+    (at - proto::kFileStart).resize_in(doc);
     return doc;
 }
 

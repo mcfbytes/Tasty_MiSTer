@@ -9,7 +9,7 @@
 
 #include "infra/endian.h"
 
-namespace mister::cores::mra {
+namespace mister::cores {
 namespace {
 
 constexpr std::array<std::uint32_t, 64> kMdK = {

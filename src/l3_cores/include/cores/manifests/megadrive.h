@@ -7,6 +7,7 @@
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
+#include "cores/megadrive/megadrive_windows.h"
 #include "cores/pcm_census_rows.h"
 
 namespace mister::cores::manifests {
@@ -23,9 +24,7 @@ inline constexpr auto kMegaDriveServices = std::to_array<LinkDecoderDecl>({
     },
 });
 
-inline constexpr auto kMdPlusWindows = std::to_array<CoreWindowDecl>({
-    {.region = {0x1000'0000u, 0x0001'0000u, "mdplus-ring"}, .feeds_pcm = true},
-});
+using megadrive::kMdPlusWindows;
 
 inline constexpr CoreProfile kMegaDrive{
     .kind = CoreKind::MegaDrive,

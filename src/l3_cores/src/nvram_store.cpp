@@ -3,6 +3,8 @@
 
 #include "cores/fnv1a64.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
+#include "svc/card_dirs.h"
 
 namespace mister::cores {
 namespace {
@@ -122,7 +124,7 @@ Ex<SavePath> NvramStore::stock_path_for(std::string_view partition) const {
 
 Ex<SavePath> NvramStore::per_disc_path(const SavePartition&) const {
     SavePath out;
-    bool ok = out.assign(policy_.force_sd_root ? "/media/fat/saves/" : "saves/");
+    bool ok = out.assign(policy_.force_sd_root ? svc::kSdSavesPrefix : svc::kSavesPrefix);
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
     ok = ok && out.append(policy_.prefix);
@@ -135,7 +137,7 @@ Ex<SavePath> NvramStore::per_disc_path(const SavePartition&) const {
 
 Ex<SavePath> NvramStore::stock_disc_path(const SavePartition&) const {
     SavePath out;
-    bool ok = out.assign(policy_.force_sd_root ? "/media/fat/saves/" : "saves/");
+    bool ok = out.assign(policy_.force_sd_root ? svc::kSdSavesPrefix : svc::kSavesPrefix);
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
     ok = ok && out.append(policy_.prefix);
@@ -164,7 +166,7 @@ Ex<SavePath> NvramStore::per_core_indexed_path(const SavePartition& p) const {
 
 Ex<SavePath> NvramStore::per_image_path(const SavePartition& p) const {
     SavePath out;
-    bool ok = out.assign("saves/");
+    bool ok = out.assign(svc::kSavesPrefix);
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
     ok = ok && out.append(infra::stem(image_.view()));

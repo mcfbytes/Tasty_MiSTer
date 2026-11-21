@@ -5,12 +5,13 @@
 #include <memory>
 #include <string_view>
 
-#include "app/companion_host.h"
+#include "app/pcm/companion_host.h"
 #include "app/companion_walk.h"
 #include "app/negotiated_core.h"
 #include "app/owner_tally.h"
 #include "cores/companion.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/types.h"
 #include "proto/types.h"
@@ -30,7 +31,7 @@ public:
         const NegotiatedCore& negotiated,
         OwnerTally& tally,
         os::PhysAddr aperture_base,
-        infra::OptRef<CompanionHost::Binds> binds
+        infra::OptRef<pcm::CompanionHost::Binds> binds
     ) noexcept
         : vfs_(vfs),
           negotiated_(negotiated),
@@ -53,7 +54,7 @@ private:
     const NegotiatedCore& negotiated_;
     OwnerTally& tally_;
     os::PhysAddr aperture_base_;
-    infra::OptRef<CompanionHost::Binds> binds_;
+    infra::OptRef<pcm::CompanionHost::Binds> binds_;
     std::unique_ptr<cores::ICompanion> companion_{};
     bool attached_ = false;
     proto::CompanionBindGen gen_{};

@@ -4,17 +4,17 @@
 #include <optional>
 #include <string_view>
 
-#include "app/page_description.h"
-#include "app/tier_set.h"
+#include "app/hd/page_description.h"
+#include "app/hd/tier_set.h"
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 #include "ui/page_arg.h"
 #include "ui/page_id.h"
 #include "ui/types.h"
 
 namespace mister::ui {
 
-class HdPushRow final : public IHdRow {
+class HdPushRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -22,15 +22,15 @@ public:
         std::string_view label;
         PageId page = PageId::None;
         PageArg arg{};
-        app::RowTier tier = app::RowTier::Place;
-        app::PageDescription::RowIcon icon = app::PageDescription::RowIcon::None;
+        app::hd::RowTier tier = app::hd::RowTier::Place;
+        app::hd::PageDescription::RowIcon icon = app::hd::PageDescription::RowIcon::None;
     };
 
     explicit HdPushRow(const Spec& spec) noexcept : spec_(spec) {}
 
     std::optional<RowKey> key() const override;
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
+    Transition select(const RowCx&) override;
 
 private:
     Spec spec_;

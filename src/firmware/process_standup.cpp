@@ -31,11 +31,14 @@
 #include "app/board_ops.h"
 #include "app/board_reboot.h"
 #include "app/boot_handoff.h"
+#include "app/deadline_miss_log.h"
+#include "app/log_lane.h"
 #include "infra/error.h"
 #include "infra/heartbeat.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/persist.h"
-#include "infra/rt_stats.h"
+#include "infra/xthread/rt_stats.h"
 #include "infra/seat.h"
 #include "hal/board_profile.h"
 #include "hal/board_windows.h"
@@ -76,7 +79,9 @@ static_assert(
 constinit xthread::RtStats stats TASTY_PERSIST(proc, main_rt_stats){};
 
 constinit reactor::RoundTimer round_timer TASTY_PERSIST(proc, main_round_timer){};
-constinit xthread::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
+constinit app::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
+
+constinit app::DeadlineMissLog miss_log TASTY_PERSIST(proc, main_rt_miss_log){rt_lane.producer()};
 
 [[noreturn]] void exit_io_wedged(const fw::ThreadAssembly& assembly, const fw::SessionMode& mode) {
     infra::JsonOut out;
@@ -391,7 +396,7 @@ ProcessStandup::Exit ProcessStandup::open_platform() {
     auto exec = reactor::Executive::create(
         stats,
         {.round_timer = infra::OptRef<reactor::RoundTimer>{round_timer},
-         .log_lane = rt_lane.producer()}
+         .miss_log = infra::OptRef<reactor::IDeadlineMissSink>{miss_log}}
     );
     if (!exec) {
         report("Executive::create", exec.error());
@@ -458,6 +463,7 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
             .regions = board.regions,
             .doorbells = board.doorbells,
             .doorbell_nodes = hal::doorbell_nodes(board),
+            .aperture_node = hal::aperture_node(board),
             .video = board.video,
             .write_combine = board.memory.write_combine
                                  .resolve(

@@ -38,7 +38,7 @@ struct OutputSize {
 
 [[nodiscard]] constexpr PixelCount pixels_of(HdRect box) noexcept {
     return box.is_empty() ? PixelCount{}
-                          : PixelCount::of(std::int64_t{box.w} * std::int64_t{box.h});
+                          : PixelCount::truncating(std::int64_t{box.w} * std::int64_t{box.h});
 }
 
 }

@@ -14,6 +14,7 @@
 #include "hal/board_profile.h"
 #include "hal/link_port.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "reactor/executive.h"

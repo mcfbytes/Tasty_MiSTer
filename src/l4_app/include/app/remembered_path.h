@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include "app/core_name.h"
 #include "app/mra_facts.h"
-#include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
@@ -22,8 +22,6 @@ inline constexpr std::size_t kRememberedBlob = 1024;
 class RememberedStem {
 
 public:
-    static constexpr std::size_t kMax = 64;
-
     constexpr RememberedStem() noexcept = default;
 
     [[nodiscard]] static RememberedStem of(
@@ -43,7 +41,7 @@ public:
         default;
 
 private:
-    FixedStr<kMax, StrFit::Clip> text_{};
+    CoreName text_{};
 };
 
 [[nodiscard]] std::string remembered_blob_name(const RememberedStem& stem, proto::FileRowId row);

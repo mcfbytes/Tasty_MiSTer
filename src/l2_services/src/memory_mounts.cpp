@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/memory_mounts.h"
 
+#include "infra/prelude.h"
 #include "observed_file.h"
+#include "infra/span_cut.h"
+#include "infra/tally.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -19,16 +22,22 @@ public:
         : blob_(blob),
           hints_(std::move(hints)) {}
 
-    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<infra::ByteCount> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) override {
         if (!FileSize::of(blob_).holds(at))
-            return std::size_t{0};
-        const std::span<const std::byte> tail = at.skip_in(blob_);
+            return infra::ByteCount{};
+        const std::span<const std::byte> tail = infra::affine::from(blob_, at);
         const std::size_t n = std::min(tail.size(), dst.size());
         std::memcpy(dst.data(), tail.data(), n);
-        return n;
+        return infra::ByteCount{n};
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<infra::ByteCount> write_at(
+        proto::FileOffset,
+        std::span<const std::byte>
+    ) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
@@ -126,9 +135,9 @@ std::unique_ptr<IFile> MemoryMounts::open_by_crc_under(std::string_view prefix, 
     return nullptr;
 }
 
-Tally MemoryMounts::sequential_hints(std::string_view key) const noexcept {
+infra::Tally MemoryMounts::sequential_hints(std::string_view key) const noexcept {
     const Blob* m = find_(key);
-    return m == nullptr ? Tally{} : Tally{m->hints->load(std::memory_order_relaxed)};
+    return m == nullptr ? infra::Tally{} : infra::Tally{m->hints->load(std::memory_order_relaxed)};
 }
 
 }

@@ -3,7 +3,8 @@
 
 #include <cstdint>
 
-#include "infra/pause_latch.h"
+#include "infra/xthread/pause_latch.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

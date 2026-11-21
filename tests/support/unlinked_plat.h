@@ -11,10 +11,12 @@
 #include "hal/board_profile.h"
 #include "hal/board_windows.h"
 #include "hal/boards_table.h"
+#include "app/deadline_miss_log.h"
+#include "app/log_lane.h"
 #include "infra/error.h"
-#include "infra/log_lane.h"
 #include "infra/opt_ref.h"
-#include "infra/rt_stats.h"
+#include "infra/prelude.h"
+#include "infra/xthread/rt_stats.h"
 #include "reactor/executive.h"
 #include "reactor/round_timer.h"
 #include "rt_evidence.h"
@@ -45,7 +47,7 @@ public:
             reactor::Executive::create(
                 stats(),
                 {.round_timer = infra::OptRef<reactor::RoundTimer>{round_timer()},
-                 .log_lane = rt_lane().producer()}
+                 .miss_log = infra::OptRef<reactor::IDeadlineMissSink>{miss_log_}}
             )
         );
         if (!*exec_)
@@ -64,6 +66,7 @@ public:
                 .regions = row_->regions,
                 .doorbells = row_->doorbells,
                 .doorbell_nodes = hal::doorbell_nodes(*row_),
+                .aperture_node = hal::aperture_node(*row_),
                 .video = row_->video,
                 .kernel = row_->kernel,
                 .threads = row_->threads,
@@ -109,9 +112,11 @@ private:
 
     reactor::RoundTimer& round_timer() noexcept { return *round_timer_; }
 
-    xthread::LogLane& rt_lane() noexcept { return *rt_lane_; }
+    app::LogLane& rt_lane() noexcept { return *rt_lane_; }
 
-    mutable std::optional<xthread::LogLane> rt_lane_{std::in_place};
+    mutable std::optional<app::LogLane> rt_lane_{std::in_place};
+
+    app::DeadlineMissLog miss_log_{rt_lane_->producer()};
     mutable std::optional<reactor::RoundTimer> round_timer_{std::in_place};
     const hal::BoardProfile* row_ = nullptr;
     TempRoot root_;

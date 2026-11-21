@@ -9,6 +9,7 @@
 
 #include "browse_rules.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::svc::detail {

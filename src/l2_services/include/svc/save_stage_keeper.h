@@ -11,8 +11,10 @@
 #include <utility>
 #include <vector>
 
+#include "infra/byte_count.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/autosave_policy.h"
@@ -54,20 +56,19 @@ public:
     ~SaveStageKeeper() override = default;
 
     [[nodiscard]] Ex<std::optional<Grant>> adopt(std::string_view path);
-    [[nodiscard]] Ex<std::span<std::uint8_t>> read(
+    [[nodiscard]] Ex<infra::ByteCount> read(
         proto::StageKey key,
         proto::FileOffset at,
-        std::span<std::uint8_t> dst
+        std::span<std::byte> dst
     );
-    [[nodiscard]] Ex<std::span<const std::uint8_t>> write(
+    [[nodiscard]] Ex<infra::ByteCount> write(
         proto::StageKey key,
         proto::FileOffset at,
-        std::span<const std::uint8_t> src
+        std::span<const std::byte> src
     );
-    [[nodiscard]] Ex<proto::FileSize> create(
-        proto::StageKey key,
-        std::span<const std::uint8_t> first
-    );
+    [[nodiscard]] Ex<proto::FileSize> create(proto::StageKey key, std::span<const std::byte> first);
+
+    [[nodiscard]] Ex<void> commit_image(std::string_view path, std::span<const std::byte> image);
 
     void retire(proto::StageKey key) noexcept;
 
@@ -150,8 +151,8 @@ private:
     SaveStageOrders& orders_;
     SaveStageCell& cell_;
     Pool pool_{};
-    std::vector<std::uint8_t> commit_buf_;
-    std::vector<std::uint8_t> chunk_buf_;
+    std::vector<std::byte> commit_buf_;
+    std::vector<std::byte> chunk_buf_;
     std::optional<Job> job_{};
     std::optional<proto::CommitAllSeq> sweep_{};
     std::optional<StagedSave::TimePoint> paused_at_{};

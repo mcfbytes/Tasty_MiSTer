@@ -11,12 +11,13 @@ Viewport Viewport::centre(RowIndex selected, ListWindow window, ViewportPolicy p
     const RowIndex sel = selected >= row_after(window.items) ? last_row(window.items) : selected;
     v.selected = sel;
 
-    const RowCount max_first = saturating_sub(window.items, window.height);
+    const RowCount max_first = infra::affine::saturating_sub(window.items, window.height);
 
     RowIndex first{};
     if (p.lookahead) {
 
-        const RowCount half = window.height.half();
+        constexpr std::uint32_t kHalfDivisor = 2;
+        const RowCount half = window.height / kHalfDivisor;
         first = (sel.before() > half) ? sel - half : RowIndex{};
     } else {
 

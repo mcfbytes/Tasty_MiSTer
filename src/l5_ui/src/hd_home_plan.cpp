@@ -4,9 +4,10 @@
 #include <algorithm>
 #include <cstddef>
 
-#include "app/recent_games.h"
+#include "app/recents/recent_games.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/page_context.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
@@ -23,36 +24,36 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
               .label = "Pair Bluetooth controller",
               .page = PageId::BtPair,
               .arg = PageArg{PairStart::AutoFirst},
-              .tier = app::RowTier::Verb,
-              .icon = app::PageDescription::RowIcon::Bluetooth
+              .tier = app::hd::RowTier::Verb,
+              .icon = app::hd::PageDescription::RowIcon::Bluetooth
           }
       ),
       all_row_(
           HdPushRow::Spec{
               .label = "All recent games",
               .page = PageId::HdRecentGames,
-              .tier = app::RowTier::Verb,
-              .icon = app::PageDescription::RowIcon::Recent
+              .tier = app::hd::RowTier::Verb,
+              .icon = app::hd::PageDescription::RowIcon::Recent
           }
       ),
       settings_(
           HdPushRow::Spec{
               .label = "Settings",
               .page = PageId::HdSettings,
-              .tier = app::RowTier::Verb,
-              .icon = app::PageDescription::RowIcon::Settings
+              .tier = app::hd::RowTier::Verb,
+              .icon = app::hd::PageDescription::RowIcon::Settings
           }
       ) {
     TASTY_SEAT_BODY(HdHomePlan);
     cores_.bind(ctx_);
-    const std::span<const app::RecentGames::Record> records = in.recent_games.records();
+    const std::span<const app::recents::RecentGames::Record> records = in.recent_games.records();
     has_any_ = !records.empty();
     const std::size_t shown = std::min(kInlineRecent, records.size());
     played_.reserve(shown);
     constexpr std::size_t kFixedRows = 5;
     refs_.reserve(shown + kFixedRows);
     for (std::size_t i = 0; i < shown; ++i) {
-        played_.emplace_back(launch_, records[i], app::RowTier::Shelf);
+        played_.emplace_back(launch_, records[i], app::hd::RowTier::Shelf);
         refs_.emplace_back(played_.back());
     }
     refs_.emplace_back(all_gate_);
@@ -74,7 +75,7 @@ std::string_view HdHomePlan::title() const {
     return "Home";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdHomePlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdHomePlan::rows() const {
     TASTY_SEAT_BODY(HdHomePlan);
     return refs_;
 }
@@ -89,22 +90,22 @@ bool HdHomePlan::remembers_focus() const noexcept {
     return false;
 }
 
-svc::Tally HdHomePlan::refusals() const noexcept {
+infra::Tally HdHomePlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdHomePlan);
     return refusals_.sum(cores_.refusals()).sum(launch_.refusals());
 }
 
-app::PageDescription::Row HdHomePlan::BrowseRow::describe() const {
+app::hd::PageDescription::Row HdHomePlan::BrowseRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(BrowseRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Submenu;
-    r.tier = app::RowTier::Verb;
-    r.icon = app::PageDescription::RowIcon::Cores;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Submenu;
+    r.tier = app::hd::RowTier::Verb;
+    r.icon = app::hd::PageDescription::RowIcon::Cores;
     (void)r.label.assign("Browse cores");
     return r;
 }
 
-Transition HdHomePlan::BrowseRow::select() {
+Transition HdHomePlan::BrowseRow::select(const RowCx&) {
     TASTY_SEAT_BODY(BrowseRow);
     return plan_.cores_.open(plan_.ctx_, false);
 }

@@ -6,6 +6,7 @@
 
 #include <cerrno>
 
+#include "infra/prelude.h"
 #include "os/types.h"
 
 namespace mister::fw {

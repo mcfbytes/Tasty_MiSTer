@@ -9,6 +9,7 @@
 #include <cerrno>
 
 #include "app/path_text.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

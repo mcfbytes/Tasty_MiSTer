@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/ascii.h"
+#include "infra/span_cut.h"
 #include "vfs_detail.h"
 
 namespace mister::svc::asset_name {
@@ -81,16 +82,16 @@ std::optional<Crc32> parse_crc_name(std::string_view filename, std::string_view 
 }
 
 ZipSplit zip_split(std::string_view path) noexcept {
-    constexpr std::size_t kZipSuffixChars = 4;
-    const std::optional<infra::TextOffset> z = infra::ifind(path, ".zip");
+    constexpr infra::ByteCount kZipSuffixChars{4};
+    const std::optional<infra::ByteOffset> z = infra::ifind(path, ".zip");
     if (!z)
         return {};
-    const infra::TextOffset end = z->advanced(infra::ByteCount{kZipSuffixChars});
-    const infra::TextOffset member_at = end.advanced(infra::ByteCount{1});
+    const infra::ByteOffset end = *z + kZipSuffixChars;
+    const infra::ByteOffset member_at = end + infra::ByteCount{1};
     ZipSplit s;
     s.zipped = true;
-    s.archive = end.prefix_of(path);
-    s.member = member_at.inside(path) ? member_at.suffix_after(path) : std::string_view{};
+    s.archive = infra::affine::first_clamped(path, end);
+    s.member = member_at.inside(path) ? infra::affine::from(path, member_at) : std::string_view{};
     return s;
 }
 

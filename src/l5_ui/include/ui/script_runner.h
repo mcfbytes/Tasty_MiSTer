@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 

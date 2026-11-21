@@ -5,6 +5,7 @@
 
 #include "infra/ascii.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 

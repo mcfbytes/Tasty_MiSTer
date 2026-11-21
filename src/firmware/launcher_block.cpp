@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "open_verdict.h"
 
 namespace mister::fw {
@@ -13,16 +14,16 @@ DeviceBlock::Parts::Frontend LauncherBlock::device_front() noexcept {
         .launcher_demand = infra::OptRef{launcher_demand_},
         .launcher_wake = infra::OptRef<xthread::WakeFlag>{launcher_wake_},
         .launcher_state = infra::OptRef<const app::LauncherStateCell>{launcher_state_},
-        .launcher_keys = infra::OptRef<app::LauncherKeyBridge>{launcher_keys_},
+        .launcher_keys = infra::OptRef<app::input::LauncherKeyBridge>{launcher_keys_},
         .grants_uart = true,
     };
 }
 
-app::ScanoutChannel::Answerer LauncherBlock::mint_answerer_() noexcept {
-    app::ScanoutChannel::Answerer a = scanout_channel_.answerer();
-    if (!a)
-        fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout answerer minted twice");
-    return a;
+app::launcher::ScanoutChannel::Worker LauncherBlock::mint_worker_() noexcept {
+    app::launcher::ScanoutChannel::Worker w = scanout_channel_.worker();
+    if (!w)
+        fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout worker minted twice");
+    return w;
 }
 
 void LauncherBlock::open_fds(OpenVerdict& verdict) noexcept {
@@ -37,12 +38,12 @@ void LauncherBlock::open_fds(OpenVerdict& verdict) noexcept {
 }
 
 void LauncherBlock::open_seat(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept {
-    app::ScanoutChannel::Asker asker = scanout_channel_.asker();
+    app::launcher::ScanoutChannel::Owner asker = scanout_channel_.owner();
     if (!asker)
-        fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout asker minted twice");
+        fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout owner minted twice");
     launcher_host_.emplace(
         std::move(seated(host_epoll_, "T-LAUNCHER bound past a refused open")),
-        app::LauncherHost::Wiring{
+        app::launcher::LauncherHost::Wiring{
             .demand = launcher_demand_,
             .state = launcher_state_,
             .fb_ack = launcher_fb_ack_,

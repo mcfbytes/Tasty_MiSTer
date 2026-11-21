@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "os/uio_handle.h"
 
+#include "infra/prelude.h"
 #include "os/path_buf.h"
 
 #include <fcntl.h>

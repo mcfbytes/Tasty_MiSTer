@@ -89,7 +89,7 @@ Delivered HeldTransfer::on(const proto::LinkOp::PlainDownload& a, const LinkOpCt
             return Delivered{drop_plain_(), spends};
         }
         (void)binder_.fio_queue().flush();
-        auto ds = proto::DownloadSession::begin(link_, a.dest);
+        auto ds = proto::link::DownloadSession::begin(link_, a.dest);
         if (!ds)
             return Delivered{ILinkEncoder::Outcome::Dropped, spends};
         plain_ds_.emplace(std::move(*ds));
@@ -109,7 +109,7 @@ Delivered HeldTransfer::on(const proto::LinkOp::PlainDownload& a, const LinkOpCt
     if (!file)
         return Delivered{drop_plain_(), spends};
 
-    if (hal::words(a.framing, bytes.size()) > proto::tightest_load_budget_words()) {
+    if (hal::words(a.framing, bytes.size()) > proto::link::tightest_load_budget_words()) {
         return Delivered{drop_plain_(), spends};
     }
 
@@ -141,7 +141,7 @@ void HeldTransfer::release_window() noexcept {
 }
 
 void HeldTransfer::echo_payload_act_(const proto::LinkOp::StagePayload& a, bool encoded) noexcept {
-    if (a.act && !copy_posted())
+    if (a.act && !copy_posted() && !length_act_)
         publish_payload_echo(a.act.widen(), encoded);
 }
 
@@ -171,6 +171,9 @@ ILinkEncoder::Outcome HeldTransfer::stage_payload_(
         return drop_stage_();
     if (a.copy_word != 0) {
         return a.phase == Phase::Whole ? stage_copy_(a, bytes) : drop_stage_();
+    }
+    if (a.phase == Phase::Whole && file && bytes.empty() && file->aux != 0) {
+        return stage_length_(a, *file);
     }
 
     if (a.phase == Phase::Close && !file) {
@@ -254,8 +257,8 @@ Delivered HeldTransfer::on(const proto::LinkOp::SetWideIndex& a, const LinkOpCtx
         return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
     (void)binder_.fio_queue().flush();
-    proto::SpiFrame frame{link_};
-    if (auto r = proto::DownloadSession::set_index(frame, a.dest); !r) {
+    proto::link::SpiFrame frame{link_};
+    if (auto r = proto::link::DownloadSession::set_index(frame, a.dest); !r) {
         return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
     return Delivered{ILinkEncoder::Outcome::Encoded, false};
@@ -551,15 +554,19 @@ ILinkEncoder::Outcome HeldTransfer::stage_copy_(
     std::span<const std::uint8_t> bytes
 ) noexcept {
     cut_stage_();
-    const std::size_t n = bytes.size() / sizeof(std::uint16_t);
+    const std::size_t n = bytes.size() / sizeof(hal::SpiWord);
     if (copy_ds_ || proto::sets_region(a) || a.copy_word > n || n > kCopyWordsMax) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    std::array<std::uint16_t, kCopyWordsMax> w{};
+    std::array<hal::SpiWord, kCopyWordsMax> w{};
 
-    infra::load_le_run(bytes.first(n * sizeof(std::uint16_t)), std::span(w).first(n));
+    for (std::size_t i = 0; i < n; ++i) {
+        w[i] = hal::SpiWord::load_le(
+            bytes.subspan(i * sizeof(hal::SpiWord)).first<sizeof(hal::SpiWord)>()
+        );
+    }
     (void)binder_.fio_queue().flush();
-    auto ds = proto::DownloadSession::begin(link_, a.dest);
+    auto ds = proto::link::DownloadSession::begin(link_, a.dest);
     if (!ds)
         return ILinkEncoder::Outcome::Dropped;
     if (auto r = ds->post(std::span(w).first(a.copy_word)); !r) {
@@ -571,6 +578,36 @@ ILinkEncoder::Outcome HeldTransfer::stage_copy_(
     copy_act_ = a.act.widen();
     copy_ds_.emplace(std::move(*ds));
     return ILinkEncoder::Outcome::Encoded;
+}
+
+ILinkEncoder::Outcome HeldTransfer::stage_length_(
+    const proto::LinkOp::StagePayload& a,
+    const InternedFile& file
+) noexcept {
+    cut_stage_();
+    if (copy_ds_ || binder_.fio_queue().held() || binder_.fio_queue().tenant_holds_fio()) {
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    (void)binder_.fio_queue().flush();
+    proto::SessionParams params{.aux = proto::AuxValue{file.aux}, .ext = file.ext.view()};
+    auto ds = proto::link::DownloadSession::begin(link_, a.dest, params);
+    if (!ds)
+        return ILinkEncoder::Outcome::Dropped;
+    const auto closed = ds->end_or_post();
+    if (!closed)
+        return ILinkEncoder::Outcome::Dropped;
+    if (!*closed)
+        length_act_ = a.act.widen();
+    return ILinkEncoder::Outcome::Encoded;
+}
+
+void HeldTransfer::end_length_(bool ok) noexcept {
+    if (!length_act_)
+        return;
+    publish_payload_echo(length_act_, ok);
+    if (!ok)
+        ++session_tally_.link_op_drops;
+    length_act_ = {};
 }
 
 bool HeldTransfer::hold_wire(bool park_asked) noexcept {
@@ -595,6 +632,7 @@ bool HeldTransfer::hold_wire(bool park_asked) noexcept {
         if (park_asked) {
             link_.abandon_post();
             ++tally_.file_tx_hold_abandons;
+            end_length_(false);
             return false;
         }
         const auto done = link_.posted_done();
@@ -602,6 +640,7 @@ bool HeldTransfer::hold_wire(bool park_asked) noexcept {
             ++tally_.file_tx_held_rounds;
             return true;
         }
+        end_length_(done.has_value());
         return false;
     }
     if (park_asked) {
@@ -640,6 +679,7 @@ void HeldTransfer::cut_all() noexcept {
         link_.abandon_post();
         ++tally_.file_tx_hold_abandons;
     }
+    end_length_(false);
 
     cut_file_tx_(tenancy_.core());
     cut_stage_();
@@ -675,7 +715,7 @@ ILinkEncoder::Outcome HeldTransfer::drop_stage_() noexcept {
 
 bool HeldTransfer::stage_fits_round_(std::size_t bytes) const noexcept {
     const std::size_t words = hal::words(link_.width(), bytes);
-    return words <= proto::tightest_load_budget_words();
+    return words <= proto::link::tightest_load_budget_words();
 }
 
 ILinkEncoder::Outcome HeldTransfer::drop_plain_() noexcept {

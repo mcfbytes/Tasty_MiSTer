@@ -13,7 +13,7 @@ struct ConfigSlotCount {
     std::uint8_t v = 0;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr ConfigSlotCount of(I n) noexcept {
+    [[nodiscard]] static constexpr ConfigSlotCount truncating(I n) noexcept {
         return ConfigSlotCount{static_cast<std::uint8_t>(n)};
     }
 

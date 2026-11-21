@@ -12,13 +12,13 @@
 #include <vector>
 
 #include "app/identity_latch.h"
-#include "app/page_description.h"
-#include "app/ui_write_lane.h"
-#include "app/verdict_sinks.h"
+#include "app/hd/page_description.h"
+#include "app/recents/ui_write_lane.h"
+#include "app/recents/verdict_sinks.h"
 #include "infra/endian.h"
-#include "svc/button_map.h"
-#include "svc/device_identity.h"
-#include "svc/map_store.h"
+#include "svc/input/button_map.h"
+#include "svc/input/device_identity.h"
+#include "svc/input/map_store.h"
 #include "ui/draw_classic.h"
 #include "ui/navigator.h"
 #include "ui/osd_renderer.h"
@@ -126,7 +126,7 @@ JoyMapPage::JoyMapPage(Spec spec)
       scope_(spec_.front_end || spec_.core.empty() ? MapScope::System : MapScope::Core) {
     TASTY_SEAT_BODY(JoyMapPage);
     prompts_ = build_joymap_prompts(scope_, spec_.j_names);
-    wizard_.begin(svc::DeviceIdentity{}, svc::MapKind::Joystick);
+    wizard_.begin(svc::input::DeviceIdentity{}, svc::input::MapKind::Joystick);
     if (!spec_.ends || prompts_.empty()) {
         done_ = true;
         refusals_.add();
@@ -143,7 +143,7 @@ JoyMapPage::~JoyMapPage() {
 
 void JoyMapPage::arm_next() {
     token_ = token_.next();
-    spec_.ends->arm.publish(app::CaptureArm{.token = token_, .armed = true});
+    spec_.ends->arm.publish(app::input::CaptureArm{.token = token_, .armed = true});
     armed_ = true;
     spec_.ends->input_ctrl.kick();
 }
@@ -151,7 +151,7 @@ void JoyMapPage::arm_next() {
 void JoyMapPage::disarm() {
     if (!spec_.ends || !armed_)
         return;
-    spec_.ends->arm.publish(app::CaptureArm{.token = token_, .armed = false});
+    spec_.ends->arm.publish(app::input::CaptureArm{.token = token_, .armed = false});
     armed_ = false;
     spec_.ends->input_ctrl.kick();
 }
@@ -159,31 +159,34 @@ void JoyMapPage::disarm() {
 void JoyMapBlob::store(BlobWord word, svc::EvdevCode code) noexcept {
     std::uint32_t& menu = infra::at_index(blob_, kMenuFuncWord);
     if (word == kCntOk) {
-        menu = svc::packed_word(svc::PackedKeys::lone(code));
+        menu = svc::input::packed_word(svc::input::PackedKeys::lone(code));
     } else if (word == kCntEsc) {
-        svc::PackedKeys pair = svc::packed_keys_of(menu);
+        svc::input::PackedKeys pair = svc::input::packed_keys_of(menu);
         pair.hi = pair.hi.or_bits(code);
-        menu = svc::packed_word(pair);
+        menu = svc::input::packed_word(pair);
     } else if (word.indexes(blob_)) {
-        infra::at_index(blob_, word) = svc::packed_word(svc::PackedKeys::lone(code));
+        infra::at_index(blob_, word) = svc::input::packed_word(svc::input::PackedKeys::lone(code));
     }
 }
 
 svc::EvdevCode JoyMapBlob::code(BlobWord word) const noexcept {
-    const svc::PackedKeys menu = svc::packed_keys_of(infra::at_index(blob_, kMenuFuncWord));
+    const svc::input::PackedKeys menu = svc::input::packed_keys_of(
+        infra::at_index(blob_, kMenuFuncWord)
+    );
     if (word == kCntOk)
         return menu.lo;
     if (word == kCntEsc)
         return menu.hi;
     if (word.indexes(blob_))
-        return svc::packed_keys_of(infra::at_index(blob_, word)).lo;
+        return svc::input::packed_keys_of(infra::at_index(blob_, word)).lo;
     return svc::EvdevCode{};
 }
 
 bool JoyMapBlob::duplicate_in(BlobWord word, svc::EvdevCode code) const noexcept {
     const BlobWord seg = word >= kSegment ? kSegment : BlobWord{};
     for (BlobWord w = seg; w < word && w.indexes(blob_); w = w.next()) {
-        if (svc::packed_keys_of(infra::at_index(blob_, w)) == svc::PackedKeys::lone(code))
+        if (svc::input::packed_keys_of(infra::at_index(blob_, w))
+            == svc::input::PackedKeys::lone(code))
             return true;
     }
     return false;
@@ -216,11 +219,11 @@ Transition JoyMapPage::finish(bool save) {
             refusals_.add();
         return Transition::pop();
     }
-    svc::ButtonMap map;
-    map.kind = svc::MapKind::Joystick;
+    svc::input::ButtonMap map;
+    map.kind = svc::input::MapKind::Joystick;
     map.blob.resize(blob_.words().size() * sizeof(std::uint32_t));
     infra::store_le_run<std::uint32_t>(blob_.words(), std::span<std::byte>{map.blob});
-    svc::DeviceIdentity id{};
+    svc::input::DeviceIdentity id{};
     id.vid = lock_->vid;
     id.pid = lock_->pid;
     id.id = std::string(lock_->id.view());
@@ -228,13 +231,13 @@ Transition JoyMapPage::finish(bool save) {
     id.unique_filenames = lock_->unique_filenames;
     const std::string_view core = scope_ == MapScope::System ? std::string_view{}
                                                              : std::string_view{spec_.core};
-    const auto encoded = svc::MapStore::encode(core, id, map, lock_->mod);
+    const auto encoded = svc::input::MapStore::encode(core, id, map, lock_->mod);
 
     if (encoded
         && spec_.writes->arm(
-            app::UiWriteLane::Target{.rel = encoded->rel, .retire = encoded->retire},
+            app::recents::UiWriteLane::Target{.rel = encoded->rel, .retire = encoded->retire},
             encoded->bytes,
-            app::VerdictSink::Maps
+            app::recents::VerdictSink::Maps
         )) {
         saved_ = true;
     } else {
@@ -246,7 +249,7 @@ Transition JoyMapPage::finish(bool save) {
 Transition JoyMapPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(JoyMapPage);
     if (done_) {
-        if (ev.buttons.has_any({UiEvent::Select | UiEvent::Menu})) {
+        if (ev.buttons.intersects({UiEvent::Select | UiEvent::Menu})) {
             return Transition::pop();
         }
         return Transition{};
@@ -267,7 +270,7 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
         || KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_KPENTER})) {
         return finish(lock_.has_value());
     }
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (ev.buttons.intersects({UiEvent::Menu}))
         return finish(false);
     return Transition{};
 }
@@ -276,14 +279,14 @@ Transition JoyMapPage::on_tick(PageContext&) {
     TASTY_SEAT_BODY(JoyMapPage);
     if (done_ || !spec_.ends)
         return Transition{};
-    app::CaptureHit hit{};
+    app::input::CaptureHit hit{};
     if (!hit_reader_.take_if_changed(spec_.ends->hit, hit))
         return Transition{};
     if (hit.token != token_)
         return Transition{};
     if (!lock_) {
         lock_ = hit;
-        svc::DeviceIdentity id{};
+        svc::input::DeviceIdentity id{};
         id.vid = hit.vid;
         id.pid = hit.pid;
         id.id = std::string(hit.id.view());
@@ -299,8 +302,8 @@ Transition JoyMapPage::on_tick(PageContext&) {
     }
     wizard_.on_button(hit.code);
 
-    if (!wizard_advance_into(svc::MappingWizard::Step::Confirm)
-        || !wizard_advance_into(svc::MappingWizard::Step::Persist)) {
+    if (!wizard_advance_into(svc::input::MappingWizard::Step::Confirm)
+        || !wizard_advance_into(svc::input::MappingWizard::Step::Persist)) {
         refusals_.add();
         rebegin();
         arm_next();
@@ -315,17 +318,17 @@ Transition JoyMapPage::on_tick(PageContext&) {
     return Transition{};
 }
 
-bool JoyMapPage::wizard_advance_into(svc::MappingWizard::Step want) {
+bool JoyMapPage::wizard_advance_into(svc::input::MappingWizard::Step want) {
     const auto step = wizard_.advance();
     return step && *step == want;
 }
 
 void JoyMapPage::rebegin() {
-    svc::DeviceIdentity id{};
+    svc::input::DeviceIdentity id{};
     id.vid = lock_->vid;
     id.pid = lock_->pid;
     id.id = std::string(lock_->id.view());
-    wizard_.begin(id, svc::MapKind::Joystick);
+    wizard_.begin(id, svc::input::MapKind::Joystick);
 }
 
 template <class Visit>
@@ -434,7 +437,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
     RowCount hd_total{};
     const std::size_t hd_cap = std::min<std::size_t>(
         out.rows.size(),
-        static_cast<std::size_t>(out.count) + app::PageDescription::kMaxRows
+        static_cast<std::size_t>(out.count) + app::hd::PageDescription::kMaxRows
     );
     for (const Drawn& row : drawn) {
         std::string_view text{row.text};
@@ -447,7 +450,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
             continue;
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
-        r.hd.kind = app::PageDescription::RowKind::Text;
+        r.hd.kind = app::hd::PageDescription::RowKind::Text;
         (void)r.hd.label.assign(text);
     }
 
@@ -458,7 +461,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
             continue;
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
-        r.hd.kind = app::PageDescription::RowKind::Text;
+        r.hd.kind = app::hd::PageDescription::RowKind::Text;
         (void)r.hd.label.assign(prompts_[i].text());
         const svc::EvdevCode code = captured_code(i);
         if (code.is_unset()) {

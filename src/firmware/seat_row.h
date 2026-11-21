@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::fw {

@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <array>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -24,43 +23,36 @@
 #include <span>
 #include <string_view>
 
-#include "app/capture_main.h"
-#include "app/connect_main.h"
-#include "app/encode_main.h"
-#include "app/hd_osd_main.h"
-#include "app/input_build.h"
-#include "app/input_main.h"
-#include "app/launcher_main.h"
-#include "app/pcm_main.h"
-#include "app/rec_write_main.h"
+#include "app/capture/capture_main.h"
+#include "app/connect/connect_main.h"
+#include "app/capture/encode_main.h"
+#include "app/hd/hd_osd_main.h"
+#include "app/input/input_build.h"
+#include "app/input/input_main.h"
+#include "app/launcher/launcher_main.h"
+#include "app/pcm/pcm_main.h"
+#include "app/capture/rec_write_main.h"
 #include "app/rt_main.h"
 #include "app/video_pump.h"
+#include "infra/prelude.h"
+#include "os/clock.h"
+#include "os/delay.h"
 #include "os/kernel_tid.h"
 #include "os/timer_slack.h"
+#include "os/timespec.h"
 #include "os/types.h"
 #include "reactor/frame_main.h"
 #include "rt_evidence.h"
 #include "rt_setup.h"
-#include "svc/chd_prefetch.h"
+#include "svc/disc/chd_prefetch.h"
 #include "svc/io_main.h"
-#include "svc/prefetch_main.h"
+#include "svc/disc/prefetch_main.h"
 
 namespace mister::fw {
 
 namespace {
 
-constexpr std::chrono::nanoseconds kOneSecond{std::chrono::seconds{1}};
-constexpr std::chrono::nanoseconds kOneMilli{std::chrono::milliseconds{1}};
-
-void sleep_one_milli() noexcept {
-    timespec ts{};
-    ts.tv_sec = 0;
-    ts.tv_nsec = kOneMilli.count();
-    int rc = 0;
-    do {
-        rc = ::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts);
-    } while (rc == EINTR);
-}
+constexpr std::chrono::milliseconds kOneMilli{1};
 
 void block_process_stop_set() noexcept {
     sigset_t set;
@@ -137,7 +129,7 @@ template <class Ready>
             return {};
         (void)::sched_yield();
         if ((spins & kSleepEveryMask) == kSleepEveryMask)
-            sleep_one_milli();
+            os::sleep_for(kOneMilli);
     }
     return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
 }
@@ -308,10 +300,10 @@ SeatBirth ThreadAssembly::adopt_seat(SeatTag s) noexcept {
 
     const hal::CommName comm = hal::comm_name(comm_prefix_.data(), seat_role(s));
     const int nrc = ::pthread_setname_np(::pthread_self(), comm.text.data());
-    SeatBirth birth{};
+    SeatBirth birth{.tid = os::KernelTid::current()};
     birth.name = RtSetup{nrc == 0, nrc};
 
-    if (r.spawn == hal::SpawnKind::PromoteInPlace || !infra::kPosixGlibc) {
+    if (r.spawn == hal::SpawnKind::PromoteInPlace) {
         birth.affinity = pin_current_cpu(r.cpu);
     } else {
         birth.affinity = confirm_current_cpu(r.cpu);
@@ -354,9 +346,7 @@ void* ThreadAssembly::trampoline(void* self) {
     static_assert(xthread::SeatBody<M>);
     constexpr SeatTag s = Row::seat;
     auto* a = static_cast<ThreadAssembly*>(self);
-    const SeatBirth birth = a->adopt_seat(s);
-    a->seats_[seat_index(s)].birth.publish(birth);
-    a->seats_[seat_index(s)].tid.store(os::KernelTid::current(), std::memory_order_release);
+    a->seats_[seat_index(s)].birth.publish(a->adopt_seat(s));
     a->mains_.get<M>()->start();
     if constexpr (s == SeatTag::RT) {
 
@@ -365,11 +355,7 @@ void* ThreadAssembly::trampoline(void* self) {
             outcome.failure = result.error();
         }
         a->rt_outcome_.publish(outcome);
-        a->rt_exited_.store(true, std::memory_order_release);
         a->main_wake_.request();
-    }
-    if constexpr (s == SeatTag::Io) {
-        a->io_exited_.store(true, std::memory_order_release);
     }
     return nullptr;
 }
@@ -381,7 +367,9 @@ Ex<void> ThreadAssembly::check_presence_() const noexcept {
     );
     if (missing == SeatTag::Unbound)
         return {};
-    return std::unexpected(Error{Errc::seat_absent, ERR_SITE(), seat::detail::tag_detail(missing)});
+    return std::unexpected(
+        Error{Errc::seat_absent, ERR_SITE(), infra::seat::detail::tag_detail(missing)}
+    );
 }
 
 Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
@@ -413,9 +401,8 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
     }
 
     if (auto p = await_published([this] {
-            for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
-                const os::KernelTid published = seats_[i].tid.load(std::memory_order_acquire);
-                if (seats_[i].live && published == kNoTidPublished)
+            for (const LiveSeat& seat : seats_) {
+                if (seat.live && !seat.birth.generation().held())
                     return false;
             }
             return true;
@@ -457,39 +444,12 @@ Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
 
 namespace {
 
-int join_within(
-    pthread_t thread,
-    [[maybe_unused]] const std::atomic<bool>& exited,
-    const timespec& abs
-) noexcept {
-#if defined(__GLIBC__)
+int join_within(pthread_t thread, const timespec& abs) noexcept {
     return ::pthread_clockjoin_np(thread, nullptr, CLOCK_MONOTONIC, &abs);
-#else
-    for (;;) {
-        if (exited.load(std::memory_order_acquire))
-            return ::pthread_join(thread, nullptr);
-        timespec now{};
-        (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > abs.tv_sec || (now.tv_sec == abs.tv_sec && now.tv_nsec >= abs.tv_nsec)) {
-            return ETIMEDOUT;
-        }
-        timespec slp{};
-        constexpr std::chrono::milliseconds kJoinPoll{1};
-        slp.tv_nsec = static_cast<long>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(kJoinPoll).count()
-        );
-        (void)::clock_nanosleep(CLOCK_MONOTONIC, 0, &slp, nullptr);
-    }
-#endif
 }
 
 timespec deadline_from_now(std::chrono::nanoseconds deadline) noexcept {
-    timespec abs{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &abs);
-    const std::int64_t total = static_cast<std::int64_t>(abs.tv_nsec) + deadline.count();
-    abs.tv_sec += static_cast<time_t>(total / kOneSecond.count());
-    abs.tv_nsec = static_cast<long>(total % kOneSecond.count());
-    return abs;
+    return os::to_timespec(os::since_boot(os::steady_now() + deadline));
 }
 
 }
@@ -498,7 +458,7 @@ Ex<void> ThreadAssembly::join_rt_within(std::chrono::nanoseconds deadline) {
     const std::size_t i = seat_index(SeatTag::RT);
     if (!seats_[i].live)
         return {};
-    const int rc = join_within(seats_[i].handle, rt_exited_, deadline_from_now(deadline));
+    const int rc = join_within(seats_[i].handle, deadline_from_now(deadline));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
             Error{
@@ -520,7 +480,7 @@ Ex<void> ThreadAssembly::join_io_within(std::chrono::nanoseconds deadline) {
     const std::size_t i = seat_index(SeatTag::Io);
     if (!seats_[i].live)
         return {};
-    const int rc = join_within(seats_[i].handle, io_exited_, deadline_from_now(deadline));
+    const int rc = join_within(seats_[i].handle, deadline_from_now(deadline));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
             Error{

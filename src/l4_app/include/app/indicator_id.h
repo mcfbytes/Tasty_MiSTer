@@ -2,9 +2,9 @@
 #pragma once
 
 #include <array>
-#include <bitset>
 #include <cstdint>
 
+#include "infra/enum_set.h"
 #include "infra/message_sum.h"
 
 namespace mister::app {
@@ -20,28 +20,32 @@ using PerIndicator = std::array<T, infra::ordinal(IndicatorId::kCount)>;
 
 class IndicatorSet {
 public:
-    [[nodiscard]] constexpr bool has(IndicatorId id) const noexcept {
-        return bits_.test(infra::ordinal(id));
+    using Bits = infra::EnumSet<IndicatorId, std::uint8_t>;
+
+    constexpr IndicatorSet() noexcept = default;
+
+    [[nodiscard]] constexpr bool contains(IndicatorId id) const noexcept {
+        return bits_.contains(id);
     }
 
-    [[nodiscard]] constexpr bool any() const noexcept { return bits_.any(); }
+    [[nodiscard]] constexpr bool is_empty() const noexcept { return bits_.is_empty(); }
 
     [[nodiscard]] constexpr IndicatorSet with(IndicatorId id) const noexcept {
         IndicatorSet out = *this;
-        out.bits_.set(infra::ordinal(id));
+        out.bits_.insert(id);
         return out;
     }
 
     [[nodiscard]] constexpr IndicatorSet without(IndicatorId id) const noexcept {
         IndicatorSet out = *this;
-        out.bits_.reset(infra::ordinal(id));
+        out.bits_.remove(id);
         return out;
     }
 
     friend constexpr bool operator==(const IndicatorSet&, const IndicatorSet&) = default;
 
 private:
-    std::bitset<infra::ordinal(IndicatorId::kCount)> bits_{};
+    Bits bits_{};
 };
 
 }

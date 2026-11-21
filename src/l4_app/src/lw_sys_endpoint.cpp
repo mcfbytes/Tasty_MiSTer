@@ -5,9 +5,8 @@
 #include <array>
 #include <chrono>
 
+#include "infra/prelude.h"
 #include "infra/seat_owner_io.h"
-#include "reactor/cause_decode.h"
-#include "reactor/notifier.h"
 
 namespace mister::app {
 
@@ -50,7 +49,7 @@ void LwSysEndpoint::prepare_hook_(const SysGrant& g) noexcept {
 }
 
 bool LwSysEndpoint::arm_hook_(const SysGrant& g) noexcept {
-    return line_.open(g.line, w_.doorbells);
+    return line_.open(g.body.line, w_.doorbells);
 }
 
 void LwSysEndpoint::bind_hook_(const SysGrant&) noexcept {}
@@ -90,9 +89,9 @@ LwSysEndpoint::Port& LwSysEndpoint::port_() noexcept {
     return *block_;
 }
 
-std::optional<proto::StatusSnapshot> LwSysEndpoint::read_snapshot_() noexcept {
+std::optional<proto::link::StatusSnapshot> LwSysEndpoint::read_snapshot_() noexcept {
     using hal::SysBlock;
-    proto::StatusSnapshot snapshot{};
+    proto::link::StatusSnapshot snapshot{};
     const std::optional<SysBlock::Stflg>
         first = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
 
@@ -113,23 +112,20 @@ void LwSysEndpoint::serve_status_(bool rang) noexcept {
     const auto t0 = clock_.now();
     if (!lease_())
         return;
-    const std::uint32_t cause = line_.drain(rang, port_(), hal::SysBlock::Reg::Cause);
-    const reactor::CauseDecode d = reactor::decode_cause_checked(cause);
+    const proto::CauseBits cause = line_.drain(rang, port_(), hal::SysBlock::Reg::Cause);
 
-    if (cause == 0u && !rang) {
+    if (cause.empty() && !rang) {
         release_();
         return;
     }
-    if (d.is_refused()
-        || d.cause() != reactor::Cause::Sys
-        || (cause & hal::SysBlock::kCauseStatus) == 0u) {
+    if (!cause.holds(proto::CauseBits{hal::SysBlock::kCauseStatus})) {
         release_();
         ++tally_.spurious;
         publish_();
         return;
     }
     ++tally_.drains;
-    std::optional<proto::StatusSnapshot> capture{};
+    std::optional<proto::link::StatusSnapshot> capture{};
     for (unsigned i = 0; i < kMaxReads && !capture; ++i) {
         capture = read_snapshot_();
         if (!capture)
@@ -138,7 +134,6 @@ void LwSysEndpoint::serve_status_(bool rang) noexcept {
     release_();
     if (!capture) {
         ++tally_.torn;
-        recheck_ = true;
         publish_();
         return;
     }
@@ -159,9 +154,9 @@ template class LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
 }
 
 namespace mister::hal {
-template class ReadWindowPort<SysBlock, seat_owner::Io>;
+template class WindowPort<SysBlock, seat_owner::Io>;
 }
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 template class GrantLease<app::SysGrant, seat_owner::Io>;
 }

@@ -4,16 +4,16 @@
 #include <array>
 
 #include "infra/message_sum.h"
-#include "os/wpa_state.h"
-#include "svc/connect_request.h"
+#include "os/connect/wpa_state.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 
 enum class Slot : std::uint8_t {
     Interface,
@@ -29,8 +29,8 @@ enum class Slot : std::uint8_t {
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 constexpr std::array<std::string_view, 1> kForgetBody{"Every saved network is removed."};
-constexpr RowIndex kOnNo = RowIndex::of(1);
-constexpr RowIndex kYes = RowIndex::of(0);
+constexpr RowIndex kOnNo = RowIndex::truncating(1);
+constexpr RowIndex kYes = RowIndex::truncating(0);
 constexpr std::string_view kNone = "-";
 
 }
@@ -58,14 +58,14 @@ ConnectDemand WifiAdvancedPlan::connect_demand() const {
 bool WifiAdvancedPlan::slot_shown(SlotId slot) const {
     TASTY_SEAT_BODY(WifiAdvancedPlan);
     if (slot.is(Slot::LastFailure)) {
-        return views().wifi && views().wifi->failure != svc::WifiFailure::None;
+        return views().wifi && views().wifi->failure != svc::connect::WifiFailure::None;
     }
     return true;
 }
 
-app::PageDescription::Row WifiAdvancedPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row WifiAdvancedPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(WifiAdvancedPlan);
-    const std::optional<svc::WifiView>& v = views().wifi;
+    const std::optional<svc::connect::WifiView>& v = views().wifi;
     switch (slot.named<Slot>()) {
         case Slot::Interface:
             return connect_row(
@@ -93,7 +93,7 @@ app::PageDescription::Row WifiAdvancedPlan::slot_describe(SlotId slot) const {
             return connect_row(
                 RowKind::Value,
                 "Link state",
-                v ? os::wpa_state_text(v->wpa_state) : kNone
+                v ? os::connect::wpa_state_text(v->wpa_state) : kNone
             );
         case Slot::LastFailure:
             return connect_row(
@@ -156,7 +156,7 @@ Transition WifiAdvancedPlan::slot_entered(SlotId slot, const TextEntryResult& re
     if (!pass)
         return Transition::pop();
     Request::WifiJoin join{};
-    join.security = os::WifiSecurity::Psk;
+    join.security = os::connect::WifiSecurity::Psk;
     join.hidden = true;
     join.ssid = hidden_;
     join.pass = pass->value;

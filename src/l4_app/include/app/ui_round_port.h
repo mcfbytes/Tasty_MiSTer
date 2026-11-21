@@ -10,7 +10,9 @@ struct LinkEvent;
 
 namespace mister::app {
 
+namespace input {
 struct RawKeyEdge;
+}
 
 class IUiRoundPort {
 public:
@@ -18,7 +20,7 @@ public:
 
     virtual void boot_witness() = 0;
 
-    virtual void on(const RawKeyEdge& e) noexcept = 0;
+    virtual void on(const input::RawKeyEdge& e) noexcept = 0;
     [[nodiscard]] virtual UiRoundEdge round(UiPassWork work) = 0;
 
     virtual void publish_edges(const UiRoundEdge& edge) = 0;

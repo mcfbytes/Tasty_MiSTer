@@ -8,6 +8,7 @@
 
 #include "cores/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/child_process.h"
 
 namespace mister::app::proc {

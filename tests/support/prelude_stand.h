@@ -7,7 +7,7 @@
 
 #include "app/audio_pump.h"
 #include "app/ini_cell.h"
-#include "app/input_gates_cell.h"
+#include "app/input/input_gates_cell.h"
 #include "app/link_rx_channel.h"
 #include "app/link_tx_channel.h"
 #include "app/prelude_composer.h"
@@ -15,6 +15,7 @@
 #include "app/video_pump.h"
 #include "app/video_wire.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/link_event.h"
 #include "svc/vfs.h"
@@ -35,7 +36,7 @@ namespace mister::testing {
 
 [[nodiscard]] inline app::VideoPump::Wiring video_wiring(
     const xthread::Counter& activity,
-    const app::InputGatesCell& gates,
+    const app::input::InputGatesCell& gates,
     app::LinkTxChannel<SeatTag::Ui>& link_tx,
     proto::ILinkRouter& replies,
     const app::IniCell& ini = kStandIniCell

@@ -6,12 +6,13 @@
 
 #include "ui/slot_id.h"
 #include "ui/types.h"
+#include "infra/run.h"
 
 namespace mister::ui {
 
 class SlotRange {
 public:
-    constexpr SlotRange(RowIndex first, RowCount count) noexcept : first_(first), count_(count) {}
+    constexpr SlotRange(RowIndex first, RowCount count) noexcept : run_{first, count} {}
 
     [[nodiscard]] static constexpr SlotRange table(RowCount count) noexcept {
         return SlotRange{RowIndex{}, count};
@@ -26,25 +27,24 @@ public:
         return SlotRange{run.end(), count};
     }
 
-    [[nodiscard]] constexpr RowIndex end() const noexcept { return first_ + count_; }
+    [[nodiscard]] constexpr RowIndex end() const noexcept { return run_.end(); }
 
     [[nodiscard]] constexpr RowCount total() const noexcept { return end().before(); }
 
-    [[nodiscard]] constexpr SlotId first() const noexcept { return SlotId::at(first_); }
+    [[nodiscard]] constexpr SlotId first() const noexcept { return SlotId::at(run_.start); }
 
     [[nodiscard]] constexpr bool contains(SlotId slot) const noexcept {
-        return slot.row() >= first_ && slot.row() < end();
+        return run_.contains(slot.row());
     }
 
     [[nodiscard]] constexpr std::optional<std::size_t> subscript_of(SlotId slot) const noexcept {
         if (!contains(slot))
             return std::nullopt;
-        return (slot.row() - first_).size();
+        return (slot.row() - run_.start).size();
     }
 
 private:
-    RowIndex first_;
-    RowCount count_;
+    infra::affine::Run<RowIndex> run_{};
 };
 
 }

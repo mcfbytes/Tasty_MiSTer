@@ -7,29 +7,30 @@
 #include <optional>
 #include <string>
 
-#include "svc/adv7513_init_options.h"
+#include "hal/types.h"
+#include "svc/video/adv7513_init_options.h"
 #include "svc/config_snapshot.h"
-#include "svc/dv1_spd.h"
+#include "svc/video/dv1_spd.h"
 #include "app/types.h"
-#include "svc/modeline.h"
-#include "svc/video_sample.h"
+#include "svc/video/modeline.h"
+#include "svc/video/video_sample.h"
 
 namespace mister::app {
 
-using AspectWords = std::array<std::uint16_t, 2>;
+using AspectWords = std::array<hal::SpiWord, 2>;
 
 struct AspectTerm {
     std::uint16_t v = 0;
 
     template <std::integral I>
     [[nodiscard]] static constexpr std::optional<AspectTerm> of(I n) noexcept {
-        if (n < 1 || n > svc::AspectRaw::kValueMask)
+        if (n < 1 || n > svc::video::AspectRaw::kValueMask)
             return std::nullopt;
         return AspectTerm{static_cast<std::uint16_t>(n)};
     }
 
     friend constexpr AspectWords aspect_words(AspectTerm num, AspectTerm den) noexcept {
-        return {num.v, den.v};
+        return {hal::SpiWord{num.v}, hal::SpiWord{den.v}};
     }
 
     friend constexpr bool operator==(AspectTerm, AspectTerm) = default;
@@ -56,9 +57,9 @@ struct VideoIni {
         std::optional<VsyncAdjust> vsync{};
     };
 
-    svc::Modeline::WireOptions wire{};
-    svc::adv7513::InitOptions init{};
-    svc::SpdQuirk spd_quirk = svc::SpdQuirk::Full;
+    svc::video::Modeline::WireOptions wire{};
+    svc::video::adv7513::InitOptions init{};
+    svc::video::SpdQuirk spd_quirk = svc::video::SpdQuirk::Full;
 
     VfilterSeeds vfilter_seeds{};
 
@@ -82,7 +83,7 @@ struct VideoIni {
 
 [[nodiscard]] VideoIni absent_video_ini(const VideoIni::Force& force, const VideoIni& last);
 
-[[nodiscard]] constexpr std::array<std::uint16_t, 4> ar_custom_words(
+[[nodiscard]] constexpr std::array<hal::SpiWord, 4> ar_custom_words(
     const std::array<AspectRatio, 2>& ratios
 ) noexcept {
     const auto first = aspect_words(ratios[0].num, ratios[0].den);

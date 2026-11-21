@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::svc {
 

@@ -22,8 +22,8 @@ consteval CoreProfile own_block_service_profile(
         .start = StartRule::None,
         .signatures = {},
         .block_service = BlockService::CoreOwn,
-        .image_rows_no_zip = image_rows_no_zip,
         .undeclared_start_mount = StartMount::Unmodelled,
+        .host = {.image_rows_no_zip = image_rows_no_zip},
     };
 }
 

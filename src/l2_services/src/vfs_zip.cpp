@@ -14,7 +14,9 @@
 #include <minizip/unzip.h>
 
 #include "infra/ascii.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
+#include "os/positioned_io.h"
 
 namespace mister::svc::detail {
 
@@ -264,9 +266,12 @@ public:
     ZipFile(const ZipFile&) = delete;
     ZipFile& operator=(const ZipFile&) = delete;
 
-    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<infra::ByteCount> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) override {
         if (!size_.holds(at))
-            return std::size_t{0};
+            return infra::ByteCount{};
         if (at < pos_) {
             if (auto r = rewind(); !r)
                 return std::unexpected(r.error());
@@ -293,10 +298,13 @@ public:
             done += static_cast<std::size_t>(n);
             pos_ += proto::FileSize{static_cast<std::uint64_t>(n)};
         }
-        return done;
+        return infra::ByteCount{done};
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(proto::FileOffset, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<infra::ByteCount> write_at(
+        proto::FileOffset,
+        std::span<const std::byte>
+    ) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
@@ -310,15 +318,12 @@ public:
         UniqueFd fd{::open(archive_.c_str(), O_RDONLY | O_CLOEXEC)};
         if (fd.get() < 0)
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-        const int rc = ::posix_fadvise(
-            fd.get(),
-            packed_at_.seek_offset(),
-            packed_len_.file_word<::off_t>(),
-            POSIX_FADV_WILLNEED
+        return os::advise(
+            fd,
+            packed_at_.kernel_offset(),
+            packed_len_.kernel_length(),
+            os::Advice::WillNeed
         );
-        if (rc != 0)
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(rc)});
-        return {};
     }
 
 private:

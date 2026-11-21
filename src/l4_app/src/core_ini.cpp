@@ -69,13 +69,13 @@ CoreIni::Resolved CoreIni::resolve(std::string_view conf_name, const MraFacts& f
     if (!boot_pending_)
         return out;
 
-    if (cfg.waitmount[0] != '\0' && !cores::profile_for(conf_name).is_front_end) {
+    if (cfg.waitmount[0] != '\0' && !cores::profile_for(conf_name).host.front_end) {
         if (!wait_for_mount_(cfg.waitmount))
             out.waitmount_exhausted = true;
     }
     boot_handoff_.clear();
-    if (const LauncherProfile* l = launcher_for_main(cfg.main)) {
-        out.launcher = infra::OptRef<const LauncherProfile>{*l};
+    if (const launcher::LauncherProfile* l = launcher::launcher_for_main(cfg.main)) {
+        out.launcher = infra::OptRef<const launcher::LauncherProfile>{*l};
         return out;
     }
     if (auto exe = alternate_executable(vfs_, cfg.main, self_exe_path())) {

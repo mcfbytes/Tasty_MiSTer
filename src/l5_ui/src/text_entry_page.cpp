@@ -6,13 +6,14 @@
 #include <utility>
 #include <linux/input-event-codes.h>
 
-#include "app/hd_window.h"
+#include "app/hd/hd_window.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
-#include "os/passkey.h"
-#include "os/passphrase.h"
-#include "os/pin_code.h"
-#include "os/ssid.h"
+#include "infra/tally.h"
+#include "os/connect/passkey.h"
+#include "os/connect/passphrase.h"
+#include "os/connect/pin_code.h"
+#include "os/connect/ssid.h"
 #include "svc/types.h"
 #include "ui/draw_classic.h"
 #include "ui/keyboard_text.h"
@@ -24,8 +25,8 @@
 namespace mister::ui {
 namespace {
 
-using Row = app::PageDescription::Row;
-using RowKind = app::PageDescription::RowKind;
+using Row = app::hd::PageDescription::Row;
+using RowKind = app::hd::PageDescription::RowKind;
 
 constexpr char kMask = '*';
 constexpr std::size_t kFieldChars = 22;
@@ -54,7 +55,7 @@ TextEntryPage::TextEntryPage(const TextEntryRequest& request) noexcept
     : request_(request),
       grid_(request.kind) {
     TASTY_SEAT_BODY(TextEntryPage);
-    sel_ = RowIndex::of(infra::ordinal(Line::Grid0));
+    sel_ = RowIndex::truncating(infra::ordinal(Line::Grid0));
 }
 
 PageId TextEntryPage::id() const {
@@ -62,7 +63,7 @@ PageId TextEntryPage::id() const {
     return PageId::TextEntry;
 }
 
-svc::Tally TextEntryPage::refusals() const noexcept {
+infra::Tally TextEntryPage::refusals() const noexcept {
     TASTY_SEAT_BODY(TextEntryPage);
     return refusals_;
 }
@@ -70,13 +71,13 @@ svc::Tally TextEntryPage::refusals() const noexcept {
 bool TextEntryPage::valid_() const noexcept {
     switch (request_.kind) {
         case TextEntryKind::Passphrase:
-            return os::Passphrase::parse(text_.view()).has_value();
+            return os::connect::Passphrase::parse(text_.view()).has_value();
         case TextEntryKind::HiddenSsid:
-            return !text_.view().empty() && os::Ssid::parse(text_.view()).has_value();
+            return !text_.view().empty() && os::connect::Ssid::parse(text_.view()).has_value();
         case TextEntryKind::Passkey:
-            return os::Passkey::parse(text_.view()).has_value();
+            return os::connect::Passkey::parse(text_.view()).has_value();
         case TextEntryKind::Pin:
-            return os::PinCode::parse(text_.view()).has_value();
+            return os::connect::PinCode::parse(text_.view()).has_value();
     }
     return false;
 }
@@ -84,7 +85,7 @@ bool TextEntryPage::valid_() const noexcept {
 bool TextEntryPage::accepts_(char c) const noexcept {
     if (!text_entry_numeric(request_.kind))
         return true;
-    return os::Passkey::is_digit(c);
+    return os::connect::Passkey::is_digit(c);
 }
 
 bool TextEntryPage::shown_(Line line) const noexcept {
@@ -119,7 +120,7 @@ std::optional<RowIndex> TextEntryPage::grid_row_(Line line) noexcept {
     const std::size_t first = infra::ordinal(Line::Grid0);
     if (at < first || at >= first + KeyGrid::kRows)
         return std::nullopt;
-    return RowIndex::of(at - first);
+    return RowIndex::truncating(at - first);
 }
 
 TextEntryPage::Line TextEntryPage::line_at_(RowIndex i) const noexcept {
@@ -132,7 +133,7 @@ MenuMask TextEntryPage::mask() const {
     MenuMask m{};
     for (std::size_t i = 0; i < kLines.size(); ++i) {
         if (focusable_(kLines[i]))
-            m = m.with(RowIndex::of(i));
+            m = m.with(RowIndex::truncating(i));
     }
     return m;
 }
@@ -164,17 +165,21 @@ bool TextEntryPage::walk(PageWalk& out) const {
         const Line line = kLines[i];
         if (!shown_(line))
             continue;
-        if (RowIndex::of(i) == sel_)
+        if (RowIndex::truncating(i) == sel_)
             selected_at = total;
         order[total++] = line;
     }
 
-    const app::HdWindow win = out.window(RowIndex::of(selected_at), RowCount::of(total));
+    const app::hd::HdWindow win = out.window(
+        RowIndex::truncating(selected_at),
+        RowCount::truncating(total)
+    );
     for (std::size_t k = 0; k < total; ++k) {
         const Line line = order[k];
         Row hd{};
         std::string text;
-        const bool selected = RowIndex::of(infra::ordinal(line)) == sel_ && line != Line::Field;
+        const bool selected = RowIndex::truncating(infra::ordinal(line)) == sel_
+            && line != Line::Field;
         if (line == Line::Field) {
             hd = field_row(text_entry_heading(request_.kind), text_.view(), masked);
         } else if (const std::optional<RowIndex> g = grid_row_(line)) {
@@ -208,19 +213,19 @@ bool TextEntryPage::walk(PageWalk& out) const {
         if (!hd.value.empty())
             text.append("  ").append(hd.value.view());
 
-        const bool in_window = RowRange{win.first, win.count}.contains(RowIndex::of(k));
+        const bool in_window = RowRange{win.start, win.len}.contains(RowIndex::truncating(k));
         if (in_window) {
             PageRow& r = out.rows[out.count++];
             r.has_hd = true;
             r.hd = hd;
             r.classic = classic_row(
-                osd_row_at(RowCount::of(k)),
+                osd_row_at(RowCount::truncating(k)),
                 text,
                 {.inverted = selected, .arrow = OsdRenderer::kArrowNone}
             );
         } else if (std::cmp_less(out.count, out.rows.size())) {
             out.rows[out.count++].classic = classic_row(
-                osd_row_at(RowCount::of(k)),
+                osd_row_at(RowCount::truncating(k)),
                 text,
                 {.inverted = selected, .arrow = OsdRenderer::kArrowNone}
             );
@@ -245,22 +250,22 @@ Transition TextEntryPage::finish_() {
     switch (request_.kind) {
         case TextEntryKind::Passphrase:
             result = infra::make<TextEntryResult>(
-                TextEntryResult::Passphrase{*os::Passphrase::parse(text_.view())}
+                TextEntryResult::Passphrase{*os::connect::Passphrase::parse(text_.view())}
             );
             break;
         case TextEntryKind::HiddenSsid:
             result = infra::make<TextEntryResult>(
-                TextEntryResult::Ssid{*os::Ssid::parse(text_.view())}
+                TextEntryResult::Ssid{*os::connect::Ssid::parse(text_.view())}
             );
             break;
         case TextEntryKind::Passkey:
             result = infra::make<TextEntryResult>(
-                TextEntryResult::Passkey{*os::Passkey::parse(text_.view())}
+                TextEntryResult::Passkey{*os::connect::Passkey::parse(text_.view())}
             );
             break;
         case TextEntryKind::Pin:
             result = infra::make<TextEntryResult>(
-                TextEntryResult::Pin{*os::PinCode::parse(text_.view())}
+                TextEntryResult::Pin{*os::connect::PinCode::parse(text_.view())}
             );
             break;
     }
@@ -325,13 +330,13 @@ Transition TextEntryPage::handle(const UiEvent& ev) {
         }
     }
 
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (ev.buttons.intersects({UiEvent::Menu}))
         return cancel_();
-    if (ev.buttons.has_any({UiEvent::Back})) {
+    if (ev.buttons.intersects({UiEvent::Back})) {
         text_.pop();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Select})) {
+    if (ev.buttons.intersects({UiEvent::Select})) {
         const bool enter = key == svc::EvdevCode{KEY_ENTER} || key == svc::EvdevCode{KEY_KPENTER};
         if (typing_ && enter && valid_())
             return finish_();
@@ -339,8 +344,8 @@ Transition TextEntryPage::handle(const UiEvent& ev) {
     }
 
     const std::optional<RowIndex> g = grid_row_(line_at_(sel_));
-    const bool left = ev.buttons.has_any({UiEvent::Left | UiEvent::Minus});
-    const bool right = ev.buttons.has_any({UiEvent::Right | UiEvent::Plus});
+    const bool left = ev.buttons.intersects({UiEvent::Left | UiEvent::Minus});
+    const bool right = ev.buttons.intersects({UiEvent::Right | UiEvent::Plus});
     if (g && (left || right)) {
         typing_ = false;
         grid_.step(*g, right ? CycleDir::Next : CycleDir::Back);

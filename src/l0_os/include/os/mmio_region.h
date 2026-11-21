@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/map_length.h"
 #include "os/types.h"
 #include "infra/seat.h"

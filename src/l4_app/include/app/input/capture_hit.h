@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+#include "app/input/capture_arm.h"
+#include "infra/fixed_str.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "infra/xthread/telemetry.h"
+#include "svc/types.h"
+
+namespace mister::app::input {
+
+inline constexpr std::size_t kCaptureIdCap = 128;
+
+struct CaptureHit {
+    CaptureToken token{};
+    std::uint32_t unique_hash = 0;
+    svc::EvdevCode code{};
+    svc::DeviceSlot device_ordinal{};
+    bool mod = false;
+    bool unique_filenames = false;
+    bool id_clipped = false;
+    svc::Vid vid{};
+    svc::Pid pid{};
+    FixedStr<kCaptureIdCap, StrFit::Clip> id{};
+};
+
+using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
+
+}

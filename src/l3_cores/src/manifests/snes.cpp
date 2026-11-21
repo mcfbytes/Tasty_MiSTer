@@ -6,31 +6,36 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cores/msu_companion.h"
-#include "cores/msu_wire.h"
-#include "cores/sgb_core.h"
-#include "cores/snes_core.h"
-#include "cores/snes_loader.h"
+#include "cores/snes/msu_companion.h"
+#include "cores/snes/msu_machine.h"
+#include "cores/snes/msu_wire.h"
+#include "cores/snes/sgb_core.h"
+#include "cores/snes/snes_core.h"
+#include "cores/snes/snes_loader.h"
 
 namespace mister::cores::manifests {
 
 using namespace std::chrono_literals;
 
 std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<SnesCore>(p, g.services);
+    return std::make_unique<snes::SnesCore>(p, g.services);
 }
 
 std::unique_ptr<ILoader> make_snes_loader(const LoaderContext& ctx) {
     (void)ctx;
-    return std::make_unique<SnesLoader>();
+    return std::make_unique<snes::SnesLoader>();
 }
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<SgbCore>(p, g.services, kSgbMailboxFrame);
+    return std::make_unique<snes::SgbCore>(p, g.services, kSgbMailboxFrame);
 }
 
 std::unique_ptr<ICompanion> make_msu_companion(const svc::Vfs& vfs) {
-    return std::make_unique<MsuCompanion>(vfs);
+    return std::make_unique<snes::MsuCompanion>(vfs);
+}
+
+std::unique_ptr<IMailboxServant> make_msu_servant(const ServantGrant& g) {
+    return std::make_unique<snes::MsuMachine>(g.vfs);
 }
 
 static_assert(kSnes.kind == CoreKind::Snes);
@@ -69,37 +74,43 @@ static_assert(
     "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
 );
 static_assert(
-    msu::kFrameWords == 4 && proto::well_formed(kSnesMailboxFrame),
+    snes::msu::kFrameWords == 4 && proto::well_formed(kSnesMailboxFrame),
     "snes.cpp:536-541: spi_uio_cmd_cont(UIO_CD_GET), then three spi_w(0)"
 );
 static_assert(
-    msu::kCdSet == 0x35
-        && msu::kSetEnable == 1
-        && msu::kSetTrackSize == 2
-        && msu::kSetDataBase == 3,
+    snes::msu::kCdSet == 0x35
+        && snes::msu::kSetEnable == 1
+        && snes::msu::kSetTrackSize == 2
+        && snes::msu::kSetDataBase == 3,
     "snes.cpp:471-473 + user_io.h:63: UIO_CD_SET with MSU_CD_SET/TRACK_MOUNTED/DATA_BASE"
 );
 static_assert(
-    msu::set_enable(true) == mister::proto::MailboxWords{0x8001, 0, 0}
-        && msu::set_enable(false) == mister::proto::MailboxWords{0x0001, 0, 0},
+    snes::msu::set_enable(true)
+            == mister::proto::MailboxWords{hal::SpiWord{0x8001}, hal::SpiWord{}, hal::SpiWord{}}
+        && snes::msu::set_enable(false)
+            == mister::proto::MailboxWords{hal::SpiWord{0x0001}, hal::SpiWord{}, hal::SpiWord{}},
     "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)"
 );
 static_assert(
-    msu::set_data_base() == mister::proto::MailboxWords{0x0003, 0, 0x2300},
-    "snes.cpp:524 sent 0x20600000; the base is now the aperture + msu::kDataBaseOffset"
+    snes::msu::set_data_base()
+        == mister::proto::MailboxWords{hal::SpiWord{0x0003}, hal::SpiWord{}, hal::SpiWord{0x2300}},
+    "snes.cpp:524 sent 0x20600000; the base is now the aperture + snes::msu::kDataBaseOffset"
 );
 static_assert(
-    msu::set_track_size(0x0001'2345u) == mister::proto::MailboxWords{0x0002, 0x2345, 1},
+    snes::msu::set_track_size(0x0001'2345u)
+        == mister::proto::MailboxWords{hal::SpiWord{0x0002}, hal::SpiWord{0x2345}, hal::SpiWord{1}},
     "snes.cpp:558: (f_audio.size << 16) | MSU_AUDIO_TRACK_MOUNTED"
 );
 static_assert(
-    msu::kSectorBytes == 1024 && msu::kAudioIndex == 2 && msu::kDataIndex == 3,
+    snes::msu::kSectorSize == mister::proto::BlockSize{1024}
+        && snes::msu::kAudioIndex == 2
+        && snes::msu::kDataIndex == 3,
     "snes.cpp:477,492,568: 1024-byte sectors on index 2; snes.cpp:525: the data on 3"
 );
 static_assert(
     std::ranges::none_of(
         kSnes.slots,
-        [](const FileSlot& s) { return s.index == proto::IoIndex{msu::kDataIndex}; }
+        [](const FileSlot& s) { return s.index == proto::IoIndex{snes::msu::kDataIndex}; }
     ),
     "no content row loads on index 3: a window close there is the data track's"
 );

@@ -18,9 +18,13 @@
 
 #include "browse_rules.h"
 #include "infra/errno.h"
+#include "infra/file_mode.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "os/block_device.h"
+#include "os/file_create.h"
 #include "posix_file.h"
+#include "svc/card_dirs.h"
 #include "svc/game_asset_finder.h"
 #include "svc/memory_mounts.h"
 #include "vfs_detail.h"
@@ -46,12 +50,10 @@ using infra::istarts_with;
 
 namespace {
 
-constexpr std::string_view kSdRoot = "/media/fat";
 constexpr std::string_view kMediaDir = "/media";
 constexpr std::string_view kNetworkDir = "/media/network";
 constexpr std::string_view kCifsDir = "cifs";
 constexpr std::string_view kGamesDir = "games";
-constexpr std::string_view kConfigDir = "config";
 
 constexpr std::uint8_t kUsbRootSlots = 4;
 constexpr std::uint8_t kUsbSearchSlots = 6;
@@ -125,21 +127,32 @@ std::optional<std::string> fold_case_lookup(std::string_view base, std::string_v
 
 namespace {
 
-int open_flags(OpenMode m) {
+std::expected<UniqueFd, infra::Errno> open_in_mode(const char* path, OpenMode m) noexcept {
+    using os::OpenFlags;
+    constexpr OpenFlags kRead = OpenFlags::read_only();
+    constexpr OpenFlags kReadWrite = OpenFlags::read_write();
+    constexpr OpenFlags kCreate = OpenFlags::read_write().creating();
+    constexpr OpenFlags kTruncate = kCreate.truncating();
+    constexpr OpenFlags kSync = kTruncate.synced();
+    static_assert(kRead.open_word() == (O_RDONLY | O_CLOEXEC));
+    static_assert(kReadWrite.open_word() == (O_RDWR | O_CLOEXEC));
+    static_assert(kCreate.open_word() == (O_RDWR | O_CREAT | O_CLOEXEC));
+    static_assert(kTruncate.open_word() == (O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC));
+    static_assert(kSync.open_word() == (O_RDWR | O_CREAT | O_TRUNC | O_SYNC | O_CLOEXEC));
     switch (m) {
         case OpenMode::Read:
         case OpenMode::ReadWhole:
-            return O_RDONLY | O_CLOEXEC;
+            return os::open_existing(path, kRead);
         case OpenMode::ReadWrite:
-            return O_RDWR | O_CLOEXEC;
+            return os::open_existing(path, kReadWrite);
         case OpenMode::Create:
-            return O_RDWR | O_CREAT | O_CLOEXEC;
+            return os::open_created(path, kCreate, infra::kInheritedDirMode);
         case OpenMode::Truncate:
-            return O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC;
+            return os::open_created(path, kTruncate, infra::kInheritedDirMode);
         case OpenMode::Sync:
-            return O_RDWR | O_CREAT | O_TRUNC | O_SYNC | O_CLOEXEC;
+            return os::open_created(path, kSync, infra::kInheritedDirMode);
     }
-    return O_RDONLY | O_CLOEXEC;
+    return os::open_existing(path, kRead);
 }
 
 Ex<std::unique_ptr<IFile>> hinted_whole(Ex<std::unique_ptr<IFile>> f) {
@@ -147,12 +160,6 @@ Ex<std::unique_ptr<IFile>> hinted_whole(Ex<std::unique_ptr<IFile>> f) {
         (void)(*f)->advise(IFile::Access::Sequential, proto::kFileStart, FileSize{});
     return f;
 }
-
-bool mode_creates(OpenMode m) {
-    return m == OpenMode::Create || m == OpenMode::Truncate || m == OpenMode::Sync;
-}
-
-constexpr ::mode_t kCreateMode = S_IRWXU | S_IRWXG | S_IRWXO;
 
 }
 
@@ -291,13 +298,14 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
         return zip_open_member(std::string(zs.archive), std::string(zs.member));
     }
 
-    const int flags = open_flags(mode);
-    const int raw = ::open(full.c_str(), flags, kCreateMode);
-    if (raw < 0) {
-        const auto e = static_cast<std::uint32_t>(errno);
-        return std::unexpected(Error{Errc::os, ERR_SITE(), e});
+    auto opened = open_in_mode(full.c_str(), mode);
+    if (!opened) {
+
+        if (opened.error() == infra::Errno{ENOENT})
+            return std::unexpected(opened.error().refusal(Errc::not_found, ERR_SITE()));
+        return std::unexpected(opened.error().refusal(Errc::os, ERR_SITE()));
     }
-    UniqueFd fd{raw};
+    UniqueFd fd{std::move(*opened)};
 
     struct ::stat st{};
     if (::fstat(fd.get(), &st) != 0) {
@@ -487,13 +495,12 @@ Ex<void> Vfs::ensure_dir_(std::string_view rel) const {
             cur.push_back('/');
         cur.append(comp);
 
-        if (::mkdir(cur.c_str(), kCreateMode) == 0) {
+        const auto made = os::make_dir(cur.c_str(), infra::kInheritedDirMode);
+        if (!made)
+            return std::unexpected(made.error().refusal(Errc::os, ERR_SITE()));
 
+        if (*made == os::DirMade::Created)
             durable_.sync_dir_containing(cur);
-        } else if (errno != EEXIST) {
-            const auto e = static_cast<std::uint32_t>(errno);
-            return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-        }
     }
     return {};
 }

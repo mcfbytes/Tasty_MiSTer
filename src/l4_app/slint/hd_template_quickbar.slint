@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Theme, MenuRow, HelpItem, Chevron, RowGlyph, ListScreen, ScreenHeader, HelpBar } from "hd_common.slint";
+import { Theme, MenuRow, HelpItem, RowKind, RowIcon, RowTier, Chevron, RowGlyph, ListScreen, ScreenHeader, HelpBar } from "hd_common.slint";
 
 component Ring inherits Rectangle {
     x: Theme.focus-stroke;
@@ -14,7 +14,7 @@ component ShelfCard inherits Rectangle {
     in property <MenuRow> entry;
     in property <length> slot;
     in property <length> card-h;
-    property <bool> shown: root.entry.tier == 2;
+    property <bool> shown: root.entry.tier == RowTier.shelf;
     property <bool> focused: root.entry.selected;
     property <length> card-w: root.width - Theme.gap;
     property <length> edge: 2 * Theme.focus-stroke + Theme.ring-w;
@@ -102,7 +102,7 @@ component Tile inherits Rectangle {
             padding-left: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
             padding-right: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
             spacing: Theme.gap / 2;
-            if root.entry.icon != 0: VerticalLayout {
+            if root.entry.icon != RowIcon.none: VerticalLayout {
                 alignment: center;
                 RowGlyph {
                     width: Theme.glyph;
@@ -123,7 +123,7 @@ component Tile inherits Rectangle {
                 wrap: word-wrap;
                 overflow: elide;
             }
-            if root.entry.kind == 1: VerticalLayout {
+            if root.entry.kind == RowKind.submenu: VerticalLayout {
                 alignment: center;
                 Chevron { ink: root.ink; dir: 0; }
             }
@@ -164,8 +164,8 @@ component StripItem inherits Rectangle {
     in property <MenuRow> entry;
     in property <length> slot;
     in property <length> tile-h;
-    property <bool> rule: root.entry.kind == 3;
-    property <bool> tile: !root.rule && root.entry.tier != 2;
+    property <bool> rule: root.entry.kind == RowKind.separator;
+    property <bool> tile: !root.rule && root.entry.tier != RowTier.shelf;
     min-width: root.rule ? Theme.gap : 0px;
     preferred-width: root.tile ? root.slot : root.rule ? Theme.gap : 0px;
     max-width: self.preferred-width;
@@ -206,7 +206,7 @@ component BandTile inherits Rectangle {
             padding-right: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
             spacing: Theme.gap / 2;
             alignment: center;
-            if root.entry.icon != 0: VerticalLayout {
+            if root.entry.icon != RowIcon.none: VerticalLayout {
                 alignment: center;
                 RowGlyph { ink: root.ink; icon: root.entry.icon; }
             }
@@ -289,7 +289,7 @@ component FocusCard inherits Rectangle {
         padding: Theme.row-pad * 2;
         spacing: Theme.gap;
         alignment: center;
-        if root.entry.icon != 0: HorizontalLayout {
+        if root.entry.icon != RowIcon.none: HorizontalLayout {
             alignment: center;
             RowGlyph {
                 width: Theme.glyph * 2;

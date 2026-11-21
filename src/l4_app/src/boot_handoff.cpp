@@ -8,6 +8,7 @@
 #include <string>
 
 #include "app/config_apply.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

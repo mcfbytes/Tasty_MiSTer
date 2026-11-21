@@ -6,6 +6,7 @@
 #include <cerrno>
 
 #include "infra/persist.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

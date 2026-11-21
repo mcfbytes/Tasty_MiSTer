@@ -6,7 +6,7 @@
 
 #include "app/cmd_verb_sink.h"
 #include "app/bitstream_resolve.h"
-#include "app/recent_games.h"
+#include "app/recents/recent_games.h"
 #include "app/session_identity.h"
 #include "app/ui_request.h"
 #include "ui/core_verbs.h"
@@ -18,6 +18,7 @@
 #include "ui/page_context.h"
 #include "ui/place_facts.h"
 #include "ui/placement.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
@@ -87,7 +88,7 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
         refusals_.add();
 }
 
-IHdRow& HdRootPlan::row_for_(RootRow row) noexcept {
+IRow& HdRootPlan::row_for_(RootRow row) noexcept {
     switch (row) {
         case RootRow::Resume:
             return resume_gate_;
@@ -185,7 +186,7 @@ std::string_view HdRootPlan::title() const {
     return "Menu";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdRootPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdRootPlan::rows() const {
     TASTY_SEAT_BODY(HdRootPlan);
     return refs_;
 }
@@ -222,9 +223,9 @@ void HdRootPlan::rewalk(const proto::ItemTable& table, const BuildEnv& env) {
     walk_(table, env);
 }
 
-svc::Tally HdRootPlan::refusals() const noexcept {
+infra::Tally HdRootPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdRootPlan);
-    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
+    return refusals_.sum(picks_ ? picks_->refusals() : infra::Tally{});
 }
 
 std::uint32_t HdRootPlan::commands_published() const noexcept {
@@ -237,16 +238,16 @@ bool HdRootPlan::LoadRow::shown() const {
     return plan_.primary_.has_value() && plan_.picks_.has_value();
 }
 
-app::PageDescription::Row HdRootPlan::LoadRow::describe() const {
+app::hd::PageDescription::Row HdRootPlan::LoadRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(LoadRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Submenu;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Submenu;
     r.tier = kTier;
     (void)r.label.assign(plan_.load_label_);
     return r;
 }
 
-Transition HdRootPlan::LoadRow::select() {
+Transition HdRootPlan::LoadRow::select(const RowCx&) {
     TASTY_SEAT_BODY(LoadRow);
     if (!shown())
         return Transition{};

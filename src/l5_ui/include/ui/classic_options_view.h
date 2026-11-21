@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
@@ -49,7 +49,7 @@ private:
     [[nodiscard]] std::optional<Glyph> leftchar_of(proto::OsdRow row, bool has_ring) const noexcept;
 
     struct Drawn {
-        app::PageDescription::Row hd;
+        app::hd::PageDescription::Row hd;
         infra::OptRef<const OptionItem> item;
     };
 

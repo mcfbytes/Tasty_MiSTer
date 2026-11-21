@@ -7,7 +7,7 @@
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
+using RowKind = app::hd::PageDescription::RowKind;
 
 enum class Slot : std::uint8_t { Wifi, Saved, Advanced, Count };
 
@@ -44,7 +44,7 @@ bool NetworkPlan::slot_shown(SlotId slot) const {
     return views().saved && views().saved->rows[0].has_value();
 }
 
-app::PageDescription::Row NetworkPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row NetworkPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(NetworkPlan);
     switch (slot.named<Slot>()) {
         case Slot::Wifi:
@@ -62,7 +62,7 @@ Transition NetworkPlan::slot_select(SlotId slot) {
     TASTY_SEAT_BODY(NetworkPlan);
     switch (slot.named<Slot>()) {
         case Slot::Wifi:
-            if (!views().wifi || views().wifi->presence == svc::WifiPresence::NoAdapter) {
+            if (!views().wifi || views().wifi->presence == svc::connect::WifiPresence::NoAdapter) {
                 return Transition{};
             }
             return Transition::push(PageId::WifiNetworks);

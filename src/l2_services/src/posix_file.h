@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "proto/types.h"
 #include "svc/file.h"
@@ -32,9 +33,12 @@ public:
     PosixFile(const PosixFile&) = delete;
     PosixFile& operator=(const PosixFile&) = delete;
 
-    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override;
+    [[nodiscard]] Ex<infra::ByteCount> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) override;
 
-    [[nodiscard]] Ex<std::size_t> write_at(
+    [[nodiscard]] Ex<infra::ByteCount> write_at(
         proto::FileOffset at,
         std::span<const std::byte> src
     ) override;

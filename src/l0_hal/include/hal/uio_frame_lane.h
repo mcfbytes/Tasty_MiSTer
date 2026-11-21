@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "hal/reg_access.h"
+#include "hal/reg_field.h"
 
 namespace mister::hal {
 
@@ -23,10 +24,11 @@ struct UioFrameLane {
 
     static constexpr RegAccess kAccess = RegAccess::ReadWrite;
     static constexpr std::uint32_t kId = 0x314E414Cu;
-    static constexpr std::uint32_t kSelShift = 16;
+    static constexpr RegField<std::uint32_t> kOpField{0, 0xFFFF};
+    static constexpr RegField<std::uint32_t> kSelField{16, 0x3};
 
     static constexpr std::uint32_t begin(Sel sel, std::uint16_t op) noexcept {
-        return (static_cast<std::uint32_t>(sel) << kSelShift) | op;
+        return kSelField.set(kOpField.set(0u, {op}), {static_cast<std::uint32_t>(sel)});
     }
 };
 

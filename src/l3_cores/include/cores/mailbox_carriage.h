@@ -17,7 +17,7 @@ public:
     MailboxCarriage(
         hal::ISpiTransport& link,
         IMailboxPort& port,
-        proto::SpiFioQueue& queue,
+        proto::link::SpiFioQueue& queue,
         proto::MailboxFrameDecl frame
     ) noexcept
         : link_(link),
@@ -45,7 +45,7 @@ public:
 private:
     hal::ISpiTransport& link_;
     IMailboxPort& port_;
-    proto::SpiFioQueue& queue_;
+    proto::link::SpiFioQueue& queue_;
     proto::MailboxFrameDecl frame_;
 };
 

@@ -14,7 +14,7 @@ struct SaveRowCount {
     using affine_count = SaveRowCount;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr SaveRowCount of(I rows) noexcept {
+    [[nodiscard]] static constexpr SaveRowCount truncating(I rows) noexcept {
         return SaveRowCount{static_cast<std::uint8_t>(rows)};
     }
 
@@ -29,7 +29,7 @@ struct SaveRowCount {
     }
 
     [[nodiscard]] static constexpr SaveRowCount through(SaveRow row) noexcept {
-        return SaveRowCount::of(row.v + 1u);
+        return SaveRowCount::truncating(row.v + 1u);
     }
 
     [[nodiscard]] constexpr SaveRow end() const noexcept { return SaveRow{v}; }

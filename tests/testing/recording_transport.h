@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "hal/core_capabilities.h"
-#include "hal/core_identity.h"
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "wire_log.h"
 
 namespace mister::testing {
@@ -22,7 +22,7 @@ public:
     WireLog log;
     std::deque<std::uint16_t> replies;
     hal::SpiWord idle_reply{0};
-    hal::CoreIdentity identity{hal::CoreTypeByte{0xA4}};
+    hal::CoreTypeByte identity{0xA4};
     hal::CoreCapabilities caps{};
     hal::Width fio_width = hal::Width::Byte;
     hal::IoVersion io_ver{};
@@ -86,7 +86,7 @@ public:
         return {};
     }
 
-    [[nodiscard]] Ex<hal::CoreIdentity> identify() override {
+    [[nodiscard]] Ex<hal::CoreTypeByte> identify() override {
         ++identify_calls;
         return identity;
     }

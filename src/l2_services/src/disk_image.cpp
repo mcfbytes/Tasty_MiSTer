@@ -4,6 +4,7 @@
 #include <array>
 
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "svc/card_writer.h"
 #include "svc/raw_disk_image.h"
 
@@ -29,8 +30,12 @@ namespace {
     if (!got)
         return std::unexpected(got.error());
 
-    const infra::OptRef<const DiskFormatRow>
-        row = select_disk_format(rows, path, *size, std::span<const std::byte>(head).first(*got));
+    const infra::OptRef<const DiskFormatRow> row = select_disk_format(
+        rows,
+        path,
+        *size,
+        got->first_in(std::span<const std::byte>(head))
+    );
     if (!row) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }

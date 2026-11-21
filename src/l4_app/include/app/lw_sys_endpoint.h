@@ -10,15 +10,16 @@
 #include "app/block_line.h"
 #include "app/sys_grant.h"
 #include "app/sys_route.h"
-#include "hal/read_window_port.h"
 #include "hal/reg_port.h"
 #include "hal/sys_block.h"
+#include "hal/window_port.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "os/epoll_set.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "os/monotonic_clock.h"
-#include "proto/status_snapshot.h"
+#include "proto/link/status_snapshot.h"
 #include "svc/io_coworker.h"
 
 namespace mister::app {
@@ -40,7 +41,7 @@ public:
         const SysGrantCell& grant;
         SysRouteCell& route;
         SysLeaseCell& lease;
-        proto::StatusSnapshotCell& snapshots;
+        proto::link::StatusSnapshotCell& snapshots;
         infra::OptRef<const os::EpollSet> doorbells{};
         infra::OptRef<Port> port{};
     };
@@ -73,11 +74,11 @@ private:
 
     [[nodiscard]] Port& port_() noexcept;
 
-    [[nodiscard]] std::optional<proto::StatusSnapshot> read_snapshot_() noexcept;
+    [[nodiscard]] std::optional<proto::link::StatusSnapshot> read_snapshot_() noexcept;
     void serve_status_(bool rang) noexcept;
 
     Wiring w_;
-    std::optional<hal::ReadWindowPort<hal::SysBlock, seat_owner::Io>> block_{};
+    std::optional<hal::WindowPort<hal::SysBlock, seat_owner::Io>> block_{};
     BlockLine<seat_owner::Io> line_{};
     bool recheck_ = false;
     std::optional<hal::SysBlock::Stflg> sent_stflg_{};
@@ -90,9 +91,9 @@ extern template class LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
 
 namespace mister::hal {
 
-extern template class ReadWindowPort<SysBlock, seat_owner::Io>;
+extern template class WindowPort<SysBlock, seat_owner::Io>;
 }
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 extern template class GrantLease<app::SysGrant, seat_owner::Io>;
 }

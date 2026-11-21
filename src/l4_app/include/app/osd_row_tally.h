@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "infra/seat.h"
-#include "svc/types.h"
+#include "infra/tally.h"
 
 namespace mister::app {
 
@@ -20,10 +20,10 @@ struct OsdRowTally {
     std::uint32_t page_rows_sent = 0;
     std::uint32_t status_rows_sent = 0;
 
-    svc::Tally menu_ctls_sent{};
+    infra::Tally menu_ctls_sent{};
 
-    svc::Tally rotations_sent{};
-    svc::Tally rotation_failures{};
+    infra::Tally rotations_sent{};
+    infra::Tally rotation_failures{};
 };
 
 }

@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/bit_field.h"
 #include "proto/item_probe.h"
 #include "proto/item_table.h"

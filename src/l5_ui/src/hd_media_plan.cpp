@@ -58,7 +58,7 @@ std::string_view HdMediaPlan::title() const {
     return "Media";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdMediaPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdMediaPlan::rows() const {
     TASTY_SEAT_BODY(HdMediaPlan);
     return refs_;
 }
@@ -69,11 +69,11 @@ std::optional<RowKey> HdMediaPlan::SlotRow::key() const {
     return slot_row_key(row_);
 }
 
-app::PageDescription::Row HdMediaPlan::SlotRow::describe() const {
+app::hd::PageDescription::Row HdMediaPlan::SlotRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(SlotRow);
     const OptionItem& it = plan_.slot_(at_);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Submenu;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Submenu;
     (void)r.label.assign(hd_label(it.label));
 
     const std::string_view path = plan_.now_playing_.path_of(row_);
@@ -82,7 +82,7 @@ app::PageDescription::Row HdMediaPlan::SlotRow::describe() const {
     return r;
 }
 
-Transition HdMediaPlan::SlotRow::select() {
+Transition HdMediaPlan::SlotRow::select(const RowCx&) {
     TASTY_SEAT_BODY(SlotRow);
     return Transition::push(PageId::HdSlotSheet, PageArg{row_});
 }

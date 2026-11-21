@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_recent_games_plan.h"
 
-#include "app/recent_games.h"
+#include "app/recents/recent_games.h"
 #include "ui/hd_plan_inputs.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
 HdRecentGamesPlan::HdRecentGamesPlan(const HdPlanInputs& in) : launch_(in) {
     TASTY_SEAT_BODY(HdRecentGamesPlan);
-    const std::span<const app::RecentGames::Record> records = in.recent_games.records();
+    const std::span<const app::recents::RecentGames::Record> records = in.recent_games.records();
     rows_.reserve(records.size());
     refs_.reserve(records.size());
-    for (const app::RecentGames::Record& r : records) {
+    for (const app::recents::RecentGames::Record& r : records) {
         rows_.emplace_back(launch_, r);
         refs_.emplace_back(rows_.back());
     }
@@ -29,12 +30,12 @@ std::string_view HdRecentGamesPlan::title() const {
     return "Recent games";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdRecentGamesPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdRecentGamesPlan::rows() const {
     TASTY_SEAT_BODY(HdRecentGamesPlan);
     return refs_;
 }
 
-svc::Tally HdRecentGamesPlan::refusals() const noexcept {
+infra::Tally HdRecentGamesPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdRecentGamesPlan);
     return refusals_.sum(launch_.refusals());
 }

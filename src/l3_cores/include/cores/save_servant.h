@@ -6,7 +6,7 @@
 #include <span>
 #include <string_view>
 
-#include "cores/save_image.h"
+#include "cores/nvram_save.h"
 #include "hal/types.h"
 #include "proto/save_act.h"
 
@@ -17,7 +17,7 @@ public:
     virtual ~ISaveServant() = default;
 
     [[nodiscard]] virtual proto::SaveAct start(
-        const SaveImage& image,
+        const mra::NvramSave& image,
         std::string_view rel,
         hal::Width word
     ) noexcept = 0;

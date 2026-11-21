@@ -5,12 +5,17 @@
 #include <optional>
 
 #include "app/bay_counts.h"
-#include "app/sector_grant.h"
 #include "app/osd_route.h"
+#include "app/pad_route.h"
+#include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "app/sys_route.h"
-#include "infra/opt_ref.h"
+#include "hal/entry_mask.h"
+#include "hal/reset_counts.h"
+#include "hal/sys_directory.h"
 #include "infra/json_out.h"
+#include "infra/opt_ref.h"
+#include "infra/tally.h"
 #include "record_ctx.h"
 #include "svc/io_pass.h"
 
@@ -24,17 +29,18 @@ struct BayView {
     std::uint32_t fed_refusals = 0;
     std::uint32_t pad_grants = 0;
     std::uint32_t pad_refusals = 0;
-    std::uint32_t pads_on_lw = 0;
+    app::PadRoute pad{};
+    infra::CellGen pad_lease{};
     std::uint32_t sector_grants = 0;
     std::uint32_t sector_refusals = 0;
     std::uint32_t lease_holds = 0;
     std::uint32_t lease_long_holds = 0;
     app::SectorRoute cd{};
-    xthread::GrantGen cd_lease{};
+    infra::CellGen cd_lease{};
     std::uint32_t osd_grants = 0;
     std::uint32_t osd_refusals = 0;
     app::OsdRoute osd{};
-    xthread::GrantGen osd_lease{};
+    infra::CellGen osd_lease{};
     std::uint32_t osd_page_rows_link = 0;
     std::uint32_t osd_status_rows_link = 0;
     std::uint32_t card_grants = 0;
@@ -44,11 +50,17 @@ struct BayView {
     std::uint32_t sys_refusals = 0;
     std::uint32_t sys_pin_refusals = 0;
     app::SysRoute sys{};
-    xthread::GrantGen sys_lease{};
+    infra::CellGen sys_lease{};
     std::uint32_t status_lw = 0;
     std::uint32_t status_lw_adopts = 0;
     std::uint32_t status_lw_stale = 0;
     std::uint32_t poll_retirements = 0;
+    infra::Tally enables{};
+    infra::Tally enable_refusals{};
+    infra::Tally open_refusals{};
+    infra::Tally enable_lost{};
+    hal::EntryMask owned_last{};
+    hal::ResetCounts resets_last{};
     svc::IoPassMicros io_pass_max{};
     svc::IoPassMicros io_pass_p99{};
     svc::IoPassCount io_pass_bulk_run_max{};
@@ -62,7 +74,11 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("fedref", v.fed_refusals);
     o.field("padok", v.pad_grants);
     o.field("padref", v.pad_refusals);
-    o.field("padlw", v.pads_on_lw);
+    o.field("padlw", v.pad.on_lw);
+    o.field("padlease", v.pad_lease.held());
+    o.field("padstores", v.pad.stores);
+    o.field("padrevk", v.pad.revoked);
+    o.field("padgated", v.pad.gated_stores);
     o.field("cdok", v.sector_grants);
     o.field("cdref", v.sector_refusals);
     o.field("cdlw", v.cd.on_lw);
@@ -77,10 +93,6 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("cdahead", v.cd.read_ahead);
     o.field("cdlat", v.cd.lat_max_us);
     o.field("cdbref", v.cd.bind_refusals);
-    o.field("cdfrej", v.cd.fab_rejected);
-    o.field("cdfskip", v.cd.fab_skipped);
-    o.field("cdfabt", v.cd.fab_aborted);
-    o.field("cdfrst", v.cd.fab_reset_fills);
     o.field("cdhold", v.lease_holds);
     o.field("cdlong", v.lease_long_holds);
     o.field("osdok", v.osd_grants);
@@ -121,6 +133,13 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("stad", v.status_lw_adopts);
     o.field("ststale", v.status_lw_stale);
     o.field("blkret", v.poll_retirements);
+    o.field("lwen", v.enables);
+    o.field("lwenref", v.enable_refusals);
+    o.field("lwopref", v.open_refusals);
+    o.field("lwenlost", v.enable_lost);
+    o.field("lwowned", v.owned_last);
+    o.field("lwhrst", v.resets_last.hrst);
+    o.field("lwfreed", v.resets_last.freed);
     o.field("iopmax", v.io_pass_max.count());
     o.field("iop99", v.io_pass_p99.count());
     o.field("iobdef", v.io_pass_bulk_run_max);
@@ -137,19 +156,24 @@ struct BayRecord {
     infra::OptRef<const app::OsdLeaseCell> osd_lease{};
     infra::OptRef<const app::SysLeaseCell> sys_lease{};
     infra::OptRef<const svc::IoPassCell> io_pass{};
+    infra::OptRef<const app::PadRouteCell> pad_route{};
+    infra::OptRef<const app::PadLeaseCell> pad_lease{};
 
     [[nodiscard]] std::optional<View> sample(const RecordCtx& ctx) const noexcept {
         const app::BayCounts c = counts.sample().value;
         const app::SectorRoute cd = route ? route->sample().value : app::SectorRoute{};
         const app::OsdRoute osd = osd_route ? osd_route->sample().value : app::OsdRoute{};
         const app::SysRoute sys = sys_route ? sys_route->sample().value : app::SysRoute{};
-        const xthread::GrantGen cd_lease = sector_lease ? sector_lease->sample().value
-                                                        : xthread::GrantGen{};
-        const xthread::GrantGen osd_lease_gen = osd_lease ? osd_lease->sample().value
-                                                          : xthread::GrantGen{};
-        const xthread::GrantGen sys_lease_gen = sys_lease ? sys_lease->sample().value
-                                                          : xthread::GrantGen{};
+        const infra::CellGen cd_lease = sector_lease ? sector_lease->sample().value
+                                                     : infra::CellGen{};
+        const infra::CellGen osd_lease_gen = osd_lease ? osd_lease->sample().value
+                                                       : infra::CellGen{};
+        const infra::CellGen sys_lease_gen = sys_lease ? sys_lease->sample().value
+                                                       : infra::CellGen{};
         const svc::IoPass io_pass_seen = io_pass ? io_pass->sample().value : svc::IoPass{};
+        const app::PadRoute pad = pad_route ? pad_route->sample().value : app::PadRoute{};
+        const infra::CellGen pad_lease_gen = pad_lease ? pad_lease->sample().value
+                                                       : infra::CellGen{};
         return View{
             .builds = c.builds,
             .bay_full = c.bay_full,
@@ -158,7 +182,8 @@ struct BayRecord {
             .fed_refusals = ctx.dc.fed_refusals,
             .pad_grants = c.pad_grants,
             .pad_refusals = c.pad_refusals,
-            .pads_on_lw = ctx.dc.pads_on_lw,
+            .pad = pad,
+            .pad_lease = pad_lease_gen,
             .sector_grants = c.sector_grants,
             .sector_refusals = c.sector_refusals,
             .lease_holds = c.lease_holds,
@@ -183,6 +208,12 @@ struct BayRecord {
             .status_lw_adopts = ctx.dc.status_lw_adopts,
             .status_lw_stale = ctx.dc.status_lw_stale,
             .poll_retirements = c.poll_retirements,
+            .enables = c.enables,
+            .enable_refusals = c.enable_refusals,
+            .open_refusals = c.open_refusals,
+            .enable_lost = c.enable_lost,
+            .owned_last = c.owned_last,
+            .resets_last = c.resets_last,
             .io_pass_max = io_pass_seen.max_micros(),
             .io_pass_p99 = io_pass_seen.p99(),
             .io_pass_bulk_run_max = io_pass_seen.bulk_run_max

@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 
+#include "app/core_name.h"
 #include "app/event_sink.h"
 #include "app/load_window_map.h"
 #include "app/path_text.h"
@@ -15,18 +16,19 @@
 #include "hal/fpga_aperture.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
-#include "infra/inbox.h"
-#include "infra/loan_channel.h"
+#include "infra/xthread/inbox.h"
+#include "infra/xthread/loan_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "infra/seat_owner_ui.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "os/clock.h"
 #include "proto/save_state_decl.h"
-#include "proto/savestate_engine.h"
-#include "proto/save_primer.h"
+#include "proto/link/savestate_engine.h"
+#include "proto/link/save_primer.h"
 #include "svc/card_writer.h"
 #include "svc/io_coworker.h"
 #include "svc/vfs.h"
@@ -43,17 +45,18 @@ struct PrimeAbortLevel {
     friend constexpr bool operator==(PrimeAbortLevel, PrimeAbortLevel) = default;
 };
 
-class SaveStateAttach final : public svc::IIoCoworker, public proto::SaveStateEngine::ISaveToast {
+class SaveStateAttach final : public svc::IIoCoworker,
+                              public proto::link::SaveStateEngine::ISaveToast {
     TASTY_SEAT_MEDIATOR(Ui, Io);
 
 public:
     struct Ask {
         TASTY_SEAT_EXEMPT(component);
         proto::SaveStateDecl decl{};
-        FixedStr<64, StrFit::Clip> core_name{};
+        CoreName core_name{};
         PathText rom_path{};
         cores::LoadHint load_hint = cores::LoadHint::None;
-        proto::ActKey generation{};
+        proto::ActKey act{};
     };
 
     using AskInbox = xthread::Inbox<Ask, 2>;
@@ -61,7 +64,7 @@ public:
     struct PrimeOrder {
         TASTY_SEAT_MEDIATOR(Any, Any);
         proto::SaveStateDecl decl{};
-        FixedStr<64, StrFit::Clip> core_name{};
+        CoreName core_name{};
         PathText rom_path{};
         cores::LoadHint load_hint = cores::LoadHint::None;
         bool ok = false;
@@ -106,7 +109,7 @@ public:
     [[nodiscard]] bool idle() const noexcept override;
 
 private:
-    class Files final : public proto::SaveStateEngine::ISaveStateFiles {
+    class Files final : public proto::link::SaveStateEngine::ISaveStateFiles {
         TASTY_SEAT_MEDIATOR(Ui, Io);
 
     public:
@@ -127,7 +130,7 @@ private:
         svc::CardWriter card_;
     };
 
-    class IoSlotMap final : public proto::SaveStateEngine::ISlotMap {
+    class IoSlotMap final : public proto::link::SaveStateEngine::ISlotMap {
         TASTY_SEAT_RESIDENT(Io);
 
     public:
@@ -142,7 +145,7 @@ private:
         ILoadWindowMap<seat_owner::Io>& map_;
     };
 
-    class UiSlotMap final : public proto::SaveStateEngine::ISlotMap {
+    class UiSlotMap final : public proto::link::SaveStateEngine::ISlotMap {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
@@ -176,10 +179,13 @@ private:
     xthread::Telemetry<PrimeAbortLevel, SeatTag::Ui> abort_{};
 
     struct UiHalf {
-        UiHalf(const hal::FpgaAperture& aperture, const proto::SaveStateEngine::Environment& env)
+        UiHalf(
+            const hal::FpgaAperture& aperture,
+            const proto::link::SaveStateEngine::Environment& env
+        )
             : engine(aperture, env) {}
 
-        proto::SaveStateEngine engine;
+        proto::link::SaveStateEngine engine;
         bool out = false;
         bool raised = false;
         proto::ActKey held{};
@@ -188,7 +194,7 @@ private:
     } ui_;
 
     struct IoHalf {
-        proto::SavePrimer primer;
+        proto::link::SavePrimer primer;
         Chan::Job job{};
     } io_;
 };

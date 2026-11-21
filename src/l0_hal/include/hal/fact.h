@@ -7,6 +7,7 @@
 
 #include "infra/error.h"
 #include "hal/unmeasured.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

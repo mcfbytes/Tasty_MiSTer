@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <optional>
 
+#include "infra/prelude.h"
 #include "os/kernel_rt_probe.h"
 
 namespace mister::fw {
@@ -20,14 +21,8 @@ namespace mister::fw {
     out.kernel_rt = RtSetup{out.kernel == os::KernelRt::PreemptRt, 0};
     out.vm = os::read_vm_compaction(os::kCompactUnevictablePath, os::kCompactionProactivenessPath);
 
-#if defined(__GLIBC__)
     out.trim_pin = RtSetup{infra::mallopt(M_TRIM_THRESHOLD, -1) == 1, 0};
     out.mmap_pin = RtSetup{infra::mallopt(M_MMAP_MAX, 0) == 1, 0};
-#else
-    out.trim_pin = RtSetup{false, 0};
-    out.mmap_pin = RtSetup{false, 0};
-    std::fprintf(stderr, "mallopt N/A on musl (mallocng); trim_pin/mmap_pin not attempted\n");
-#endif
 
     if (::mlockall(MCL_CURRENT | MCL_FUTURE) == 0) {
         out.mem_lock = RtSetup{true, 0};

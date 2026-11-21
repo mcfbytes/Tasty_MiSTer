@@ -8,6 +8,7 @@
 namespace mister::proto {
 
 inline constexpr unsigned kBlockSlots = 16;
+static_assert(kBlockSlots == BlockSlotMask::kBits, "the slot mask names every block slot");
 
 constexpr bool SlotIndex::in_block_slots() const noexcept {
     return v < kBlockSlots;

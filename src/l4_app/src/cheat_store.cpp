@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/indexed_array.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -147,7 +148,7 @@ void CheatStore::take(const CheatCatalog& cat) {
 }
 
 bool CheatStore::in_range_(RowIndex i) const noexcept {
-    return RowCount::of(recs_.size()).contains(i);
+    return RowCount::truncating(recs_.size()).contains(i);
 }
 
 CheatRow CheatStore::row(RowIndex i) const noexcept {
@@ -228,7 +229,7 @@ Ex<bool> CheatStore::toggle(RowIndex i) {
                             proto::kFileStart,
                             std::as_writable_bytes(std::span{buf})
                         );
-                        if (!got || *got != buf.size()) {
+                        if (!got || *got != infra::ByteCount{buf.size()}) {
                             ++refusals_;
                         } else {
                             r.bytes = std::move(buf);

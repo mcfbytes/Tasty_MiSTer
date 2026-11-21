@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "hal/reg_access.h"
+#include "hal/reg_field.h"
 
 namespace mister::hal {
 
@@ -17,12 +18,13 @@ struct SysBlock {
         Status1 = 0x0C,
         Status2 = 0x10,
         Status3 = 0x14,
+        Pend = 0x18,
         Id = 0x1C,
     };
     static constexpr std::size_t kSize = 0x20;
 
-    static constexpr RegAccess kAccess = RegAccess::ReadOnly;
-    static constexpr std::uint32_t kId = 0x31535453u;
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
+    static constexpr std::uint32_t kId = 0x32545645u;
     static constexpr std::uint32_t kSnapshotWords = 4;
 
     static constexpr std::uint32_t kCauseStatus = 1u << 0;
@@ -33,12 +35,11 @@ struct SysBlock {
         return static_cast<Reg>(static_cast<std::uint32_t>(Reg::Status0) + kWordBytes * i);
     }
 
-    enum StflgBits : std::uint32_t {
-        kFlagMask = 0x0F,
-        kMarkMask = 0xFFF0,
-        kMark = 0xA0,
-        kSeqShift = 16
-    };
+    static constexpr RegField<std::uint32_t> kFlagField{0, 0x0F};
+    static constexpr RegField<std::uint32_t> kMarkField{4, 0xFFF};
+    static constexpr RegField<std::uint32_t> kSeqField{16, 0xFFFF};
+
+    enum Mark : std::uint32_t { kMark = 0x0A };
 
     struct Stflg {
         std::uint16_t seq;
@@ -47,11 +48,11 @@ struct SysBlock {
     };
 
     [[nodiscard]] static constexpr std::optional<Stflg> decode(std::uint32_t stflg) noexcept {
-        if ((stflg & kMarkMask) != kMark)
+        if (kMarkField.get(stflg) != kMark)
             return std::nullopt;
         return Stflg{
-            static_cast<std::uint16_t>(stflg >> kSeqShift),
-            static_cast<std::uint8_t>(stflg & kFlagMask)
+            static_cast<std::uint16_t>(kSeqField.get(stflg)),
+            static_cast<std::uint8_t>(kFlagField.get(stflg))
         };
     }
 };
@@ -59,7 +60,7 @@ struct SysBlock {
 static_assert(
     static_cast<std::size_t>(SysBlock::status(SysBlock::kSnapshotWords - 1)) + 4 <= SysBlock::kSize
         && static_cast<std::size_t>(SysBlock::Reg::Id) + 4 == SysBlock::kSize,
-    "lw_sys_status.sv's register map"
+    "lw_evt.sv's register map"
 );
 static_assert(SysBlock::decode(0x0001'00A1u) == SysBlock::Stflg{1, 1}, "STFLG {seq 1, A, flag 1}");
 static_assert(!SysBlock::decode(0xDEADBEEFu), "the unmarked word decodes to nothing");

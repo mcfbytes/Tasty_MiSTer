@@ -9,6 +9,9 @@
 #include <cstddef>
 #include <ctime>
 
+#include "infra/prelude.h"
+#include "os/timespec.h"
+
 namespace mister::reactor {
 
 namespace {
@@ -33,11 +36,7 @@ Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
     itimerspec spec{};
-
-    const std::chrono::seconds whole = std::chrono::duration_cast<std::chrono::seconds>(period);
-    const std::chrono::nanoseconds frac = period - whole;
-    spec.it_interval.tv_sec = static_cast<time_t>(whole.count());
-    spec.it_interval.tv_nsec = static_cast<long>(frac.count());
+    spec.it_interval = os::to_timespec(period);
     spec.it_value = spec.it_interval;
     if (::timerfd_settime(fd, 0, &spec, nullptr) < 0) {
         const auto e = static_cast<std::uint32_t>(errno);

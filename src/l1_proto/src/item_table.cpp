@@ -9,16 +9,17 @@
 #include <optional>
 
 #include "infra/ascii.h"
+#include "infra/prelude.h"
 
 namespace mister::proto {
 
 namespace {
 
 constexpr bool selector_set(OsdMask mask, StatusBit bit) noexcept {
-    return bit.word() == 0 && mask.has(OsdMask{bit.mask()});
+    return bit.word() == 0 && mask.intersects(OsdMask{bit.mask()});
 }
 
-static_assert(std::numeric_limits<std::uint16_t>::digits == StatusBit::kWordBits);
+static_assert(std::numeric_limits<std::uint16_t>::digits == StatusBit::kRegisterBits);
 
 constexpr std::uint32_t kMaxFieldSpan = 8;
 

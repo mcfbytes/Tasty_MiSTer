@@ -9,18 +9,19 @@
 #include "app/boot_args.h"
 #include "app/cmd_verb_sink.h"
 #include "app/event_sink.h"
-#include "app/hd_osd_status.h"
+#include "app/hd/hd_osd_status.h"
 #include "app/osd_close.h"
-#include "app/owner_tick.h"
 #include "app/ui_page_record.h"
-#include "app/verdict_sinks.h"
+#include "app/recents/verdict_sinks.h"
 #include "device_block.h"
 #include "hal/board_profile.h"
 #include "hal/board_windows.h"
 #include "hal/compatible_blob.h"
 #include "hal/irq_pin.h"
+#include "infra/xthread/coworker.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/kernel_rt.h"
 #include "svc/config_snapshot.h"
@@ -29,11 +30,17 @@
 
 namespace mister::app {
 class HpsFramebuffer;
+
+namespace launcher {
 class LauncherScreen;
+}
 class LinkSession;
 class MglPump;
 class SaveStateAttach;
+
+namespace launcher {
 class ScanoutRelay;
+}
 class SessionOwner;
 class IUiRoundPort;
 }
@@ -60,13 +67,13 @@ public:
             infra::OptRef<app::IEventSink> shot_sink{};
             infra::OptRef<app::MglPump> mgl{};
             infra::OptRef<app::HpsFramebuffer> fb{};
-            infra::OptRef<app::LauncherScreen> launcher_screen{};
+            infra::OptRef<app::launcher::LauncherScreen> launcher_screen{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};
 
-            app::VerdictSinks verdicts{};
+            app::recents::VerdictSinks verdicts{};
             infra::OptRef<const app::UiPageCell> ui_pages{};
-            infra::OptRef<const app::HdOsdStatusCell> hd{};
+            infra::OptRef<const app::hd::HdOsdStatusCell> hd{};
         };
 
         virtual ~Face() = default;
@@ -88,7 +95,7 @@ public:
     public:
         virtual ~Front() = default;
         [[nodiscard]] virtual DeviceBlock::Parts::Frontend device_front() noexcept = 0;
-        [[nodiscard]] virtual infra::OptRef<app::ScanoutRelay> scanout() noexcept = 0;
+        [[nodiscard]] virtual infra::OptRef<app::launcher::ScanoutRelay> scanout() noexcept = 0;
 
         [[nodiscard]] virtual std::unique_ptr<Face> face(
             const BootParts& plat,
@@ -105,7 +112,7 @@ public:
 
     public:
         virtual ~Tail() = default;
-        [[nodiscard]] virtual infra::OptRef<app::IOwnerTick> owner_tick() noexcept = 0;
+        [[nodiscard]] virtual infra::OptRef<xthread::ICoworker> owner_tick() noexcept = 0;
     };
 
     struct Traits {

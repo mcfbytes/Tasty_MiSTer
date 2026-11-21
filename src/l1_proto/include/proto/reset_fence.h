@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "proto/conf_switches.h"
 #include "proto/status_word.h"
 
 namespace mister::proto {
@@ -16,7 +17,7 @@ public:
 
     virtual void before_status(const StatusWord& sent, const StatusWord& next) noexcept = 0;
 
-    virtual void before_buttons(std::uint16_t sent, std::uint16_t next) noexcept = 0;
+    virtual void before_buttons(ConfSwitches sent, ConfSwitches next) noexcept = 0;
 
     virtual void before_reset_line() noexcept = 0;
 

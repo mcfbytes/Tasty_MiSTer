@@ -4,17 +4,18 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "os/epoll_set.h"
-#include "infra/park_fds.h"
+#include "infra/xthread/park_fds.h"
 #include "infra/park_timeout.h"
-#include "infra/pause_latch.h"
+#include "infra/prelude.h"
+#include "infra/xthread/pause_latch.h"
 #include "infra/seat.h"
-#include "infra/seat_main.h"
-#include "infra/seat_park.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/seat_main.h"
+#include "infra/xthread/seat_park.h"
+#include "infra/xthread/wake_flag.h"
 #include "svc/io_coworker.h"
 #include "svc/io_pass.h"
 

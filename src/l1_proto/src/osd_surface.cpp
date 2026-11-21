@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::proto {
 
@@ -12,34 +13,34 @@ std::span<std::uint8_t> OsdSurface::row(OsdRow r) {
     if (!kMaxRows.covers(r)) {
         fatal(r.refusal(Errc::slot_range, ERR_SITE()), "osd row");
     }
-    return std::span<std::uint8_t>(row_cell(ui_.rows, r).data(), kRowBytes);
+    return std::span<std::uint8_t>(ui_.rows[r].data(), kRowBytes);
 }
 
 std::span<const std::uint8_t> OsdSurface::row(OsdRow r) const {
     if (!kMaxRows.covers(r)) {
         fatal(r.refusal(Errc::slot_range, ERR_SITE()), "osd row");
     }
-    return std::span<const std::uint8_t>(row_cell(ui_.rows, r).data(), kRowBytes);
+    return std::span<const std::uint8_t>(ui_.rows[r].data(), kRowBytes);
 }
 
 void OsdSurface::publish(OsdRow r) noexcept {
     if (!kMaxRows.covers(r))
         return;
     Row staged;
-    std::memcpy(staged.b, row_cell(ui_.rows, r).data(), kRowBytes);
-    row_cell(published_, r).publish(staged);
+    std::memcpy(staged.b, ui_.rows[r].data(), kRowBytes);
+    published_[r].publish(staged);
 }
 
-std::uint32_t OsdSurface::seq(OsdRow r) const noexcept {
+infra::CellGen OsdSurface::seq(OsdRow r) const noexcept {
     if (!kMaxRows.covers(r))
-        return 0;
-    return row_cell(published_, r).generation();
+        return infra::CellGen{};
+    return published_[r].generation();
 }
 
 std::uint32_t OsdSurface::sample(OsdRow r, Row& dst) const noexcept {
     if (!kMaxRows.covers(r))
         return 0;
-    return row_cell(published_, r).sample_into(dst);
+    return published_[r].sample_into(dst);
 }
 
 std::uint32_t OsdSurface::refusals() const noexcept {
@@ -68,8 +69,8 @@ OsdRowCount OsdSurface::visible_rows() const noexcept {
 }
 
 void OsdSurface::clear() noexcept {
-    constexpr std::size_t kPageBytes = kPageRows.size() * kRowBytes;
-    std::memset(&ui_.rows, 0, kPageBytes);
+    for (OsdRow r{}; kPageRows.covers(r); r += kOneOsdRow)
+        ui_.rows[r].fill(0);
     for (OsdRow r{}; kMaxRows.covers(r); r += kOneOsdRow)
         publish(r);
     publish_info_window(InfoWindow{});

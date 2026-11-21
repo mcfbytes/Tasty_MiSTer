@@ -5,8 +5,8 @@
 #include <string>
 
 #include "infra/seat.h"
-#include "svc/bt_prompt.h"
-#include "svc/prompt_gen.h"
+#include "svc/connect/bt_prompt.h"
+#include "svc/connect/prompt_gen.h"
 
 namespace mister::ui {
 
@@ -24,9 +24,9 @@ struct BtPromptRows {
     std::string headline{};
     std::string value{};
     Ask ask = Ask::None;
-    svc::PromptGen gen{};
+    svc::connect::PromptGen gen{};
 
-    [[nodiscard]] static BtPromptRows of(const svc::BtPrompt& prompt);
+    [[nodiscard]] static BtPromptRows of(const svc::connect::BtPrompt& prompt);
 };
 
 }

@@ -9,10 +9,11 @@
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
+#include "cores/disk_servant_row.h"
 #include "cores/option_row.h"
 #include "cores/sector_kick_row.h"
-#include "cores/st_config.h"
-#include "cores/st_options.h"
+#include "cores/st/st_config.h"
+#include "cores/st/st_options.h"
 #include "proto/bit_field.h"
 #include "proto/status_bit.h"
 #include "proto/types.h"
@@ -110,19 +111,19 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::file(
         " A: ",
         kStMainPage,
-        tag_of(StOption::FloppyA),
+        st::tag_of(st::StOption::FloppyA),
         {.slot = IoIndex{0}, .ejects_on_select = true}
     ),
     OptionRow::file(
         " B: ",
         kStMainPage,
-        tag_of(StOption::FloppyB),
+        st::tag_of(st::StOption::FloppyB),
         {.slot = IoIndex{1}, .ejects_on_select = true}
     ),
     OptionRow::cycle(
         " Write protect:  ",
         kStMainPage,
-        tag_of(StOption::WriteProtect),
+        st::tag_of(st::StOption::WriteProtect),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{6}, 2},
          .values = kStWriteProtectNames}
@@ -131,83 +132,88 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::file(
         " Cart: ",
         kStMainPage,
-        tag_of(StOption::Cartridge),
+        st::tag_of(st::StOption::Cartridge),
         {.slot = IoIndex{5}, .ejects_on_select = true}
     ),
     OptionRow::separator(kStMainPage),
     OptionRow::host_fact(
         " Joysticks swap: ",
         kStMainPage,
-        tag_of(StOption::JoySwap),
+        st::tag_of(st::StOption::JoySwap),
         {.host = OptionRow::Host::JoySwap, .values = kStYesNo}
     ),
     OptionRow::separator(kStMainPage),
     OptionRow::to(
         " Modify config",
         kStMainPage,
-        tag_of(StOption::ModifyConfig),
+        st::tag_of(st::StOption::ModifyConfig),
         {.link = OptionRow::Link::SubPage, .link_page = kStConfigPage}
     ),
     OptionRow::to(
         " Load config",
         kStMainPage,
-        tag_of(StOption::LoadConfig),
+        st::tag_of(st::StOption::LoadConfig),
         {.link = OptionRow::Link::LoadConfig}
     ),
     OptionRow::to(
         " Save config",
         kStMainPage,
-        tag_of(StOption::SaveConfig),
+        st::tag_of(st::StOption::SaveConfig),
         {.link = OptionRow::Link::SaveConfig}
     ),
     OptionRow::to(
         " MT32-pi",
         kStMainPage,
-        tag_of(StOption::Mt32Pi),
+        st::tag_of(st::StOption::Mt32Pi),
         {.link = OptionRow::Link::Mt32Pi}
     ),
     OptionRow::separator(kStMainPage),
     OptionRow::action(
         " Reset",
         kStMainPage,
-        tag_of(StOption::Reset),
+        st::tag_of(st::StOption::Reset),
         {.reset_act = OptionRow::ResetAct::Warm}
     ),
     OptionRow::action(
         " Cold Boot",
         kStMainPage,
-        tag_of(StOption::ColdBoot),
+        st::tag_of(st::StOption::ColdBoot),
         {.reset_act = OptionRow::ResetAct::Cold}
     ),
 
     OptionRow::file(
         " HDD0: ",
         kStConfigPage,
-        tag_of(StOption::Hdd0),
+        st::tag_of(st::StOption::Hdd0),
         {.slot = IoIndex{2}, .browse_unmount = true}
     ),
     OptionRow::file(
         " HDD1: ",
         kStConfigPage,
-        tag_of(StOption::Hdd1),
+        st::tag_of(st::StOption::Hdd1),
         {.slot = IoIndex{3}, .browse_unmount = true}
     ),
     OptionRow::separator(kStConfigPage),
     OptionRow::cycle(
         " Memory:     ",
         kStConfigPage,
-        tag_of(StOption::Memory),
+        st::tag_of(st::StOption::Memory),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{1}, 3},
          .values = kStMemoryNames,
          .choices = ChoiceCount{6},
          .arms_reset = true}
     ),
-    OptionRow::file(" TOS:        ", kStConfigPage, tag_of(StOption::Tos), {.slot = IoIndex{4}}),
+    OptionRow::file(
+        " TOS:        ",
+        kStConfigPage,
+        st::tag_of(st::StOption::Tos),
+        {.slot = IoIndex{4}}
+    ),
     OptionRow::cycle(
         " Chipset:    ",
         kStConfigPage,
-        tag_of(StOption::Chipset),
+        st::tag_of(st::StOption::Chipset),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{23}, 2},
          .values = kStChipsetNames}
@@ -216,25 +222,25 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " Blitter:    ",
         kStConfigPage,
-        tag_of(StOption::Blitter),
+        st::tag_of(st::StOption::Blitter),
         {.word = kStSystemCtrl, .values = kStOnOff}
     ),
     OptionRow::cycle(
         " Viking:     ",
         kStConfigPage,
-        tag_of(StOption::Viking),
+        st::tag_of(st::StOption::Viking),
         {.word = kStSystemCtrl, .values = kStOnOff}
     ),
     OptionRow::cycle(
         " Aspect:     ",
         kStConfigPage,
-        tag_of(StOption::Aspect),
+        st::tag_of(st::StOption::Aspect),
         {.word = kStSystemCtrl, .values = kStAspectNames}
     ),
     OptionRow::cycle(
         " Screen:     ",
         kStConfigPage,
-        tag_of(StOption::Screen),
+        st::tag_of(st::StOption::Screen),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{8}, 1},
          .values = kStScreenNames}
@@ -242,7 +248,7 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " Mono 60Hz:  ",
         kStConfigPage,
-        tag_of(StOption::Mono60),
+        st::tag_of(st::StOption::Mono60),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{30}, 1},
          .values = kStOnOff}
@@ -250,13 +256,13 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " Video Crop: ",
         kStConfigPage,
-        tag_of(StOption::VideoCrop),
+        st::tag_of(st::StOption::VideoCrop),
         {.word = kStSystemCtrl, .values = kStVideoCropNames}
     ),
     OptionRow::cycle(
         " Scale:      ",
         kStConfigPage,
-        tag_of(StOption::Scale),
+        st::tag_of(st::StOption::Scale),
         {.word = kStExtCtrl,
          .bits = proto::BitField{proto::StatusBit{11}, 2},
          .values = kStScaleNames}
@@ -264,7 +270,7 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " Scanlines:  ",
         kStConfigPage,
-        tag_of(StOption::Scanlines),
+        st::tag_of(st::StOption::Scanlines),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{20}, 2},
          .values = kStScanlineNames}
@@ -273,7 +279,7 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " Dongle:     ",
         kStConfigPage,
-        tag_of(StOption::Dongle),
+        st::tag_of(st::StOption::Dongle),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{25}, 1},
          .values = kStDongleNames}
@@ -282,7 +288,7 @@ inline constexpr auto kStOptionRows = std::to_array<OptionRow>({
     OptionRow::cycle(
         " YM-Audio:   ",
         kStConfigPage,
-        tag_of(StOption::YmAudio),
+        st::tag_of(st::StOption::YmAudio),
         {.word = kStSystemCtrl,
          .bits = proto::BitField{proto::StatusBit{22}, 1},
          .values = kStStereoNames}
@@ -311,12 +317,18 @@ inline constexpr CoreProfile kAtariSt{
 
     .reset = {.button_reacts = true, .action_reacts = true, .ladders = true, .restore_boots = true},
 
-    .config_codec = infra::OptRef<const IConfigCodec>{kStConfigCodec},
+    .config_codec = infra::OptRef<const IConfigCodec>{st::kStConfigCodec},
 
     .grants = {Grant::Disk},
 };
 
 std::unique_ptr<Core> make_st(const CoreProfile& p, const CoreGrant& g);
+
+std::unique_ptr<IDiskServant> make_st_disk_servant(const CoreProfile& p, const ServantGrant& g);
+
+inline constexpr auto kAtariStDiskServants = std::to_array<DiskServantRow>({
+    {.protocol = proto::DiskProtocol::Acsi, .make = &make_st_disk_servant},
+});
 
 std::unique_ptr<BootLadder> make_st_ladder(const CoreProfile& p, const LadderContext& ctx);
 

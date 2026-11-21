@@ -12,6 +12,7 @@
 #include "os/mmio_region.h"
 #include "hal/phys_region.h"
 #include "hal/region_id.h"
+#include "infra/prelude.h"
 #include "hal/types.h"
 #include "os/types.h"
 
@@ -102,10 +103,6 @@ inline constexpr std::size_t kLwBridgeSize = 0x0020'0000u;
 
 inline constexpr os::PhysAddr kFpgaMemBase{0x2000'0000u};
 inline constexpr std::uint32_t kFpgaMemMask = 0x1FFF'FFFFu;
-
-constexpr os::PhysAddr fpga_mem(FabricAddr addr) noexcept {
-    return addr.folded_into(kFpgaMemBase, kFpgaMemMask);
-}
 
 namespace detail {
 

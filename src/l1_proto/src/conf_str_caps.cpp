@@ -7,6 +7,7 @@
 
 #include "infra/ascii.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 
 namespace mister::proto {
 
@@ -167,10 +168,16 @@ Ex<std::string_view> ConfStrCaps::try_irq(std::string_view rest) {
     const std::string_view body = rest.substr(kIrqToken.size(), seg_end - kIrqToken.size());
 
     const std::size_t eq = body.find('=');
+    const auto klass = irq_class_from(body.substr(0, eq));
+
+    if (!klass) {
+        irq_unknown_classes_.add();
+        caps_.push_back({Capability::Kind::Irq, std::string(rest.substr(0, seg_end))});
+        return rest.substr(seg_end);
+    }
     if (eq == std::string_view::npos) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultNoEquals});
     }
-    const auto klass = irq_class_from(body.substr(0, eq));
     std::string_view tail = body.substr(eq + 1);
     std::string_view line_s = tail;
     std::uint32_t cause_base = 0;
@@ -184,7 +191,7 @@ Ex<std::string_view> ConfStrCaps::try_irq(std::string_view rest) {
     }
 
     const auto line = parse_num(line_s, kDecimalRadix);
-    if (!klass || !line || *line < kIrqPoolFirstLine || *line > kIrqOrdinalMax) {
+    if (!line || *line < kIrqPoolFirstLine || *line > kIrqOrdinalMax) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultBadLine});
     }
     irq_.push_back(

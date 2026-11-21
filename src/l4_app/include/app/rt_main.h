@@ -4,17 +4,18 @@
 #include <cstdint>
 #include <utility>
 
-#include "app/replay_ring.h"
+#include "app/replay/replay_ring.h"
 #include "app/rt_park.h"
 #include "app/types.h"
 #include "hal/link_timing.h"
-#include "infra/coalesced_kick.h"
+#include "infra/xthread/coalesced_kick.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/seat_main.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/seat_main.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/types.h"
 
 namespace mister::reactor {
@@ -29,14 +30,23 @@ class DiskLamp;
 namespace mister::app {
 
 class LinkSession;
-class InputEmit;
 template <SeatTag Producer>
 class LinkTxChannel;
 class OsdWire;
-class ReplayGate;
 class CoreFrameCounter;
+
+namespace launcher {
 class ScanoutRelay;
+}
 class RoundBudget;
+
+namespace replay {
+class ReplayGate;
+}
+
+namespace input {
+class InputEmit;
+}
 
 class RtMain final : public xthread::SeatMain<RtMain> {
     TASTY_SEAT_RESIDENT(RT);
@@ -44,15 +54,15 @@ class RtMain final : public xthread::SeatMain<RtMain> {
 public:
     struct Wiring {
         infra::OptRef<LinkSession> session{};
-        infra::OptRef<InputEmit> input{};
+        infra::OptRef<input::InputEmit> input{};
         infra::OptRef<OsdWire> osd{};
         infra::OptRef<reactor::RoundTimer> timer{};
 
         infra::OptRef<xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>> input_kick{};
         infra::OptRef<CoreFrameCounter> frames{};
-        infra::OptRef<ScanoutRelay> scanout{};
-        infra::OptRef<ReplayGate> replay{};
-        ReplayRing::Receiver replay_ring{};
+        infra::OptRef<launcher::ScanoutRelay> scanout{};
+        infra::OptRef<replay::ReplayGate> replay{};
+        replay::ReplayRing::Receiver replay_ring{};
         infra::OptRef<hal::DiskLamp> lamp{};
         infra::OptRef<const xthread::WakeFlag> disk_activity{};
     };
@@ -66,7 +76,8 @@ public:
           input_kick_(wiring.input_kick),
           park_(exec),
           replay_(
-              (wiring.replay && wiring.replay_ring) ? wiring.replay : infra::OptRef<ReplayGate>{}
+              (wiring.replay && wiring.replay_ring) ? wiring.replay
+                                                    : infra::OptRef<replay::ReplayGate>{}
           ),
           replay_ring_(std::move(wiring.replay_ring)),
           frames_(wiring.frames),
@@ -157,17 +168,17 @@ private:
     reactor::Executive& exec_;
     infra::OptRef<LinkSession> session_{};
 
-    infra::OptRef<InputEmit> input_{};
+    infra::OptRef<input::InputEmit> input_{};
     infra::OptRef<OsdWire> osd_{};
 
     infra::OptRef<reactor::RoundTimer> timer_{};
 
     infra::OptRef<xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>> input_kick_{};
     RtPark park_;
-    infra::OptRef<ReplayGate> replay_{};
-    ReplayRing::Receiver replay_ring_{};
+    infra::OptRef<replay::ReplayGate> replay_{};
+    replay::ReplayRing::Receiver replay_ring_{};
     infra::OptRef<CoreFrameCounter> frames_{};
-    infra::OptRef<ScanoutRelay> scanout_{};
+    infra::OptRef<launcher::ScanoutRelay> scanout_{};
     infra::OptRef<hal::DiskLamp> lamp_{};
     infra::OptRef<const xthread::WakeFlag> disk_activity_{};
     bool stopping_ = false;

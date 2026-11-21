@@ -4,7 +4,7 @@
 #include <string_view>
 
 #include "cores/manifests/threedo.h"
-#include "cores/saturn_ladder.h"
+#include "cores/cd/saturn_ladder.h"
 
 namespace mister::cores::manifests {
 
@@ -23,11 +23,11 @@ static_assert(
 );
 
 static_assert(
-    std::holds_alternative<CdProfile::SaturnFacts>(kSaturnProfile.row),
+    std::holds_alternative<cd::CdProfile::SaturnFacts>(kSaturnProfile.row),
     "spec 1.5.2.1: Saturn reads 6 command words and writes 6 status words"
 );
 static_assert(
-    std::get<CdProfile::SaturnFacts>(kSaturnProfile.row).quirks.size() == kSaturnQuirks.size(),
+    std::get<cd::CdProfile::SaturnFacts>(kSaturnProfile.row).quirks.size() == kSaturnQuirks.size(),
     "saturncdd.cpp:1116-1120: the quirk rows are this dialect's own"
 );
 static_assert(
@@ -36,7 +36,7 @@ static_assert(
 );
 
 static_assert(
-    kSaturnTicks.speeds == CdSpeedCount{3}
+    kSaturnTicks.speeds == cd::CdSpeedCount{3}
         && kSaturnTicks.speed[0] == 16'667us
         && kSaturnTicks.speed[1] == 13'333us
         && kSaturnTicks.speed[2] == 6'667us,
@@ -66,8 +66,8 @@ static_assert(
     "one row period quantises the pass; 1 ms lands stock's 7/7/6 dither"
 );
 static_assert(
-    kSaturnServices[0].impl == &kCdCommandEdge<kSaturn>
-        && kSaturnServices[1].impl == &kCdServiceTick<kSaturn>,
+    kSaturnServices[0].impl == &cd::kCdCommandEdge<kSaturn>
+        && kSaturnServices[1].impl == &cd::kCdServiceTick<kSaturn>,
     "the SHARED CD obligations keyed to this profile"
 );
 static_assert(
@@ -87,7 +87,7 @@ static_assert(
     "whatever boot.rom the user placed"
 );
 static_assert(
-    !kSaturn.cheats.reset_on_mount && kSaturn.cheats.cd_dir_suffix.empty(),
+    !kSaturn.host.cheats.reset_on_mount && kSaturn.host.cheats.cd_dir_suffix.empty(),
     "sat.cpp:205 comments cheats_init out and cheats.cpp names no Saturn arm"
 );
 static_assert(
@@ -184,11 +184,11 @@ static_assert(
 static_assert(kSaturnQuirks.size() == 7, "sat.cpp:213-225: five TOC titles, two READ titles");
 
 std::unique_ptr<Core> make_saturn(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<CdCore>(p, kSaturnProfile, g.services);
+    return std::make_unique<cd::CdCore>(p, kSaturnProfile, g.services);
 }
 
 std::unique_ptr<BootLadder> make_saturn_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<SaturnLadder>(p, ctx);
+    return std::make_unique<cd::SaturnLadder>(p, ctx);
 }
 
 }

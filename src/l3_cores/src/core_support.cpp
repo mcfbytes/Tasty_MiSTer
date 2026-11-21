@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/core_support.h"
 #include "cores/core_adopt.h"
-#include "proto/core_session.h"
+#include "infra/prelude.h"
+#include "proto/link/core_session.h"
 #include "proto/status_bit.h"
 
 #include <algorithm>
@@ -37,7 +38,7 @@ Ex<void> Core::shutdown() {
     return down;
 }
 
-Ex<void> Core::pre_adopt_(proto::CoreSession& s) {
+Ex<void> Core::pre_adopt_(proto::link::CoreSession& s) {
     s.set_suppress_status_wire(profile_->suppress_reset_status_write);
     return {};
 }

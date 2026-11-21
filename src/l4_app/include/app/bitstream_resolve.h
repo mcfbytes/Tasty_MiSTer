@@ -9,6 +9,7 @@
 #include "app/xml_kind.h"
 #include "cores/manifest_doc_facts.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::svc {
 class Vfs;

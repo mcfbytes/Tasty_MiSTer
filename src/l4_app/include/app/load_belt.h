@@ -23,6 +23,7 @@
 #include "cores/mount_status.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "infra/error.h"
 
 namespace mister::app {
@@ -61,7 +62,7 @@ inline constexpr RungMask kSourced{
 };
 
 constexpr bool sourced(RungMask m) noexcept {
-    return m.within(kSourced);
+    return m.is_subset(kSourced);
 }
 
 static_assert(
@@ -81,7 +82,7 @@ public:
     struct SaveStateHold {
         PickedLoad load{};
         proto::ActKey gen{};
-        std::chrono::nanoseconds due{};
+        os::RawMonotonicClock::time_point due{};
     };
 
     class Host {
@@ -144,7 +145,7 @@ public:
 
     [[nodiscard]] bool any_live(RungMask m) const noexcept { return live().any(m); }
 
-    [[nodiscard]] bool empty() const noexcept { return live().empty(); }
+    [[nodiscard]] bool empty() const noexcept { return live().is_empty(); }
 
     [[nodiscard]] const std::optional<LoadWalk>& walk() const noexcept { return walk_; }
 

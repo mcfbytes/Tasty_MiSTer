@@ -8,6 +8,7 @@
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
 #include "ui/system_page.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
@@ -16,10 +17,10 @@ constexpr std::array<std::string_view, 1> kRebootBody{"Reboot MiSTer?"};
 
 }
 
-app::PageDescription::Row HdSettingsPlan::HdEnterClassicRow::describe() const {
+app::hd::PageDescription::Row HdSettingsPlan::HdEnterClassicRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdEnterClassicRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Submenu;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Submenu;
     (void)r.label.assign("Advanced (classic menu)");
     return r;
 }
@@ -29,7 +30,7 @@ std::optional<RowKey> HdSettingsPlan::HdEnterClassicRow::key() const {
     return push_row_key(classic_);
 }
 
-Transition HdSettingsPlan::HdEnterClassicRow::select() {
+Transition HdSettingsPlan::HdEnterClassicRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdEnterClassicRow);
     return Transition::enter_classic();
 }
@@ -78,7 +79,7 @@ std::string_view HdSettingsPlan::title() const {
     return "Settings";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdSettingsPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdSettingsPlan::rows() const {
     TASTY_SEAT_BODY(HdSettingsPlan);
     return refs_;
 }
@@ -94,7 +95,7 @@ RowCount HdSettingsPlan::pinned() const noexcept {
     return RowCount{1};
 }
 
-svc::Tally HdSettingsPlan::refusals() const noexcept {
+infra::Tally HdSettingsPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdSettingsPlan);
     return refusals_.sum(scripts_entry_.refusals());
 }
@@ -104,16 +105,16 @@ std::uint32_t HdSettingsPlan::commands_published() const noexcept {
     return published_;
 }
 
-app::PageDescription::Row HdSettingsPlan::AutosaveRow::describe() const {
+app::hd::PageDescription::Row HdSettingsPlan::AutosaveRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(AutosaveRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Value;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Value;
     (void)r.label.assign(kAutosaveLabel);
     (void)r.value.assign(autosave_word(plan_.autosave_on_));
     return r;
 }
 
-Transition HdSettingsPlan::AutosaveRow::select() {
+Transition HdSettingsPlan::AutosaveRow::select(const RowCx&) {
     TASTY_SEAT_BODY(AutosaveRow);
     if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::SetAutosave{.on = !plan_.autosave_on_})) {
         plan_.refusals_.add();
@@ -123,15 +124,15 @@ Transition HdSettingsPlan::AutosaveRow::select() {
     return Transition{};
 }
 
-app::PageDescription::Row HdSettingsPlan::ScriptsRow::describe() const {
+app::hd::PageDescription::Row HdSettingsPlan::ScriptsRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(ScriptsRow);
-    app::PageDescription::Row r{};
-    r.kind = app::PageDescription::RowKind::Submenu;
+    app::hd::PageDescription::Row r{};
+    r.kind = app::hd::PageDescription::RowKind::Submenu;
     (void)r.label.assign("Scripts");
     return r;
 }
 
-Transition HdSettingsPlan::ScriptsRow::select() {
+Transition HdSettingsPlan::ScriptsRow::select(const RowCx&) {
     TASTY_SEAT_BODY(ScriptsRow);
     return plan_.scripts_entry_.open(plan_.ctx_);
 }

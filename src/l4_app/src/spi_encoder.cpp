@@ -8,40 +8,40 @@
 #include "app/link_op_dispatch.h"
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
-#include "hal/reg_block.h"
 #include "app/save_flush.h"
 #include "app/cheat_apply.h"
 #include "app/core_option_acts.h"
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
-#include "proto/block_slots.h"
-#include "proto/core_session.h"
-#include "proto/joystick_port.h"
+#include "infra/prelude.h"
+#include "proto/link/block_slots.h"
+#include "proto/link/core_session.h"
+#include "proto/link/joystick_port.h"
 #include "proto/link_op.h"
 #include "proto/osd_surface.h"
 #include "proto/ps2_frame.h"
 #include "proto/ps2_wire.h"
-#include "proto/osd_transport.h"
-#include "proto/spi_frame.h"
-#include "proto/status_register.h"
-#include "svc/input_emitter.h"
+#include "proto/link/osd_transport.h"
+#include "proto/link/spi_frame.h"
+#include "proto/link/status_register.h"
+#include "svc/input/input_emitter.h"
 
 namespace mister::app {
 
 namespace {
 
 constexpr proto::OsdRow kOsdRowLimit = proto::OsdSurface::kMaxRows.end();
-constexpr proto::PlayerIndex kPlayerLimit{proto::JoystickPort::kMaxPorts};
+constexpr proto::PlayerIndex kPlayerLimit{proto::link::JoystickPort::kMaxPorts};
 constexpr proto::SlotIndex kBlockSlotLimit{proto::kBlockSlots};
 }
 
 SpiEncoder::SpiEncoder(
     hal::ISpiTransport& link,
     hal::ICoreSignals& signals,
-    proto::CoreSession& session,
+    proto::link::CoreSession& session,
     OsdWire& osd,
-    proto::BlockSlots& slots,
-    svc::InputEmitter& em,
+    proto::link::BlockSlots& slots,
+    svc::input::InputEmitter& em,
     SessionTally& session_tally
 ) noexcept
     : link_(link),
@@ -78,7 +78,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     const LinkOpCtx&
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (session_.type() != proto::CoreType::EightBit) {
+    if (!session_.terms().bursts_status) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (!a.field.fits_status())
@@ -97,8 +97,8 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if ((a.rows > 1) || a.row >= kOsdRowLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    proto::OsdTransport osd;
-    proto::SpiFrame frame{link_};
+    proto::link::OsdTransport osd;
+    proto::link::SpiFrame frame{link_};
     const proto::OsdRow row = a.row;
     Ex<void> flushed;
     if (a.bytes == proto::TxSlabId{}) {
@@ -140,16 +140,16 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
     jw.suppress_analog_followup = a.suppress_analog_followup;
     jw.joy_transl = a.joy_transl;
 
-    jw.analog_capable = session_.type() == proto::CoreType::EightBit;
+    jw.analog_capable = session_.terms().analog_capable;
     jw.analog_word = session_.capabilities().io_version != hal::IoVersion{0};
     em_.joysticks().configure(jw);
     return ILinkEncoder::Outcome::Encoded;
 }
 
-void SpiEncoder::bind_pads(infra::OptRef<const LwPads> granted) noexcept {
-    if (granted) {
+void SpiEncoder::bind_pads(Carrier pads, proto::BuildGeneration gen) noexcept {
 
-        em_.bind_pads(frame_, hal::reg::Block::redeem(granted->regs.lend()), granted->block);
+    if (pads == Carrier::Lw) {
+        em_.bind_relay(gen);
     } else {
         em_.bind_pads(frame_);
     }
@@ -159,12 +159,8 @@ void SpiEncoder::drop_pads() noexcept {
     em_.hold_pads();
 }
 
-void SpiEncoder::trust_pads(bool ready) noexcept {
-    em_.trust_pads(ready);
-}
-
-bool SpiEncoder::pads_on_lw() const noexcept {
-    return em_.pads_on_lw();
+bool SpiEncoder::pads_relayed() const noexcept {
+    return em_.pads_relayed();
 }
 
 ILinkEncoder::Outcome SpiEncoder::on(
@@ -236,7 +232,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (session_.type() != proto::CoreType::EightBit) {
+    if (!session_.terms().bursts_status) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (auto r = session_.pulse(a.bit); !r)

@@ -14,7 +14,7 @@ concept SlotNames = std::is_scoped_enum_v<E> && requires { E::Count; };
 
 template <SlotNames E>
 [[nodiscard]] constexpr RowCount named_rows() noexcept {
-    return RowCount::of(infra::ordinal(E::Count));
+    return RowCount::truncating(infra::ordinal(E::Count));
 }
 
 class SlotId {
@@ -23,7 +23,7 @@ class SlotId {
 public:
     template <SlotNames E>
     [[nodiscard]] static constexpr SlotId of(E named) noexcept {
-        return SlotId{RowIndex::of(infra::ordinal(named))};
+        return SlotId{RowIndex::truncating(infra::ordinal(named))};
     }
 
     [[nodiscard]] static constexpr SlotId at(RowIndex row) noexcept { return SlotId{row}; }
@@ -35,7 +35,8 @@ public:
 
     template <SlotNames E>
     [[nodiscard]] constexpr E named() const noexcept {
-        return row_ < RowIndex::of(infra::ordinal(E::Count)) ? row_.enumerator<E>() : E::Count;
+        return row_ < RowIndex::truncating(infra::ordinal(E::Count)) ? row_.enumerator<E>()
+                                                                     : E::Count;
     }
 
     [[nodiscard]] constexpr RowIndex row() const noexcept { return row_; }

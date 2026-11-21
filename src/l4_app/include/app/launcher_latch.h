@@ -4,15 +4,16 @@
 #include <optional>
 #include <string_view>
 
-#include "app/launcher_demand.h"
-#include "app/launcher_profile.h"
+#include "app/launcher/launcher_demand.h"
+#include "app/launcher/launcher_profile.h"
 #include "app/path_text.h"
 #include "app/bitstream_resolve.h"
 #include "app/ui_request.h"
 #include "cores/registry.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -24,18 +25,22 @@ public:
     explicit LauncherLatch(const svc::Vfs& vfs) noexcept : vfs_(vfs) {}
 
     void bind(
-        infra::OptRef<LauncherDemandCell> demand_cell,
+        infra::OptRef<launcher::LauncherDemandCell> demand_cell,
         infra::OptRef<xthread::WakeFlag> host_wake
     ) noexcept {
         cell_ = demand_cell;
         wake_ = host_wake;
     }
 
-    [[nodiscard]] infra::OptRef<const LauncherProfile> profile() const noexcept {
+    [[nodiscard]] infra::OptRef<const launcher::LauncherProfile> profile() const noexcept {
         return demand_.profile;
     }
 
-    void latch(const LauncherProfile& l, std::string_view core_name, std::string_view pending_path);
+    void latch(
+        const launcher::LauncherProfile& l,
+        std::string_view core_name,
+        std::string_view pending_path
+    );
 
     [[nodiscard]] UiRequest::LoadCore alias(const UiRequest::LoadCore& req) const noexcept;
 
@@ -50,7 +55,7 @@ public:
 
     [[nodiscard]] std::optional<UiRequest::LoadCore> swap_to_image(SwapGate gate);
 
-    [[nodiscard]] const LauncherDemand& demand() const noexcept { return demand_; }
+    [[nodiscard]] const launcher::LauncherDemand& demand() const noexcept { return demand_; }
 
     [[nodiscard]] bool swap_owed() const noexcept { return swap_owed_; }
 
@@ -58,9 +63,9 @@ public:
 
 private:
     const svc::Vfs& vfs_;
-    LauncherDemand demand_{};
+    launcher::LauncherDemand demand_{};
     PathText image_{};
-    infra::OptRef<LauncherDemandCell> cell_{};
+    infra::OptRef<launcher::LauncherDemandCell> cell_{};
     infra::OptRef<xthread::WakeFlag> wake_{};
     bool swap_owed_ = false;
 };

@@ -7,7 +7,7 @@
 
 #include "infra/error.h"
 
-namespace mister {
+namespace mister::infra {
 
 enum class SeatTag : std::uint8_t {
     Unbound = 0,
@@ -135,9 +135,9 @@ namespace seat::detail {
     return static_cast<SeatTag>(static_cast<std::uint8_t>(detail));
 }
 
-[[noreturn]] void violation(SeatTag want, SeatTag got, infra::ErrorSite site, const char* what);
+[[noreturn]] void violation(SeatTag want, SeatTag got, ErrorSite site, const char* what);
 
-inline void check(SeatTag want, infra::ErrorSite site, const char* what) noexcept {
+inline void check(SeatTag want, ErrorSite site, const char* what) noexcept {
     if (const SeatTag got = current_seat(); got != want) {
         violation(want, got, site, what);
     }
@@ -147,7 +147,7 @@ inline void check(SeatTag want, infra::ErrorSite site, const char* what) noexcep
 
 template <SeatTag Want>
 inline void seat_assert(
-    [[maybe_unused]] infra::ErrorSite site,
+    [[maybe_unused]] ErrorSite site,
     [[maybe_unused]] const char* what
 ) noexcept {
     if constexpr (kSeatChecksEnabled && Want != SeatTag::Unbound) {
@@ -158,13 +158,14 @@ inline void seat_assert(
 }
 
 #define TASTY_SEAT_RESIDENT(tag) \
-    static constexpr ::mister::SeatTag kSeatDecl = ::mister::SeatTag::tag
+    static constexpr ::mister::infra::SeatTag kSeatDecl = ::mister::infra::SeatTag::tag
 
 #define TASTY_SEAT_MEDIATOR(a, b) \
-    static constexpr ::mister::SeatTag kSeatMediatorA = ::mister::seat_arg::a; \
-    static constexpr ::mister::SeatTag kSeatMediatorB = ::mister::seat_arg::b
+    static constexpr ::mister::infra::SeatTag kSeatMediatorA = ::mister::infra::seat_arg::a; \
+    static constexpr ::mister::infra::SeatTag kSeatMediatorB = ::mister::infra::seat_arg::b
 
-#define TASTY_SEAT_EXEMPT(kind) static constexpr int kSeatExempt = ::mister::seat_exempt::kind
+#define TASTY_SEAT_EXEMPT(kind) \
+    static constexpr int kSeatExempt = ::mister::infra::seat_exempt::kind
 
 #define TASTY_SEAT_OPEN() static constexpr bool kSeatOpen = true
 
@@ -177,7 +178,7 @@ inline void seat_assert(
     using SeatOwner = Owner; \
     static constexpr bool kSeatFrom = true
 
-namespace mister::seat_owner {
+namespace mister::infra::seat_owner {
 struct RT {
     TASTY_SEAT_RESIDENT(RT);
 };

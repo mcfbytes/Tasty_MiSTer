@@ -3,6 +3,7 @@
 
 #include "cores/core_profile.h"
 #include "cores/registry.h"
+#include "infra/prelude.h"
 
 namespace mister::fw {
 
@@ -15,7 +16,7 @@ namespace mister::fw {
             continue;
         const DocCensus* doc = nullptr;
         for (const DocCensus& d : kDocCensus) {
-            if (d.core == p.name) {
+            if (d.kind == p.kind) {
                 doc = &d;
                 break;
             }
@@ -33,7 +34,7 @@ namespace mister::fw {
     for (std::size_t i = 0; i < kDocCensus.size(); ++i) {
         bool found = false;
         for (const cores::CoreFactory& f : table) {
-            if (f.profile.name == kDocCensus[i].core) {
+            if (f.profile.kind == kDocCensus[i].kind) {
                 found = true;
                 break;
             }

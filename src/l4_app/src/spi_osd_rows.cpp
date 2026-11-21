@@ -3,7 +3,7 @@
 
 #include <span>
 
-#include "proto/spi_frame.h"
+#include "proto/link/spi_frame.h"
 
 namespace mister::app {
 
@@ -13,7 +13,7 @@ proto::OsdRowCount SpiOsdRows<First>::backlog() const noexcept {
     proto::OsdRowCount n{};
     const proto::OsdRowCount bound = surface_->visible_rows();
     for (proto::OsdRow r = First; bound.covers(r); r += proto::kOneOsdRow) {
-        if (surface_->seq(r) != proto::row_cell(seen_, r))
+        if (surface_->seq(r) != seen_[r])
             n += proto::kOneOsdRow;
     }
     return n;
@@ -24,12 +24,12 @@ bool SpiOsdRows<First>::flush_one() noexcept {
     TASTY_SEAT_BODY(SpiOsdRows);
     unsigned pending = 0;
     proto::OsdRow target{};
-    std::uint32_t target_seq = 0;
+    infra::CellGen target_seq{};
 
     const proto::OsdRowCount bound = surface_->visible_rows();
     for (proto::OsdRow r = First; bound.covers(r); r += proto::kOneOsdRow) {
-        const std::uint32_t s = surface_->seq(r);
-        if (s == proto::row_cell(seen_, r))
+        const infra::CellGen s = surface_->seq(r);
+        if (s == seen_[r])
             continue;
         if (++pending == 1) {
             target = r;
@@ -50,7 +50,7 @@ bool SpiOsdRows<First>::flush_one() noexcept {
         ++tally_->sample_refusals;
         return false;
     }
-    proto::SpiFrame frame{*link_};
+    proto::link::SpiFrame frame{*link_};
     const auto flushed = rows_.flush_row(
         frame,
         row,
@@ -64,11 +64,11 @@ bool SpiOsdRows<First>::flush_one() noexcept {
         return true;
     }
 
-    if (got != target_seq) {
+    if (infra::CellGen{got} != target_seq) {
         ++tally_->commits_refused;
         return true;
     }
-    proto::row_cell(seen_, row) = target_seq;
+    seen_[row] = target_seq;
     ++tally_->rows_flushed;
     return true;
 }

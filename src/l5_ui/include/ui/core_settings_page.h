@@ -9,12 +9,14 @@
 
 #include "app/link_tx_channel.h"
 #include "app/option_cell.h"
-#include "app/page_description.h"
-#include "app/recents_store.h"
+#include "app/hd/page_description.h"
+#include "app/recents/recents_store.h"
 #include "app/ui_request_ring.h"
 #include "proto/reset_edge.h"
+#include "infra/prelude.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/browser_host.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
@@ -84,7 +86,7 @@ public:
     Transition on_cancel() override;
     Transition on_eject() override;
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CoreSettingsPage);
         return refusals_;
     }
@@ -113,7 +115,7 @@ private:
 
     [[nodiscard]] std::string compose(const Line& l) const;
 
-    [[nodiscard]] app::PageDescription::Row hd_row(
+    [[nodiscard]] app::hd::PageDescription::Row hd_row(
         infra::OptRef<const Line> line,
         std::string_view text,
         bool stippled
@@ -151,14 +153,14 @@ private:
     proto::BindGeneration conf_gen_{};
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
     infra::OptRef<BrowserLaunch> browser_{};
-    infra::OptRef<app::RecentsStore> recents_{};
+    infra::OptRef<app::recents::RecentsStore> recents_{};
     std::string core_dir_;
 
     RowIndex sel_{};
     RowIndex first_row_{};
     bool armed_ = false;
     proto::IoIndex pending_slot_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

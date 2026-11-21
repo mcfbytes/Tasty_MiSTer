@@ -16,6 +16,7 @@
 #include "app/video_pump.h"
 #include "infra/fixed_str.h"
 #include "infra/path_text.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/path_buf.h"
 #include "os/process_title.h"
@@ -40,7 +41,7 @@ struct HandoffPath {
 };
 
 constexpr std::string_view kTitlePrefix = "MiSTer: ";
-constexpr std::size_t kTitleCap = kTitlePrefix.size() + app::SessionIdentity::kMax;
+constexpr std::size_t kTitleCap = kTitlePrefix.size() + app::CoreName::kBufSize;
 
 }
 
@@ -75,7 +76,7 @@ void UiSink::stamp_core_identity(bool front_end) {
     const HandoffPath core{w_.tmp_root, "CORENAME"};
     const HandoffPath rbf{w_.tmp_root, "RBFNAME"};
     const bool a = core.write(id->core.view());
-    const bool b = rbf.write(id->rbf.view());
+    const bool b = rbf.write(id->conf_name.view());
     if (a && b) {
         ++corename_writes_;
     } else {
@@ -121,16 +122,15 @@ void UiSink::on(const app::Event::CoreLoaded& a, const app::Event::Head& h) {
     w_.mgl.on_core_loaded(h.tag, a.mgl_capable);
 
     const std::optional<app::SessionIdentity> latched = w_.identity.copy();
-    w_.video.on_core_loaded(app::CoreIdentity::of(latched), a.front_end);
+    w_.video.on_core_loaded(app::VideoLoadIdentity::of(latched), a.front_end);
     {
 
         const app::SessionIdentity cid = latched.value_or(app::SessionIdentity{});
 
         app::CoreInputFacts f{};
         (void)f.core.assign(cid.core.view());
-        f.front_end = cid.front_end;
         f.plan = cid.joy;
-        f.reshape = cid.analog_reshape;
+        f.host = cid.host;
 
         w_.input.on_core_loaded(f);
     }

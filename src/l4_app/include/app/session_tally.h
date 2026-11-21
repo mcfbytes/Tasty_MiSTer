@@ -4,7 +4,9 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 
 namespace mister::app {
 
@@ -28,6 +30,8 @@ struct SessionTally {
     std::uint32_t load_facts_refusals = 0;
 
     std::uint32_t osd_close_hooks = 0;
+
+    infra::Tally pad_ops_off_carrier{};
 
     Error last_error{};
 };

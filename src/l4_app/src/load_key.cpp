@@ -2,6 +2,7 @@
 #include "app/load_key.h"
 
 #include "infra/crc32.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

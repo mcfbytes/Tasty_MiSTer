@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/options_model.h"
 #include "ui/options_keys.h"
@@ -67,15 +67,15 @@ ClassicOptionsView::DrawnList ClassicOptionsView::compose_drawn() const {
     const bool flat = model_.flat();
     for_each_drawn([&](const OptionItem& it) {
         const OptionItem::Look look{.flat = flat, .value = status_field(it.bits)};
-        const std::optional<app::PageDescription::Row> own = it.describe(look);
+        const std::optional<app::hd::PageDescription::Row> own = it.describe(look);
 
         if (!own)
             return;
-        app::PageDescription::Row row = *own;
+        app::hd::PageDescription::Row row = *own;
 
         if (it.selectable_index.has_value() && *it.selectable_index == sel_) {
             row.selected = true;
-            list.selected = RowIndex::of(list.rows.size());
+            list.selected = RowIndex::truncating(list.rows.size());
         }
         list.rows.push_back(Drawn{.hd = row, .item = infra::OptRef<const OptionItem>{it}});
     });
@@ -106,15 +106,15 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
     const DrawnList drawn = compose_drawn();
 
     const RowSpan<const Drawn> drawn_rows{std::span<const Drawn>{drawn.rows}};
-    const RowCount total = RowCount::of(drawn.rows.size());
-    const app::HdWindow win = out.window(drawn.selected, total);
-    out.page.row_count = win.count;
+    const RowCount total = RowCount::truncating(drawn.rows.size());
+    const app::hd::HdWindow win = out.window(drawn.selected, total);
+    out.page.row_count = win.len;
 
     std::vector<Line> storage = rows.sized_table<std::vector<Line>>();
     const RowSpan<Line> lines{std::span<Line>{storage}};
     compose_lines(lines);
 
-    for (const RowIndex at : ui::rows(win.first, win.count)) {
+    for (const RowIndex at : ui::rows(win.start, win.len)) {
         if (at >= row_after(total) || out.count >= out.rows.size())
             break;
         PageRow& r = out.rows[out.count++];

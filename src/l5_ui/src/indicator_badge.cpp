@@ -98,10 +98,11 @@ IndicatorBadge::IndicatorBadge(std::span<const IndicatorCanvas> lines) noexcept 
             const std::size_t py = band_top + y;
             for (std::size_t x = 0; x < art[y].size() && x < kIconSide; ++x) {
                 if (art[y][x] == '#')
-                    rows_[py / kRowPixels][kPad + x] |= kPixelBit[py % kRowPixels];
+                    rows_[proto::OsdRow::saturating(py / kRowPixels)]
+                         [kPad + x] |= kPixelBit[py % kRowPixels];
             }
         }
-        RowBytes& text_row = rows_[(band_top + kTextDrop) / kRowPixels];
+        RowBytes& text_row = rows_[proto::OsdRow::saturating((band_top + kTextDrop) / kRowPixels)];
         std::size_t x = text_x;
         proto::OsdCol cell{};
         for (const char ch : line.text()) {
@@ -121,16 +122,16 @@ IndicatorBadge::IndicatorBadge(std::span<const IndicatorCanvas> lines) noexcept 
         band_top += kBand;
     }
     width_ = std::min(
-        proto::OsdColCount::of((widest + kPad + kRowPixels - 1) / kRowPixels),
+        proto::OsdColCount::saturating((widest + kPad + kRowPixels - 1) / kRowPixels),
         proto::kInfoMaxWidth
     );
-    height_ = proto::OsdRowCount::of((band_top + kPad) / kRowPixels);
+    height_ = proto::OsdRowCount::saturating((band_top + kPad) / kRowPixels);
 }
 
 IndicatorBadge::RowBytes IndicatorBadge::row(proto::OsdRow row) const noexcept {
     if (!height_.covers(row))
         return RowBytes{};
-    return proto::row_cell(rows_, row);
+    return rows_[row];
 }
 
 }

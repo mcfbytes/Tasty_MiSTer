@@ -14,6 +14,7 @@
 #include "app/interned_file.h"
 #include "app/link_bytes.h"
 #include "app/link_tx_reader.h"
+#include "infra/prelude.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/link_op.h"

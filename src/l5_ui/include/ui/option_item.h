@@ -11,13 +11,14 @@
 #include <utility>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "proto/types.h"
 #include "ui/browser_session.h"
 #include "ui/build_env.h"
+#include "ui/row.h"
 #include "ui/transition.h"
 #include "ui/types.h"
 
@@ -31,7 +32,7 @@ class IOptionHost;
 
 using proto::BitField;
 
-class OptionItem {
+class OptionItem : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -93,10 +94,15 @@ public:
     [[nodiscard]] Carry build(const Source& in, const BuildEnv& env);
     [[nodiscard]] std::string compose(const Look& look) const;
 
-    [[nodiscard]] std::optional<app::PageDescription::Row> describe(const Look& look) const;
+    [[nodiscard]] std::optional<app::hd::PageDescription::Row> describe(const Look& look) const;
 
     [[nodiscard]] Transition select(IOptionHost& host) const;
     [[nodiscard]] Transition step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const;
+
+    [[nodiscard]] std::optional<RowKey> key() const override;
+    [[nodiscard]] app::hd::PageDescription::Row describe(const RowCx& cx) const override;
+    Transition select(const RowCx& cx) override;
+    Transition step(CycleDir dir, const RowCx& cx) override;
 
     [[nodiscard]] virtual std::optional<proto::FileRowId> file_row() const noexcept {
         return std::nullopt;
@@ -142,7 +148,7 @@ private:
     virtual Carry on_build(const Source& in, const BuildEnv& env) = 0;
     virtual std::string on_compose(const Look& look) const = 0;
 
-    virtual std::optional<app::PageDescription::Row> on_describe(const Look& look) const = 0;
+    virtual std::optional<app::hd::PageDescription::Row> on_describe(const Look& look) const = 0;
     virtual Transition on_select(IOptionHost& host) const = 0;
     virtual Transition on_step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const = 0;
 

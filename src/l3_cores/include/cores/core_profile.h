@@ -8,12 +8,12 @@
 #include "svc/blank_region.h"
 #include "svc/blank_save.h"
 #include "cores/boot_asset.h"
-#include "cores/cheat_lookup.h"
 #include "cores/config_codec.h"
 #include "cores/core_init_step.h"
 #include "cores/core_window_decl.h"
 #include "cores/file_slot.h"
 #include "cores/grant_set.h"
+#include "cores/host_bit_row.h"
 #include "cores/host_policy.h"
 #include "cores/option_row.h"
 #include "cores/reset_row.h"
@@ -22,6 +22,7 @@
 #include "cores/start_rule.h"
 #include "cores/types.h"
 #include "infra/ascii.h"
+#include "infra/prelude.h"
 #include "infra/error.h"
 #include "proto/sector_floor.h"
 #include "proto/types.h"
@@ -30,8 +31,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
-namespace mister::svc {
-class IAnalogReshape;
+namespace mister::svc::disc {
 class ISectorProgram;
 class IDiscRules;
 }
@@ -119,14 +119,6 @@ struct CoreProfile {
 
     std::span<const CoreInitStep> init_additions{};
 
-    bool suppress_analog_followup = false;
-
-    infra::OptRef<const svc::IAnalogReshape> analog_reshape{};
-
-    bool suppress_stick_dpad = false;
-
-    bool is_front_end = false;
-
     bool tasty_playable = false;
 
     BlockService block_service = BlockService::Generic;
@@ -138,12 +130,6 @@ struct CoreProfile {
 
     BaudRate default_uart_baud{kDefaultUartBaud};
 
-    std::string_view cue_browse_dir{};
-
-    bool image_rows_no_zip = false;
-
-    CheatLookup cheats{};
-
     std::span<const svc::DiskFormatRow> disk_formats{};
 
     std::span<const OptionRow> option_rows{};
@@ -151,6 +137,8 @@ struct CoreProfile {
     std::span<const std::string_view> option_pages{};
 
     std::span<const CoreWindowDecl> windows{};
+
+    std::span<const HostBitRow> host_bits{};
 
     bool no_stream_role = false;
 
@@ -162,9 +150,9 @@ struct CoreProfile {
 
     HostPolicy host{};
 
-    infra::OptRef<const svc::ISectorProgram> sector_program{};
+    infra::OptRef<const svc::disc::ISectorProgram> sector_program{};
 
-    infra::OptRef<const svc::IDiscRules> disc_rules{};
+    infra::OptRef<const svc::disc::IDiscRules> disc_rules{};
 
     infra::OptRef<const IConfigCodec> config_codec{};
 

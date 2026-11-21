@@ -20,7 +20,7 @@ struct PcmRingPoint {
         return hal::SpiHalves::of(v).low;
     }
 
-    [[nodiscard]] constexpr std::size_t byte_offset() const noexcept { return v; }
+    [[nodiscard]] constexpr std::size_t index() const noexcept { return v; }
 
     friend constexpr bool operator==(PcmRingPoint, PcmRingPoint) = default;
 };

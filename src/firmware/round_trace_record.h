@@ -4,10 +4,11 @@
 #include <chrono>
 #include <cstddef>
 
-#include "infra/diag_log.h"
+#include "infra/xthread/diag_log.h"
 #include "infra/json_name.h"
 #include "infra/json_out.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "reactor/round_trace.h"
 #include "reactor/types.h"
 
@@ -20,8 +21,8 @@ struct RoundTraceRecord {
 
 constexpr void to_json(infra::JsonOut& o, const reactor::RoundTrace::Round& r) noexcept {
     o.field("rs", r.seq);
-    o.field("t0", r.start.time_since_epoch().count());
-    o.field("t1", r.end.time_since_epoch().count());
+    o.field("t0", os::since_boot(r.start).count());
+    o.field("t1", os::since_boot(r.end).count());
     o.field("wk", r.wake.count());
     o.field("sc", r.blame.seg);
     o.field("si", r.blame.index);
@@ -40,7 +41,7 @@ constexpr void to_json(infra::JsonOut& o, const reactor::RoundTrace::Round& r) n
     for (const reactor::RoundTrace::LeadUp& l : r.lead) {
         if (l.start == reactor::MonoInstant{})
             continue;
-        o.elem(l.start.time_since_epoch().count());
+        o.elem(os::since_boot(l.start).count());
         o.elem(l.took.count());
         o.elem(infra::ordinal(l.blame.seg));
         o.elem(l.blame.index);

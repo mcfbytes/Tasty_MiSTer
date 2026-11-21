@@ -23,16 +23,23 @@ namespace mister::svc {
 class Vfs;
 }
 
+namespace mister::app::recents {
+class UiWriteLane;
+}
+
 namespace mister::app {
 
-class UiWriteLane;
 class VideoWire;
 
 class AudioPump {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    AudioPump(const svc::Vfs& vfs, VideoWire& wire, infra::OptRef<UiWriteLane> writes) noexcept
+    AudioPump(
+        const svc::Vfs& vfs,
+        VideoWire& wire,
+        infra::OptRef<app::recents::UiWriteLane> writes
+    ) noexcept
         : vfs_(vfs),
           wire_(wire),
           writes_(writes) {}
@@ -87,7 +94,7 @@ private:
 
     const svc::Vfs& vfs_;
     VideoWire& wire_;
-    infra::OptRef<UiWriteLane> writes_;
+    infra::OptRef<app::recents::UiWriteLane> writes_;
     svc::AfilterParser parser_{};
     svc::AudioService model_{svc::AudioService::create()};
 

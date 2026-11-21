@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/child_process.h"
 
 namespace mister::os {

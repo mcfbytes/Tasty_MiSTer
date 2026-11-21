@@ -2,17 +2,20 @@
 #pragma once
 
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <span>
 
+#include "hal/reg_field.h"
+#include "infra/affine.h"
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
 #include "infra/hex_text.h"
 #include "infra/json_out.h"
-#include "infra/lw_offset_label.h"
+#include "infra/prelude.h"
 #include "os/map_length.h"
 #include "os/types.h"
 
@@ -21,6 +24,13 @@ struct MapLength;
 }
 
 namespace mister::hal {
+
+using ::mister::infra::affine::operator+;
+using ::mister::infra::affine::operator-;
+using ::mister::infra::affine::operator*;
+using ::mister::infra::affine::operator/;
+using ::mister::infra::affine::operator+=;
+using ::mister::infra::affine::operator-=;
 
 struct SpiWord {
     std::uint16_t v = 0;
@@ -40,9 +50,11 @@ struct SpiWord {
         return static_cast<std::uint8_t>(v >> kHighByteShift);
     }
 
-    [[nodiscard]] constexpr bool any_of(SpiWord mask) const noexcept { return (v & mask.v) != 0u; }
+    [[nodiscard]] constexpr bool intersects(SpiWord mask) const noexcept {
+        return (v & mask.v) != 0u;
+    }
 
-    [[nodiscard]] constexpr bool all_of(SpiWord mask) const noexcept {
+    [[nodiscard]] constexpr bool contains(SpiWord mask) const noexcept {
         return (v & mask.v) == mask.v;
     }
 
@@ -75,12 +87,20 @@ struct SpiWord {
         return decode(v);
     }
 
+    [[nodiscard]] constexpr std::uint16_t bits() const noexcept { return v; }
+
     constexpr void store_le(std::span<std::uint8_t, 2> dst) const noexcept {
         infra::store_le<std::uint16_t>(dst, v);
     }
 
     constexpr void store_le(std::span<std::byte, 2> dst) const noexcept {
         infra::store_le<std::uint16_t>(dst, v);
+    }
+
+    constexpr void store_low(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = low_byte(); }
+
+    constexpr void store_low(std::span<std::byte, 1> dst) const noexcept {
+        dst[0] = std::byte{low_byte()};
     }
 
     [[nodiscard]] infra::HexText padded_hex() const noexcept {
@@ -97,8 +117,13 @@ struct SpiWord {
 
 private:
     friend struct SpiHalves;
+    template <std::size_t N>
+    friend struct SpiWords;
 
-    [[nodiscard]] static constexpr SpiWord from_half(std::uint32_t dword, unsigned shift) noexcept {
+    [[nodiscard]] static constexpr SpiWord from_half(
+        std::uint64_t dword,
+        std::size_t shift
+    ) noexcept {
         return SpiWord{static_cast<std::uint16_t>(dword >> shift)};
     }
 
@@ -114,15 +139,18 @@ static_assert(sizeof(SpiWord) == 2);
 struct ButtonMask {
     std::uint16_t v = 0;
 
-    [[nodiscard]] constexpr bool has(ButtonMask bit) const noexcept { return (v & bit.v) != 0u; }
+    [[nodiscard]] constexpr bool intersects(ButtonMask bits) const noexcept {
+        return (v & bits.v) != 0u;
+    }
+
+    [[nodiscard]] constexpr ButtonMask with(ButtonMask bits) const noexcept {
+        return ButtonMask{static_cast<std::uint16_t>(v | bits.v)};
+    }
 
     friend constexpr bool operator==(ButtonMask, ButtonMask) = default;
 };
 
-struct GpiField {
-    std::uint8_t shift = 0;
-    std::uint32_t mask = 0;
-};
+using GpiField = RegField<std::uint32_t>;
 
 inline constexpr GpiField kGpiDataField{0, 0x0000'FFFFu};
 inline constexpr GpiField kGpiButtonsField{29, 0x3};
@@ -130,13 +158,9 @@ inline constexpr GpiField kGpiButtonsField{29, 0x3};
 struct GpiWord {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr std::uint32_t field(GpiField f) const noexcept {
-        return (v >> f.shift) & f.mask;
-    }
+    [[nodiscard]] constexpr std::uint32_t field(GpiField f) const noexcept { return f.get(v); }
 
-    [[nodiscard]] constexpr bool test(GpiField f) const noexcept {
-        return (v & (f.mask << f.shift)) != 0u;
-    }
+    [[nodiscard]] constexpr bool test(GpiField f) const noexcept { return f.test(v); }
 
     [[nodiscard]] constexpr SpiWord data() const noexcept {
         return SpiWord{static_cast<std::uint16_t>(field(kGpiDataField))};
@@ -153,6 +177,8 @@ struct GpiWord {
     friend constexpr bool operator==(GpiWord, GpiWord) = default;
 };
 
+struct ResetCounts;
+
 struct EventCount8 {
     std::uint8_t v = 0;
 
@@ -168,20 +194,23 @@ struct EventCount8 {
 
 private:
     [[nodiscard]] static constexpr EventCount8 of_lane(
-        std::uint32_t word,
-        unsigned shift
+        RegField<std::uint32_t>::Value lane
     ) noexcept {
-        return EventCount8{static_cast<std::uint8_t>(word >> shift)};
+        return EventCount8{static_cast<std::uint8_t>(lane.v)};
     }
     friend struct SectorBlock;
+    friend struct ResetCounts;
 };
 
 static_assert(sizeof(GpiWord) == 4);
 
 struct LwOffset;
+struct RegWord;
 
 struct LwExtent {
     std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr LwExtent of(RegWord w) noexcept;
 
     [[nodiscard]] static std::optional<LwExtent> of_length(os::MapLength len) noexcept;
 
@@ -198,6 +227,11 @@ struct LwExtent {
     [[nodiscard]] constexpr bool contains(LwOffset rel) const noexcept;
 
     [[nodiscard]] constexpr LwOffset from_origin() const noexcept;
+
+    [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
+        return Error{why, at, v};
+    }
+
     friend constexpr bool operator==(LwExtent, LwExtent) = default;
     friend constexpr auto operator<=>(LwExtent, LwExtent) = default;
 };
@@ -206,6 +240,8 @@ struct LwOffset {
     static constexpr std::uint32_t kDword = 4;
 
     std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr LwOffset of(RegWord w) noexcept;
 
     [[nodiscard]] constexpr LwOffset plus(LwOffset rel) const noexcept {
         return LwOffset{v + rel.v};
@@ -233,8 +269,8 @@ struct LwOffset {
         return bridge.advanced(v);
     }
 
-    [[nodiscard]] constexpr infra::LwOffsetLabel as_log_label() const noexcept {
-        return infra::LwOffsetLabel{v};
+    [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
+        return infra::DecimalText{v};
     }
 
     [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
@@ -299,6 +335,8 @@ struct CoreTypeByte {
 
 static_assert(sizeof(CoreTypeByte) == 1);
 
+inline constexpr CoreTypeByte kUnnegotiatedType{0x55};
+
 enum class Width : std::uint8_t { Byte = 0, Word = 1 };
 
 [[nodiscard]] constexpr std::size_t word_bytes(Width w) noexcept {
@@ -306,7 +344,7 @@ enum class Width : std::uint8_t { Byte = 0, Word = 1 };
 }
 
 [[nodiscard]] constexpr std::size_t words(Width w, std::size_t bytes) noexcept {
-    return w == Width::Word ? (bytes + 1u) / 2u : bytes;
+    return w == Width::Word ? infra::affine::div_ceil(bytes, 2u) : bytes;
 }
 
 using SchedPolicy = os::SchedPolicy;
@@ -395,5 +433,17 @@ struct HeaderCtr {
 };
 
 static_assert(sizeof(HeaderCtr) == 1);
+
+struct BufNo {
+    std::uint8_t v = 0;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr BufNo of(I i) noexcept {
+        return BufNo{static_cast<std::uint8_t>(i)};
+    }
+
+    friend constexpr bool operator==(BufNo, BufNo) = default;
+    friend constexpr auto operator<=>(BufNo, BufNo) = default;
+};
 
 }

@@ -8,9 +8,10 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "hal/spi_transport.h"
 
-namespace mister::proto {
+namespace mister::proto::link {
 class SpiFioQueue;
 }
 
@@ -22,7 +23,7 @@ class FioCheatSink final : public ICheatSink {
 public:
     explicit FioCheatSink(
         hal::ISpiTransport& link,
-        infra::OptRef<proto::SpiFioQueue> queue = {}
+        infra::OptRef<proto::link::SpiFioQueue> queue = {}
     ) noexcept
         : link_(&link),
           queue_(queue) {}
@@ -41,7 +42,7 @@ public:
 
 private:
     hal::ISpiTransport* link_;
-    infra::OptRef<proto::SpiFioQueue> queue_;
+    infra::OptRef<proto::link::SpiFioQueue> queue_;
     std::uint32_t sends_ = 0;
     std::uint64_t bytes_ = 0;
 };

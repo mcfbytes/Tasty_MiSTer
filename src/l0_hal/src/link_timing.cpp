@@ -6,6 +6,7 @@
 
 #include "hal/fact_field.h"
 #include "hal/program_geometry.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

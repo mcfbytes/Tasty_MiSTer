@@ -20,7 +20,7 @@ bool ScreenshotPump::take(std::string_view path, bool scaled) noexcept {
     return true;
 }
 
-void ScreenshotPump::tick() noexcept {
+void ScreenshotPump::serve() noexcept {
     TASTY_SEAT_BODY(ScreenshotPump);
     while (auto res = shots_.reap()) {
 
@@ -37,6 +37,11 @@ void ScreenshotPump::tick() noexcept {
             )
         );
     }
+}
+
+void ScreenshotPump::on_stop() noexcept {
+    TASTY_SEAT_BODY(ScreenshotPump);
+    serve();
 }
 
 }

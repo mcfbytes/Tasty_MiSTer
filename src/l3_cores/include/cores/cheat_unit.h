@@ -6,6 +6,7 @@
 
 #include "infra/affine.h"
 #include "infra/decimal_text.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 
 namespace mister::cores {

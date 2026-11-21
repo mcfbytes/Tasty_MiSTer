@@ -9,10 +9,10 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
-#include "os/passkey.h"
-#include "os/passphrase.h"
-#include "os/pin_code.h"
-#include "os/ssid.h"
+#include "os/connect/passkey.h"
+#include "os/connect/passphrase.h"
+#include "os/connect/pin_code.h"
+#include "os/connect/ssid.h"
 
 namespace mister::ui {
 
@@ -29,22 +29,22 @@ struct TextEntryResult {
 
     struct Passphrase {
         static constexpr Kind kKind = Kind::Passphrase;
-        os::Passphrase value{};
+        os::connect::Passphrase value{};
     };
 
     struct Ssid {
         static constexpr Kind kKind = Kind::Ssid;
-        os::Ssid value{};
+        os::connect::Ssid value{};
     };
 
     struct Passkey {
         static constexpr Kind kKind = Kind::Passkey;
-        os::Passkey value = os::Passkey::zero();
+        os::connect::Passkey value = os::connect::Passkey::zero();
     };
 
     struct Pin {
         static constexpr Kind kKind = Kind::Pin;
-        os::PinCode value{};
+        os::connect::PinCode value{};
     };
 
     using Alternatives = std::tuple<Passphrase, Ssid, Passkey, Pin>;

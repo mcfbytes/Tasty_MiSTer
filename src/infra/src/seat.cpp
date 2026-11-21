@@ -5,7 +5,7 @@
 
 #include "infra/persist.h"
 
-namespace mister {
+namespace mister::infra {
 namespace {
 
 thread_local SeatTag g_seat TASTY_PERSIST(proc, seat_current) = SeatTag::Unbound;

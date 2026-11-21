@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/osd_wire.h"
 
-#include "proto/spi_frame.h"
+#include "infra/prelude.h"
+#include "proto/link/spi_frame.h"
 
 namespace mister::app {
 
 Ex<void> OsdWire::show_as(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdTarget t) noexcept {
-    proto::SpiFrame frame{*link_};
+    proto::link::SpiFrame frame{*link_};
 
     asleep_ = false;
     const bool drop_hdmi = proto::includes_hdmi(target_) && !proto::includes_hdmi(t);
@@ -51,7 +52,7 @@ Ex<void> OsdWire::show_as(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdT
                     return {};
                 }
             }
-            if (auto r = osd_.enable(frame, proto::OsdMode::Message); !r)
+            if (auto r = osd_.enable(frame, proto::link::OsdMode::Message); !r)
                 return r;
             latch_lit(s, owner, t);
             return {};
@@ -65,7 +66,7 @@ Ex<void> OsdWire::send_rotation() noexcept {
     const proto::OsdTarget latched = target_;
     Ex<void> sent = osd_.set_target(proto::OsdTarget::All);
     if (sent) {
-        proto::SpiFrame frame{*link_};
+        proto::link::SpiFrame frame{*link_};
         sent = osd_.set_rotation(frame, rotation_);
     }
     const Ex<void> restored = osd_.set_target(latched);
@@ -100,7 +101,7 @@ Ex<void> OsdWire::reassert_show() noexcept {
 }
 
 Ex<void> OsdWire::menu_ctl(bool enable) noexcept {
-    proto::SpiFrame frame{*link_};
+    proto::link::SpiFrame frame{*link_};
     if (auto e = osd_.set_target(target_); !e)
         return e;
     if (auto e = osd_.menu_ctl(frame, enable); !e)
@@ -128,7 +129,7 @@ bool OsdWire::emit_info_window_() noexcept {
         }
         return true;
     }
-    proto::SpiFrame frame{*link_};
+    proto::link::SpiFrame frame{*link_};
     if (auto sent = osd_.enable_info(frame, *w); !sent) {
         info_failures_.add();
         info_seen_.forget();

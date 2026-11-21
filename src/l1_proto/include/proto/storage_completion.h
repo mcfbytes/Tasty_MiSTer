@@ -8,6 +8,7 @@
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

@@ -15,19 +15,22 @@
 #include "app/staged_frame.h"
 #include "app/video_wire.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/span_cut.h"
+#include "infra/xthread/telemetry.h"
 #include "os/clock.h"
+#include "os/deadline.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/link_event.h"
 #include "proto/types.h"
 #include "svc/filter_send_plan.h"
-#include "svc/filter_set.h"
-#include "svc/video_service.h"
+#include "svc/video/filter_set.h"
+#include "svc/video/video_service.h"
 
 namespace mister::app {
 
-class PreludeComposer : public svc::VideoService::IVideoWireSink {
+class PreludeComposer : public svc::video::VideoService::IVideoWireSink {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -44,11 +47,13 @@ public:
 
     struct Inputs {
         ArCustomWords ar_custom{};
-        svc::ShadowMaskWord shadow{};
+        svc::video::ShadowMaskWord shadow{};
 
         std::string_view core{};
         std::string_view afilter_default{};
     };
+
+    enum class ModeEdge : std::uint8_t { None, Emitted };
 
     static constexpr std::chrono::milliseconds kReplyDeadline{1000};
 
@@ -61,9 +66,9 @@ public:
 
     void begin(const Inputs& in) noexcept;
 
-    void take_filters(std::unique_ptr<svc::FilterSet> set) noexcept;
+    void take_filters(std::unique_ptr<svc::video::FilterSet> set) noexcept;
 
-    [[nodiscard]] Ex<void> publish(proto::UioOp op, std::span<const std::uint16_t> w) override;
+    [[nodiscard]] Ex<void> publish(proto::UioOp op, std::span<const hal::SpiWord> w) override;
 
     void on_reply(const proto::LinkEvent::FrameReply& r) noexcept;
 
@@ -75,6 +80,8 @@ public:
 
     [[nodiscard]] bool holding_mode() const noexcept;
 
+    [[nodiscard]] ModeEdge mode_edge() const noexcept { return mode_edge_; }
+
     [[nodiscard]] Answers answers() const noexcept { return answers_; }
 
     [[nodiscard]] const xthread::Telemetry<PreludeStats, SeatTag::Ui>& stats_cell() const noexcept {
@@ -83,7 +90,7 @@ public:
 
 private:
     struct Publish {
-        std::span<const std::uint16_t> v{};
+        std::span<const hal::SpiWord> v{};
 
         [[nodiscard]] bool fits_block() const noexcept {
             return !v.empty() && v.size() <= VideoWire::kWords;
@@ -99,7 +106,7 @@ private:
             return words;
         }
 
-        [[nodiscard]] std::span<const std::uint16_t> words() const noexcept { return v; }
+        [[nodiscard]] std::span<const hal::SpiWord> words() const noexcept { return v; }
     };
 
     struct RepliesOwed {
@@ -121,8 +128,7 @@ private:
         constexpr void add_one() noexcept { ++v; }
 
         [[nodiscard]] constexpr std::uint32_t stats_word() const noexcept {
-            const std::uint32_t parked = static_cast<std::uint32_t>(v);
-            return parked;
+            return static_cast<std::uint32_t>(v);
         }
 
         friend constexpr bool operator==(HeldCount, HeldCount) = default;
@@ -137,8 +143,7 @@ private:
         }
 
         [[nodiscard]] std::uint32_t stats_word() const noexcept {
-            const std::uint32_t words = static_cast<std::uint32_t>(v);
-            return words;
+            return static_cast<std::uint32_t>(v);
         }
 
         [[nodiscard]] svc::FilterBankWordIndex past(svc::FilterBankWordIndex from) const noexcept {
@@ -148,13 +153,13 @@ private:
 
         template <class WordAt>
         void fill(
-            std::span<std::uint16_t> block,
+            std::span<hal::SpiWord> block,
             svc::FilterBankWordIndex from,
             WordAt&& word_at
         ) const {
             const std::size_t base = from.wire_offset(svc::FilterAddressGrid{});
             for (std::size_t i = 0; i < v; ++i)
-                block[i] = word_at(svc::FilterBankWordIndex{base + i});
+                block[i] = hal::SpiWord{word_at(svc::FilterBankWordIndex{base + i})};
         }
 
         friend constexpr bool operator==(ChunkWords, ChunkWords) = default;
@@ -179,11 +184,11 @@ private:
     struct Held {
         proto::UioOp op{};
         FrameWordCount n{};
-        std::array<std::uint16_t, VideoWire::kWords> w{};
+        std::array<hal::SpiWord, VideoWire::kWords> w{};
         bool live = false;
 
-        [[nodiscard]] std::span<const std::uint16_t> words() const noexcept {
-            return n.prefix_of(w);
+        [[nodiscard]] std::span<const hal::SpiWord> words() const noexcept {
+            return infra::affine::first(std::span<const hal::SpiWord>(w), n);
         }
     };
 
@@ -206,6 +211,8 @@ private:
     [[nodiscard]] const Held* find_held_(proto::UioOp op) const noexcept;
     [[nodiscard]] HeldCount held_count_() const noexcept;
     void hold_(proto::UioOp op, Publish words) noexcept;
+
+    void note_mode_staged_() noexcept;
     void publish_stats_() noexcept;
     void release_step_() noexcept;
     void begin_release_() noexcept;
@@ -223,17 +230,17 @@ private:
     bool fbuf_owed_ = false;
     bool filter_owed_ = false;
     Inputs inputs_{};
-    std::unique_ptr<svc::FilterSet> set_{};
+    std::unique_ptr<svc::video::FilterSet> set_{};
 
     svc::FilterSendPlan plan_{};
     svc::FilterFormat fmt_{};
-    svc::VFilter vert_ = svc::VFilter::Horz;
+    svc::video::VFilter vert_ = svc::video::VFilter::Horz;
     bool bare_ = false;
     bool bare_no_digests_ = false;
     svc::FilterSendPlan::SegIndex seg_{};
     svc::FilterBankWordIndex cursor_{};
-    svc::FilterBank sent_h_{};
-    svc::FilterBank sent_v_{};
+    svc::video::FilterBank sent_h_{};
+    svc::video::FilterBank sent_v_{};
 
     ResendSeq last_filter_seq_{};
     ResendSeq last_scaling_seq_{};
@@ -244,10 +251,13 @@ private:
     std::array<InFlight, VideoWire::kFramesInFlight> flight_{};
 
     Release release_ = Release::None;
+
+    proto::StageGen mode_gen_{};
+    ModeEdge mode_edge_ = ModeEdge::None;
     bool mode_in_block_done_ = false;
     bool shadow_done_ = false;
     bool tail_done_ = false;
-    std::optional<os::RawMonotonicClock::time_point> deadline_{};
+    std::optional<os::Deadline> deadline_{};
 
     Answers answers_{};
     PreludeStats stats_{};

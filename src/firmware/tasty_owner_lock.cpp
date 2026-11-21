@@ -14,6 +14,9 @@
 
 #include "app/path_text.h"
 #include "infra/error.h"
+#include "infra/file_mode.h"
+#include "infra/prelude.h"
+#include "os/file_create.h"
 #include "os/write_all.h"
 
 namespace mister::fw {
@@ -23,19 +26,15 @@ TastyOwnerLock::TastyOwnerLock(TastyPaths paths, UniqueFd fd) noexcept
       fd_(std::move(fd)) {}
 
 Ex<TastyOwnerLock> TastyOwnerLock::take(const TastyPaths& paths) noexcept {
-    const int fd = ::open(
-        paths.lock.c_str(),
-        O_RDWR | O_CREAT | O_CLOEXEC,
-        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
-    );
-    if (fd < 0)
-        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
-    if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
-        const int e = errno;
-        ::close(fd);
-        return std::unexpected(infra::errno_error(Errc::busy, ERR_SITE(), e));
+    constexpr os::OpenFlags kLockFlags = os::OpenFlags::read_write().creating();
+    static_assert(kLockFlags.open_word() == (O_RDWR | O_CREAT | O_CLOEXEC));
+    auto fd = os::open_created(paths.lock.c_str(), kLockFlags, infra::kSharedFileMode);
+    if (!fd)
+        return std::unexpected(fd.error().refusal(Errc::os, ERR_SITE()));
+    if (::flock(fd->get(), LOCK_EX | LOCK_NB) != 0) {
+        return std::unexpected(infra::errno_error(Errc::busy, ERR_SITE(), errno));
     }
-    return TastyOwnerLock{paths, UniqueFd{fd}};
+    return TastyOwnerLock{paths, std::move(*fd)};
 }
 
 void TastyOwnerLock::release() noexcept {
@@ -51,14 +50,12 @@ void TastyOwnerLock::release() noexcept {
 }
 
 Ex<void> TastyOwnerLock::write_pid(os::ProcessId pid, std::string_view movie) const noexcept {
-    const int fd = ::open(
-        paths_.pid.c_str(),
-        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
-    );
-    if (fd < 0)
-        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
-    const UniqueFd guard{fd};
+    constexpr os::OpenFlags kPidFlags = os::OpenFlags::write_only().creating().truncating();
+    static_assert(kPidFlags.open_word() == (O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC));
+    auto fd = os::open_created(paths_.pid.c_str(), kPidFlags, infra::kSharedFileMode);
+    if (!fd)
+        return std::unexpected(fd.error().refusal(Errc::os, ERR_SITE()));
+    const UniqueFd guard{std::move(*fd)};
 
     const std::string bytes = std::to_string(pid.printed()) + "\n" + std::string(movie) + "\n";
     return os::write_all(guard, std::as_bytes(std::span<const char>(bytes)));

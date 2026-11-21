@@ -39,7 +39,7 @@ struct BitField {
     }
 
     constexpr FieldCount slots() const noexcept {
-        return FieldCount::of(std::uint64_t{1} << (width < kWordBits ? width : kWordBits));
+        return FieldCount::saturating(std::uint64_t{1} << (width < kWordBits ? width : kWordBits));
     }
 
     [[nodiscard]] constexpr FieldValue read(const StatusWord& word) const noexcept;

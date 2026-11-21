@@ -11,6 +11,7 @@
 
 #include "infra/error.h"
 #include "infra/indexed_span.h"
+#include "infra/prelude.h"
 #include "proto/item.h"
 #include "proto/text_span.h"
 #include "proto/types.h"

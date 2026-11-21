@@ -75,8 +75,8 @@ inline constexpr std::array kMainPassSteps{
     },
     MainPassStep{
         MainPassStep::Step::Bridge,
-        "SPI never serves a bridge slot, so an unbound one would wait for ever: MAIN "
-        "ends the session"
+        "after the poll retires, SPI no longer serves a bridge slot, so an unbound one "
+        "would wait for ever: MAIN ends the session"
     },
     MainPassStep{
         MainPassStep::Step::FrontEnd,

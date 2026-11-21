@@ -15,11 +15,13 @@
 #include "app/uart_modes.h"
 #include "app/uart_persist.h"
 #include "cores/types.h"
-#include "infra/counter.h"
+#include "hal/types.h"
+#include "infra/xthread/counter.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
-#include "infra/inbox.h"
+#include "infra/xthread/inbox.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::proto {
@@ -71,8 +73,10 @@ struct CoreNames {
     return static_cast<UartMode>(static_cast<std::uint8_t>(m) & kModeMask);
 }
 
-[[nodiscard]] constexpr std::uint16_t wire_mode(UartMode masked) noexcept {
-    return static_cast<std::uint16_t>(uart_mode_facts(masked).wire_as.value_or(masked));
+[[nodiscard]] constexpr hal::SpiWord wire_mode(UartMode masked) noexcept {
+    return hal::SpiWord{
+        static_cast<std::uint16_t>(uart_mode_facts(masked).wire_as.value_or(masked))
+    };
 }
 
 class UartModeController {

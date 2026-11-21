@@ -3,26 +3,24 @@
 
 #include <cstdint>
 
+#include "infra/serial.h"
+
 namespace mister::app {
 
 struct CoreGen {
     std::uint16_t v = 0;
+    using serial_rule = infra::serial::SkipZero<std::uint16_t>;
 
-    [[nodiscard]] constexpr CoreGen next() const noexcept {
-        const auto n = static_cast<std::uint16_t>(v + 1u);
-        return CoreGen{n == 0 ? std::uint16_t{1} : n};
-    }
+    [[nodiscard]] constexpr CoreGen next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(CoreGen, CoreGen) = default;
 };
 
 struct ActEpoch {
     std::uint16_t v = 0;
+    using serial_rule = infra::serial::SkipZero<std::uint16_t>;
 
-    [[nodiscard]] constexpr ActEpoch next() const noexcept {
-        const auto n = static_cast<std::uint16_t>(v + 1u);
-        return ActEpoch{n == 0 ? std::uint16_t{1} : n};
-    }
+    [[nodiscard]] constexpr ActEpoch next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(ActEpoch, ActEpoch) = default;
 };

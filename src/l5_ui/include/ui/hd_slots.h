@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/slot_id.h"
 #include "ui/text_entry_result.h"
 #include "ui/transition.h"
@@ -14,7 +14,7 @@ public:
     virtual ~IHdSlots() = default;
 
     [[nodiscard]] virtual bool slot_shown(SlotId slot) const = 0;
-    [[nodiscard]] virtual app::PageDescription::Row slot_describe(SlotId slot) const = 0;
+    [[nodiscard]] virtual app::hd::PageDescription::Row slot_describe(SlotId slot) const = 0;
     virtual Transition slot_select(SlotId slot) = 0;
 
     virtual Transition slot_confirmed(SlotId slot, RowIndex choice) {

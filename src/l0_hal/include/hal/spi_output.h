@@ -6,6 +6,7 @@
 #include "hal/block_view.h"
 #include "hal/gpo_block.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 
@@ -22,7 +23,7 @@ struct SpiOutput {
         return SpiOutput{v & ~bits.v};
     }
 
-    [[nodiscard]] constexpr bool has(SpiOutput bits) const noexcept {
+    [[nodiscard]] constexpr bool contains(SpiOutput bits) const noexcept {
         return (v & bits.v) == bits.v;
     }
 

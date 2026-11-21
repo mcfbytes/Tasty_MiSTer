@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "proto/osd_surface.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "ui/types.h"
 #include "infra/fixed_str.h"

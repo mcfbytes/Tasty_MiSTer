@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "infra/byte_view.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 namespace {

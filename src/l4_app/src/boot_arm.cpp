@@ -6,6 +6,7 @@
 #include "app/session_machine.h"
 #include "app/fenced_core_signals.h"
 #include "app/xml_kind.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

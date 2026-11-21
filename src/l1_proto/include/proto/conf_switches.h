@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "hal/spi_sample.h"
+#include "hal/types.h"
 #include "infra/seat.h"
 
 namespace mister::proto {
@@ -12,6 +14,8 @@ public:
     TASTY_SEAT_EXEMPT(component);
 
     enum class Bit : std::uint16_t {
+        MenuButton = 1u << 0,
+        UserButton = 1u << 1,
         VgaScaler = 1u << 2,
         Csync = 1u << 3,
         ForcedScandoubler = 1u << 4,
@@ -32,11 +36,39 @@ public:
         return *this;
     }
 
+    [[nodiscard]] constexpr ConfSwitches without(Bit b) const noexcept {
+        ConfSwitches out = *this;
+        out.bits_ = static_cast<std::uint16_t>(out.bits_ & ~static_cast<std::uint16_t>(b));
+        return out;
+    }
+
+    [[nodiscard]] constexpr bool intersects(ConfSwitches bits) const noexcept {
+        return (bits_ & bits.bits_) != 0;
+    }
+
     [[nodiscard]] constexpr bool has(Bit b) const noexcept {
         return (bits_ & static_cast<std::uint16_t>(b)) != 0;
     }
 
-    [[nodiscard]] constexpr std::uint16_t word() const noexcept { return bits_; }
+    [[nodiscard]] constexpr ConfSwitches with_buttons(hal::ButtonMask buttons) const noexcept {
+        ConfSwitches out = without(Bit::MenuButton).without(Bit::UserButton);
+        if (buttons.intersects(hal::SpiSample::kMenuButton))
+            out.set(Bit::MenuButton);
+        if (buttons.intersects(hal::SpiSample::kUserButton))
+            out.set(Bit::UserButton);
+        return out;
+    }
+
+    [[nodiscard]] constexpr hal::ButtonMask buttons() const noexcept {
+        hal::ButtonMask out{};
+        if (has(Bit::MenuButton))
+            out = hal::SpiSample::kMenuButton;
+        if (has(Bit::UserButton))
+            out = out.with(hal::SpiSample::kUserButton);
+        return out;
+    }
+
+    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{bits_}; }
 
     friend constexpr bool operator==(ConfSwitches, ConfSwitches) = default;
 

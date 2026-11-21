@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/confirm_page.h"
 
-#include "app/hd_panel_plan.h"
-#include "app/hd_window.h"
-#include "app/page_description.h"
+#include "app/hd/hd_panel_plan.h"
+#include "app/hd/hd_window.h"
+#include "app/hd/page_description.h"
 #include "ui/confirm_host.h"
 #include "ui/draw_classic.h"
 #include "ui/osd_renderer.h"
@@ -16,7 +16,7 @@ namespace mister::ui {
 bool ConfirmPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(ConfirmPage);
     (void)out.page.title.assign(spec_.title);
-    out.page.shape = app::PageDescription::Shape::Choice;
+    out.page.shape = app::hd::PageDescription::Shape::Choice;
     out.title_arrow = OsdRenderer::kArrowNone;
     out.count = 0;
 
@@ -25,7 +25,7 @@ bool ConfirmPage::walk(PageWalk& out) const {
     const RowCount total = body.size() + choices.size();
     const RowIndex selected = choices.empty() ? RowIndex{} : row_after(body.size()) + sel_.before();
 
-    const app::HdWindow win = out.window(selected, total);
+    const app::hd::HdWindow win = out.window(selected, total);
 
     const auto choice_of = [&](RowIndex at) {
         return RowIndex{} + (at - row_after(body.size()));
@@ -47,15 +47,15 @@ bool ConfirmPage::walk(PageWalk& out) const {
         );
     };
 
-    const RowRange window = rows(win.first, win.count);
+    const RowRange window = rows(win.start, win.len);
     for (const RowIndex at : window) {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         if (at < row_after(body.size())) {
-            r.hd.kind = app::PageDescription::RowKind::Text;
+            r.hd.kind = app::hd::PageDescription::RowKind::Text;
             (void)r.hd.label.assign(body[at]);
         } else {
-            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.kind = app::hd::PageDescription::RowKind::Action;
             (void)r.hd.label.assign(choices[choice_of(at)]);
             r.hd.selected = !choices.empty() && at == selected;
         }
@@ -75,18 +75,19 @@ Transition ConfirmPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ConfirmPage);
     if (!spec_.host)
         return Transition::pop();
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (ev.buttons.intersects({UiEvent::Menu}))
         return spec_.host->on_cancel();
-    if (ev.buttons.has_any({UiEvent::Select})) {
+    if (ev.buttons.intersects({UiEvent::Select})) {
         return spec_.host->on_confirm(sel_);
     }
 
     const std::size_t n = spec_.choices.size();
-    if (n != 0 && app::choices_in_a_row(n)) {
-        if (ev.buttons.has_any({UiEvent::Left}) && sel_ > RowIndex{}) {
+    if (n != 0 && app::hd::choices_in_a_row(n)) {
+        if (ev.buttons.intersects({UiEvent::Left}) && sel_ > RowIndex{}) {
             set_selection(sel_ - kOneRow);
         } else if (
-            ev.buttons.has_any({UiEvent::Right}) && sel_ + kOneRow < row_after(RowCount::of(n))
+            ev.buttons.intersects({UiEvent::Right})
+            && sel_ + kOneRow < row_after(RowCount::truncating(n))
         ) {
             set_selection(sel_ + kOneRow);
         }

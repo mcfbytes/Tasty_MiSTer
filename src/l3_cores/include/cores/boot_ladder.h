@@ -19,8 +19,10 @@
 #include "cores/payload_pieces.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "os/deadline.h"
 #include "proto/types.h"
 #include "svc/card_writer.h"
 #include "svc/vfs.h"
@@ -127,9 +129,9 @@ protected:
     [[nodiscard]] bool order_disc_payload(const proto::LinkOp::StageDiscPayload& facts = {});
 
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
-    [[nodiscard]] std::chrono::nanoseconds now_ns() const;
+    [[nodiscard]] os::RawMonotonicClock::time_point now() const;
 
-    [[nodiscard]] proto::ActKey next_gen() noexcept { return host_.next_generation(); }
+    [[nodiscard]] proto::ActKey next_gen() noexcept { return host_.next_act(); }
 
     const CoreProfile& profile_;
     const svc::Vfs& vfs_;
@@ -157,8 +159,8 @@ private:
     std::string image_dir_;
     std::string save_path_;
     bool save_ready_ = false;
-    std::chrono::nanoseconds reset_hold_ns_{};
-    std::chrono::nanoseconds mount_due_ns_{};
+    os::RawMonotonicClock::time_point reset_hold_{};
+    os::Deadline mount_due_{os::Deadline::immediate()};
     bool bit0_asserted_ = false;
 
     [[nodiscard]] Ex<std::string> save_root_();

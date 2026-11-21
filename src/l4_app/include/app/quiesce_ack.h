@@ -4,7 +4,8 @@
 #include <cstdint>
 
 #include "app/switch_park.h"
-#include "infra/pause_latch.h"
+#include "infra/xthread/pause_latch.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {

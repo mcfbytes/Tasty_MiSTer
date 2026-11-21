@@ -9,7 +9,9 @@
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/mailbox_census_rows.h"
-#include "cores/msu_wire.h"
+#include "cores/mailbox_servant_row.h"
+#include "cores/snes/msu_wire.h"
+#include "cores/snes/snes_msu_decl.h"
 #include "proto/mailbox_frame_decl.h"
 
 namespace mister::cores {
@@ -31,14 +33,8 @@ inline constexpr auto kSnesServices = std::to_array<LinkDecoderDecl>({
     },
 });
 
-inline constexpr proto::MailboxFrameDecl kSnesMailboxFrame{
-    .poll_opcode = proto::UioOp::CdGet,
-    .words = msu::kFrameWords
-};
-
-inline constexpr auto kSnesWindows = std::to_array<CoreWindowDecl>({
-    {.region = {msu::kTrackOffset, 0u, "snes-msu-data"}, .feeds_pcm = false},
-});
+using snes::kSnesMailboxFrame;
+using snes::kSnesWindows;
 
 inline constexpr auto kSnesStartAssets = stock_start_chain("SNES");
 
@@ -73,7 +69,7 @@ inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
 inline constexpr proto::MailboxFrameDecl kSgbMailboxFrame = kSnesMailboxFrame;
 
 inline constexpr auto kSgbWindows = std::to_array<CoreWindowDecl>({
-    {.region = {msu::kTrackOffset, 0u, "sgb-msu-data"}, .feeds_pcm = false},
+    {.region = {snes::msu::kTrackOffset, 0u, "sgb-msu-data"}, .feeds_pcm = false},
 });
 
 inline constexpr CoreProfile kSgb{
@@ -97,5 +93,8 @@ std::unique_ptr<ILoader> make_snes_loader(const LoaderContext& ctx);
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<ICompanion> make_msu_companion(const svc::Vfs& vfs);
+
+std::unique_ptr<IMailboxServant> make_msu_servant(const ServantGrant& g);
+inline constexpr MailboxServantRow kMsuServant{.id = ServantId::Msu1, .make = &make_msu_servant};
 
 }

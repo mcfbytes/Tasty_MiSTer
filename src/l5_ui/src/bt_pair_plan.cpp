@@ -6,9 +6,9 @@
 
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
-#include "os/bt_kind.h"
-#include "svc/bt_page_mode.h"
-#include "svc/connect_request.h"
+#include "os/connect/bt_kind.h"
+#include "svc/connect/bt_page_mode.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/slot_range.h"
@@ -17,22 +17,27 @@
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 using Ask = BtPromptRows::Ask;
 
 enum class Slot : std::uint8_t { Headline, First, Second, Cancel, Count };
-constexpr SlotRange kDevices = SlotRange::after_named<Slot>(RowCount::of(svc::BtDeviceView::kRows));
+constexpr SlotRange kDevices = SlotRange::after_named<Slot>(
+    RowCount::truncating(svc::connect::BtDeviceView::kRows)
+);
 constexpr SlotRange kShowAll = SlotRange::after(kDevices, kOneRow);
 
-infra::OptRef<const svc::BtDeviceViewRow> device_at(const ConnectViews& views, SlotId slot) {
+infra::OptRef<const svc::connect::BtDeviceViewRow> device_at(
+    const ConnectViews& views,
+    SlotId slot
+) {
     const std::optional<std::size_t> at = kDevices.subscript_of(slot);
     if (!views.devices || !at)
         return std::nullopt;
     const auto& row = views.devices->rows[*at];
     if (!row)
         return {};
-    return infra::OptRef<const svc::BtDeviceViewRow>{*row};
+    return infra::OptRef<const svc::connect::BtDeviceViewRow>{*row};
 }
 
 std::string_view first_label(Ask ask) {
@@ -80,7 +85,7 @@ bool BtPairPlan::remembers_focus() const noexcept {
 ConnectDemand BtPairPlan::connect_demand() const {
     TASTY_SEAT_BODY(BtPairPlan);
     return ConnectDemand::bluetooth(
-        show_all_ ? svc::BtPageMode::PairingAll : svc::BtPageMode::Pairing,
+        show_all_ ? svc::connect::BtPageMode::PairingAll : svc::connect::BtPageMode::Pairing,
         start_
     );
 }
@@ -95,7 +100,7 @@ void BtPairPlan::refresh(const SystemFacts& facts, const SessionFacts& session) 
     (void)facts;
     (void)session;
     const std::optional<BtPromptRows> prompt = prompt_();
-    shown_gen_ = prompt ? std::optional<svc::PromptGen>{prompt->gen} : std::nullopt;
+    shown_gen_ = prompt ? std::optional<svc::connect::PromptGen>{prompt->gen} : std::nullopt;
 }
 
 bool BtPairPlan::holds_pairing() const {
@@ -124,11 +129,11 @@ bool BtPairPlan::slot_shown(SlotId slot) const {
         return false;
     if (slot == kShowAll.first())
         return true;
-    infra::OptRef<const svc::BtDeviceViewRow> row = device_at(views(), slot);
-    return row.has_value() && (show_all_ || os::bt_kind_is_input(row->kind));
+    infra::OptRef<const svc::connect::BtDeviceViewRow> row = device_at(views(), slot);
+    return row.has_value() && (show_all_ || os::connect::bt_kind_is_input(row->kind));
 }
 
-app::PageDescription::Row BtPairPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row BtPairPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(BtPairPlan);
     const std::optional<BtPromptRows> prompt = prompt_();
     switch (slot.named<Slot>()) {
@@ -153,7 +158,7 @@ app::PageDescription::Row BtPairPlan::slot_describe(SlotId slot) const {
     }
     if (slot == kShowAll.first())
         return connect_row(RowKind::Value, "Show all devices", show_all_ ? "On" : "Off");
-    infra::OptRef<const svc::BtDeviceViewRow> row = device_at(views(), slot);
+    infra::OptRef<const svc::connect::BtDeviceViewRow> row = device_at(views(), slot);
     if (!row)
         return connect_row(RowKind::Action, {});
     const std::string_view mark = row->connected ? "connected" : (row->paired ? "paired" : "");
@@ -161,7 +166,7 @@ app::PageDescription::Row BtPairPlan::slot_describe(SlotId slot) const {
     return connect_row(RowKind::Value, name, mark);
 }
 
-bool BtPairPlan::answer_(svc::PromptAnswer answer) {
+bool BtPairPlan::answer_(svc::connect::PromptAnswer answer) {
     const std::optional<BtPromptRows> prompt = prompt_();
 
     if (!prompt || !shown_gen_ || prompt->gen != *shown_gen_)
@@ -190,13 +195,13 @@ Transition BtPairPlan::slot_select(SlotId slot) {
                 entry_gen_ = shown_gen_;
                 return request_text(slot, TextEntryKind::Pin, "PIN", false);
             }
-            (void)answer_(svc::PromptAnswer::Accept);
+            (void)answer_(svc::connect::PromptAnswer::Accept);
             return Transition{};
         case Slot::Second:
-            (void)answer_(svc::PromptAnswer::Reject);
+            (void)answer_(svc::connect::PromptAnswer::Reject);
             return Transition{};
         case Slot::Cancel:
-            (void)answer_(svc::PromptAnswer::Cancel);
+            (void)answer_(svc::connect::PromptAnswer::Cancel);
             return Transition{};
         case Slot::Count:
             break;
@@ -205,7 +210,7 @@ Transition BtPairPlan::slot_select(SlotId slot) {
         show_all_ = !show_all_;
         return Transition{};
     }
-    if (infra::OptRef<const svc::BtDeviceViewRow> row = device_at(views(), slot)) {
+    if (infra::OptRef<const svc::connect::BtDeviceViewRow> row = device_at(views(), slot)) {
         start_ = PairStart::Pick;
         (void)send(infra::make<Request>(Request::BtPair{row->addr}));
     }
@@ -216,12 +221,12 @@ Transition BtPairPlan::slot_entered(SlotId slot, const TextEntryResult& result) 
     TASTY_SEAT_BODY(BtPairPlan);
     (void)slot;
     const std::optional<BtPromptRows> prompt = prompt_();
-    const std::optional<svc::PromptGen> opened = std::exchange(entry_gen_, std::nullopt);
+    const std::optional<svc::connect::PromptGen> opened = std::exchange(entry_gen_, std::nullopt);
     if (!prompt || !opened || prompt->gen != *opened)
         return Transition::pop();
     Request::BtAnswer reply{};
     reply.gen = *opened;
-    reply.answer = svc::PromptAnswer::Accept;
+    reply.answer = svc::connect::PromptAnswer::Accept;
     if (const auto key = infra::as<TextEntryResult::Passkey>(result))
         reply.passkey = key->value;
     if (const auto pin = infra::as<TextEntryResult::Pin>(result))

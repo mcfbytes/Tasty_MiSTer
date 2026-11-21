@@ -8,6 +8,7 @@ add_library(mister_os STATIC
   src/epoll_floor.cpp
   src/epoll_set.cpp
   src/evdev.cpp
+  src/file_create.cpp
   src/framebuffer.cpp
   src/i2c_device.cpp
   src/kernel_rt_probe.cpp
@@ -15,12 +16,15 @@ add_library(mister_os STATIC
   src/monotonic_clock.cpp
   src/nanosleep_delay.cpp
   src/net_probe.cpp
+  src/positioned_io.cpp
   src/process_id.cpp
   src/process_name.cpp
   src/process_title.cpp
+  src/replace_file.cpp
   src/run_sync.cpp
   src/small_file.cpp
   src/stack_touch.cpp
+  src/sync.cpp
   src/task_sched.cpp
   src/thread_cpu_clock.cpp
   src/timer_slack.cpp
@@ -38,24 +42,24 @@ target_link_libraries(mister_os
   PRIVATE tasty_options)
 
 add_library(mister_os_connect STATIC
-  src/ssid.cpp
-  src/passphrase.cpp
-  src/ipv4_addr.cpp
-  src/bt_addr.cpp
-  src/bt_device_path.cpp
-  src/wifi_security.cpp
-  src/socket_group.cpp
-  src/unix_dgram_socket.cpp
-  src/unix_stream_socket.cpp
-  src/wpa_ctrl.cpp
-  src/wpa_decode.cpp
-  src/dbus_auth.cpp
-  src/dbus_connection.cpp
-  src/dbus_wire.cpp
-  src/bluez_client.cpp
-  src/bluez_agent.cpp
-  src/hci_reset.cpp
-  src/usb_adapter_cycle.cpp
+  src/connect/ssid.cpp
+  src/connect/passphrase.cpp
+  src/connect/ipv4_addr.cpp
+  src/connect/bt_addr.cpp
+  src/connect/bt_device_path.cpp
+  src/connect/wifi_security.cpp
+  src/connect/socket_group.cpp
+  src/connect/unix_dgram_socket.cpp
+  src/connect/unix_stream_socket.cpp
+  src/connect/wpa_ctrl.cpp
+  src/connect/wpa_decode.cpp
+  src/connect/dbus_auth.cpp
+  src/connect/dbus_connection.cpp
+  src/connect/dbus_wire.cpp
+  src/connect/bluez_client.cpp
+  src/connect/bluez_agent.cpp
+  src/connect/hci_reset.cpp
+  src/connect/usb_adapter_cycle.cpp
 )
 target_link_libraries(mister_os_connect
   PUBLIC mister_os
@@ -73,6 +77,7 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/epoll_floor.h
   os/epoll_set.h
   os/evdev.h
+  os/file_create.h
   os/framebuffer.h
   os/i2c_device.h
   os/kernel_rt.h
@@ -87,16 +92,20 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/nanosleep_delay.h
   os/net_probe.h
   os/path_buf.h
+  os/positioned_io.h
   os/process_id.h
   os/process_name.h
   os/process_title.h
   os/raw_monotonic_clock.h
+  os/replace_file.h
   os/run_sync.h
   os/small_file.h
   os/stack_touch.h
+  os/sync.h
   os/task_sched.h
   os/thread_cpu_clock.h
   os/timer_slack.h
+  os/timespec.h
   os/types.h
   os/uio_handle.h
   os/uio_line_ref.h
@@ -110,55 +119,55 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/writeback_probe.h
 )
 tasty_add_header_checks(tasty_os_connect_header_checks LIB mister_os_connect HEADERS
-  os/hex_digit.h
-  os/ssid.h
-  os/passphrase.h
-  os/country_code.h
-  os/if_name.h
-  os/ipv4_addr.h
-  os/bssid.h
-  os/bt_addr.h
-  os/bt_device_path.h
-  os/bt_name.h
-  os/bt_kind.h
-  os/passkey.h
-  os/passkey_digits.h
-  os/pin_code.h
-  os/signal_bars.h
-  os/signal_dbm.h
-  os/rssi_dbm.h
-  os/freq_mhz.h
-  os/wpa_network_id.h
-  os/wifi_security.h
-  os/group_id.h
-  os/socket_group.h
-  os/unix_dgram_socket.h
-  os/unix_stream_socket.h
-  os/wpa_ctrl.h
-  os/wpa_event.h
-  os/wpa_network_list.h
-  os/wpa_scan_table.h
-  os/wpa_state.h
-  os/wpa_status.h
-  os/dbus_auth.h
-  os/dbus_bus_name.h
-  os/dbus_connection.h
-  os/dbus_header.h
-  os/dbus_incoming.h
-  os/dbus_message.h
-  os/dbus_object_path.h
-  os/dbus_reader.h
-  os/dbus_serial.h
-  os/dbus_writer.h
-  os/agent_ask.h
-  os/bluez_client.h
-  os/bluez_agent.h
-  os/bluez_objects.h
-  os/hci_index.h
-  os/hci_reset.h
-  os/usb_device_count.h
-  os/usb_adapter_cycle.h
-  os/bt_radio.h
-  os/dbus_wire_types.h
+  os/connect/hex_digit.h
+  os/connect/ssid.h
+  os/connect/passphrase.h
+  os/connect/country_code.h
+  os/connect/if_name.h
+  os/connect/ipv4_addr.h
+  os/connect/bssid.h
+  os/connect/bt_addr.h
+  os/connect/bt_device_path.h
+  os/connect/bt_name.h
+  os/connect/bt_kind.h
+  os/connect/passkey.h
+  os/connect/passkey_digits.h
+  os/connect/pin_code.h
+  os/connect/signal_bars.h
+  os/connect/signal_dbm.h
+  os/connect/rssi_dbm.h
+  os/connect/freq_mhz.h
+  os/connect/wpa_network_id.h
+  os/connect/wifi_security.h
+  os/connect/group_id.h
+  os/connect/socket_group.h
+  os/connect/unix_dgram_socket.h
+  os/connect/unix_stream_socket.h
+  os/connect/wpa_ctrl.h
+  os/connect/wpa_event.h
+  os/connect/wpa_network_list.h
+  os/connect/wpa_scan_table.h
+  os/connect/wpa_state.h
+  os/connect/wpa_status.h
+  os/connect/dbus_auth.h
+  os/connect/dbus_bus_name.h
+  os/connect/dbus_connection.h
+  os/connect/dbus_header.h
+  os/connect/dbus_incoming.h
+  os/connect/dbus_message.h
+  os/connect/dbus_object_path.h
+  os/connect/dbus_reader.h
+  os/connect/dbus_serial.h
+  os/connect/dbus_writer.h
+  os/connect/agent_ask.h
+  os/connect/bluez_client.h
+  os/connect/bluez_agent.h
+  os/connect/bluez_objects.h
+  os/connect/hci_index.h
+  os/connect/hci_reset.h
+  os/connect/usb_device_count.h
+  os/connect/usb_adapter_cycle.h
+  os/connect/bt_radio.h
+  os/connect/dbus_wire_types.h
 )
 

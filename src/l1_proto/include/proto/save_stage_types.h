@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "infra/serial.h"
 
 namespace mister::proto {
 
@@ -25,8 +26,9 @@ struct SaveStageSlotCount {
 
 struct StageEpoch {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
-    [[nodiscard]] constexpr StageEpoch next() const noexcept { return StageEpoch{v + 1u}; }
+    [[nodiscard]] constexpr StageEpoch next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(StageEpoch, StageEpoch) = default;
     friend constexpr auto operator<=>(StageEpoch, StageEpoch) = default;
@@ -43,20 +45,14 @@ struct StageRevision {
 
 struct CommitAllSeq {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
-    [[nodiscard]] constexpr CommitAllSeq next() const noexcept { return CommitAllSeq{v + 1u}; }
+    [[nodiscard]] constexpr CommitAllSeq next() const noexcept {
+        return infra::serial::next(*this);
+    }
 
     friend constexpr bool operator==(CommitAllSeq, CommitAllSeq) = default;
     friend constexpr auto operator<=>(CommitAllSeq, CommitAllSeq) = default;
-};
-
-struct StageTally {
-    TASTY_SEAT_EXEMPT(component);
-    std::uint32_t v = 0;
-
-    constexpr void add() noexcept { ++v; }
-
-    friend constexpr bool operator==(StageTally, StageTally) = default;
 };
 
 }

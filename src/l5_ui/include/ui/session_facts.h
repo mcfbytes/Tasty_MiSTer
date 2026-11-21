@@ -5,9 +5,9 @@
 
 #include "app/info_origin.h"
 #include "app/info_plane.h"
-#include "app/session_identity.h"
-#include "infra/fixed_str.h"
+#include "app/core_name.h"
 #include "proto/types.h"
+#include "ui/osd_tree.h"
 
 namespace mister::ui {
 
@@ -16,11 +16,11 @@ struct SessionFacts {
     bool core_loaded = false;
     bool front_end = false;
 
-    FixedStr<app::SessionIdentity::kMax, StrFit::Clip> core_dir{};
+    app::CoreName core_dir{};
 
     bool hd_switchable = false;
 
-    bool in_hd_tree = false;
+    OsdTree tree = OsdTree::Classic;
 
     proto::OsdRow info_origin{app::kInfoOriginY};
 
@@ -28,7 +28,9 @@ struct SessionFacts {
 
     bool autosave = false;
 
-    [[nodiscard]] bool shows_hd_switch() const noexcept { return hd_switchable && !in_hd_tree; }
+    [[nodiscard]] bool shows_hd_switch() const noexcept {
+        return hd_switchable && tree == OsdTree::Classic;
+    }
 };
 
 }

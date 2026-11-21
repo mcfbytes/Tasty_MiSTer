@@ -4,11 +4,12 @@
 #include <string>
 #include <utility>
 
+#include "infra/prelude.h"
 #include "open_verdict.h"
-#include "os/wpa_ctrl.h"
-#include "svc/bt_service.h"
-#include "svc/ifup_starter.h"
-#include "svc/wpa_conf_store.h"
+#include "os/connect/wpa_ctrl.h"
+#include "svc/connect/bt_service.h"
+#include "svc/connect/ifup_starter.h"
+#include "svc/connect/wpa_conf_store.h"
 
 namespace mister::fw {
 
@@ -26,19 +27,19 @@ ConnectBlock::ConnectBlock(const ConnectPaths& paths, OpenVerdict& verdict) noex
 }
 
 void ConnectBlock::open_seat(const os::IClock& clock, ThreadAssembly::SeatMains& mains) noexcept {
-    app::ConnectChannel::Server server = channel_.server();
+    app::connect::ConnectChannel::Server server = channel_.server();
     if (!server)
         fatal(Error{Errc::busy, ERR_SITE(), 0}, "connect server minted twice");
     host_.emplace(
         std::move(seated(epoll_, "T-CONNECT bound past a refused open")),
-        svc::WifiService{
-            os::WpaCtrlOpener{},
-            svc::WpaConfStore{std::string{paths_.conf}},
-            svc::IfupStarter{},
+        app::connect::WifiService{
+            os::connect::WpaCtrlOpener{},
+            svc::connect::WpaConfStore{std::string{paths_.conf}},
+            svc::connect::IfupStarter{},
             std::string{paths_.net_class}
         },
-        svc::BtService{std::string{paths_.bus_socket}},
-        app::ConnectHost::Wiring{.server = std::move(server), .clock = clock}
+        app::connect::BtService{std::string{paths_.bus_socket}},
+        app::connect::ConnectHost::Wiring{.server = std::move(server), .clock = clock}
     );
     main_.emplace(*host_, std::move(seated(fds_, "T-CONNECT bound past a refused open")));
     mains.bind(&*main_);

@@ -6,7 +6,7 @@
 
 #include "infra/seat.h"
 
-namespace mister {
+namespace mister::infra {
 
 class LatHist {
     TASTY_SEAT_EXEMPT(component);

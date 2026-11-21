@@ -9,6 +9,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "hal/boot_handoff.h"
 
 namespace mister::hal {

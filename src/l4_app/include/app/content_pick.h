@@ -40,12 +40,13 @@
 #include "cores/file_slot.h"
 #include "cores/loader_context.h"
 #include "cores/loader_memo.h"
-#include "cores/ram_image_recipe.h"
+#include "cores/tas/ram_image_recipe.h"
 #include "cores/registry.h"
 #include "hal/fpga_aperture.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/prelude.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
@@ -160,7 +161,7 @@ public:
         UiRequest::Kind asked,
         const R& req,
         CorrelationTag tag,
-        const cores::RamImageRecipe& ram_image
+        const cores::tas::RamImageRecipe& ram_image
     );
 
     [[nodiscard]] After run_attached_load(const PickedLoad& load, Host& host);
@@ -247,7 +248,7 @@ private:
         const proto::ConfStrFileRow& row,
         std::string_view pick,
         const PickedLoad& load,
-        const cores::RamImageRecipe& image
+        const cores::tas::RamImageRecipe& image
     );
 
     [[nodiscard]] Armed arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);

@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <compare>
+#include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 
+#include "hal/aperture_node_decl.h"
 #include "hal/aperture_region.h"
 #include "hal/fpga_aperture.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
 #include "hal/scaler_header.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -34,6 +39,7 @@ public:
 
     [[nodiscard]] static Ex<ScalerBuffers> map(
         const FpgaAperture& aperture,
+        const ApertureNodeDecl& node,
         const ApertureRegion& scaler_out
     );
 

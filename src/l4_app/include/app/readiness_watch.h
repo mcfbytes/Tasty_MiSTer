@@ -7,8 +7,9 @@
 
 #include "app/bitstream_programmer.h"
 #include "hal/pin_levels.h"
+#include "infra/xthread/counter.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
 
 namespace mister::app {
 
@@ -48,7 +49,7 @@ public:
 
     struct Tally {
         std::uint32_t recoveries = 0;
-        std::uint32_t recover_polls = 0;
+        xthread::Counter recover_polls{};
     };
 
     ReadinessWatch(const hal::PinLevelCell& levels, BitstreamProgrammer& programmer) noexcept
@@ -79,9 +80,8 @@ public:
 
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>&
-    recover_polls_cell() const noexcept {
-        return recover_polls_cell_;
+    [[nodiscard]] const xthread::Counter& recover_polls_cell() const noexcept {
+        return tally_.recover_polls;
     }
 
 private:
@@ -98,7 +98,6 @@ private:
     std::uint32_t readiness_poll_budget_ = 0;
     bool recover_owed_ = false;
     bool load_ok_ = false;
-    xthread::Telemetry<std::uint32_t, SeatTag::Main> recover_polls_cell_{};
     Tally tally_{};
 };
 

@@ -10,8 +10,11 @@
 #include <string>
 #include <string_view>
 
+#include "hal/spi_halves.h"
+#include "hal/spi_words.h"
 #include "infra/ascii.h"
 #include "svc/afilter_parser.h"
+#include "infra/prelude.h"
 #include "infra/byte_view.h"
 #include "svc/read_bounded.h"
 #include "svc/vfs.h"
@@ -77,10 +80,10 @@ FilterWireImage decode_filter_image(std::string_view contents) {
             const auto val = parse_line_int(st);
             if (!val)
                 continue;
-            const auto u = static_cast<std::uint32_t>(*val);
-            append_filter_word(image, static_cast<std::uint16_t>(u));
+            const hal::SpiHalves halves = hal::SpiHalves::of(static_cast<std::uint32_t>(*val));
+            append_filter_word(image, halves.low);
             if (line == 1) {
-                append_filter_word(image, static_cast<std::uint16_t>(u >> 16));
+                append_filter_word(image, halves.high);
             }
             ++line;
             continue;
@@ -90,10 +93,10 @@ FilterWireImage decode_filter_image(std::string_view contents) {
             if (!val)
                 continue;
             const auto coeff = static_cast<std::int64_t>(kCoefScaleQ39 * (*val));
-            const auto u = static_cast<std::uint64_t>(coeff);
-            append_filter_word(image, static_cast<std::uint16_t>(u));
-            append_filter_word(image, static_cast<std::uint16_t>(u >> 16));
-            append_filter_word(image, static_cast<std::uint16_t>(u >> 32));
+            const hal::SpiWords<3> words = hal::SpiWords<3>::le(static_cast<std::uint64_t>(coeff));
+            append_filter_word(image, words[0]);
+            append_filter_word(image, words[1]);
+            append_filter_word(image, words[2]);
             ++line;
             continue;
         }
@@ -102,9 +105,9 @@ FilterWireImage decode_filter_image(std::string_view contents) {
         if (!val)
             continue;
         const auto coeff = static_cast<std::int32_t>(kCoefScaleQ21 * (*val));
-        const auto u = static_cast<std::uint32_t>(coeff);
-        append_filter_word(image, static_cast<std::uint16_t>(u));
-        append_filter_word(image, static_cast<std::uint16_t>(u >> 16));
+        const hal::SpiHalves halves = hal::SpiHalves::of(static_cast<std::uint32_t>(coeff));
+        append_filter_word(image, halves.low);
+        append_filter_word(image, halves.high);
         ++line;
     }
     return image;
@@ -153,7 +156,7 @@ AfilterEnable AudioService::filter_enable() const noexcept {
 
 void AudioService::accept_probe_reply(proto::ReplyWord r, bool front_end) noexcept {
     has_filter_ = r.nonzero();
-    has_boost_ = r.any(proto::user_io::kBoostCapability) && !front_end;
+    has_boost_ = r.intersects(proto::user_io::kBoostCapability) && !front_end;
     if (!has_boost_) {
         corevol_ = corevol_.attenuation_only();
     }
@@ -237,7 +240,7 @@ Ex<AfilterRead> AfilterParser::parse(const Vfs& vfs, std::string_view name) cons
 [[nodiscard]] Ex<void> emit_afilter_stream(
     proto::ILinkFrame& frame,
     CoreVolume lead,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 ) {
 
     if (words.size() + 1 > kFilterWireWords) {
@@ -245,31 +248,31 @@ Ex<AfilterRead> AfilterParser::parse(const Vfs& vfs, std::string_view name) cons
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
         );
     }
-    std::array<std::uint16_t, kFilterWireWords> window{};
-    window[0] = lead.field_bits();
+    std::array<hal::SpiWord, kFilterWireWords> window{};
+    window[0] = hal::SpiWord{lead.field_bits()};
     for (std::size_t i = 0; i < words.size(); ++i)
         window[i + 1] = words[i];
     return proto::send_frame(
         frame,
         proto::UioOp::SetAfilter,
-        std::span<const std::uint16_t>(window.data(), words.size() + 1)
+        std::span<const hal::SpiWord>(window.data(), words.size() + 1)
     );
 }
 
 [[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, CoreVolume vol) {
 
-    const std::uint16_t words[1] = {vol.field_bits()};
+    const hal::SpiWord words[1] = {hal::SpiWord{vol.field_bits()}};
     return proto::send_frame(
         frame,
         proto::UioOp::SetAfilter,
-        std::span<const std::uint16_t>(words, 1)
+        std::span<const hal::SpiWord>(words, 1)
     );
 }
 
 [[nodiscard]] Ex<void> emit_audvol(proto::ILinkFrame& frame, AudvolByte vol) {
 
-    const std::uint16_t words[1] = {vol.word()};
-    return proto::send_frame(frame, proto::UioOp::AudVol, std::span<const std::uint16_t>(words, 1));
+    const hal::SpiWord words[1] = {vol.word()};
+    return proto::send_frame(frame, proto::UioOp::AudVol, std::span<const hal::SpiWord>(words, 1));
 }
 
 }

@@ -29,10 +29,10 @@ static_assert(sizeof(Errno) == sizeof(int));
 
 }
 
-namespace mister {
+namespace mister::infra {
 
-constexpr infra::Errno Error::os_errno() const noexcept {
-    return infra::Errno{static_cast<int>(detail)};
+constexpr Errno Error::os_errno() const noexcept {
+    return Errno{static_cast<int>(detail)};
 }
 
 }

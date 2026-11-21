@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "app/romset_alias_reader.h"
 #include "app/session_identity.h"
 #include "infra/ascii.h"
@@ -15,6 +15,7 @@
 #include "infra/opt_ref.h"
 #include "ui/arc_label.h"
 #include "ui/cycle_value.h"
+#include "ui/hd_label.h"
 #include "ui/option_host.h"
 #include "ui/option_item.h"
 #include "ui/option_items/addon_item.h"
@@ -105,7 +106,7 @@ public:
 
 private:
     [[nodiscard]] proto::FieldCount count_() const noexcept {
-        return proto::FieldCount::of(values_->size());
+        return proto::FieldCount::saturating(values_->size());
     }
 
     const std::vector<std::string>* values_;
@@ -116,8 +117,11 @@ Transition refused(IOptionHost& host) {
     return Transition{};
 }
 
-app::PageDescription::Row described(app::PageDescription::RowKind kind, std::string_view label) {
-    app::PageDescription::Row row{};
+app::hd::PageDescription::Row described(
+    app::hd::PageDescription::RowKind kind,
+    std::string_view label
+) {
+    app::hd::PageDescription::Row row{};
     row.kind = kind;
     (void)row.label.assign(label);
     return row;
@@ -223,9 +227,9 @@ std::string OptionItem::compose(const Look& look) const {
     return on_compose(look);
 }
 
-std::optional<app::PageDescription::Row> OptionItem::describe(const Look& look) const {
+std::optional<app::hd::PageDescription::Row> OptionItem::describe(const Look& look) const {
     TASTY_SEAT_BODY(OptionItem);
-    std::optional<app::PageDescription::Row> row = on_describe(look);
+    std::optional<app::hd::PageDescription::Row> row = on_describe(look);
     if (!row)
         return std::nullopt;
     row->enabled = !disabled;
@@ -241,6 +245,40 @@ Transition OptionItem::select(IOptionHost& host) const {
 Transition OptionItem::step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const {
     TASTY_SEAT_BODY(OptionItem);
     return on_step(dir, value, host);
+}
+
+std::optional<RowKey> OptionItem::key() const {
+    TASTY_SEAT_BODY(OptionItem);
+    return RowKey::ordinal(item);
+}
+
+app::hd::PageDescription::Row OptionItem::describe(const RowCx& cx) const {
+    TASTY_SEAT_BODY(OptionItem);
+    const Look look{
+        .flat = false,
+        .value = cx.host.has_value() ? cx.host->field(bits) : proto::FieldValue{}
+    };
+    const std::optional<app::hd::PageDescription::Row> described = describe(look);
+
+    if (!described)
+        return app::hd::PageDescription::Row{};
+    app::hd::PageDescription::Row row = *described;
+    (void)row.label.assign(hd_label(row.label.view()));
+    return row;
+}
+
+Transition OptionItem::select(const RowCx& cx) {
+    TASTY_SEAT_BODY(OptionItem);
+    if (!cx.host.has_value())
+        return Transition{};
+    return select(*cx.host);
+}
+
+Transition OptionItem::step(CycleDir dir, const RowCx& cx) {
+    TASTY_SEAT_BODY(OptionItem);
+    if (!cx.host.has_value())
+        return Transition{};
+    return step(dir, cx.host->field(bits), *cx.host);
 }
 
 OptionItem::Carry PageItem::on_build(const Source& in, const BuildEnv&) {
@@ -267,8 +305,8 @@ std::string PageItem::on_compose(const Look& look) const {
     return s;
 }
 
-std::optional<app::PageDescription::Row> PageItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Submenu, label);
+std::optional<app::hd::PageDescription::Row> PageItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Submenu, label);
 }
 
 Transition PageItem::on_select(IOptionHost& host) const {
@@ -311,6 +349,7 @@ BrowserSession::Request ImageItem::on_shape_browse(
     req.policy.saves_home = role == cores::SlotRole::Save;
     if (role == cores::SlotRole::Disc)
         req.extensions = with_chd(std::move(req.extensions));
+    req.cd_descend = role == cores::SlotRole::Disc;
     bool opens_zip = false;
     for (const cores::FileSlot& s : f.slots)
         if (s.index == ioctl_index)
@@ -328,9 +367,9 @@ std::string FileItem::on_compose(const Look&) const {
     return compose_slot(*this, " Load *.");
 }
 
-std::optional<app::PageDescription::Row> FileItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> FileItem::on_describe(const Look&) const {
     const std::string text = compose_slot(*this, " Load *.");
-    return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
+    return described(app::hd::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
 
 Transition FileItem::on_select(IOptionHost& host) const {
@@ -349,9 +388,9 @@ std::string ImageItem::on_compose(const Look&) const {
     return compose_slot(*this, " Mount *.");
 }
 
-std::optional<app::PageDescription::Row> ImageItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> ImageItem::on_describe(const Look&) const {
     const std::string text = compose_slot(*this, " Mount *.");
-    return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
+    return described(app::hd::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
 
 Transition ImageItem::on_select(IOptionHost& host) const {
@@ -371,8 +410,8 @@ std::string CheatsItem::on_compose(const Look&) const {
     return label.empty() ? std::string{" Cheats"} : " " + label;
 }
 
-std::optional<app::PageDescription::Row> CheatsItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Submenu, label);
+std::optional<app::hd::PageDescription::Row> CheatsItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Submenu, label);
 }
 
 Transition CheatsItem::on_select(IOptionHost&) const {
@@ -392,8 +431,8 @@ std::string ManualItem::on_compose(const Look&) const {
     return label;
 }
 
-std::optional<app::PageDescription::Row> ManualItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Action, label);
+std::optional<app::hd::PageDescription::Row> ManualItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Action, label);
 }
 
 Transition ManualItem::on_select(IOptionHost& host) const {
@@ -413,8 +452,8 @@ std::string DipItem::on_compose(const Look&) const {
     return label;
 }
 
-std::optional<app::PageDescription::Row> DipItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Submenu, label);
+std::optional<app::hd::PageDescription::Row> DipItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Submenu, label);
 }
 
 Transition DipItem::on_select(IOptionHost&) const {
@@ -433,8 +472,8 @@ std::string ToggleItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-std::optional<app::PageDescription::Row> ToggleItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Action, label);
+std::optional<app::hd::PageDescription::Row> ToggleItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Action, label);
 }
 
 Transition ToggleItem::on_select(IOptionHost& host) const {
@@ -454,8 +493,8 @@ std::string ToggleCloseItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-std::optional<app::PageDescription::Row> ToggleCloseItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Action, label);
+std::optional<app::hd::PageDescription::Row> ToggleCloseItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Action, label);
 }
 
 Transition ToggleCloseItem::on_select(IOptionHost& host) const {
@@ -477,15 +516,17 @@ OptionItem::Carry CycleItem::on_build(const Source& in, const BuildEnv& env) {
 
 std::string_view CycleItem::shown_value(const Look& look) const {
     const SlotLabels labels{values};
-    return labels.label(choice_slot(labels, look.value, proto::FieldCount::of(values.size())));
+    return labels.label(
+        choice_slot(labels, look.value, proto::FieldCount::saturating(values.size()))
+    );
 }
 
 std::string CycleItem::on_compose(const Look& look) const {
     return std::string{format_key_value(label, shown_value(look)).view()};
 }
 
-std::optional<app::PageDescription::Row> CycleItem::on_describe(const Look& look) const {
-    app::PageDescription::Row row = described(app::PageDescription::RowKind::Value, label);
+std::optional<app::hd::PageDescription::Row> CycleItem::on_describe(const Look& look) const {
+    app::hd::PageDescription::Row row = described(app::hd::PageDescription::RowKind::Value, label);
     row.steps = true;
     (void)row.value.assign(shown_value(look));
     return row;
@@ -519,8 +560,8 @@ std::string SeparatorItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-std::optional<app::PageDescription::Row> SeparatorItem::on_describe(const Look&) const {
-    return described(app::PageDescription::RowKind::Separator, {});
+std::optional<app::hd::PageDescription::Row> SeparatorItem::on_describe(const Look&) const {
+    return described(app::hd::PageDescription::RowKind::Separator, {});
 }
 
 Transition SeparatorItem::on_select(IOptionHost& host) const {
@@ -545,7 +586,7 @@ std::string AddonItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> AddonItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> AddonItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -565,7 +606,7 @@ std::string DefMraItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> DefMraItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> DefMraItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -585,7 +626,7 @@ std::string JoyNamesItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> JoyNamesItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> JoyNamesItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -605,7 +646,7 @@ std::string InfoItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> InfoItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> InfoItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -625,7 +666,7 @@ std::string VersionItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> VersionItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> VersionItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -645,7 +686,7 @@ std::string CfgVerItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> CfgVerItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> CfgVerItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -665,7 +706,7 @@ std::string NoOsdItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> NoOsdItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> NoOsdItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -685,7 +726,7 @@ std::string UnknownItem::on_compose(const Look&) const {
     return {};
 }
 
-std::optional<app::PageDescription::Row> UnknownItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> UnknownItem::on_describe(const Look&) const {
     return std::nullopt;
 }
 
@@ -706,10 +747,10 @@ std::string ExitItem::on_compose(const Look&) const {
     return label;
 }
 
-std::optional<app::PageDescription::Row> ExitItem::on_describe(const Look&) const {
+std::optional<app::hd::PageDescription::Row> ExitItem::on_describe(const Look&) const {
     const std::string_view text{label};
     return described(
-        app::PageDescription::RowKind::Action,
+        app::hd::PageDescription::RowKind::Action,
         text.substr(std::min(text.find_first_not_of(' '), text.size()))
     );
 }

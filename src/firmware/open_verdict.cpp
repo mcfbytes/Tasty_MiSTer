@@ -3,6 +3,7 @@
 
 #include <utility>
 
+#include "infra/prelude.h"
 #include "report.h"
 
 namespace mister::fw {

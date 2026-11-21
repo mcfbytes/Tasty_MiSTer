@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/file_tx_pieces.h"
+#include "infra/span_cut.h"
 
 #include <algorithm>
 #include <limits>
@@ -7,6 +8,7 @@
 
 #include "app/file_bytes.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -94,15 +96,14 @@ bool FileTxPieces::ready(
 bool FileTxPieces::stage_(const proto::FileSize piece) {
     const proto::FileSize n = piece.min(sent_.remaining_in(total_));
     std::vector<std::uint8_t> buf = n.zeroed<std::vector<std::uint8_t>>();
-    std::size_t got = 0;
-    while (proto::FileSize{got} < n) {
-        auto r = file_->read_at(
-            sent_ + proto::FileSize{got},
-            std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(got))
-        );
-        if (!r || *r == 0)
+    std::span<std::byte> left = std::as_writable_bytes(std::span<std::uint8_t>(buf));
+    proto::FileOffset at = sent_;
+    while (!left.empty()) {
+        auto r = file_->read_at(at, left);
+        if (!r || r->empty())
             return false;
-        got += *r;
+        at += proto::FileSize::of(*r);
+        left = r->past_in(left);
     }
     if (loader_ != nullptr) {
         loader_->shape(row_, buf, sent_);
@@ -111,9 +112,7 @@ bool FileTxPieces::stage_(const proto::FileSize piece) {
     }
 
     if (sent_ + n > keyed_to_) {
-        key_.feed(
-            std::span<const std::uint8_t>(buf).subspan((keyed_to_ - sent_).file_word<std::size_t>())
-        );
+        key_.feed(infra::affine::from(std::span<const std::uint8_t>(buf), keyed_to_ - sent_));
         keyed_to_ = sent_ + n;
     }
     staged_ = FileIntern{.bytes = std::move(buf)};
@@ -250,7 +249,7 @@ Rung::Pass FileTxPieces::step(const RungEdges& edges, cores::ILadderHost& owner)
     TASTY_SEAT_BODY(FileTxPieces);
     if (!ready(edges.inbox, edges.level))
         return Rung::Pass::Waiting;
-    switch (step(edges.inbox, edges.level, owner.next_generation(), owner.link_width())) {
+    switch (step(edges.inbox, edges.level, owner.next_act(), owner.link_width())) {
         case Pass::Sent:
             return Rung::Pass::Moved;
         case Pass::Waiting:

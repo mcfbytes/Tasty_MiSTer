@@ -12,6 +12,7 @@
 #include "app/ui_request_ring.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "ui/build_env.h"

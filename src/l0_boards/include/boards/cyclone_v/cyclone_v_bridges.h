@@ -10,6 +10,7 @@
 #include "hal/reg_access.h"
 #include "hal/register_window.h"
 #include "hal/taken_window.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::boards::cyclone_v {

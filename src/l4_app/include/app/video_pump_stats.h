@@ -5,8 +5,10 @@
 #include <optional>
 
 #include "app/types.h"
+#include "infra/prelude.h"
 #include "os/types.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -68,8 +70,8 @@ struct VideoPumpStats {
     VideoI2cOutcome i2c = VideoI2cOutcome::Unwired;
 
     std::uint8_t i2c_bus = kI2cBusNeverAcked;
-    svc::Tally i2c_writes{};
-    svc::Tally i2c_errors{};
+    infra::Tally i2c_writes{};
+    infra::Tally i2c_errors{};
     std::optional<os::I2cReg> i2c_fail_reg{};
 
     std::uint8_t i2c_first_op = 0;
@@ -79,13 +81,13 @@ struct VideoPumpStats {
     std::uint32_t i2c_verify_errors = 0;
     std::uint32_t i2c_poll_errors = 0;
     std::uint32_t i2c_reprobes = 0;
-    svc::Tally i2c_trips{};
+    infra::Tally i2c_trips{};
     bool i2c_breaker_open = false;
 
     std::uint32_t spd_sends = 0;
     std::uint32_t spd_disables = 0;
     std::uint32_t spd_dv1_sends = 0;
-    svc::Tally spd_dv1_nowidth{};
+    infra::Tally spd_dv1_nowidth{};
     std::uint32_t spd_noname = 0;
     std::optional<os::I2cReg> spd_fail_reg{};
 

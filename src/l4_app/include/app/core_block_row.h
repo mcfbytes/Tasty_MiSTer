@@ -8,7 +8,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/no_block_roles.h"
-#include "proto/spi_block_decoder.h"
+#include "proto/link/spi_block_decoder.h"
 #include "reactor/link_decoder.h"
 
 namespace mister::app {
@@ -17,7 +17,8 @@ class CoreBlockRow final : public reactor::ILinkDecoder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit constexpr CoreBlockRow(proto::SpiBlockDecoder& decoder) noexcept : d_(&decoder) {}
+    explicit constexpr CoreBlockRow(proto::link::SpiBlockDecoder& decoder) noexcept
+        : d_(&decoder) {}
 
     void service(reactor::CoreState& st) const override {
         TASTY_SEAT_BODY(CoreBlockRow);
@@ -41,7 +42,7 @@ public:
     }
 
 private:
-    proto::SpiBlockDecoder* d_;
+    proto::link::SpiBlockDecoder* d_;
 };
 
 }

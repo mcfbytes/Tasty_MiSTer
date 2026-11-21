@@ -7,20 +7,22 @@
 #include <string_view>
 #include <utility>
 
+#include "app/round_words.h"
 #include "app/save_upload_slot.h"
-#include "cores/save_image.h"
+#include "cores/nvram_save.h"
 #include "cores/save_servant.h"
 #include "hal/spi_transport.h"
-#include "infra/counter.h"
-#include "infra/loan_channel.h"
-#include "infra/polled.h"
+#include "infra/xthread/counter.h"
+#include "infra/xthread/loan_channel.h"
+#include "infra/xthread/polled.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/fio_tenant.h"
 #include "proto/save_act.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
-#include "proto/upload_session.h"
+#include "proto/link/upload_session.h"
 #include "svc/io_coworker.h"
 
 namespace mister::app {
@@ -34,7 +36,7 @@ public:
     using Loan = Chan::Loan;
     using Ask = SaveUploadSlot::Ask;
 
-    static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kSavePieceWords;
+    static constexpr proto::FioWordCount kMaxRoundWords{1u + proto::kSavePieceWords};
 
     static constexpr proto::FioWordCount kCutWords{2};
 
@@ -61,9 +63,9 @@ public:
     SaveUploadRelay(const SaveUploadRelay&) = delete;
     SaveUploadRelay& operator=(const SaveUploadRelay&) = delete;
 
-    [[nodiscard]] bool order(const cores::SaveImage& image, std::string_view rel) noexcept;
+    [[nodiscard]] bool order(const cores::mra::NvramSave& image, std::string_view rel) noexcept;
 
-    void service_rt(std::uint32_t budget_words, bool fio_free) noexcept;
+    void service_rt(proto::FioWordCount budget_words, bool fio_free) noexcept;
 
     void forget() noexcept;
 
@@ -107,7 +109,7 @@ public:
 
 private:
     struct Order {
-        cores::SaveImage image{};
+        cores::mra::NvramSave image{};
         FixedStr<kConfigRelCap, StrFit::Reject> rel{};
         bool owed = false;
     };
@@ -126,9 +128,9 @@ private:
         RelayStamp stamp{CoreGen{1}, ActEpoch{1}};
         bool pull_out = false;
         hal::Width width = hal::Width::Byte;
-        std::optional<proto::UploadSession> open{};
+        std::optional<proto::link::UploadSession> open{};
         Order order{};
-        std::uint32_t round_words = 0;
+        RoundWords round_words{};
         std::uint32_t unanswered = 0;
         xthread::Counter started{}, acts{}, saved{}, failed{}, refused{}, stale{}, wire_faults{},
             liveness_drops{};

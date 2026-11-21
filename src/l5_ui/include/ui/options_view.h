@@ -8,6 +8,7 @@
 #include "ui/transition.h"
 #include "ui/types.h"
 #include "svc/types.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -34,7 +35,7 @@ public:
 
     [[nodiscard]] virtual bool empty() const = 0;
 
-    [[nodiscard]] virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
+    [[nodiscard]] virtual infra::Tally refusals() const noexcept { return infra::Tally{}; }
 
 protected:
     IOptionsView() = default;

@@ -3,12 +3,13 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 #include "ui/core_pick_host.h"
 #include "ui/page.h"
 #include "ui/page_launches.h"
 
-namespace mister::app {
+namespace mister::app::recents {
 class RecentsStore;
 }
 
@@ -26,7 +27,7 @@ public:
 
     Transition open(PageContext& ctx, bool recents_first);
 
-    svc::Tally refusals() const noexcept {
+    infra::Tally refusals() const noexcept {
         TASTY_SEAT_BODY(CoresEntry);
         return refusals_.sum(core_pick_.refusals());
     }
@@ -36,10 +37,10 @@ private:
         return launches_ ? launches_->browser : infra::OptRef<BrowserLaunch>{};
     }
 
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     infra::OptRef<PageLaunches> launches_{};
     infra::OptRef<const IBrowseSource> storage_{};
-    infra::OptRef<app::RecentsStore> recents_{};
+    infra::OptRef<app::recents::RecentsStore> recents_{};
     CorePickHost core_pick_{};
 };
 

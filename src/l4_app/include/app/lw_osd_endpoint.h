@@ -4,15 +4,18 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "app/lw_block_endpoint.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "hal/osd_block.h"
+#include "hal/osd_status.h"
 #include "hal/reg_port.h"
 #include "hal/window_port.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_ui.h"
 #include "proto/osd_surface.h"
@@ -43,12 +46,17 @@ public:
 
     [[nodiscard]] const OsdRoute& route() const noexcept { return tally_; }
 
+    static constexpr unsigned kDrainPolls = 16u * hal::OsdBlock::kFifoEntries;
+
 private:
-    static constexpr proto::OsdRowCount kRows = proto::OsdSurface::kPageRows;
+    static constexpr proto::OsdRowCount kRows{hal::OsdBlock::kImageRows};
     static_assert(
-        kRows == proto::OsdRowCount{hal::OsdBlock::kImageRows}
-            && proto::OsdSurface::kRowBytes == hal::OsdBlock::kRowBytes,
-        "the shadow holds exactly the surface's page rows"
+        proto::OsdSurface::kMaxRows <= kRows,
+        "the surface never composes past the image"
+    );
+    static_assert(
+        proto::OsdSurface::kRowBytes == hal::OsdBlock::kRowBytes,
+        "the image holds exactly the surface's row bytes"
     );
 
     using Base = LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
@@ -66,16 +74,25 @@ private:
     void serve_bound_() noexcept override;
     [[nodiscard]] bool idle_bound_hook_() const noexcept override;
 
+    using Frame = proto::OsdRowCells<proto::OsdRow, kRows.size()>;
+
     void store_frame_() noexcept;
+    [[nodiscard]] bool store_image_(proto::OsdRowCount n) noexcept;
+    [[nodiscard]] bool store_dirty_(proto::OsdRowCount n) noexcept;
+    [[nodiscard]] bool settle_(
+        hal::OsdStatus before,
+        std::span<const proto::OsdRow> frame
+    ) noexcept;
     [[nodiscard]] bool store_row_(proto::OsdRow row) noexcept;
-    [[nodiscard]] std::uint32_t ctrl_() const noexcept;
+    [[nodiscard]] hal::OsdStatus status_() noexcept;
+    [[nodiscard]] std::optional<hal::OsdStatus> drain_() noexcept;
     [[nodiscard]] proto::OsdRowCount bound_rows_() const noexcept;
     [[nodiscard]] Port& port_() noexcept;
 
     Wiring w_;
     std::optional<hal::WindowPort<hal::OsdBlock, seat_owner::Ui>> block_{};
-    proto::OsdRowCells<std::uint32_t, kRows.size()> stored_{};
-    std::uint32_t ctrl_stored_ = 0;
+    proto::OsdRowCount image_rows_{kRows};
+    proto::OsdRowCells<infra::CellGen, kRows.size()> stored_{};
     proto::OsdSurface::Row row_{};
 };
 
@@ -88,6 +105,6 @@ namespace mister::hal {
 extern template class WindowPort<OsdBlock, seat_owner::Ui>;
 }
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 extern template class GrantLease<app::OsdGrant, seat_owner::Ui>;
 }

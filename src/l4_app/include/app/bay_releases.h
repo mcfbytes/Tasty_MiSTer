@@ -7,13 +7,15 @@
 
 #include "app/built_core.h"
 #include "infra/indexed_array.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/build_generation.h"
 #include "proto/types.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 
-using BayGens = std::array<std::uint16_t, kCoreBaySlots>;
+using BayGens = std::array<proto::BuildGeneration, kCoreBaySlots>;
 
 struct BayReleases {
     BayGens released_gen{};

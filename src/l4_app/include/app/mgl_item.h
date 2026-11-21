@@ -19,6 +19,7 @@
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
 #include "infra/path_text.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

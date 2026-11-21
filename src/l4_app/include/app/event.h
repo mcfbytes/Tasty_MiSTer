@@ -11,9 +11,10 @@
 #include "infra/error.h"
 #include "app/ui_request.h"
 #include "cores/progress.h"
-#include "infra/counted_lane.h"
+#include "infra/xthread/counted_lane.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

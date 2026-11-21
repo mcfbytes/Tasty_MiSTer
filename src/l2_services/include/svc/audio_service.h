@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <span>
 
+#include "hal/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/link_frame.h"
 #include "proto/types.h"
@@ -149,7 +151,7 @@ private:
 [[nodiscard]] Ex<void> emit_afilter_stream(
     proto::ILinkFrame& frame,
     CoreVolume lead,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 );
 
 [[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, CoreVolume vol);

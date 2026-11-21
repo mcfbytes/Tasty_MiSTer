@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 #include "proto/conf_str_caps.h"
 #include "proto/file_slots.h"
@@ -43,6 +44,10 @@ public:
     }
 
     std::uint32_t axi_unknown_kind_count() const noexcept { return caps_.axi_unknown_kind_count(); }
+
+    infra::Tally irq_unknown_class_count() const noexcept {
+        return caps_.irq_unknown_class_count();
+    }
 
     const std::optional<SaveStateDecl>& savestate() const noexcept { return caps_.savestate(); }
 

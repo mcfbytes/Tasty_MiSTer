@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/link_op.h"
 
@@ -21,8 +22,6 @@ class ContentPick;
 class CoreBuilder;
 class CoreSwitch;
 class FileTxPieces;
-class InputDecode;
-class JoyLevelEmitter;
 class LadderHostAdapter;
 template <SeatTag Producer>
 class LinkTxChannel;
@@ -32,16 +31,27 @@ class LoadWalk;
 class ManifestLadder;
 class MglPlayer;
 class MountQueue;
-class Ps2Egress;
 class SessionOwner;
-class SettleStage;
 class VideoWire;
+
+namespace replay {
+class SettleStage;
+}
+
+namespace input {
+class InputDecode;
+class LinkPadSink;
+class Ps2Egress;
+}
 }
 
 namespace mister::cores {
 class BootLadder;
 class PayloadPieces;
+
+namespace st {
 class StMediaLadder;
+}
 }
 
 namespace mister::ui {
@@ -85,12 +95,12 @@ using LinkOpProducers = std::tuple<
         proto::LinkOp::Kind::WriteStatus,
         BindTail,
         LoadWalk,
-        SettleStage,
+        replay::SettleStage,
         cores::BootLadder,
         ui::CoreOptionsPage,
         ui::FrontEndBackground>,
     OpUnproduced<proto::LinkOp::Kind::OsdFlush, kOwedOsdFlush>,
-    OpProducer<proto::LinkOp::Kind::JoyEmit, JoyLevelEmitter>,
+    OpProducer<proto::LinkOp::Kind::JoyEmit, input::LinkPadSink>,
     OpUnproduced<proto::LinkOp::Kind::SendRtc, kOwedSendRtc>,
     OpUnproduced<proto::LinkOp::Kind::BlockAnswer, kOwedBlockAnswer>,
     OpProducer<proto::LinkOp::Kind::BindDecoders, CoreSwitch, SessionOwner>,
@@ -100,16 +110,16 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::BindConfig, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindUart, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindSlotConfig, ConfigSaves>,
-    OpProducer<proto::LinkOp::Kind::BindMount, MountQueue, cores::StMediaLadder>,
+    OpProducer<proto::LinkOp::Kind::BindMount, MountQueue, cores::st::StMediaLadder>,
     OpProducer<proto::LinkOp::Kind::RebootNow, BoardReboot>,
     OpProducer<proto::LinkOp::Kind::ApplyCore, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::AbortSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindIdentity, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindJoy, BindTail>,
-    OpProducer<proto::LinkOp::Kind::JoyRelease, JoyLevelEmitter>,
+    OpProducer<proto::LinkOp::Kind::JoyRelease, input::LinkPadSink>,
     OpProducer<proto::LinkOp::Kind::SaveUpload, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::SaveAsk, ConfigSaves>,
-    OpProducer<proto::LinkOp::Kind::Ps2Frame, Ps2Egress>,
+    OpProducer<proto::LinkOp::Kind::Ps2Frame, input::Ps2Egress>,
     OpProducer<proto::LinkOp::Kind::DropCore, CoreSwitch>,
     OpProducer<proto::LinkOp::Kind::AdoptCore, CoreBuilder>,
     OpProducer<proto::LinkOp::Kind::SessionUp, SessionOwner>,

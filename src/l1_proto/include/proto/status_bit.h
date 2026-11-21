@@ -15,7 +15,7 @@ class StatusBit {
 public:
     static constexpr unsigned kCount = 128;
 
-    static constexpr unsigned kWordBits = 16;
+    static constexpr unsigned kRegisterBits = 16;
 
     constexpr StatusBit() noexcept = default;
 
@@ -35,10 +35,10 @@ public:
                                : std::nullopt;
     }
 
-    [[nodiscard]] constexpr std::size_t word() const noexcept { return v_ / kWordBits; }
+    [[nodiscard]] constexpr std::size_t word() const noexcept { return v_ / kRegisterBits; }
 
     [[nodiscard]] constexpr std::uint16_t mask() const noexcept {
-        return static_cast<std::uint16_t>(1u << (v_ % kWordBits));
+        return static_cast<std::uint16_t>(1u << (v_ % kRegisterBits));
     }
 
     [[nodiscard]] constexpr hal::SpiWord lane_mask() const noexcept { return hal::SpiWord{mask()}; }

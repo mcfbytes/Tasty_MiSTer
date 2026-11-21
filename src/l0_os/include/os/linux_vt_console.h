@@ -3,6 +3,7 @@
 
 #include <optional>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/vt_console.h"
 

@@ -7,6 +7,7 @@
 #include "cores/pcm_feed.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

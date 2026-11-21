@@ -38,7 +38,7 @@ struct DeclaredSelect {
     T if_clear{};
 
     [[nodiscard]] constexpr T pick(ReplyWord r) const noexcept {
-        return r.any(kDeclaredSelects[infra::ordinal(R)].mask) ? if_set : if_clear;
+        return r.intersects(kDeclaredSelects[infra::ordinal(R)].mask) ? if_set : if_clear;
     }
 };
 

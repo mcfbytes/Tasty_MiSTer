@@ -2,10 +2,11 @@
 #include "app/session_machine.h"
 
 #include "app/log_clock.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
-SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept
+SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, LogLane& lane) noexcept
     : events_(events.producer()),
       log_lane_(lane.producer()),
       last_transition_(log_now()) {}
@@ -24,11 +25,7 @@ void SessionMachine::transition(SessionState to) {
     const StatusMicros dwell = us_between(last_transition_, now);
     last_transition_ = now;
     log_lane_.push(
-        LogRec::SessionTransition{
-            .dwell = dwell,
-            .from = static_cast<std::uint8_t>(from),
-            .to = static_cast<std::uint8_t>(to)
-        },
+        LogRec::SessionTransition{.dwell = dwell, .from = from, .to = to},
         log_stamp(now)
     );
 }

@@ -9,6 +9,7 @@
 #include "cores/config_fit.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

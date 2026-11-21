@@ -3,9 +3,10 @@
 
 #include <utility>
 
-#include "cores/ram_image_recipe.h"
+#include "cores/tas/ram_image_recipe.h"
 #include "infra/ascii.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -58,7 +59,7 @@ AddonSend AddonSend::plan(std::string_view list, std::string_view pick, proto::W
 
 bool AddonSend::take_image(std::vector<std::uint8_t> bytes) {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (!infra::ieq(entries_[i].ext, cores::kRamImageAddon))
+        if (!infra::ieq(entries_[i].ext, cores::tas::kRamImageAddon))
             continue;
         image_ = std::move(bytes);
         image_at_ = EntryNo::of(i);

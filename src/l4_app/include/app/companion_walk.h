@@ -6,7 +6,7 @@
 #include <optional>
 #include <span>
 
-#include "app/companion_host.h"
+#include "app/pcm/companion_host.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
 #include "app/load_walk.h"
@@ -17,6 +17,7 @@
 #include "cores/loader.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/mailbox_act.h"
 #include "proto/types.h"
@@ -32,7 +33,7 @@ public:
 
     struct Host {
         LoadWalk::Host load;
-        infra::OptRef<CompanionHost::Binds> binds{};
+        infra::OptRef<pcm::CompanionHost::Binds> binds{};
     };
 
     [[nodiscard]] static Ex<CompanionWalk> start(
@@ -40,7 +41,7 @@ public:
         proto::CompanionBindGen gen,
         std::unique_ptr<cores::ILoader> loader,
         std::span<const cores::CoreWindowDecl> windows,
-        infra::OptRef<CompanionHost::Binds> binds
+        infra::OptRef<pcm::CompanionHost::Binds> binds
     );
 
     [[nodiscard]] Pass step(Host& h);
@@ -64,7 +65,7 @@ private:
         proto::CompanionBindGen gen,
         std::unique_ptr<cores::ILoader> loader,
         std::span<const cores::CoreWindowDecl> windows,
-        infra::OptRef<CompanionHost::Binds> binds
+        infra::OptRef<pcm::CompanionHost::Binds> binds
     ) noexcept
         : plan_(plan),
           loader_(std::move(loader)),
@@ -86,7 +87,7 @@ private:
     PathText source_{};
     std::unique_ptr<cores::ILoader> loader_;
     std::span<const cores::CoreWindowDecl> windows_;
-    infra::OptRef<CompanionHost::Binds> binds_;
+    infra::OptRef<pcm::CompanionHost::Binds> binds_;
     std::optional<LoadWalk> walk_{};
     proto::CompanionBindGen gen_{};
     bool loaded_ = false;

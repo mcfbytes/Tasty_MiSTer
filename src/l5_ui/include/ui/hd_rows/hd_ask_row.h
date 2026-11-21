@@ -5,18 +5,18 @@
 #include <span>
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/confirm_host.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
 class IHdAction;
 struct ConfirmLaunch;
 
-class HdAskRow final : public IHdRow, public IConfirmHost {
+class HdAskRow final : public IRow, public IConfirmHost {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -29,15 +29,15 @@ public:
 
         RowIndex initial{1};
 
-        decltype(app::PageDescription::Row::value) value{};
-        app::RowTier tier = app::RowTier::Place;
+        decltype(app::hd::PageDescription::Row::value) value{};
+        app::hd::RowTier tier = app::hd::RowTier::Place;
     };
 
     explicit HdAskRow(const Spec& spec) noexcept : spec_(spec) {}
 
     bool shown() const override;
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
+    Transition select(const RowCx&) override;
     Transition on_confirm(RowIndex choice) override;
 
 private:

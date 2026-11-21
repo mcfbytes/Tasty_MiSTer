@@ -15,9 +15,11 @@
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
+#include "svc/disc/disc_identity.h"
 
 namespace mister::cores {
 
@@ -70,7 +72,7 @@ public:
         proto::FileSize size
     ) = 0;
 
-    [[nodiscard]] virtual proto::ActKey next_generation() noexcept = 0;
+    [[nodiscard]] virtual proto::ActKey next_act() noexcept = 0;
 
     [[nodiscard]] virtual MountStatus mount_status() = 0;
 
@@ -89,6 +91,11 @@ public:
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
 
     [[nodiscard]] virtual std::optional<proto::FieldValue> option_choice(OptionTag tag) = 0;
+
+    virtual void game_identified(std::string_view image, const svc::disc::DiscIdText& serial) {
+        (void)image;
+        (void)serial;
+    }
 
 protected:
     ILadderHost() = default;

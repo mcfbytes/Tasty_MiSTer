@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "hal/link_port.h"
 
 namespace mister::boards {
@@ -19,7 +20,7 @@ public:
     [[nodiscard]] bool ready() const override;
     [[nodiscard]] hal::SpiSample sample() const noexcept override;
 
-    [[nodiscard]] Ex<hal::CoreIdentity> identify() override;
+    [[nodiscard]] Ex<hal::CoreTypeByte> identify() override;
     hal::CoreCapabilities latch_capabilities() override;
     void set_core_reset(bool asserted) override;
 

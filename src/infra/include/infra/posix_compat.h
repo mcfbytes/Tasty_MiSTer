@@ -1,66 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstddef>
-#include <cstdio>
+#include <malloc.h>
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
 
-#include "infra/persist.h"
-
-#if defined(__GLIBC__)
-#include <malloc.h>
-#else
-#include <errno.h>
-#include <fcntl.h>
-#ifndef M_TRIM_THRESHOLD
-#define M_TRIM_THRESHOLD 0
-#define M_MMAP_MAX 0
-#endif
-#endif
+#include <cstddef>
+#include <cstdio>
 
 namespace mister::infra {
 
-#if defined(__GLIBC__)
-
 using ::mallopt;
 using ::pthread_attr_setaffinity_np;
-#else
-
-inline int mallopt(int, int) {
-    return 0;
-}
-
-inline int pthread_attr_setaffinity_np(pthread_attr_t*, std::size_t, const cpu_set_t*) {
-    return ENOSYS;
-}
-#endif
-
-#if defined(__GLIBC__)
-inline constexpr bool kPosixGlibc = true;
-#else
-inline constexpr bool kPosixGlibc = false;
-#endif
 
 inline void set_stdout_file(std::FILE* f) noexcept {
-#if defined(__GLIBC__)
     stdout = f;
-#else
-
-    static int original TASTY_PERSIST(proc, stdout_original) = -1;
-    if (f == nullptr)
-        return;
-    const int fd = ::fileno(f);
-    if (fd == STDOUT_FILENO) {
-        if (original >= 0)
-            (void)::dup2(original, STDOUT_FILENO);
-        return;
-    }
-    if (original < 0)
-        original = ::fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
-    (void)::dup2(fd, STDOUT_FILENO);
-#endif
 }
 
 }

@@ -7,6 +7,7 @@
 #include "app/session_identity.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/page_context.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
@@ -33,7 +34,7 @@ HdControllersPlan::HdControllersPlan(const HdPlanInputs& in)
               .label = "Pair Bluetooth controller",
               .page = PageId::BtPair,
               .arg = PageArg{PairStart::AutoFirst},
-              .icon = app::PageDescription::RowIcon::Bluetooth
+              .icon = app::hd::PageDescription::RowIcon::Bluetooth
           }
       ),
       bluetooth_(HdPushRow::Spec{.label = "Bluetooth", .page = PageId::Bluetooth}),
@@ -53,12 +54,12 @@ std::string_view HdControllersPlan::title() const {
     return "Controllers";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdControllersPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdControllersPlan::rows() const {
     TASTY_SEAT_BODY(HdControllersPlan);
     return refs_;
 }
 
-svc::Tally HdControllersPlan::refusals() const noexcept {
+infra::Tally HdControllersPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdControllersPlan);
     return refusals_;
 }

@@ -10,7 +10,8 @@
 #include "app/link_op_ctx.h"
 #include "app/link_op_facts.h"
 #include "infra/message_sum.h"
-#include "proto/link.h"
+#include "proto/link/link.h"
+#include "proto/link/pad_ports.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -80,7 +81,7 @@ concept LinkOpWireSink = std::same_as<typename S::Result, ILinkEncoder::Outcome>
 
 template <class S>
 concept LinkOpFrameSink = std::same_as<typename S::Result, Delivered>
-    && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c, proto::Link& link) {
+    && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c, proto::link::Link& link) {
            {
                s.on(std::declval<const proto::LinkOp::StagedFrame&>(), c, link)
            } -> std::same_as<Delivered>;
@@ -240,5 +241,21 @@ concept LinkOpPadSink = requires(S& s, const proto::LinkOp& m) {
     { s.on(std::declval<const proto::LinkOp::JoyRelease&>()) } -> std::same_as<bool>;
     { s.misrouted(m) } -> std::same_as<bool>;
 };
+
+struct LinkOpJoyPort {
+    using Result = bool;
+
+    static constexpr proto::PlayerIndex kPortLimit{proto::link::kPadPorts};
+
+    static bool joy_port(proto::PlayerIndex player) noexcept { return player < kPortLimit; }
+
+    bool on(const proto::LinkOp::JoyEmit& a) const noexcept { return joy_port(a.player); }
+
+    bool on(const proto::LinkOp::JoyRelease& a) const noexcept { return joy_port(a.player); }
+
+    bool misrouted(const proto::LinkOp&) const noexcept { return false; }
+};
+
+static_assert(LinkOpPadSink<LinkOpJoyPort>);
 
 }

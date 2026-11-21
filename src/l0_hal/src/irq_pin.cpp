@@ -13,6 +13,7 @@
 #include "infra/error.h"
 #include "infra/hex_text.h"
 #include "infra/parse_int.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "os/path_buf.h"
 #include "os/small_file.h"

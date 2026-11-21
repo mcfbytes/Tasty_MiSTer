@@ -3,7 +3,7 @@
 
 #include <optional>
 
-#include "app/recents_store.h"
+#include "app/recents/recents_store.h"
 #include "infra/opt_ref.h"
 #include "ui/browse_source.h"
 #include "ui/browser_host.h"
@@ -33,13 +33,14 @@ Transition CoresEntry::open(PageContext& ctx, bool recents_first) {
     BrowserSession::Request r;
     r.extensions = "RBFMRAMGL";
     r.scan.cores_only = true;
-    const app::RecentsStore::ListId cores_list = app::RecentsStore::ListId::cores();
+    const app::recents::RecentsStore::ListId
+        cores_list = app::recents::RecentsStore::ListId::cores();
     r.recents = cores_list;
     r.recents_first = recents_first;
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&core_pick_));
     if (recents_first) {
 
-        if (!recents_ || recents_->load(app::RecentsStore::kNoCore, cores_list).empty()) {
+        if (!recents_ || recents_->load(app::recents::RecentsStore::kNoCore, cores_list).empty()) {
             refusals_.add();
             return Transition{};
         }

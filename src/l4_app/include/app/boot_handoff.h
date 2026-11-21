@@ -10,6 +10,7 @@
 #include "app/load_request.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {

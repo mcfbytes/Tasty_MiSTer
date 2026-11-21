@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "app/board_ops.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 
 namespace mister::app {

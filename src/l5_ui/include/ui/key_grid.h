@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "ui/key_grid_layer.h"
 #include "ui/text_entry_kind.h"

@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "app/link_tx_channel.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

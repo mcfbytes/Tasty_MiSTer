@@ -2,6 +2,7 @@
 #include "ui/fb_terminal_host.h"
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::ui {
 

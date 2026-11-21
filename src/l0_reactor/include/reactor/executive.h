@@ -12,18 +12,20 @@
 
 #include "infra/error.h"
 #include "infra/indexed_array.h"
-#include "infra/log_lane.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/rt_latency.h"
-#include "infra/rt_stats.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/rt_stats.h"
+#include "infra/xthread/telemetry.h"
 #include "infra/unique_fd.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "reactor/core_state.h"
+#include "reactor/deadline_miss_sink.h"
 #include "reactor/round_timer.h"
 #include "reactor/service_slot.h"
 #include "reactor/tick_deadline.h"
 #include "reactor/tick_no.h"
+#include "reactor/types.h"
 #include "reactor/link_decoder_decl.h"
 #include "infra/seat.h"
 
@@ -38,7 +40,7 @@ public:
     struct Wiring {
         infra::OptRef<RoundTimer> round_timer{};
 
-        std::optional<xthread::LogLane::Producer> log_lane{};
+        infra::OptRef<IDeadlineMissSink> miss_log{};
     };
 
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats, const Wiring& wiring);
@@ -76,13 +78,13 @@ public:
 
     std::size_t borrowed_high_water() const noexcept { return borrowed_count_; }
 
-    [[nodiscard]] const xthread::RtLatency& latency() const noexcept { return latency_; }
+    [[nodiscard]] const infra::RtLatency& latency() const noexcept { return latency_; }
 
     std::size_t service_count() const noexcept { return service_count_; }
 
-    void service_on_caller(std::int64_t now_ns) noexcept;
+    void service_on_caller() noexcept;
 
-    [[nodiscard]] bool run_entered() const noexcept { return entered_.generation() != 0u; }
+    [[nodiscard]] bool run_entered() const noexcept { return entered_.generation().held(); }
 
     [[nodiscard]] std::uint32_t caller_pass_refusals() const noexcept {
         return caller_pass_refusals_;
@@ -104,7 +106,7 @@ private:
 
     Executive(xthread::RtStats& stats, const Wiring& wiring)
         : stats_(stats),
-          log_lane_(wiring.log_lane),
+          miss_log_(wiring.miss_log),
           round_timer_(wiring.round_timer) {}
 
     [[nodiscard]] ServiceSlot live_end() const noexcept {
@@ -112,11 +114,11 @@ private:
         return end.value_or(ServiceSlot{});
     }
 
-    void service_round(bool swept, std::int64_t wake_ns);
-    void run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment seg);
+    void service_round(bool swept);
+    void run_service(ServiceSlot row, RoundSegment seg);
 
     xthread::RtStats& stats_;
-    xthread::RtLatency latency_{};
+    infra::RtLatency latency_{};
     UniqueFd epfd_;
     xthread::WakeFlag wake_;
 
@@ -137,13 +139,13 @@ private:
     TickNo tick_count_{};
     TickDeadline tick_ = TickDeadline::held();
     bool tick_held_ = false;
-    std::optional<xthread::LogLane::Producer> log_lane_;
+    infra::OptRef<IDeadlineMissSink> miss_log_;
     infra::OptRef<RoundTimer> round_timer_;
     bool bound_in_round_ = false;
 
     bool round_claimed_ = false;
     bool swept_ = false;
-    std::int64_t t_wake_ = 0;
+    MonoInstant t_wake_{};
     static constexpr int kMaxEvents = 16;
     epoll_event evs_[kMaxEvents] = {};
     int n_ready_ = 0;

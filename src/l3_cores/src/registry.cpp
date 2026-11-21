@@ -2,6 +2,7 @@
 #include "cores/registry.h"
 
 #include <array>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -9,10 +10,11 @@
 #include "cores/core_window_grant.h"
 #include "cores/generic_core.h"
 #include "cores/manifests/megadrive.h"
+#include "cores/manifests/menu.h"
 #include "cores/manifests/psx.h"
 #include "cores/manifests/snes.h"
-#include "cores/arcade_core.h"
-#include "cores/arcade_manifest_role.h"
+#include "cores/mra/arcade_core.h"
+#include "cores/mra/arcade_manifest_role.h"
 #include "cores/manifests/cdi.h"
 #include "cores/manifests/electron.h"
 #include "cores/manifests/megacd.h"
@@ -26,12 +28,13 @@
 #include "cores/manifests/x86.h"
 #include "hal/board_profile.h"
 #include "infra/ascii.h"
+#include "infra/indexed_array.h"
 
 namespace mister::cores {
 namespace {
 
 constexpr auto kCoreTable = std::to_array<CoreFactory>({
-    {.profile = kMenuProfile, .make = &make_generic},
+    {.profile = manifests::kMenu, .make = &make_generic},
     {.profile = manifests::kMegaCd,
      .make = &manifests::make_megacd,
      .make_ladder = &manifests::make_megacd_ladder},
@@ -45,10 +48,12 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .make = &manifests::make_snes,
      .make_loader = &manifests::make_snes_loader,
      .derives_content = true,
-     .make_companion = &manifests::make_msu_companion},
+     .make_companion = &manifests::make_msu_companion,
+     .mailbox_servant = manifests::kMsuServant},
     {.profile = manifests::kSgb,
      .make = &manifests::make_sgb,
-     .make_companion = &manifests::make_msu_companion},
+     .make_companion = &manifests::make_msu_companion,
+     .mailbox_servant = manifests::kMsuServant},
     {.profile = manifests::kElectron,
      .make = &manifests::make_electron,
      .make_loader = &manifests::make_uef_loader,
@@ -56,7 +61,8 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
     {.profile = manifests::kAtariSt,
      .make = &manifests::make_st,
      .make_ladder = &manifests::make_st_ladder,
-     .make_loader = &manifests::make_st_loader},
+     .make_loader = &manifests::make_st_loader,
+     .disk_servants = manifests::kAtariStDiskServants},
     {.profile = manifests::kThreeDo,
      .make = &manifests::make_threedo,
      .make_ladder = &manifests::make_threedo_ladder},
@@ -85,14 +91,14 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .make = &manifests::make_cdi,
      .make_ladder = &manifests::make_cdi_ladder},
 
-    {.profile = kArcadeProfile,
-     .make = &make_arcade,
-     .manifest_doc = infra::OptRef<const IManifestDocRole>{kMraRole}},
+    {.profile = mra::kArcadeProfile,
+     .make = &mra::make_arcade,
+     .manifest_doc = infra::OptRef<const IManifestDocRole>{mra::kMraRole}},
 });
 
 consteval bool channel_rows_carry_a_store() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.profile.saves_by_channel != (f.make_save_store != nullptr))
+        if (f.profile.saves_by_channel != f.saves_by_channel())
             return false;
     return true;
 }
@@ -100,6 +106,78 @@ consteval bool channel_rows_carry_a_store() {
 static_assert(
     channel_rows_carry_a_store(),
     "a saves_by_channel row needs make_save_store, and only such a row has one"
+);
+
+consteval bool disk_rows_name_their_servants() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.profile.grants.has(Grant::Disk) != f.serves_disks())
+            return false;
+        if (f.serves_disks() && f.profile.disk_formats.empty())
+            return false;
+        for (std::size_t i = 0; i < f.disk_servants.size(); ++i) {
+            const DiskServantRow& r = f.disk_servants[i];
+            if (r.protocol == proto::DiskProtocol::None || r.make == nullptr)
+                return false;
+            for (std::size_t j = i + 1; j < f.disk_servants.size(); ++j)
+                if (f.disk_servants[j].protocol == r.protocol)
+                    return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    disk_rows_name_their_servants(),
+    "a row grants Disk exactly when it declares disk servants: each names a protocol "
+    "once with its factory, and the row declares the disk formats the servant opens"
+);
+
+consteval bool one_disk_servant_is_declared() {
+    bool declared = false;
+    for (const CoreFactory& f : kCoreTable) {
+        if (!f.serves_disks())
+            continue;
+        if (declared || f.disk_servants.size() != 1)
+            return false;
+        declared = true;
+    }
+    return declared;
+}
+
+static_assert(
+    one_disk_servant_is_declared(),
+    "make_disk_servant builds the one declared servant for the process's life: a "
+    "second servant row needs the relay to take its servant per load first"
+);
+
+consteval bool in_servant_set(ServantId id) {
+    const infra::IndexedArray<bool, ServantId::kCount, ServantId> ids{};
+    return ids.find(id).has_value();
+}
+
+consteval bool mailbox_rows_name_their_servants() {
+    for (std::size_t i = 0; i < kCoreTable.size(); ++i) {
+        const CoreFactory& f = kCoreTable[i];
+        const MailboxServantRow& s = f.mailbox_servant;
+        if (f.profile.grants.has(Grant::Mailbox) != s.declared())
+            return false;
+        if (s.declared() == (s.id == ServantId::None) || !in_servant_set(s.id))
+            return false;
+        if (f.make_companion != nullptr && !s.declared())
+            return false;
+        for (std::size_t j = i + 1; j < kCoreTable.size(); ++j) {
+            const MailboxServantRow& o = kCoreTable[j].mailbox_servant;
+            if (s.declared() && o.id == s.id && o.make != s.make)
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    mailbox_rows_name_their_servants(),
+    "a row grants Mailbox exactly when it declares a mailbox servant under an id of "
+    "the set; a companion's row declares one; one id has one factory"
 );
 
 consteval bool kinds_are_the_rows() {
@@ -195,7 +273,7 @@ consteval bool no_row_defaults_to_a_disc() {
 static_assert(no_row_defaults_to_a_disc(), "no row's undeclared_role may be Disc");
 
 consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
-    return !p.is_front_end
+    return !p.host.front_end
         && p.services.empty()
         && p.slots.empty()
         && p.boot_assets.empty()
@@ -205,9 +283,9 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
         && !p.staging.staged
         && !p.suppresses_mgl
         && !p.suppress_reset_status_write
-        && !p.suppress_analog_followup
-        && !p.analog_reshape
-        && p.cue_browse_dir.empty()
+        && !p.host.suppress_analog_followup
+        && !p.host.analog_reshape
+        && p.host.cue_browse_dir.empty()
         && p.default_uart_baud == kDefaultUartBaud
         && p.disk_formats.empty()
         && p.option_rows.empty()
@@ -275,6 +353,35 @@ static_assert(
     && !manifests::kPsx.block_sector_floor.is_sector(1024)
 );
 static_assert(manifests::kCdi.block_sector_floor.is_sector(2568));
+
+consteval bool host_bit_rows_are_well_formed() {
+    for (const CoreFactory& f : kCoreTable) {
+        const std::span<const HostBitRow> rows = f.profile.host_bits;
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (!rows[i].bits.valid() || !rows[i].bits.fits_status())
+                return false;
+            for (std::size_t j = i + 1; j < rows.size(); ++j) {
+                if (rows[i].fact == rows[j].fact)
+                    return false;
+                const proto::BitField& a = rows[i].bits;
+                const proto::BitField& b = rows[j].bits;
+                const std::optional<proto::StatusBit> a_last = a.end();
+                const std::optional<proto::StatusBit> b_last = b.end();
+                if (!a_last || !b_last)
+                    return false;
+                if (a.start <= *b_last && b.start <= *a_last)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+static_assert(
+    host_bit_rows_are_well_formed(),
+    "a host_bits row is a valid field inside the status word, its fact declared once "
+    "per profile, overlapping no other row"
+);
 
 consteval bool staging_cores_declare_blank_save() {
     for (const CoreFactory& f : kCoreTable) {
@@ -392,7 +499,7 @@ static_assert(
 
 consteval bool front_end_and_hint_rows_start_nothing() {
     for (const CoreFactory& f : kCoreTable)
-        if ((f.profile.is_front_end || f.profile.name.empty())
+        if ((f.profile.host.front_end || f.profile.name.empty())
             && f.profile.start != StartRule::None)
             return false;
     return true;
@@ -402,6 +509,15 @@ static_assert(
     front_end_and_hint_rows_start_nothing(),
     "the front end and a hint-only row run their own start arm: StartRule::None"
 );
+
+consteval bool front_end_is_the_menu_kind() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.profile.host.front_end != (f.profile.kind == CoreKind::Menu))
+            return false;
+    return !kGenericProfile.host.front_end;
+}
+
+static_assert(front_end_is_the_menu_kind(), "HostPolicy::front_end is set on the Menu row alone");
 
 consteval bool start_ladder_rows_take_assets() {
     for (const CoreFactory& f : kCoreTable)
@@ -465,7 +581,7 @@ consteval bool staging_rows_declare_a_ladder() {
     for (const CoreFactory& f : kCoreTable) {
         const bool staged = f.profile.staging.staged;
         const bool laddered = staged || ladder_rows(f.profile.slots) != 0;
-        if (laddered != (f.make_ladder != nullptr))
+        if (laddered != f.has_ladder())
             return false;
         if (f.profile.reset.ladders != (!staged && laddered))
             return false;
@@ -512,7 +628,7 @@ static_assert(
 
 consteval bool loader_rows_stream() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.make_loader != nullptr && f.profile.no_stream_role)
+        if (f.has_loader() && !f.streams_files())
             return false;
     }
     return true;
@@ -525,7 +641,7 @@ static_assert(
 
 consteval bool derived_rows_have_a_loader() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.derives_content && f.make_loader == nullptr)
+        if (f.derives_content && !f.has_loader())
             return false;
     }
     return true;
@@ -535,7 +651,7 @@ static_assert(derived_rows_have_a_loader(), "derives_content implies make_loader
 
 consteval bool loader_rows_keep_their_loader() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.make_loader == nullptr)
+        if (!f.has_loader())
             continue;
         const infra::OptRef<const CoreFactory> row{f};
         if (loader_for(row, hal::FabricAddr{}) != f.make_loader

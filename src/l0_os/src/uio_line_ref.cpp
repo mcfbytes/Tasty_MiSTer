@@ -6,6 +6,8 @@
 #include <cerrno>
 #include <cstdint>
 
+#include "infra/prelude.h"
+
 namespace mister::os {
 
 Ex<std::uint32_t> UioLineRef::consume() const {

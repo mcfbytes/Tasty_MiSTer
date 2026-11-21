@@ -10,11 +10,12 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "app/progress_image_sink.h"
+#include "infra/prelude.h"
 #include "reactor/executive.h"
 #include "hal/fpga_memory.h"
 #include "proto/image_sink.h"
-#include "proto/spi_fio_queue.h"
-#include "proto/spi_image_sink.h"
+#include "proto/link/spi_fio_queue.h"
+#include "proto/link/spi_image_sink.h"
 
 namespace mister::cores {
 class Core;
@@ -23,7 +24,9 @@ struct CoreProfile;
 
 namespace mister::app {
 
+namespace pcm {
 class PcmRingFeeder;
+}
 
 class LinkBinder {
     TASTY_SEAT_RESIDENT(RT);
@@ -33,18 +36,18 @@ public:
         reactor::Executive& exec;
         reactor::CoreState& state;
 
-        infra::OptRef<PcmRingFeeder> feeder{};
+        infra::OptRef<pcm::PcmRingFeeder> feeder{};
 
         infra::OptRef<proto::IFioTenant> tenant{};
     };
 
     LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept;
 
-    void service_on_caller(std::int64_t now_ns) noexcept { exec_.service_on_caller(now_ns); }
+    void service_on_caller() noexcept { exec_.service_on_caller(); }
 
     [[nodiscard]] proto::IImageSink& grant_bulk() noexcept;
 
-    [[nodiscard]] proto::SpiFioQueue& fio_queue() noexcept { return fio_queue_; }
+    [[nodiscard]] proto::link::SpiFioQueue& fio_queue() noexcept { return fio_queue_; }
 
     [[nodiscard]] ProgressImageSink& file_progress() noexcept { return progress_sink_; }
 
@@ -69,10 +72,10 @@ public:
     [[nodiscard]] std::uint32_t fed_refusals() const noexcept { return fed_refusals_; }
 
 private:
-    proto::SpiFioQueue fio_queue_;
-    proto::SpiImageSink spi_sink_;
+    proto::link::SpiFioQueue fio_queue_;
+    proto::link::SpiImageSink spi_sink_;
     ProgressImageSink progress_sink_{spi_sink_};
-    infra::OptRef<PcmRingFeeder> feeder_{};
+    infra::OptRef<pcm::PcmRingFeeder> feeder_{};
     bool feeder_granted_ = false;
     std::uint32_t fed_refusals_ = 0;
     reactor::Executive& exec_;

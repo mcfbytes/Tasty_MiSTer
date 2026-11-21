@@ -27,18 +27,4 @@ inline constexpr CoreProfile kGenericProfile{
     .undeclared_role = SlotRole::Save,
 };
 
-inline constexpr CoreProfile kMenuProfile{
-    .kind = CoreKind::Menu,
-    .name = "MENU",
-    .rbf = "",
-    .services = {},
-    .slots = {},
-    .boot_assets = {},
-    .start = StartRule::None,
-    .signatures = {},
-    .is_front_end = true,
-    .tasty_playable = true,
-    .undeclared_start_mount = StartMount::Unmodelled,
-};
-
 }

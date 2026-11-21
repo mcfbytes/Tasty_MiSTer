@@ -7,9 +7,10 @@
 #include <memory>
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "ui/page.h"
 
@@ -65,7 +66,7 @@ public:
 
     void render(OsdRenderer& out) const override;
 
-    bool describe(app::PageDescription& out) const override;
+    bool describe(app::hd::PageDescription& out) const override;
 
     Transition handle(const UiEvent&) override {
         TASTY_SEAT_BODY(ProgressPage);

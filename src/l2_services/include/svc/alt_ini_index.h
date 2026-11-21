@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "svc/dir_entry.h"
 #include "svc/types.h"
 

@@ -8,6 +8,7 @@
 
 #include "infra/parse_int.h"
 
+#include "infra/prelude.h"
 #include "proc_text.h"
 
 namespace mister::os {

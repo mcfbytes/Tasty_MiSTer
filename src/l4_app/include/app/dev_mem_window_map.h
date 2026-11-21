@@ -2,6 +2,7 @@
 #pragma once
 
 #include "app/load_window_map.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "infra/seat_owner_main.h"

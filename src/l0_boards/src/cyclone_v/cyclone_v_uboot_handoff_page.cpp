@@ -5,6 +5,7 @@
 
 #include "infra/byte_view.h"
 #include "infra/endian.h"
+#include "infra/prelude.h"
 
 namespace mister::boards::cyclone_v {
 

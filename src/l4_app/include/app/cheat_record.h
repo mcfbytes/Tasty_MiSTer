@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

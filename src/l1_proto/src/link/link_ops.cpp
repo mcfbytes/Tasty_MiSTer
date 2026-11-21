@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "proto/link/link_ops.h"
+
+#include "infra/prelude.h"
+
+namespace mister::proto::link {
+
+Ex<SaveRequestWord> LinkOps::read_save_request() {
+    auto r = link_.command(UioOp::ChkUpload);
+    if (!r)
+        return std::unexpected(r.error());
+    link_.close();
+    return SaveRequestWord::of(*r);
+}
+
+}

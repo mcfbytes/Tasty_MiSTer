@@ -9,6 +9,7 @@
 
 #include "infra/error.h"
 #include "hal/handoff_page.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

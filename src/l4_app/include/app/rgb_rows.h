@@ -10,6 +10,7 @@
 #include "app/picture_pixels.h"
 #include "app/picture_row.h"
 #include "app/row_bytes.h"
+#include "infra/span_cut.h"
 
 namespace mister::app {
 
@@ -36,7 +37,7 @@ struct RgbRows {
 
     template <class F>
     constexpr void each_row(RowBytes width, F&& f) const {
-        for_each_row(rows, [&](PictureRow y) { f(width.head(from_row(y))); });
+        for_each_row(rows, [&](PictureRow y) { f(infra::affine::first(from_row(y), width)); });
     }
 
     [[nodiscard]] constexpr bool covers(RowBytes row, PictureRows height) const noexcept {

@@ -7,7 +7,7 @@ namespace mister::hal {
 class ISpiTransport;
 }
 
-namespace mister::proto {
+namespace mister::proto::link {
 class CoreSession;
 }
 
@@ -18,7 +18,7 @@ class Core;
 
 struct CoreInitContext {
     hal::ISpiTransport& link;
-    proto::CoreSession& session;
+    proto::link::CoreSession& session;
     ICoreInitHost& host;
     infra::OptRef<Core> core{};
 };

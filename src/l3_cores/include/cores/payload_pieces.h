@@ -12,9 +12,10 @@
 #include "cores/ladder_host.h"
 #include "cores/wire_chunk.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/link_op.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
 #include "svc/file.h"
 
@@ -24,7 +25,7 @@ class PayloadPieces {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    static constexpr std::size_t kPieceWords = proto::tightest_load_budget_words();
+    static constexpr std::size_t kPieceWords = proto::link::tightest_load_budget_words();
 
     static constexpr std::size_t kPieceBytes = kPieceWords;
 

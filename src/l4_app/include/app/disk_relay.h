@@ -9,16 +9,18 @@
 
 #include "app/disk_slot.h"
 #include "app/path_text.h"
+#include "app/round_words.h"
 #include "cores/disk_port.h"
 #include "cores/disk_servant.h"
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
-#include "infra/polled.h"
-#include "infra/loan_channel.h"
+#include "infra/xthread/polled.h"
+#include "infra/xthread/loan_channel.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
-#include "proto/spi_fio_queue.h"
+#include "infra/xthread/wake_flag.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
 #include "svc/io_coworker.h"
 
@@ -32,8 +34,8 @@ public:
     using Job = Chan::Job;
     static constexpr std::uint8_t kUnits = 2;
 
-    static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kDiskActBytes / 2u;
-    static_assert(kMaxRoundWords <= proto::tightest_round_budget_words());
+    static constexpr proto::FioWordCount kMaxRoundWords{1u + proto::kDiskActBytes / 2u};
+    static_assert(kMaxRoundWords <= proto::link::tightest_round_budget_words());
 
     explicit DiskRelay(xthread::Polled, std::unique_ptr<cores::IDiskServant> servant) noexcept
         : io_{.servant = std::move(servant)},
@@ -51,7 +53,7 @@ public:
 
     void seal_boot_pump() noexcept { sealed_ = true; }
 
-    void service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept override;
+    void service_rt(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept override;
 
     [[nodiscard]] proto::FioWordCount take_round_words() noexcept;
     void order_bind(proto::DiskUnit unit, std::string_view path) noexcept override;
@@ -69,26 +71,31 @@ public:
     void pump_on_caller() noexcept;
 
     using Loan = Chan::Loan;
-    void on(const DiskSlot::Ask::Bind& a, const RelayStamp& h, Loan& l, proto::Link* link) noexcept;
+    void on(
+        const DiskSlot::Ask::Bind& a,
+        const RelayStamp& h,
+        Loan& l,
+        proto::link::Link* link
+    ) noexcept;
     void on(
         const DiskSlot::Ask::Command& a,
         const RelayStamp& h,
         Loan& l,
-        proto::Link* link
+        proto::link::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Resume& a,
         const RelayStamp& h,
         Loan& l,
-        proto::Link* link
+        proto::link::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Release& a,
         const RelayStamp& h,
         Loan& l,
-        proto::Link* link
+        proto::link::Link* link
     ) noexcept;
-    void misrouted(const DiskSlot::Ask& m, Loan& l, proto::Link* link) noexcept;
+    void misrouted(const DiskSlot::Ask& m, Loan& l, proto::link::Link* link) noexcept;
 
     void on(const DiskSlot::Ask::Bind& a, const RelayStamp& h, Job& job) noexcept;
     void on(const DiskSlot::Ask::Command& a, const RelayStamp& h, Job& job) noexcept;
@@ -141,12 +148,16 @@ private:
         void misrouted(const DiskSlot::Ask&) noexcept {}
     };
 
-    void land_(Chan::Loan&& l, proto::Link* link) noexcept;
-    [[nodiscard]] bool write_(proto::Link& link, const proto::DiskAct& a, DiskSlot& s) noexcept;
+    void land_(Chan::Loan&& l, proto::link::Link* link) noexcept;
+    [[nodiscard]] bool write_(
+        proto::link::Link& link,
+        const proto::DiskAct& a,
+        DiskSlot& s
+    ) noexcept;
 
     [[nodiscard]] bool send_orders_() noexcept;
-    void poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexcept;
-    void act_(const RelayStamp& h, Loan& l, proto::Link* link) noexcept;
+    void poll_(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept;
+    void act_(const RelayStamp& h, Loan& l, proto::link::Link* link) noexcept;
     void close_command_() noexcept;
 
     void begin_(const RelayStamp& h) noexcept;
@@ -158,7 +169,7 @@ private:
         bool release_owed = false;
         infra::IndexedArray<Order, kUnits, proto::DiskUnit> orders{};
 
-        proto::FioWordCount round_words{};
+        RoundWords round_words{};
         xthread::Counter polls{}, lent{}, declines{}, acts{}, stale{}, wire_faults{}, abandoned{};
     };
 

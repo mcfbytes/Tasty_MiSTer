@@ -7,8 +7,9 @@
 #include <string_view>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/cores_entry.h"
 #include "ui/hd_plan.h"
 #include "ui/recent_row.h"
@@ -32,20 +33,20 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
     RowCount pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
 
 private:
-    class BrowseRow final : public IHdRow {
+    class BrowseRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit BrowseRow(HdHomePlan& plan) noexcept : plan_(plan) {}
 
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdHomePlan& plan_;
@@ -53,7 +54,7 @@ private:
 
     PageContext& ctx_;
     CoresEntry cores_;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 
     RecentLaunch launch_;
     std::vector<RecentRow> played_;
@@ -64,7 +65,7 @@ private:
     HdGatedRow all_gate_{all_row_, has_any_};
     HdSeparatorRow separator_;
     HdPushRow settings_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

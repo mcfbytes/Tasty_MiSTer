@@ -8,6 +8,7 @@
 #include "cores/core_init_host.h"
 #include "cores/core_init_step.h"
 #include "cores/init_step.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

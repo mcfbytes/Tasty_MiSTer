@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "hal/core_signals.h"
 #include "proto/reset_fence.h"
 
@@ -15,7 +16,7 @@ public:
         : inner_(inner),
           fence_(fence) {}
 
-    [[nodiscard]] Ex<hal::CoreIdentity> identify() override {
+    [[nodiscard]] Ex<hal::CoreTypeByte> identify() override {
         TASTY_SEAT_BODY(FencedCoreSignals);
         return inner_.identify();
     }

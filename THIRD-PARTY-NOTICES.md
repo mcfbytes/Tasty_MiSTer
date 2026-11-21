@@ -20,8 +20,8 @@ own code is GPL-3.0-or-later (`LICENSE`).
 | LZMA SDK (inside libchdr) | 26.02 | public domain | https://www.7-zip.org/sdk.html |
 | Zstandard decoder (inside libchdr) | 1.5.7 | BSD-3-Clause | `licenses/zstd-LICENSE.txt`; https://github.com/facebook/zstd |
 
-`src/tools/build-static-deps.py` fetches every C library and the fonts by URL and SHA-256, and
-`src/tools/build-static-slint.sh` builds Slint; both are how the release is built.
+`src/tools/build-static-deps.py` fetches every C library by URL and SHA-256, and
+`src/tools/build-slint-sdk.sh` builds Slint; both are how the release is built. The two Noto Sans faces are in the tree.
 
 ## Slint
 
@@ -30,13 +30,13 @@ under (`licenses/Slint-LICENSE.md`). The GPL's text is this repository's `LICENS
 links a modified Slint. Its complete corresponding source is:
 
 - Slint 1.19.0's release source, https://github.com/slint-ui/slint/archive/v1.19.0/slint-1.19.0.tar.gz
-  (SHA-256 in `src/tools/build-static-slint.sh`);
-- patches 0001-0003, from the MiSTer Linux image's Slint package:
+  (SHA-256 in `src/tools/build-slint-sdk.sh`);
+- patch 0001, from the MiSTer Linux image's Slint package:
   https://github.com/mcfbytes/Buildroot_MiSTer/tree/eae07567a1349037fed4f723bec145c55ca9025a/package/slint
-  (an ARGB8888 software-renderer target, a caller-driven animation clock, fontconfig loaded at run time);
+  (fontconfig loaded at run time);
 - patches 0004-0005 in `src/tools/slint/` (fontconfig left out entirely, and the complex-script
   line-breaking dictionaries left out);
-- the build itself, `src/tools/build-static-slint.sh`, applying them in that order.
+- the build itself, `src/tools/build-slint-sdk.sh`, applying them in that order.
 
 The C++ for the `.slint` files is generated at build time by the Slint 1.19.0 release's `slint-compiler` (fetched
 by SHA-256 in the same script); the generated code is part of this repository's build, not of Slint.
@@ -63,12 +63,12 @@ LGPL-2.1 section 6 lets a work that uses the library be linked with it staticall
 can relink the work against a modified library. This repository is that provision: it holds the
 program's complete source, and the scripts that fetch every library above by URL and SHA-256 and
 build the binary (`CMakePresets.json` preset `armhf-static`,
-`src/tools/build-static-deps.py`, `src/tools/build-static-slint.sh`, `.github/workflows/ci.yml`).
+`src/tools/build-static-deps.py`, `src/tools/build-slint-sdk.sh`, `.github/workflows/ci.yml`).
 To relink against a modified glibc, build that glibc into the toolchain (or replace its `libc.a`),
 point `TASTY_TOOLCHAIN_ROOT` at it, and run the same steps.
 
 ## Noto Sans
 
 The binary embeds NotoSans-Regular.ttf and NotoSans-Bold.ttf from the Noto Sans 2.015 release
-(https://github.com/notofonts/latin-greek-cyrillic), unmodified, under the SIL Open Font License 1.1
+(https://github.com/notofonts/latin-greek-cyrillic), unmodified, kept in `src/l4_app/fonts/noto-sans/`, under the SIL Open Font License 1.1
 (`licenses/NotoSans-OFL.txt`).

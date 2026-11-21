@@ -3,6 +3,8 @@
 
 #include <cerrno>
 
+#include "infra/prelude.h"
+
 namespace mister::svc {
 
 FileSize RawDiskImage::size() const noexcept {
@@ -15,12 +17,12 @@ bool RawDiskImage::writable() const noexcept {
     return writable_;
 }
 
-Ex<std::size_t> RawDiskImage::read_at(proto::FileOffset at, std::span<std::byte> dst) {
+Ex<infra::ByteCount> RawDiskImage::read_at(proto::FileOffset at, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(RawDiskImage);
     return file_->read_at(at, dst);
 }
 
-Ex<std::size_t> RawDiskImage::write_at(proto::FileOffset at, std::span<const std::byte> src) {
+Ex<infra::ByteCount> RawDiskImage::write_at(proto::FileOffset at, std::span<const std::byte> src) {
     TASTY_SEAT_BODY(RawDiskImage);
     if (!writable_) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});

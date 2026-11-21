@@ -5,10 +5,11 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/prelude.h"
 #include "proto/info_window.h"
 #include "proto/types.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::proto {
 
@@ -31,7 +32,7 @@ public:
 
     void publish(OsdRow r) noexcept;
 
-    std::uint32_t seq(OsdRow r) const noexcept;
+    infra::CellGen seq(OsdRow r) const noexcept;
 
     [[nodiscard]] std::uint32_t sample(OsdRow r, Row& dst) const noexcept;
 

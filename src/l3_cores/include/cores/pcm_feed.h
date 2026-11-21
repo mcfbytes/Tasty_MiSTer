@@ -6,6 +6,7 @@
 
 #include "cores/pcm_feed_state.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/types.h"
 
 namespace mister::cores {

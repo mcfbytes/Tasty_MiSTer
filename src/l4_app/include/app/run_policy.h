@@ -6,6 +6,7 @@
 #include "app/mount_queue.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

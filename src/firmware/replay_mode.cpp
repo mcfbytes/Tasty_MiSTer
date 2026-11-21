@@ -19,6 +19,7 @@
 #include "hal/region_id.h"
 #include "hal/thread_map.h"
 #include "infra/persist.h"
+#include "infra/prelude.h"
 #include "os/child_process.h"
 #include "os/process_id.h"
 #include "os/process_title.h"
@@ -44,12 +45,6 @@ std::optional<hal::ApertureRegion> framebuffer_region(
 }
 
 inline constexpr std::size_t kFatalStackBytes = 32 * 1024;
-#if !defined(__GLIBC__)
-static_assert(
-    kFatalStackBytes >= SIGSTKSZ,
-    "the fatal handler's alternate stack must hold one signal frame"
-);
-#endif
 alignas(16) unsigned char g_fatal_stack[kFatalStackBytes] TASTY_PERSIST(proc, tasty_fatal_stack){};
 
 class TastyVoice final : public IReportVoice {
@@ -312,10 +307,10 @@ ReplayMode::Owner::Owner(
           run
       } {}
 
-bool ReplayMode::FeederReplay::take_play(const app::ReplayFeeder::Play& play) noexcept {
+bool ReplayMode::FeederReplay::take_play(const app::replay::ReplayFeeder::Play& play) noexcept {
     TASTY_SEAT_BODY(FeederReplay);
     (void)f.take_play(play);
-    return f.last_refusal() == app::ReplayFeeder::Refusal::None;
+    return f.last_refusal() == app::replay::ReplayFeeder::Refusal::None;
 }
 
 void ReplayMode::FeederReplay::take_stop() noexcept {
@@ -330,13 +325,13 @@ app::MovieFrameCount ReplayMode::FeederReplay::movie_frames() const noexcept {
 
 bool ReplayMode::FeederReplay::active() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    return f.stage() != app::ReplayFeeder::Stage::Idle;
+    return f.stage() != app::replay::ReplayFeeder::Stage::Idle;
 }
 
 std::optional<ReplayRefusal> ReplayMode::FeederReplay::refusal() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    const app::ReplayFeeder::Refusal why = f.last_refusal();
-    if (why == app::ReplayFeeder::Refusal::None)
+    const app::replay::ReplayFeeder::Refusal why = f.last_refusal();
+    if (why == app::replay::ReplayFeeder::Refusal::None)
         return std::nullopt;
     ReplayRefusal r{
         .why = why,
@@ -344,9 +339,9 @@ std::optional<ReplayRefusal> ReplayMode::FeederReplay::refusal() const noexcept 
         .setting_offered = f.last_setting_offered(),
         .path = f.refusal_path()
     };
-    if (why == app::ReplayFeeder::Refusal::Movie) {
+    if (why == app::replay::ReplayFeeder::Refusal::Movie) {
 
-        r.movie = cores::movie_refusal_of(
+        r.movie = cores::tas::movie_refusal_of(
             Error{Errc::bad_format, infra::kNoSite, f.last_refusal_detail()}
         );
     }
@@ -360,7 +355,7 @@ IReplayPort::SettingNo ReplayMode::FeederReplay::settings_set() const noexcept {
 
 std::string ReplayMode::FeederReplay::setting_line(IReplayPort::SettingNo i) const {
     TASTY_SEAT_BODY(FeederReplay);
-    const app::ReplayFeeder::SetSetting* s = i.row_in(f.settings_set());
+    const app::replay::ReplayFeeder::SetSetting* s = i.row_in(f.settings_set());
     if (s == nullptr)
         return {};
     return std::string(s->name)

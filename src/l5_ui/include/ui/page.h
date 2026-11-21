@@ -6,12 +6,12 @@
 #include <optional>
 
 #include "app/info_plane.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "cores/progress.h"
 #include "proto/info_window.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "svc/types.h"
+#include "infra/tally.h"
 #include "ui/connect_demand.h"
 #include "ui/page_facts.h"
 #include "ui/page_id.h"
@@ -24,7 +24,7 @@ namespace mister::proto {
 class ItemTable;
 }
 
-namespace mister::app {
+namespace mister::app::hd {
 struct PageDescription;
 enum class RowTier : std::uint8_t;
 }
@@ -75,7 +75,7 @@ public:
 
     virtual void render(OsdRenderer& out) const {
         TASTY_SEAT_BODY(Page);
-        app::PageDescription page{};
+        app::hd::PageDescription page{};
         std::array<PageRow, kMaxPageRows> rows{};
         PageWalk w{.page = page, .rows = rows};
         if (!walk(w))
@@ -84,9 +84,9 @@ public:
     }
 
     template <class Walker>
-    [[nodiscard]] static bool describe_walk(const Walker& source, app::PageDescription& out) {
+    [[nodiscard]] static bool describe_walk(const Walker& source, app::hd::PageDescription& out) {
         TASTY_SEAT_BODY(Page);
-        app::PageDescription page{};
+        app::hd::PageDescription page{};
         page.first = out.first;
         std::array<PageRow, kMaxPageRows> rows{};
         PageWalk w{.page = page, .rows = rows};
@@ -97,12 +97,12 @@ public:
         return true;
     }
 
-    virtual bool describe(app::PageDescription& out) const {
+    virtual bool describe(app::hd::PageDescription& out) const {
         TASTY_SEAT_BODY(Page);
         return describe_walk(*this, out);
     }
 
-    virtual bool describe_hub(app::PageDescription&) const { return false; }
+    virtual bool describe_hub(app::hd::PageDescription&) const { return false; }
 
     virtual Transition handle(const UiEvent&) = 0;
 
@@ -133,7 +133,7 @@ public:
     virtual RowIndex selection() const { return RowIndex{}; }
 
     struct TierRun {
-        app::RowTier tier;
+        app::hd::RowTier tier;
         MenuMask rows;
     };
 
@@ -154,7 +154,7 @@ public:
 
     virtual bool back_is_idle() const { return false; }
 
-    virtual svc::Tally refusals() const noexcept { return svc::Tally{}; }
+    virtual infra::Tally refusals() const noexcept { return infra::Tally{}; }
 
 protected:
     Page() = default;

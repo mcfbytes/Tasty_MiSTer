@@ -9,34 +9,21 @@
 
 #include "app/link_op_facts.h"
 #include "app/types.h"
+#include "hal/types.h"
 #include "infra/message_sum.h"
 #include "proto/uio_opcodes.h"
 #include "proto/user_io/declared_select.h"
-#include "svc/scaler_slot_mode.h"
-#include "svc/scaling_words.h"
+#include "svc/video/scaler_slot_mode.h"
+#include "svc/video/scaling_words.h"
+#include "svc/video/shadow_mask_word.h"
 #include "svc/types.h"
-#include "svc/video_wire_emit.h"
+#include "svc/video/video_wire_emit.h"
 
 namespace mister::app {
 
 inline constexpr std::size_t kArCustomWords = 4;
-inline constexpr unsigned kArCustomWordBits = 16;
 
-using ArCustomWords = std::array<std::uint16_t, kArCustomWords>;
-
-[[nodiscard]] constexpr std::uint64_t pack_ar_custom(const ArCustomWords& w) noexcept {
-    std::uint64_t bits = 0;
-    for (std::size_t i = 0; i < kArCustomWords; ++i)
-        bits |= std::uint64_t{w[i]} << (i * kArCustomWordBits);
-    return bits;
-}
-
-[[nodiscard]] constexpr ArCustomWords unpack_ar_custom(std::uint64_t bits) noexcept {
-    ArCustomWords w{};
-    for (std::size_t i = 0; i < kArCustomWords; ++i)
-        w[i] = static_cast<std::uint16_t>(bits >> (i * kArCustomWordBits));
-    return w;
-}
+using ArCustomWords = std::array<hal::SpiWord, kArCustomWords>;
 
 inline constexpr std::size_t kCoeffChunkWords = 64;
 
@@ -46,7 +33,7 @@ enum class FbufWindow : std::uint8_t { Fbuf, HdmiProbe, GammaProbe, ArCustom, kC
 
 enum class TailWindow : std::uint8_t { Probe, Flush, Push, AudVol, ButSw, kCount };
 
-enum class FrameWindow : std::uint8_t { FltNum, ShadowCap, kCount };
+enum class FrameWindow : std::uint8_t { FltNum, ShadowCap, ModeEmitted, kCount };
 
 struct StagedFrame {
     enum class Kind : std::uint8_t {
@@ -67,7 +54,7 @@ struct StagedFrame {
         proto::UioOp opcode{};
         FrameWordCount count{};
         std::byte pad_{};
-        std::array<std::uint16_t, svc::kVideoWireWords> w{};
+        std::array<hal::SpiWord, svc::video::kVideoWireWords> w{};
     };
 
     struct Mode {
@@ -87,19 +74,19 @@ struct StagedFrame {
 
     struct FilterMode {
         static constexpr Kind kKind = Kind::FilterMode;
-        svc::ScalerSlotMode mode{};
+        svc::video::ScalerSlotMode mode{};
     };
 
     struct CoeffChunk {
         static constexpr Kind kKind = Kind::CoeffChunk;
         FrameWordCount count{};
         std::byte pad_{};
-        std::array<std::uint16_t, kCoeffChunkWords> w{};
+        std::array<hal::SpiWord, kCoeffChunkWords> w{};
     };
 
     struct ShadowMask {
         static constexpr Kind kKind = Kind::ShadowMask;
-        svc::ShadowMaskWord flag{};
+        svc::video::ShadowMaskWord flag{};
     };
 
     struct AudioTail {
@@ -110,12 +97,12 @@ struct StagedFrame {
         proto::user_io::DeclaredSelect<proto::user_io::SelectRow::AudvolByFilter, svc::AudvolByte>
             audvol{};
         svc::FilterWordCount count{};
-        std::array<std::uint16_t, svc::kFilterWireWords - 1> words{};
+        std::array<hal::SpiWord, svc::kFilterWireWords - 1> words{};
     };
 
     struct ScalingPair {
         static constexpr Kind kKind = Kind::ScalingPair;
-        svc::ScalingWords words{};
+        svc::video::ScalingWords words{};
     };
 
     struct AudVol {
@@ -129,7 +116,7 @@ struct StagedFrame {
         proto::user_io::DeclaredSelect<proto::user_io::SelectRow::AfilterLead, svc::CoreVolume>
             lead{};
         svc::FilterWordCount count{};
-        std::array<std::uint16_t, svc::kFilterWireWords - 1> words{};
+        std::array<hal::SpiWord, svc::kFilterWireWords - 1> words{};
     };
 
     using Alternatives = std::tuple<

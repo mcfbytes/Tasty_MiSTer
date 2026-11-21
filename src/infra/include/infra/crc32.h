@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <span>
 
-namespace mister {
+namespace mister::infra {
 
 inline constexpr std::uint64_t kHeaderSkipMask = 0x3FFu;
 
@@ -30,6 +30,8 @@ inline constexpr std::array<std::uint32_t, kCrcTableEntries> kCrc32Table = [] {
 }();
 
 }
+
+using detail::kReflectedPolynomial;
 
 [[nodiscard]] constexpr std::uint32_t crc32_update(
     std::uint32_t crc,

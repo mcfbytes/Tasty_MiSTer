@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "cores/movie_refusal.h"
+#include "cores/tas/movie_refusal.h"
+#include "infra/prelude.h"
 #include "tasty_cli_refusal.h"
 #include "tasty_say.h"
 
@@ -22,13 +23,13 @@ constexpr char
 }
 
 void report_unhashable(
-    const cores::MovieCodec& codec,
+    const cores::tas::MovieCodec& codec,
     std::string_view rom,
     const Error& e
 ) noexcept {
-    using CR = cores::MovieRefusal;
+    using CR = cores::tas::MovieRefusal;
     const int n = static_cast<int>(rom.size());
-    const std::optional<CR> why = cores::movie_refusal_of(e);
+    const std::optional<CR> why = cores::tas::movie_refusal_of(e);
     const std::string_view images = codec.core().disc_images();
     if (!why)
         std::fprintf(stderr, "tasty: cannot read rom %.*s\n", n, rom.data());
@@ -47,8 +48,8 @@ void report_unhashable(
         std::fprintf(stderr, "tasty: cannot hash rom %.*s\n", n, rom.data());
 }
 
-const char* tasty_movie_refusal_sentence(cores::MovieRefusal why) noexcept {
-    using R = cores::MovieRefusal;
+const char* tasty_movie_refusal_sentence(cores::tas::MovieRefusal why) noexcept {
+    using R = cores::tas::MovieRefusal;
     switch (why) {
         case R::NotAMovie:
             return "this file is not a movie tasty can read; check that it is the movie itself "
@@ -143,8 +144,8 @@ const char* tasty_refusal_sentence(
             )
                 .data();
         case W::Movie: {
-            const cores::MovieRefusal why = r.movie.value_or(cores::MovieRefusal::None);
-            if (why == cores::MovieRefusal::Savestate) {
+            const cores::tas::MovieRefusal why = r.movie.value_or(cores::tas::MovieRefusal::None);
+            if (why == cores::tas::MovieRefusal::Savestate) {
                 return tasty_render(
                            out,
                            "replay refused: {} starts from a savestate or saved game, not "

@@ -13,6 +13,7 @@
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "infra/prelude.h"
 #include "hal/boards_table.h"
 #include "hal/program_geometry.h"
 

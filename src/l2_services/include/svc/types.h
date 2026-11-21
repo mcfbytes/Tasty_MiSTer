@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <span>
@@ -21,18 +22,21 @@
 #include "infra/endian.h"
 #include "infra/error.h"
 #include "infra/hex_text.h"
+#include "infra/index_set.h"
 #include "infra/json_out.h"
+#include "infra/niche.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/serial.h"
 #include "proto/mouse_delta.h"
 #include "proto/types.h"
 
-namespace mister::xthread {
+namespace mister::infra {
 struct ByteOffset;
-struct SlotStride;
 }
 
-namespace mister::proto {
-class Link;
+namespace mister::infra::xthread {
+struct SlotStride;
 }
 
 namespace mister::os {
@@ -72,7 +76,7 @@ inline constexpr std::array<PlayerIndex, kMaxPlayers> kPlayers = [] {
 struct PlayerCount {
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr PlayerCount of(std::size_t n) noexcept {
+    [[nodiscard]] static constexpr PlayerCount saturating(std::size_t n) noexcept {
         return PlayerCount{static_cast<std::uint8_t>(n > kMaxPlayers ? kMaxPlayers : n)};
     }
 
@@ -83,25 +87,16 @@ struct PlayerCount {
 struct PlayerMask {
     std::uint8_t v = 0;
 
-    [[nodiscard]] constexpr PlayerMask with(PlayerIndex player) const noexcept {
-        PlayerMask out = *this;
-        for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-            if (PlayerIndex{i} == player)
-                out.v = static_cast<std::uint8_t>(v | (1u << i));
-        }
-        return out;
+    [[nodiscard]] constexpr bool contains(PlayerIndex player) const noexcept {
+        return bits().contains(player);
     }
 
-    [[nodiscard]] constexpr bool has(PlayerIndex player) const noexcept {
-        for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-            if (PlayerIndex{i} == player)
-                return (v >> i & 1u) != 0;
-        }
-        return false;
+    [[nodiscard]] constexpr PlayerMask with(PlayerIndex player) const noexcept {
+        return PlayerMask{bits().with_or_unchanged(player).v};
     }
 
     [[nodiscard]] constexpr PlayerMask with(PlayerMask other) const noexcept {
-        return PlayerMask{static_cast<std::uint8_t>(v | other.v)};
+        return PlayerMask{bits().with(Bits{other.v}).v};
     }
 
     [[nodiscard]] constexpr proto::ParamSet as_param_set() const noexcept {
@@ -114,33 +109,19 @@ struct PlayerMask {
         return PlayerMask{static_cast<std::uint8_t>(v & ((1u << slots.v) - 1u))};
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+    [[nodiscard]] constexpr bool empty() const noexcept { return bits().empty(); }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr bool operator==(PlayerMask, PlayerMask) = default;
+
+private:
+    using Bits = infra::IndexSet<PlayerIndex, kMaxPlayers, std::uint8_t>;
+
+    [[nodiscard]] constexpr Bits bits() const noexcept { return Bits{v}; }
 };
 
 static_assert(kMaxPlayers <= 8, "PlayerMask holds one bit per player slot");
-
-struct Tally {
-    TASTY_SEAT_EXEMPT(component);
-    std::uint32_t v = 0;
-
-    constexpr void add(Tally by = Tally{1}) noexcept { v += by.v; }
-
-    constexpr void set(Tally n) noexcept { v = n.v; }
-
-    [[nodiscard]] constexpr Tally sum(Tally by) const noexcept { return Tally{v + by.v}; }
-
-    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
-
-    friend constexpr void json_field(infra::JsonOut& o, infra::JsonName key, Tally t) noexcept {
-        o.field(key, t.v);
-    }
-
-    friend constexpr bool operator==(Tally, Tally) = default;
-};
 
 struct OsErrno {
     std::uint16_t v = 0;
@@ -174,7 +155,7 @@ struct TrackNumber {
     std::uint8_t v = 0;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr TrackNumber of(I n) noexcept {
+    [[nodiscard]] static constexpr TrackNumber truncating(I n) noexcept {
         return TrackNumber{static_cast<std::uint8_t>(n)};
     }
 
@@ -258,11 +239,11 @@ struct TrackIndex {
     using affine_count = TrackCount;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr TrackIndex of(I i) noexcept {
+    [[nodiscard]] static constexpr TrackIndex truncating(I i) noexcept {
         return TrackIndex{static_cast<std::uint8_t>(i)};
     }
 
-    [[nodiscard]] constexpr xthread::ByteOffset row_offset(
+    [[nodiscard]] constexpr infra::ByteOffset row_offset(
         xthread::SlotStride row_bytes
     ) const noexcept;
 
@@ -478,6 +459,12 @@ struct HunkIndex {
 
     [[nodiscard]] constexpr bool is_none() const noexcept { return v == kNone; }
 
+    struct NichePolicy {
+        [[nodiscard]] static constexpr HunkIndex none() noexcept { return HunkIndex::none(); }
+
+        [[nodiscard]] static constexpr bool is_none(HunkIndex h) noexcept { return h.is_none(); }
+    };
+
     friend constexpr bool operator==(HunkIndex, HunkIndex) = default;
     friend constexpr auto operator<=>(HunkIndex, HunkIndex) = default;
 };
@@ -595,14 +582,54 @@ struct Generation {
     [[nodiscard]] constexpr Generation next() const noexcept { return Generation{v + 1}; }
 
     friend constexpr bool operator==(Generation, Generation) = default;
-    friend constexpr auto operator<=>(Generation, Generation) = default;
 };
+
+struct SlotBindGen {
+    std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
+
+    [[nodiscard]] constexpr SlotBindGen next() const noexcept { return infra::serial::next(*this); }
+
+    friend constexpr bool operator==(SlotBindGen, SlotBindGen) = default;
+};
+
+struct SaveServeGen {
+    std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
+
+    [[nodiscard]] constexpr SaveServeGen next() const noexcept {
+        return infra::serial::next(*this);
+    }
+
+    friend constexpr bool operator==(SaveServeGen, SaveServeGen) = default;
+};
+
+struct DiscMountGen {
+    std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
+
+    [[nodiscard]] constexpr DiscMountGen next() const noexcept {
+        return infra::serial::next(*this);
+    }
+
+    friend constexpr bool operator==(DiscMountGen, DiscMountGen) = default;
+};
+
+static_assert(
+    infra::serial::Label<SlotBindGen>
+    && infra::serial::Label<SaveServeGen>
+    && infra::serial::Label<DiscMountGen>
+);
 
 struct FltFlags {
     std::uint16_t v = 0;
     static constexpr std::uint16_t kEncodingMask = 0x0003;
     static constexpr std::uint16_t kFullPrecisionBit = 0x0004;
     static constexpr std::uint16_t kCoreScanlinesMask = 0x0030;
+
+    [[nodiscard]] static constexpr FltFlags of(hal::SpiWord reply) noexcept {
+        return FltFlags{reply.decoded(std::identity{})};
+    }
 
     [[nodiscard]] constexpr bool present() const noexcept { return v != 0; }
 
@@ -680,10 +707,7 @@ static_assert(sizeof(CoreVolume) == 1, "the core volume is one byte");
 struct AudvolByte {
     std::uint8_t v = 0;
 
-    [[nodiscard]] constexpr std::uint16_t word() const noexcept {
-        const std::uint16_t w = v;
-        return w;
-    }
+    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
 
     friend constexpr bool operator==(AudvolByte, AudvolByte) = default;
 };
@@ -704,12 +728,6 @@ struct FilterWordCount {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr std::span<const std::uint16_t> prefix_of(
-        std::span<const std::uint16_t> all
-    ) const noexcept {
-        return all.first(v);
-    }
-
     [[nodiscard]] constexpr FilterWordIndex next_index() const noexcept {
         return FilterWordIndex{v};
     }
@@ -722,15 +740,6 @@ struct FilterWordCount {
 
     friend constexpr bool operator==(FilterWordCount, FilterWordCount) = default;
 };
-
-struct ShadowMaskWord {
-    std::uint32_t v = 0;
-
-    [[nodiscard]] Ex<void> write_to(proto::Link& link) const;
-    friend constexpr bool operator==(ShadowMaskWord, ShadowMaskWord) = default;
-};
-
-static_assert(sizeof(ShadowMaskWord) == 4);
 
 struct FilterTapCount {
     std::size_t v = 0;
@@ -891,67 +900,14 @@ static_assert(
     "contains is the id-vs-count guard"
 );
 
-namespace adv7513 {
-
-enum class HdrMode : std::uint8_t { Off, Hlg, DciP3 };
-}
-
 using MouseMotion = proto::MouseDelta;
 
 static_assert(sizeof(MouseMotion) == 3 * sizeof(int), "three int deltas");
 
+inline constexpr std::size_t kKeyDownWordBits = 64;
+
 template <std::size_t kWords>
-class KeyDownSet {
-    TASTY_SEAT_EXEMPT(component);
-
-public:
-    static_assert(kWords > 0, "a key-down set holds at least one word");
-
-    constexpr void set(EvdevCode code) noexcept {
-        if (!fits(code))
-            return;
-        words_[word_of(code)] |= bit_of(code);
-    }
-
-    constexpr void clear(EvdevCode code) noexcept {
-        if (!fits(code))
-            return;
-        words_[word_of(code)] &= ~bit_of(code);
-    }
-
-    [[nodiscard]] constexpr bool has(EvdevCode code) const noexcept {
-        if (!fits(code))
-            return false;
-        return (words_[word_of(code)] & bit_of(code)) != 0;
-    }
-
-    template <class Each>
-    constexpr void drain(Each&& each) {
-        for (std::size_t w = 0; w < kWords; ++w) {
-            while (words_[w] != 0u) {
-                const unsigned bit = static_cast<unsigned>(std::countr_zero(words_[w]));
-                words_[w] &= words_[w] - 1u;
-                each(EvdevCode{static_cast<std::uint16_t>(w * kBitsPerWord + bit)});
-            }
-        }
-    }
-
-    friend constexpr bool operator==(const KeyDownSet&, const KeyDownSet&) = default;
-
-private:
-    static constexpr unsigned kBitsPerWord = 64;
-    static constexpr std::size_t kCodes = kWords * kBitsPerWord;
-
-    static constexpr bool fits(EvdevCode code) noexcept { return code.v < kCodes; }
-
-    static constexpr std::size_t word_of(EvdevCode code) noexcept { return code.v / kBitsPerWord; }
-
-    static constexpr std::uint64_t bit_of(EvdevCode code) noexcept {
-        return std::uint64_t{1} << (code.v % kBitsPerWord);
-    }
-
-    std::array<std::uint64_t, kWords> words_{};
-};
+using KeyDownSet = infra::IndexSet<EvdevCode, kWords * kKeyDownWordBits, std::uint64_t>;
 
 static_assert(
     std::is_trivially_copyable_v<KeyDownSet<14>>,
@@ -965,15 +921,17 @@ constexpr bool key_down_set_probe() {
     constexpr EvdevCode kLastAxisCode{895};
     constexpr EvdevCode kAbsentCode{4};
     KeyDownSet<14> s;
-    s.set(kFirstFrameCode);
-    s.set(kLastAxisCode);
-    const bool set_ok = s.has(kFirstFrameCode) && s.has(kLastAxisCode) && !s.has(kAbsentCode);
-    s.clear(kFirstFrameCode);
-    const bool clear_ok = !s.has(kFirstFrameCode) && s.has(kLastAxisCode);
+    s = s.with(kFirstFrameCode);
+    s = s.with(kLastAxisCode);
+    const bool set_ok = s.contains(kFirstFrameCode)
+        && s.contains(kLastAxisCode)
+        && !s.contains(kAbsentCode);
+    s = s.without(kFirstFrameCode);
+    const bool clear_ok = !s.contains(kFirstFrameCode) && s.contains(kLastAxisCode);
 
     KeyDownSet<14> d;
-    d.set(kLastAxisCode);
-    d.set(kFirstFrameCode);
+    d = d.with(kLastAxisCode);
+    d = d.with(kFirstFrameCode);
     EvdevCode first{};
     EvdevCode last{};
     bool once = false;
@@ -989,6 +947,6 @@ constexpr bool key_down_set_probe() {
     return set_ok && clear_ok && drain_ok;
 }
 
-static_assert(key_down_set_probe(), "set/clear/has and the drain order agree");
+static_assert(key_down_set_probe(), "with/without/contains and the drain order agree");
 
 }

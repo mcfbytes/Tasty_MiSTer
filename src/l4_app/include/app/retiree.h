@@ -8,6 +8,7 @@
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/build_generation.h"
 #include "proto/link_op.h"
 #include "proto/types.h"
 
@@ -20,7 +21,7 @@ namespace mister::app {
 struct Retiree {
     TASTY_SEAT_EXEMPT(component);
     proto::CoreBaySlot slot = proto::LinkOp::AdoptCore::kNoSlot;
-    std::uint16_t gen = 0;
+    proto::BuildGeneration gen{};
     infra::OptRef<svc::IStorageLifecycle> seat{};
     proto::BlockSlotMask mask{};
     proto::BlockSlotMask sent{};
@@ -32,13 +33,13 @@ struct Retiree {
         sent = sent.common(from.sent);
         const BayGens from_gens = from.bay_gens();
         for (const proto::CoreBaySlot s : kAllBaySlots)
-            if (infra::at_index(from_gens, s) != 0)
+            if (infra::at_index(from_gens, s).built())
                 infra::at_index(merged_gen, s) = infra::at_index(from_gens, s);
     }
 
     [[nodiscard]] BayGens bay_gens() const noexcept {
         BayGens out = merged_gen;
-        if (in_bay(slot) && gen != 0)
+        if (in_bay(slot) && gen.built())
             infra::at_index(out, slot) = gen;
         return out;
     }

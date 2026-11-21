@@ -3,6 +3,7 @@
 #include <span>
 
 #include "infra/crc32.h"
+#include "infra/prelude.h"
 #include "svc/types.h"
 
 namespace mister::svc {

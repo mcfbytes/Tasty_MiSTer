@@ -21,7 +21,7 @@ struct SlotArena {
 
     proto::StorageRequest ask{};
     proto::StorageCompletion answer{};
-    Generation gen{};
+    SlotBindGen gen{};
     infra::OptRef<IStorageBackend> backend{};
     proto::ResidentWindow window{};
     alignas(64) std::array<std::uint8_t, proto::kBlockStagingBytes> bytes{};

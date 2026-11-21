@@ -2,6 +2,7 @@
 #include "os/deadline.h"
 
 #include "clock_bridge.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 

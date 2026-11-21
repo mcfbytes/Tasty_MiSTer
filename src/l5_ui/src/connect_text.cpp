@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/connect_text.h"
 
-#include "os/wifi_security.h"
-#include "svc/bt_activity.h"
-#include "svc/bt_presence.h"
-#include "svc/wifi_link.h"
-#include "svc/wifi_presence.h"
+#include "os/connect/wifi_security.h"
+#include "svc/connect/bt_activity.h"
+#include "svc/connect/bt_presence.h"
+#include "svc/connect/wifi_link.h"
+#include "svc/connect/wifi_presence.h"
 
 namespace mister::ui {
 
-using RowKind = app::PageDescription::RowKind;
+using RowKind = app::hd::PageDescription::RowKind;
 
 namespace {
 
@@ -22,17 +22,17 @@ ConnectCell cell_of(std::string_view text) {
     return out;
 }
 
-std::string_view security_text(os::WifiSecurity security) {
+std::string_view security_text(os::connect::WifiSecurity security) {
     switch (security) {
-        case os::WifiSecurity::Open:
+        case os::connect::WifiSecurity::Open:
             return "open";
-        case os::WifiSecurity::Psk:
+        case os::connect::WifiSecurity::Psk:
             return "WPA2";
-        case os::WifiSecurity::PskSae:
+        case os::connect::WifiSecurity::PskSae:
             return "WPA2/3";
-        case os::WifiSecurity::Sae:
+        case os::connect::WifiSecurity::Sae:
             return "WPA3";
-        case os::WifiSecurity::Unsupported:
+        case os::connect::WifiSecurity::Unsupported:
             return "n/a";
     }
     return {};
@@ -40,71 +40,71 @@ std::string_view security_text(os::WifiSecurity security) {
 
 }
 
-app::PageDescription::Row connect_row(
+app::hd::PageDescription::Row connect_row(
     RowKind kind,
     std::string_view label,
     std::string_view value
 ) {
-    app::PageDescription::Row row{};
+    app::hd::PageDescription::Row row{};
     row.kind = kind;
     (void)row.label.assign(label);
     (void)row.value.assign(value);
     return row;
 }
 
-std::string_view wifi_failure_text(svc::WifiFailure failure) {
+std::string_view wifi_failure_text(svc::connect::WifiFailure failure) {
     switch (failure) {
-        case svc::WifiFailure::None:
+        case svc::connect::WifiFailure::None:
             return {};
-        case svc::WifiFailure::SupplicantWontStart:
+        case svc::connect::WifiFailure::SupplicantWontStart:
             return "Wi-Fi won't start";
-        case svc::WifiFailure::ConfUnreadable:
+        case svc::connect::WifiFailure::ConfUnreadable:
             return "Config unreadable";
-        case svc::WifiFailure::WrongKey:
+        case svc::connect::WifiFailure::WrongKey:
             return "Wrong password";
-        case svc::WifiFailure::NotFound:
+        case svc::connect::WifiFailure::NotFound:
             return "Network not found";
-        case svc::WifiFailure::Rejected:
+        case svc::connect::WifiFailure::Rejected:
             return "Rejected";
     }
     return {};
 }
 
-std::string_view bt_failure_text(svc::BtFailure failure) {
+std::string_view bt_failure_text(svc::connect::BtFailure failure) {
     switch (failure) {
-        case svc::BtFailure::None:
+        case svc::connect::BtFailure::None:
             return {};
-        case svc::BtFailure::AuthenticationFailed:
+        case svc::connect::BtFailure::AuthenticationFailed:
             return "Pairing failed";
-        case svc::BtFailure::AuthenticationRejected:
+        case svc::connect::BtFailure::AuthenticationRejected:
             return "Pairing rejected";
-        case svc::BtFailure::AuthenticationCanceled:
+        case svc::connect::BtFailure::AuthenticationCanceled:
             return "Pairing canceled";
-        case svc::BtFailure::ConnectionAttemptFailed:
+        case svc::connect::BtFailure::ConnectionAttemptFailed:
             return "Connect failed";
-        case svc::BtFailure::PairTimedOut:
+        case svc::connect::BtFailure::PairTimedOut:
             return "Pairing timed out";
-        case svc::BtFailure::Failed:
+        case svc::connect::BtFailure::Failed:
             return "Failed";
     }
     return {};
 }
 
-ConnectCell wifi_cell(const std::optional<svc::WifiView>& view) {
+ConnectCell wifi_cell(const std::optional<svc::connect::WifiView>& view) {
     if (!view)
         return cell_of(kChecking);
     switch (view->presence) {
-        case svc::WifiPresence::NoAdapter:
+        case svc::connect::WifiPresence::NoAdapter:
             return cell_of("No adapter");
-        case svc::WifiPresence::NoSupplicant:
+        case svc::connect::WifiPresence::NoSupplicant:
             return cell_of("Starting Wi-Fi...");
-        case svc::WifiPresence::Ready:
+        case svc::connect::WifiPresence::Ready:
             break;
     }
-    if (view->failure != svc::WifiFailure::None)
+    if (view->failure != svc::connect::WifiFailure::None)
         return cell_of(wifi_failure_text(view->failure));
     switch (view->link) {
-        case svc::WifiLink::Connected: {
+        case svc::connect::WifiLink::Connected: {
             ConnectCell out{};
             if (view->ssid)
                 (void)out.assign(view->ssid->display().view());
@@ -114,50 +114,50 @@ ConnectCell wifi_cell(const std::optional<svc::WifiView>& view) {
             }
             return out.empty() ? cell_of("Connected") : out;
         }
-        case svc::WifiLink::Associating:
-        case svc::WifiLink::Handshake:
+        case svc::connect::WifiLink::Associating:
+        case svc::connect::WifiLink::Handshake:
             return cell_of("Connecting...");
-        case svc::WifiLink::Scanning:
+        case svc::connect::WifiLink::Scanning:
             return cell_of("Scanning...");
-        case svc::WifiLink::Disabled:
+        case svc::connect::WifiLink::Disabled:
             return cell_of("Off");
-        case svc::WifiLink::Disconnected:
+        case svc::connect::WifiLink::Disconnected:
             return cell_of("Not connected");
     }
     return {};
 }
 
-ConnectCell bt_cell(const std::optional<svc::BtView>& view) {
+ConnectCell bt_cell(const std::optional<svc::connect::BtView>& view) {
     if (!view)
         return cell_of(kChecking);
     switch (view->presence) {
-        case svc::BtPresence::NoBus:
+        case svc::connect::BtPresence::NoBus:
             return cell_of("Bluetooth is off");
-        case svc::BtPresence::NoDaemon:
+        case svc::connect::BtPresence::NoDaemon:
             return cell_of("Not running");
-        case svc::BtPresence::NoAdapter:
+        case svc::connect::BtPresence::NoAdapter:
             return cell_of("No adapter");
-        case svc::BtPresence::Off:
+        case svc::connect::BtPresence::Off:
             return cell_of("Off");
-        case svc::BtPresence::Ready:
+        case svc::connect::BtPresence::Ready:
             break;
     }
     switch (view->activity.kind()) {
-        case svc::BtActivity::Kind::Discovering:
+        case svc::connect::BtActivity::Kind::Discovering:
             return cell_of("Searching...");
-        case svc::BtActivity::Kind::Pairing:
+        case svc::connect::BtActivity::Kind::Pairing:
             return cell_of("Pairing...");
-        case svc::BtActivity::Kind::Connecting:
+        case svc::connect::BtActivity::Kind::Connecting:
             return cell_of("Connecting...");
-        case svc::BtActivity::Kind::Idle:
+        case svc::connect::BtActivity::Kind::Idle:
             break;
     }
-    if (view->failure != svc::BtFailure::None)
+    if (view->failure != svc::connect::BtFailure::None)
         return cell_of(bt_failure_text(view->failure));
     return cell_of("Ready");
 }
 
-ConnectCell scan_cell(const svc::WifiScanViewRow& row) {
+ConnectCell scan_cell(const svc::connect::WifiScanViewRow& row) {
     ConnectCell out{};
     (void)out.assign(row.signal.bars().text().view());
     (void)out.append(kGap);

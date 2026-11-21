@@ -14,6 +14,7 @@
 #include "hal/phys_region.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/status_word.h"
 #include "proto/types.h"

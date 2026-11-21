@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "cores/ladder_context.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -65,7 +66,7 @@ bool OwnerLadder::arm(
         .slot_paths = slot_paths_,
         .arm = cores::LadderContext::MountArm{ask.index, ask.path.view()}
     };
-    ladder_ = row.make_ladder != nullptr ? row.make_ladder(row.profile, ctx) : nullptr;
+    ladder_ = row.has_ladder() ? row.make_ladder(row.profile, ctx) : nullptr;
     if (ladder_ == nullptr)
         return false;
 
@@ -153,7 +154,7 @@ void OwnerLadder::drop() {
 }
 
 bool OwnerLadder::arm_start(
-    const FixedStr<64, StrFit::Clip>& core_name,
+    const CoreName& core_name,
     bool index0_taken,
     cores::ILadderHost& host
 ) {
@@ -161,7 +162,7 @@ bool OwnerLadder::arm_start(
     if (core_name.empty() || ladder_ != nullptr)
         return false;
     const auto row = cores::find_core(core_name.view());
-    if (!row || row->make_ladder == nullptr)
+    if (!row || !row->has_ladder())
         return false;
     const cores::StagingPolicy& sp = row->profile.staging;
     const bool start_save = sp.save && !sp.save->start_dir.empty();
@@ -196,7 +197,7 @@ bool OwnerLadder::arm_core(
     Owed owed
 ) {
     TASTY_SEAT_BODY(OwnerLadder);
-    if (ladder_ != nullptr || row.make_ladder == nullptr)
+    if (ladder_ != nullptr || !row.has_ladder())
         return false;
     cores::LadderContext ctx{
         .vfs = vfs_,

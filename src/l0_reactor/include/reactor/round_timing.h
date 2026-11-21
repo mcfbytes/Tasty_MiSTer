@@ -7,8 +7,9 @@
 #include <limits>
 #include <type_traits>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "reactor/round_lifecycle.h"
 #include "reactor/service_slot.h"
 

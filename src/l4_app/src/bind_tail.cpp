@@ -20,6 +20,7 @@
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
 #include "proto/link_op.h"
+#include "svc/card_dirs.h"
 
 namespace mister::app {
 
@@ -97,7 +98,7 @@ void BindTail::joy(std::string_view core_name) noexcept {
         tally_,
         sleeper_,
         infra::make<proto::LinkOp>(proto::LinkOp::BindJoy{
-            .suppress_analog_followup = cores::profile_for(core_name).suppress_analog_followup
+            .suppress_analog_followup = cores::profile_for(core_name).host.suppress_analog_followup
         })
     );
 }
@@ -138,10 +139,13 @@ void BindTail::uart(std::string_view core_name, const proto::ConfStr* conf) {
 
     if (in.capable && !core_name.empty()) {
         in.files = UartBinding::Files::from_card(
-            read_exact<UartPersist::kCardBytes>(vfs_, card_path_("config/uartmode.", core_name)),
+            read_exact<UartPersist::kCardBytes>(
+                vfs_,
+                card_path_(svc::card_rel({svc::kConfigDir, "uartmode."}), core_name)
+            ),
             read_exact<UartBinding::SpeedsFile::kBytes>(
                 vfs_,
-                card_path_("config/uartspeed.", core_name)
+                card_path_(svc::card_rel({svc::kConfigDir, "uartspeed."}), core_name)
             )
         );
     }

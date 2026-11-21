@@ -9,8 +9,8 @@
 
 #include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
-#include "cores/cd_census_rows.h"
-#include "cores/cd_profile.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_profile.h"
 #include "cores/core_profile.h"
 #include "cores/loader_context.h"
 #include "cores/manifests/megacd.h"
@@ -28,14 +28,14 @@ inline constexpr auto kNeoGeoServices = std::to_array<LinkDecoderDecl>({
     {
         "neogeo.cmd_edge",
         reactor::Cause::Ring,
-        &kCdCommandEdge<kNeoGeo>,
+        &cd::kCdCommandEdge<kNeoGeo>,
         reactor::kEveryRound,
         RoundClaim::Never,
     },
     {
         "neogeo.service_tick",
         reactor::Cause::Tick,
-        &kCdServiceTick<kNeoGeo>,
+        &cd::kCdServiceTick<kNeoGeo>,
         std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
@@ -49,11 +49,11 @@ inline constexpr bool kNeoGeoCdReadyProbeSkipsMode1 = false;
 
 inline constexpr bool kNeoGeoCdStreamOnDataTrack = true;
 
-inline constexpr CdTickPeriods kNeoGeoCdTicks{
+inline constexpr cd::CdTickPeriods kNeoGeoCdTicks{
     .idle = std::chrono::microseconds{10'000},
     .stream = std::chrono::microseconds{10'000},
     .caller = std::chrono::microseconds{1'000},
-    .speeds = CdSpeedCount{4},
+    .speeds = cd::CdSpeedCount{4},
     .speed = {
         std::chrono::microseconds{10'000},
         std::chrono::microseconds{5'000},
@@ -62,11 +62,11 @@ inline constexpr CdTickPeriods kNeoGeoCdTicks{
     },
 };
 
-inline constexpr CdProfile kNeoGeoCdProfile{
+inline constexpr cd::CdProfile kNeoGeoCdProfile{
     .io = kMegaCdIoIndices,
     .cue = kMegaCdCuePolicy,
     .ticks = kNeoGeoCdTicks,
-    .row = CdProfile::SegaCddFacts{
+    .row = cd::CdProfile::SegaCddFacts{
         .crc_start = kNeoGeoCdCrcStart,
         .status_carries_is_data = kNeoGeoCdStatusCarriesIsData,
         .ready_probe_skips_mode1 = kNeoGeoCdReadyProbeSkipsMode1,
@@ -75,10 +75,10 @@ inline constexpr CdProfile kNeoGeoCdProfile{
 };
 
 namespace detail {
-inline constexpr CdProfile::SegaCddFacts kMegaCdRow = std::get<CdProfile::SegaCddFacts>(
+inline constexpr cd::CdProfile::SegaCddFacts kMegaCdRow = std::get<cd::CdProfile::SegaCddFacts>(
     kMegaCdProfile.row
 );
-inline constexpr CdProfile::SegaCddFacts kNeoGeoRow = std::get<CdProfile::SegaCddFacts>(
+inline constexpr cd::CdProfile::SegaCddFacts kNeoGeoRow = std::get<cd::CdProfile::SegaCddFacts>(
     kNeoGeoCdProfile.row
 );
 }
@@ -100,7 +100,7 @@ static_assert(
     "megacd.cpp:32 keys the fast cadence off CD-DA; neogeocd.cpp:92 off DATA"
 );
 static_assert(
-    kNeoGeoCdTicks.speeds == CdSpeedCount{4} && kMegaCdTicks.speeds == CdSpeedCount{},
+    kNeoGeoCdTicks.speeds == cd::CdSpeedCount{4} && kMegaCdTicks.speeds == cd::CdSpeedCount{},
     "neogeocd.cpp:97-108 is a four-entry speed table; MegaCD has none"
 );
 static_assert(
@@ -159,13 +159,14 @@ inline constexpr CoreProfile kNeoGeo{
 
     .blank_save = {.fill = std::byte{0xFF}, .header = {}, .regions = {}, .generic_ff = true},
     .staging = kNeoGeoStaging,
-    .cue_browse_dir = "NeoGeo-CD",
-    .image_rows_no_zip = true,
-
-    .cheats = {.reset_on_mount = false},
     .windows = kNeoGeoWindows,
 
     .reset = {.button_reacts = true},
+    .host =
+        {.cue_browse_dir = "NeoGeo-CD",
+         .image_rows_no_zip = true,
+
+         .cheats = {.reset_on_mount = false}},
 
     .grants = {Grant::Lamp, Grant::Discs},
 };

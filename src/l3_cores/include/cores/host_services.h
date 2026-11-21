@@ -4,12 +4,16 @@
 #include "cores/core_window_grant.h"
 #include "cores/save_copy_level.h"
 #include "infra/opt_ref.h"
-#include "infra/wake_flag.h"
+#include "infra/prelude.h"
+#include "infra/xthread/wake_flag.h"
 
 namespace mister::svc {
+class IStorageBackend;
+}
+
+namespace mister::svc::disc {
 class ChdPrefetch;
 class DiscReadService;
-class IStorageBackend;
 }
 
 namespace mister::hal {
@@ -22,6 +26,9 @@ class IClock;
 
 namespace mister::proto {
 class IImageSink;
+}
+
+namespace mister::proto::link {
 class SpiFioQueue;
 }
 
@@ -38,15 +45,15 @@ struct HostServices {
     hal::ISpiTransport& link;
 
     const os::IClock& clock;
-    infra::OptRef<svc::ChdPrefetch> prefetch{};
+    infra::OptRef<svc::disc::ChdPrefetch> prefetch{};
 
     infra::OptRef<proto::IImageSink> bulk{};
 
     CoreWindowGrant windows{};
 
-    infra::OptRef<svc::DiscReadService> discs{};
+    infra::OptRef<svc::disc::DiscReadService> discs{};
 
-    infra::OptRef<proto::SpiFioQueue> fio_queue{};
+    infra::OptRef<proto::link::SpiFioQueue> fio_queue{};
 
     infra::OptRef<IMailboxPort> mailbox{};
 

@@ -7,6 +7,7 @@
 
 #include "cores/pcm_extent.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/types.h"
 
 namespace mister::cores {

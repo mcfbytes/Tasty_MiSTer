@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/config_parser.h"
 #include "svc/config.h"
+#include "infra/prelude.h"
 #include "svc/config_field.h"
 #include "svc/config_snapshot.h"
 #include "svc/option_codec.h"

@@ -3,6 +3,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/posix_compat.h"
+#include "infra/prelude.h"
 
 #include <fcntl.h>
 #include <unistd.h>

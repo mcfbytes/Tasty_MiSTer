@@ -8,8 +8,11 @@
 #include <string_view>
 #include <vector>
 
+#include "infra/byte_count.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/save_stage.h"
 #include "proto/types.h"
@@ -59,18 +62,15 @@ public:
 
     void note_decline() noexcept { declines_.add(); }
 
-    [[nodiscard]] Ex<std::span<std::uint8_t>> read(
-        proto::FileOffset at,
-        std::span<std::uint8_t> dst
-    );
+    [[nodiscard]] Ex<infra::ByteCount> read(proto::FileOffset at, std::span<std::byte> dst);
 
-    [[nodiscard]] Ex<std::span<const std::uint8_t>> write(
+    [[nodiscard]] Ex<infra::ByteCount> write(
         proto::FileOffset at,
-        std::span<const std::uint8_t> src,
+        std::span<const std::byte> src,
         TimePoint now
     );
 
-    [[nodiscard]] Ex<proto::FileSize> create(std::span<const std::uint8_t> first, TimePoint now);
+    [[nodiscard]] Ex<proto::FileSize> create(std::span<const std::byte> first, TimePoint now);
 
     [[nodiscard]] static Error too_large(infra::ErrorSite at) noexcept;
     [[nodiscard]] static bool is_too_large(const Error& e) noexcept;
@@ -93,7 +93,7 @@ public:
 
     [[nodiscard]] bool resident() const noexcept;
 
-    [[nodiscard]] std::span<const std::uint8_t> image() const noexcept { return image_; }
+    [[nodiscard]] std::span<const std::byte> image() const noexcept { return image_; }
 
     [[nodiscard]] proto::FileSize extent() const noexcept;
 
@@ -104,18 +104,18 @@ private:
     void take_(proto::StageKey key, std::string_view path);
     void break_(Error e) noexcept;
 
-    std::vector<std::uint8_t> image_{};
+    std::vector<std::byte> image_{};
     proto::StageState state_ = proto::StageState::Free;
     proto::StageKey key_{};
     proto::StageRevision rev_{};
     proto::StageRevision saved_{};
     bool present_ = false;
     TimePoint last_write_{};
-    proto::StageTally commits_{};
-    proto::StageTally skipped_identical_{};
-    proto::StageTally faults_{};
+    infra::Tally commits_{};
+    infra::Tally skipped_identical_{};
+    infra::Tally faults_{};
     std::optional<Error> last_fault_{};
-    proto::StageTally declines_{};
+    infra::Tally declines_{};
     SlotPathText path_{};
     std::unique_ptr<IFile> load_{};
     proto::FileOffset loaded_{};

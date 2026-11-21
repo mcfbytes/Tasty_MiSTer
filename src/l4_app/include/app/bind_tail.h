@@ -11,6 +11,7 @@
 #include "app/owner_tally.h"
 #include "app/session_bindings.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 

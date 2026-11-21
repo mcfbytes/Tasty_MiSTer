@@ -6,15 +6,16 @@
 #include <span>
 #include <string_view>
 
-#include "infra/claim_set.h"
+#include "infra/xthread/claim_set.h"
 #include "hal/phys_region.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 
 enum class WindowId : std::uint8_t {};
 inline constexpr std::size_t kMaxWindows = 7;
 
-using WindowClaims = infra::ClaimSet<WindowId, kMaxWindows>;
+using WindowClaims = xthread::ClaimSet<WindowId, kMaxWindows>;
 using WindowClaim = WindowClaims::Claim;
 
 struct WindowDecl {

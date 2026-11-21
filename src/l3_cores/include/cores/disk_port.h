@@ -8,7 +8,7 @@
 #include "proto/disk_poll_decl.h"
 #include "proto/types.h"
 
-namespace mister::proto {
+namespace mister::proto::link {
 class Link;
 }
 
@@ -18,7 +18,7 @@ class IDiskPort {
 public:
     virtual ~IDiskPort() = default;
 
-    virtual void service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept = 0;
+    virtual void service_rt(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept = 0;
 
     virtual void order_bind(proto::DiskUnit unit, std::string_view path) noexcept = 0;
 

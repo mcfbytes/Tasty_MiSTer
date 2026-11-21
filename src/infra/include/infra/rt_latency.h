@@ -3,10 +3,10 @@
 
 #include "infra/indexed_array.h"
 #include "infra/lat_hist.h"
-#include "infra/rt_stats.h"
 #include "infra/seat.h"
+#include "infra/service_slot.h"
 
-namespace mister::xthread {
+namespace mister::infra {
 
 struct alignas(64) RtLatency {
     TASTY_SEAT_EXEMPT(component);

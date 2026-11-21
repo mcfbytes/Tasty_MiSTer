@@ -4,6 +4,8 @@
 #include <cstring>
 #include <memory>
 
+#include "infra/prelude.h"
+
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/lsan_interface.h>
 #endif

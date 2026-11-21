@@ -38,25 +38,26 @@
 #include "cores/staging_core.h"
 #include "hal/spi_transport.h"
 #include "infra/error.h"
-#include "infra/log_lane.h"
-#include "infra/log_rec.h"
+#include "app/log_lane.h"
+#include "app/log_rec.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/deadline.h"
 #include "proto/block_geometry.h"
-#include "proto/block_slots.h"
-#include "proto/disc_announce.h"
-#include "proto/download_session.h"
+#include "proto/link/block_slots.h"
+#include "proto/link/disc_announce.h"
+#include "proto/link/download_session.h"
 #include "proto/fixed_block_roles.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
 #include "proto/no_block_roles.h"
-#include "proto/spi_frame.h"
+#include "proto/link/spi_frame.h"
 #include "proto/storage_channel.h"
 #include "proto/types.h"
-#include "svc/chd_prefetch.h"
+#include "svc/disc/chd_prefetch.h"
 #include "svc/file_slot_backend.h"
 #include "svc/storage_lifecycle.h"
 #include "svc/types.h"
@@ -96,7 +97,7 @@ public:
         infra::ErrorSite advise_site;
         SessionTally& session_tally;
         CoreOptionCells& options;
-        xthread::LogLane& log_lane;
+        LogLane& log_lane;
         svc::SaveSlotBackends& save_backends;
 
         infra::OptRef<const svc::Vfs> vfs{};
@@ -105,7 +106,7 @@ public:
 
         infra::OptRef<svc::IStorageBackend> disc_backend{};
 
-        infra::OptRef<svc::ChdPrefetch> prefetch{};
+        infra::OptRef<svc::disc::ChdPrefetch> prefetch{};
 
         infra::OptRef<proto::IStorageChannel> storage_channel{};
 
@@ -117,9 +118,9 @@ public:
     SlotBindings(const SlotBindings&) = delete;
     SlotBindings& operator=(const SlotBindings&) = delete;
 
-    [[nodiscard]] proto::BlockSlots& slots() noexcept { return slots_; }
+    [[nodiscard]] proto::link::BlockSlots& slots() noexcept { return slots_; }
 
-    [[nodiscard]] const proto::BlockSlots& slots() const noexcept { return slots_; }
+    [[nodiscard]] const proto::link::BlockSlots& slots() const noexcept { return slots_; }
 
     [[nodiscard]] const SaveImageSource& save_source() const noexcept { return *save_src_; }
 
@@ -261,12 +262,12 @@ private:
     const infra::ErrorSite advise_site_;
     SessionTally& session_tally_;
     CoreOptionCells& options_;
-    xthread::LogLane::Producer log_lane_;
+    LogLane::Producer log_lane_;
     infra::OptRef<const svc::Vfs> vfs_;
     infra::OptRef<svc::IStorageLifecycle> storage_life_;
     infra::OptRef<svc::IStorageBackend> disc_backend_;
     svc::SaveSlotBackends& save_backends_;
-    infra::OptRef<svc::ChdPrefetch> prefetch_;
+    infra::OptRef<svc::disc::ChdPrefetch> prefetch_;
     MountStatusCell mount_status_cell_{};
     SaveExtentCell save_extent_cell_{};
 
@@ -275,11 +276,11 @@ private:
 
     std::unique_ptr<SaveImageSource> save_src_;
 
-    proto::BlockSlots slots_;
-    [[no_unique_address]] proto::DiscAnnounce announce_{};
+    proto::link::BlockSlots slots_;
+    [[no_unique_address]] proto::link::DiscAnnounce announce_{};
 
     static_assert(
-        sizeof(proto::BlockSlots) < 4096 + proto::kBlockStagingBytes,
+        sizeof(proto::link::BlockSlots) < 4096 + proto::kBlockStagingBytes,
         "slots_ is an inline member of a T-RT type: its table must stay small; "
         "only the design's kBlockStagingBytes blank page may ride above 4 KiB"
     );

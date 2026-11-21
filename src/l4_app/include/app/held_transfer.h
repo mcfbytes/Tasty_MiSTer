@@ -28,7 +28,7 @@
 #include "app/session_machine.h"
 #include "app/session_tally.h"
 #include "app/slot_bindings.h"
-#include "proto/spi_frame.h"
+#include "proto/link/spi_frame.h"
 #include "app/tx_digest_cell.h"
 #include "app/types.h"
 #include "app/window_job_service.h"
@@ -45,13 +45,13 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/block_roles.h"
-#include "proto/core_session.h"
-#include "proto/download_session.h"
+#include "proto/link/core_session.h"
+#include "proto/link/download_session.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
 #include "proto/no_block_roles.h"
 #include "proto/osd_surface.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
 
 namespace mister::svc {
@@ -91,7 +91,7 @@ public:
     struct Wiring {
         hal::ISpiTransport& link;
 
-        const proto::CoreSession& session;
+        const proto::link::CoreSession& session;
         LinkBinder& binder;
 
         SessionMachine& machine;
@@ -228,6 +228,13 @@ private:
     ) noexcept;
     void end_copy_(bool ok) noexcept;
 
+    [[nodiscard]] ILinkEncoder::Outcome stage_length_(
+        const proto::LinkOp::StagePayload& a,
+        const InternedFile& file
+    ) noexcept;
+
+    void end_length_(bool ok) noexcept;
+
     [[nodiscard]] ILinkEncoder::Outcome stage_payload_(
         const proto::LinkOp::StagePayload& a,
         const LinkOpCtx& ctx
@@ -256,7 +263,7 @@ private:
     }
 
     hal::ISpiTransport& link_;
-    const proto::CoreSession& session_;
+    const proto::link::CoreSession& session_;
     LinkBinder& binder_;
     SessionMachine& machine_;
     const infra::ErrorSite advise_site_;
@@ -281,10 +288,12 @@ private:
     FileTxLevel ftx_level_scratch_{};
     FileTxLevelCell ftx_level_cell_{};
 
-    std::optional<proto::DownloadSession> copy_ds_{};
-    std::array<std::uint16_t, kCopyWordsMax> copy_tail_{};
+    std::optional<proto::link::DownloadSession> copy_ds_{};
+    std::array<hal::SpiWord, kCopyWordsMax> copy_tail_{};
     std::uint8_t copy_tail_n_ = 0;
     proto::ActKey copy_act_{};
+
+    proto::ActKey length_act_{};
 
     cores::ProgressTicker stage_tick_{};
 
@@ -292,7 +301,7 @@ private:
 
     std::optional<proto::ImageBracket> stage_open_{};
 
-    std::optional<proto::DownloadSession> plain_ds_{};
+    std::optional<proto::link::DownloadSession> plain_ds_{};
 };
 
 static_assert(LinkOpTransferSink<HeldTransfer>);

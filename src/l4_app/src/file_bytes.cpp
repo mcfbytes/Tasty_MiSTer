@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/file_bytes.h"
 
-#include "app/mgl_player.h"
-#include "cores/boot_asset.h"
 #include "cores/file_tx.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
-static_assert(
-    InternedFile::kMaxLiveFiles
-    == cores::kMaxStartAssets
-        + (MglPlayer::kMaxItems - 1)
-        + cores::kMaxBootBuffers
-        + InternedFile::kHeldOps
-);
 static_assert(InternedFile::kMaxLiveFiles <= InternedFile::kRecycleSlots);
 
 static_assert(InternedFile::kPieceBytes % cores::kFileTxChunkBytes == 0);
@@ -66,7 +58,7 @@ Ex<proto::SlotIndex> FileBytes<P>::stage_(std::string_view path) noexcept {
 
 template <SeatTag P>
 std::optional<proto::SlotIndex> FileBytes<P>::pooled_slot_(proto::FileId id) noexcept {
-    return id.pooled_slot(InternedFile::kRecycleSlots);
+    return id.pooled_slot<InternedFile::kRecycleSlots>();
 }
 
 template <SeatTag P>

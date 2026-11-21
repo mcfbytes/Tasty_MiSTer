@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/load_ladder.h"
+#include "infra/span_cut.h"
 
 #include "infra/endian.h"
 
@@ -12,6 +13,7 @@
 #include "cores/progress_ticker.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -149,16 +151,18 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
 
     const std::size_t cap = std::min(buf_.size(), InternedFile::kPieceBytes / row.stride);
     const proto::FileSize chunk = (proto::FileSize{job_.total} - off_).min(proto::FileSize{cap});
-    const std::span<std::uint8_t> piece(buf_.data(), chunk.file_word<std::size_t>());
-    std::size_t got = 0;
-    while (got < piece.size()) {
-        auto r = job_.file->read_at(
-            row.file_offset + off_ + proto::FileSize{got},
-            std::as_writable_bytes(piece.subspan(got))
-        );
-        if (!r || *r == 0)
+    const std::span<std::uint8_t> piece = infra::affine::first(
+        std::span<std::uint8_t>{buf_},
+        chunk
+    );
+    std::span<std::byte> left = std::as_writable_bytes(piece);
+    proto::FileOffset at = row.file_offset + off_;
+    while (!left.empty()) {
+        auto r = job_.file->read_at(at, left);
+        if (!r || r->empty())
             return cut_(h);
-        got += *r;
+        at += proto::FileSize::of(*r);
+        left = r->past_in(left);
     }
     key_.feed(piece);
     if (row.shaped)
@@ -200,7 +204,7 @@ LoadLadder::Pass LoadLadder::fill_(Host& h) {
         return Pass::Stepped;
     }
     const proto::FileSize piece = (extent - fill_off_).min(proto::FileSize{buf_.size()});
-    const std::span<std::uint8_t> tail(buf_.data(), piece.file_word<std::size_t>());
+    const std::span<std::uint8_t> tail = infra::affine::first(std::span<std::uint8_t>{buf_}, piece);
     std::ranges::fill(tail, job_.row.fill);
     if (!window_.write(fill_off_.file_word<std::size_t>(), std::as_bytes(tail)))
         return cut_(h);

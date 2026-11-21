@@ -5,6 +5,7 @@
 
 #include "os/kernel_rt.h"
 #include "os/raw_monotonic_clock.h"
+#include "infra/prelude.h"
 #include "hal/thread_map.h"
 #include "ui/host_sample.h"
 #include "ui/host_sampler.h"

@@ -9,6 +9,7 @@
 #include "cores/stream_load.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/image_bracket.h"
 #include "proto/image_sink.h"

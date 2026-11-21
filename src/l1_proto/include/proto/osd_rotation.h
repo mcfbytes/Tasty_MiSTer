@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdint>
 
+#include "hal/types.h"
+
 namespace mister::proto {
 
 enum class OsdRotation : std::uint8_t { None = 0, Left = 1, Right = 3 };
@@ -18,8 +20,8 @@ inline constexpr std::array<OsdRotation, 3> kRotationByIni{
     return osd_rotate < kRotationByIni.size() ? kRotationByIni[osd_rotate] : OsdRotation::None;
 }
 
-[[nodiscard]] constexpr std::array<std::uint16_t, 1> rotation_words(OsdRotation rotate) noexcept {
-    return {static_cast<std::uint16_t>(rotate)};
+[[nodiscard]] constexpr std::array<hal::SpiWord, 1> rotation_words(OsdRotation rotate) noexcept {
+    return {hal::SpiWord{static_cast<std::uint16_t>(rotate)}};
 }
 
 }

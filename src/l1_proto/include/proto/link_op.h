@@ -9,9 +9,11 @@
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/spsc_ring.h"
+#include "infra/xthread/spsc_ring.h"
 #include "proto/bit_field.h"
+#include "proto/build_generation.h"
 #include "proto/conf_switches.h"
 #include "proto/mailbox_act.h"
 #include "proto/mailbox_poll.h"
@@ -288,7 +290,7 @@ struct LinkOp {
         static constexpr CoreBaySlot kNoSlot = kNoBaySlot;
         CoreBaySlot slot = kNoSlot;
         Built outcome = Built::Refused;
-        std::uint16_t gen = 0;
+        BuildGeneration gen{};
         Errc err{};
         IdentityStamp identity{};
     };

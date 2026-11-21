@@ -5,6 +5,7 @@
 
 #include "app/link_event_dispatch.h"
 #include "app/link_rx_channel.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

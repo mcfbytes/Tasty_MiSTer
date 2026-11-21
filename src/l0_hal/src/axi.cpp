@@ -11,6 +11,7 @@
 #include "infra/byte_view.h"
 #include "infra/parse_int.h"
 #include "infra/persist.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 
 #include <fcntl.h>
@@ -171,11 +172,17 @@ std::optional<T> uio_map_attr(const char* root, os::UioMinor minor, const char* 
 
 }
 
-std::optional<ApertureNode> resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept {
+std::optional<ApertureNode> resolve_aperture(
+    const char* sysfs_root,
+    const ApertureNodeDecl& node,
+    const PhysRegion& r
+) noexcept {
     if (r.len == 0)
         return std::nullopt;
+    if (node.uio_name.empty())
+        return std::nullopt;
 
-    const auto idx = os::find_uio_node_under(sysfs_root, kApertureUioName);
+    const auto idx = os::find_uio_node_under(sysfs_root, node.uio_name);
     if (!idx)
         return std::nullopt;
 
@@ -184,20 +191,24 @@ std::optional<ApertureNode> resolve_aperture(const char* sysfs_root, const PhysR
     if (!addr || !size)
         return std::nullopt;
 
-    if (os::PhysAddr{*addr} != kFpgaMemBase)
+    if (os::PhysAddr{*addr} != node.base)
         return std::nullopt;
-    const std::uint64_t off = r.phys.offset_from(kFpgaMemBase);
+    const std::uint64_t off = r.phys.offset_from(node.base);
     if (!span_fits<std::uint64_t>(off, r.len, *size))
         return std::nullopt;
 
     return ApertureNode{.minor = *idx, .base = os::PhysAddr{*addr}, .size = *size};
 }
 
-Ex<FpgaMemory> FpgaMemory::map_aperture(const ApertureRegion& r, os::MmioRegion::Access access) {
-    if (const auto node = resolve_aperture(os::kUioClassRoot, r.region())) {
-        if (const auto fd = open_uio_node(node->minor)) {
+Ex<FpgaMemory> FpgaMemory::map_aperture(
+    const ApertureNodeDecl& node,
+    const ApertureRegion& r,
+    os::MmioRegion::Access access
+) {
+    if (const auto found = resolve_aperture(os::kUioClassRoot, node, r.region())) {
+        if (const auto fd = open_uio_node(found->minor)) {
 
-            if (auto mem = map_uio(fd->get(), node->base, r, access))
+            if (auto mem = map_uio(fd->get(), found->base, r, access))
                 return mem;
         }
     }
@@ -258,6 +269,7 @@ Ex<FpgaMemory> FpgaMemory::map_fbdev(os::Framebuffer fb, const FbdevPlacement& a
 }
 
 Ex<FpgaMemory> FpgaMemory::map_scanout(
+    const ApertureNodeDecl& node,
     const ApertureRegion& r,
     WriteCombine wc,
     const char* fb_node
@@ -273,7 +285,7 @@ Ex<FpgaMemory> FpgaMemory::map_scanout(
         }
     }
 
-    return map_aperture(r, os::MmioRegion::Access::ReadWrite);
+    return map_aperture(node, r, os::MmioRegion::Access::ReadWrite);
 }
 
 namespace {

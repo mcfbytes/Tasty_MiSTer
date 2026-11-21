@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "infra/seat.h"
+#include "os/raw_monotonic_clock.h"
 #include "proto/types.h"
 #include "svc/types.h"
 #include "ui/ui_event.h"
@@ -108,11 +109,14 @@ private:
 
     std::optional<UiEvent> deliver_(
         proto::KeyCode code,
-        std::chrono::nanoseconds now,
+        os::RawMonotonicClock::time_point now,
         bool first
     ) noexcept;
 
-    std::optional<UiEvent> accept_(proto::KeyCode code, std::chrono::nanoseconds now) noexcept;
+    std::optional<UiEvent> accept_(
+        proto::KeyCode code,
+        os::RawMonotonicClock::time_point now
+    ) noexcept;
 
     const os::IClock* clock_;
     KeyRing ring_;
@@ -122,8 +126,8 @@ private:
 
     proto::KeyCode last_seen_{};
     std::optional<proto::KeyCode> db_pending_;
-    std::chrono::nanoseconds db_at_{};
-    std::chrono::nanoseconds repeat_at_{};
+    os::RawMonotonicClock::time_point db_at_{};
+    os::RawMonotonicClock::time_point repeat_at_{};
     std::uint16_t hold_cnt_ = 0;
 };
 

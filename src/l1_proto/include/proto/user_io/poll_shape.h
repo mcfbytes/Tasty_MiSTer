@@ -7,15 +7,15 @@
 
 #include "hal/types.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
+#include "proto/user_io/condition.h"
 
 namespace mister::proto::user_io {
 
 enum class PollShape : std::uint8_t { InfoPoll, RumblePoll, F12ModPoll, kCount };
-
-enum class Condition : std::uint8_t { NonZero, MaskedChangedSinceLast, kCount };
 
 enum class CommandForm : std::uint8_t { Bare, ParamInHighByte, kCount };
 
@@ -26,7 +26,7 @@ enum class Cadence : std::uint8_t { Census, SessionStart, kCount };
 struct PollShapeRow {
     PollShape shape;
     UioOp opcode;
-    hal::SpiWord mask;
+    ReplyMask mask;
     Condition push_when;
     SeatTag sink;
     CommandForm form;
@@ -37,7 +37,7 @@ struct PollShapeRow {
 inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
     {.shape = PollShape::InfoPoll,
      .opcode = UioOp::InfoGet,
-     .mask = hal::SpiWord{0x00FF},
+     .mask = ReplyMask{0x00FF},
      .push_when = Condition::NonZero,
      .sink = SeatTag::Ui,
      .form = CommandForm::Bare,
@@ -45,7 +45,7 @@ inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
      .cadence = Cadence::Census},
     {.shape = PollShape::RumblePoll,
      .opcode = UioOp::GetRumble,
-     .mask = hal::SpiWord{0xFFFF},
+     .mask = ReplyMask{0xFFFF},
      .push_when = Condition::MaskedChangedSinceLast,
      .sink = SeatTag::Input,
      .form = CommandForm::ParamInHighByte,
@@ -53,7 +53,7 @@ inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
      .cadence = Cadence::Census},
     {.shape = PollShape::F12ModPoll,
      .opcode = UioOp::GetF12Mod,
-     .mask = hal::SpiWord{0xFFFF},
+     .mask = ReplyMask{0xFFFF},
      .push_when = Condition::MaskedChangedSinceLast,
      .sink = SeatTag::Input,
      .form = CommandForm::Bare,
@@ -105,20 +105,12 @@ static_assert(poll_rows_fit_their_form(), "a Bare row issues one parameter; none
 }
 
 struct PollReply {
-    hal::SpiWord word;
-    hal::SpiWord mirror;
+    ReplyWord word;
+    ReplyWord mirror;
 };
 
 [[nodiscard]] constexpr bool guard_passes(const PollShapeRow& r, PollReply reply) noexcept {
-    switch (r.push_when) {
-        case Condition::NonZero:
-            return reply.word.any_of(r.mask);
-        case Condition::MaskedChangedSinceLast:
-            return reply.word.masked(r.mask) != reply.mirror.masked(r.mask);
-        case Condition::kCount:
-            break;
-    }
-    return false;
+    return condition_holds(r.push_when, r.mask, reply.word, reply.mirror);
 }
 
 [[nodiscard]] constexpr bool keeps_mirror(const PollShapeRow& r) noexcept {

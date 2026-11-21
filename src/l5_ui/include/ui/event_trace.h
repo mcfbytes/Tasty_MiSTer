@@ -4,9 +4,10 @@
 #include <cstdint>
 
 #include "app/event.h"
-#include "infra/diag_log.h"
+#include "infra/xthread/diag_log.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::ui {

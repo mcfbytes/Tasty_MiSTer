@@ -5,6 +5,7 @@
 #include <variant>
 
 #include "cores/addressed_load.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -89,7 +90,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
         .file = acts_->take_image(),
         .total = w.bytes,
         .wire_index = w.index,
-        .act = h.owner.next_generation(),
+        .act = h.owner.next_act(),
         .row = r
     };
     auto l = LoadLadder::start(std::move(job), std::move(*win), rel_.view());
@@ -133,7 +134,8 @@ ManifestLadder::Pass ManifestLadder::send_(Host& h) {
 
     if (!b.bytes.empty())
         send_file_ = FileIntern{.bytes = std::move(b.bytes), .path = rel_.view()};
-    const std::uint64_t bytes = send_file_ ? send_file_->bytes.size() : 0;
+
+    const std::uint64_t bytes = send_file_ ? send_file_->bytes.size() : b.aux;
 
     auto id = send_file_
         ? inbox.intern_file(std::move(*send_file_))
@@ -147,13 +149,13 @@ ManifestLadder::Pass ManifestLadder::send_(Host& h) {
     if (!inbox.push(op))
         return fail_(Errc::would_block);
     bracket_.reset();
-    echo_wait_.arm(act, h.now_ns, proto::FileSize{bytes}, kEcho);
+    echo_wait_.arm(act, h.now, proto::FileSize{bytes}, kEcho);
     pc_ = Pc::Echo;
     return Pass::Stepped;
 }
 
 ManifestLadder::Pass ManifestLadder::echo_(Host& h) {
-    switch (echo_wait_.poll(h.rung.level, h.now_ns)) {
+    switch (echo_wait_.poll(h.rung.level, h.now)) {
         case EchoWait::Answer::Waiting:
             return Pass::Waiting;
         case EchoWait::Answer::Answered:
@@ -184,7 +186,7 @@ Rung::Pass ManifestLadder::step(const RungEdges& edges, cores::ILadderHost& owne
         .map = edges.window_map,
         .aperture = edges.aperture,
         .windows = edges.windows,
-        .now_ns = edges.clock.now().time_since_epoch()
+        .now = edges.clock.now()
     };
     switch (step(h)) {
         case Pass::Stepped:

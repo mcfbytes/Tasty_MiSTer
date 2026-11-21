@@ -18,14 +18,14 @@ VsyncAdjust vsync_adjust_of(const svc::ConfigSnapshot& snap) noexcept {
     return VsyncAdjust::LowLag;
 }
 
-svc::adv7513::HdrMode hdr_mode_of(const svc::ConfigSnapshot& snap) noexcept {
+svc::video::adv7513::HdrMode hdr_mode_of(const svc::ConfigSnapshot& snap) noexcept {
     constexpr std::uint8_t kOff = 0;
     constexpr std::uint8_t kHlg = 1;
     if (snap.hdr == kOff)
-        return svc::adv7513::HdrMode::Off;
+        return svc::video::adv7513::HdrMode::Off;
     if (snap.hdr == kHlg)
-        return svc::adv7513::HdrMode::Hlg;
-    return svc::adv7513::HdrMode::DciP3;
+        return svc::video::adv7513::HdrMode::Hlg;
+    return svc::video::adv7513::HdrMode::DciP3;
 }
 
 [[nodiscard]] AspectRatio aspect_ratio_of(const char* text) noexcept {
@@ -59,7 +59,7 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
 
     const bool dv_on = ini.direct_video_ini != 0 && !(force.replay && !force.strict_direct_video);
     ini.wire.direct_video = dv_on;
-    ini.spd_quirk = svc::spd_quirk_of(svc::SpdQuirkIni{snap.spd_quirk});
+    ini.spd_quirk = svc::video::spd_quirk_of(svc::video::SpdQuirkIni{snap.spd_quirk});
 
     for (std::size_t i = 0; i < ini.ar_cust.size(); ++i)
         ini.ar_cust[i] = aspect_ratio_of(snap.custom_aspect_ratio[i]);

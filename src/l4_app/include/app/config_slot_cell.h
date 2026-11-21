@@ -9,32 +9,16 @@
 #include "cores/config_slot_count.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
+#include "infra/index_set.h"
 #include "infra/indexed_array.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 
-struct ConfigSlotMask {
-    std::uint16_t v = 0;
-    [[nodiscard]] constexpr bool has(cores::ConfigSlot slot) const noexcept;
-    [[nodiscard]] constexpr ConfigSlotMask with(cores::ConfigSlot slot) const noexcept;
-    friend constexpr bool operator==(ConfigSlotMask, ConfigSlotMask) = default;
-};
-
-[[nodiscard]] constexpr ConfigSlotMask slot_bit(cores::ConfigSlot slot) noexcept {
-    if (slot.v >= std::numeric_limits<std::uint16_t>::digits)
-        return ConfigSlotMask{};
-    return ConfigSlotMask{static_cast<std::uint16_t>(std::uint16_t{1} << slot.v)};
-}
-
-constexpr bool ConfigSlotMask::has(cores::ConfigSlot slot) const noexcept {
-    return (v & slot_bit(slot).v) != 0;
-}
-
-constexpr ConfigSlotMask ConfigSlotMask::with(cores::ConfigSlot slot) const noexcept {
-    return ConfigSlotMask{static_cast<std::uint16_t>(v | slot_bit(slot).v)};
-}
+using ConfigSlotMask = infra::
+    IndexSet<cores::ConfigSlot, std::numeric_limits<std::uint16_t>::digits, std::uint16_t>;
 
 struct ConfigSlotTable {
     TASTY_SEAT_EXEMPT(const_shared);

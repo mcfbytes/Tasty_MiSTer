@@ -12,7 +12,7 @@
 #include "app/xml_kind.h"
 #include "app/path_text.h"
 #include "app/types.h"
-#include "cores/ram_image_recipe.h"
+#include "cores/tas/ram_image_recipe.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
@@ -133,7 +133,7 @@ struct UiRequest {
         static constexpr Kind kKind = Kind::LoadRamImage;
         CoreScope scope{};
         std::uint8_t pad_[2]{};
-        cores::RamImageRecipe recipe{};
+        cores::tas::RamImageRecipe recipe{};
     };
 
     struct SetOsdStyle {

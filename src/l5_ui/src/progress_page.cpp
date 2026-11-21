@@ -26,16 +26,16 @@ void ProgressPage::set_progress(cores::Progress progress) noexcept {
     step_ = progress.scaled(kProgressMax);
 }
 
-bool ProgressPage::describe(app::PageDescription& out) const {
+bool ProgressPage::describe(app::hd::PageDescription& out) const {
     TASTY_SEAT_BODY(ProgressPage);
     out = {};
     (void)out.title.assign("Loading");
     constexpr std::uint8_t kDescribedRows = 2;
-    out.total = RowCount::of(kDescribedRows);
-    out.row_count = RowCount::of(kDescribedRows);
-    out.rows[0].kind = app::PageDescription::RowKind::Text;
+    out.total = RowCount::truncating(kDescribedRows);
+    out.row_count = RowCount::truncating(kDescribedRows);
+    out.rows[0].kind = app::hd::PageDescription::RowKind::Text;
     (void)out.rows[0].label.assign(name_.view());
-    out.rows[1].kind = app::PageDescription::RowKind::Bar;
+    out.rows[1].kind = app::hd::PageDescription::RowKind::Bar;
     if (!last_.dismisses()) {
         constexpr std::uint32_t kPercent = 100;
 

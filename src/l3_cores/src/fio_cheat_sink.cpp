@@ -2,8 +2,9 @@
 #include "cores/fio_cheat_sink.h"
 
 #include "cores/cheat_geometry.h"
-#include "proto/download_session.h"
-#include "proto/spi_fio_queue.h"
+#include "infra/prelude.h"
+#include "proto/link/download_session.h"
+#include "proto/link/spi_fio_queue.h"
 
 namespace mister::cores {
 
@@ -26,7 +27,7 @@ Ex<void> FioCheatSink::apply(std::span<const std::uint8_t> table, CheatUnit unit
     }
     if (queue_)
         (void)queue_->flush();
-    if (auto r = proto::DownloadSession::send_cheats(*link_, table); !r)
+    if (auto r = proto::link::DownloadSession::send_cheats(*link_, table); !r)
         return r;
     ++sends_;
     bytes_ += table.size();

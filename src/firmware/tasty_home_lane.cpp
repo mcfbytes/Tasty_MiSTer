@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "infra/persist.h"
+#include "infra/prelude.h"
 #include "tasty_cli_refusal.h"
 #include "tasty_owner_lock.h"
 #include "tasty_return_home.h"

@@ -6,6 +6,7 @@
 #include "svc/types.h"
 #include "app/cheat_apply.h"
 #include "app/cheat_blob_cell.h"
+#include "infra/prelude.h"
 #include "app/tx_digest_cell.h"
 #include "infra/seat.h"
 

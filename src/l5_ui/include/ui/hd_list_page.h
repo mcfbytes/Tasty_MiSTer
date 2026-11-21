@@ -7,10 +7,11 @@
 #include <memory>
 #include <optional>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/page.h"
 #include "ui/page_arg.h"
@@ -33,7 +34,7 @@ public:
 
     bool walk(PageWalk& out) const override;
 
-    bool describe_hub(app::PageDescription& out) const override;
+    bool describe_hub(app::hd::PageDescription& out) const override;
     Transition handle(const UiEvent& ev) override;
     void on_facts(const SystemFacts& facts, const SessionFacts& session) override;
 
@@ -48,7 +49,7 @@ public:
     std::optional<TierRun> tier_run(RowIndex at) const override;
 
     [[nodiscard]] bool empty() const;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
     ConnectDemand connect_demand() const override;
     bool holds_live_script() const override;
     bool bt_pairing_active() const override;
@@ -74,7 +75,7 @@ private:
         RowCount n{};
 
         void add(RowIndex r) noexcept {
-            if (n < RowCount::of(Extent))
+            if (n < RowCount::truncating(Extent))
                 at[row_after(n)] = r;
             n += kOneRow;
         }
@@ -83,14 +84,14 @@ private:
     };
 
     [[nodiscard]] PageRows page_rows_() const;
-    [[nodiscard]] IHdRow& row_(const PageRows& s, RowIndex page_row) const;
+    [[nodiscard]] IRow& row_(const PageRows& s, RowIndex page_row) const;
     [[nodiscard]] bool shown_(const PageRows& s, RowIndex page_row) const;
     [[nodiscard]] bool focusable_(RowIndex page_row) const;
     [[nodiscard]] std::optional<RowIndex> first_focusable_from_(RowIndex page_row) const;
     [[nodiscard]] std::optional<RowIndex> recalled_() const;
 
     struct Window {
-        infra::IndexedArray<RowIndex, app::PageDescription::kMaxRows, RowIndex> page_row{};
+        infra::IndexedArray<RowIndex, app::hd::PageDescription::kMaxRows, RowIndex> page_row{};
         RowCount count{};
         RowCount pinned{};
         RowIndex first{};
@@ -106,7 +107,7 @@ private:
     PageArg push_arg_;
     HdFocusMemory& memory_;
     RowIndex sel_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 };
 
 }

@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "infra/parse_int.h"
+#include "infra/prelude.h"
 #include "tasty_cli_refusal.h"
 #include "tasty_command.h"
 
@@ -101,7 +102,7 @@ inline constexpr RecRow kRecRows[] = {
     {"stop", TastyVerb::RecStop},
 };
 
-using RamFill = cores::IReplayCore::RamFill;
+using RamFill = cores::tas::IReplayCore::RamFill;
 
 struct FillRow {
     std::string_view name;
@@ -270,7 +271,7 @@ struct OptionRow {
 }
 
 [[nodiscard]] bool take_codec(std::string_view word, TastyArgs& a) noexcept {
-    const std::optional<app::RecCodec> codec = app::parse_rec_codec(word);
+    const std::optional<app::capture::RecCodec> codec = app::capture::parse_rec_codec(word);
     if (!codec)
         return false;
     a.rec.codec = *codec;
@@ -278,7 +279,7 @@ struct OptionRow {
 }
 
 [[nodiscard]] bool take_motion(std::string_view word, TastyArgs& a) noexcept {
-    const std::optional<app::RecMotion> motion = app::parse_rec_motion(word);
+    const std::optional<app::capture::RecMotion> motion = app::capture::parse_rec_motion(word);
     if (!motion)
         return false;
     a.rec.motion = *motion;
@@ -286,7 +287,7 @@ struct OptionRow {
 }
 
 [[nodiscard]] bool take_scale(std::string_view word, TastyArgs& a) noexcept {
-    const std::optional<app::RecScale> scale = app::parse_rec_scale(word);
+    const std::optional<app::capture::RecScale> scale = app::capture::parse_rec_scale(word);
     if (!scale)
         return false;
     a.rec.scale = *scale;
@@ -294,7 +295,7 @@ struct OptionRow {
 }
 
 [[nodiscard]] bool take_every(std::string_view word, TastyArgs& a) noexcept {
-    const std::optional<app::RecEvery> every = app::parse_rec_every(word);
+    const std::optional<app::RecEvery> every = app::capture::parse_rec_every(word);
     if (!every)
         return false;
     a.rec.every = *every;
@@ -318,8 +319,8 @@ struct OptionRow {
 }
 
 [[nodiscard]] bool take_segment(std::string_view word, TastyArgs& a) noexcept {
-    const std::optional<proto::FileSize> bytes = app::parse_rec_size(word);
-    if (!bytes || bytes->empty() || !app::rec_segment_ok(*bytes))
+    const std::optional<proto::FileSize> bytes = app::capture::parse_rec_size(word);
+    if (!bytes || bytes->empty() || !app::capture::rec_segment_ok(*bytes))
         return false;
     a.rec.segment_bytes = *bytes;
     return true;
@@ -456,7 +457,7 @@ template <class Row, std::size_t N>
             }
         }
     }
-    if (!app::rec_bounds_ok(a.rec))
+    if (!app::capture::rec_bounds_ok(a.rec))
         return fail(TastyRefusal::BadRecBounds);
     if (!a.record && record_option)
         return fail(TastyRefusal::RecOptionsWithoutRecord);

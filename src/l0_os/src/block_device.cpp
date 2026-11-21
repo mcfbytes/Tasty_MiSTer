@@ -6,6 +6,8 @@
 #include <cerrno>
 #include <cstddef>
 
+#include "infra/prelude.h"
+
 #if __has_include(<linux/fs.h>)
 #include <linux/fs.h>
 #endif

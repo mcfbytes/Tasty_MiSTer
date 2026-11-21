@@ -143,23 +143,23 @@ bool MiscPage::walk(PageWalk& out) const {
 
 Transition MiscPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(MiscPage);
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (ev.buttons.intersects({UiEvent::Menu}))
         return Transition::leave();
 
     if (sel_ == kConfigOrdinal) {
-        if (ev.buttons.has_any({UiEvent::Left | UiEvent::Minus})) {
+        if (ev.buttons.intersects({UiEvent::Left | UiEvent::Minus})) {
             cycle(false);
             return Transition{};
         }
-        if (ev.buttons.has_any({UiEvent::Right | UiEvent::Plus})) {
+        if (ev.buttons.intersects({UiEvent::Right | UiEvent::Plus})) {
             cycle(true);
             return Transition{};
         }
-        if (ev.buttons.has_any({UiEvent::Select}))
+        if (ev.buttons.intersects({UiEvent::Select}))
             switch_to_();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Select}))
+    if (ev.buttons.intersects({UiEvent::Select}))
         return Transition::leave();
     return Transition{};
 }

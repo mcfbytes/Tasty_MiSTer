@@ -16,6 +16,8 @@
 
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
+#include "cores/disk_servant_row.h"
+#include "cores/mailbox_servant_row.h"
 #include "cores/save_store_column.h"
 #include "cores/generic_profile.h"
 #include "hal/types.h"
@@ -39,7 +41,27 @@ struct CoreFactory {
 
     MakeSaveStore make_save_store = nullptr;
 
+    std::span<const DiskServantRow> disk_servants{};
+
+    MailboxServantRow mailbox_servant{};
+
     infra::OptRef<const IManifestDocRole> manifest_doc{};
+
+    [[nodiscard]] constexpr bool saves_by_channel() const noexcept {
+        return make_save_store != nullptr;
+    }
+
+    [[nodiscard]] constexpr bool serves_disks() const noexcept { return !disk_servants.empty(); }
+
+    [[nodiscard]] constexpr bool has_mailbox_servant() const noexcept {
+        return mailbox_servant.declared();
+    }
+
+    [[nodiscard]] constexpr bool has_ladder() const noexcept { return make_ladder != nullptr; }
+
+    [[nodiscard]] constexpr bool has_loader() const noexcept { return make_loader != nullptr; }
+
+    [[nodiscard]] constexpr bool streams_files() const noexcept { return !profile.no_stream_role; }
 };
 
 std::span<const CoreFactory> core_table();
@@ -63,10 +85,10 @@ const CoreProfile& profile_for(std::string_view conf_str_name, LoadHint hint);
     infra::OptRef<const CoreFactory> row,
     hal::FabricAddr load_addr
 ) noexcept {
-    if (row && row->make_loader != nullptr)
+    if (row && row->has_loader())
         return row->make_loader;
-    const CoreProfile& p = row ? row->profile : kGenericProfile;
-    if (load_addr == hal::FabricAddr{} || p.no_stream_role)
+    const bool streams = row ? row->streams_files() : !kGenericProfile.no_stream_role;
+    if (load_addr == hal::FabricAddr{} || !streams)
         return nullptr;
     return &make_addressed_load;
 }

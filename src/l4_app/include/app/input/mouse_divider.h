@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <optional>
+
+#include "app/input/mouse_accumulator.h"
+#include "infra/seat.h"
+#include "os/clock.h"
+#include "svc/types.h"
+
+namespace mister::app::input {
+
+class MouseDivider {
+    TASTY_SEAT_RESIDENT(Input);
+
+public:
+    struct Packet {
+        svc::MouseMotion motion{};
+        proto::MouseButtons buttons{};
+    };
+
+    explicit MouseDivider(os::IClock& clock) noexcept : clock_(clock) {}
+
+    MouseDivider(const MouseDivider&) = delete;
+    MouseDivider& operator=(const MouseDivider&) = delete;
+
+    void accumulate(svc::MouseMotion motion) noexcept { acc_.accumulate(motion); }
+
+    void note_buttons(proto::MouseButtons level) noexcept { acc_.note_buttons(level); }
+
+    [[nodiscard]] std::optional<Packet> flush() noexcept;
+
+private:
+    os::IClock& clock_;
+    MouseAccumulator acc_{};
+    os::RawMonotonicClock::time_point last_mouse_{};
+    bool mouse_pending_ = false;
+    svc::MouseMotion carry_{};
+};
+
+}

@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include "app/capture/avi_writer.h"
+#include "app/capture/sidecar_writer.h"
+#include "infra/error.h"
+#include "infra/xthread/park_fds.h"
+#include "infra/park_timeout.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "infra/xthread/seat_main.h"
+#include "infra/xthread/seat_park.h"
+#include "infra/xthread/wake_flag.h"
+
+namespace mister::app::capture {
+
+class RecWriteMain final : public xthread::SeatMain<RecWriteMain> {
+    TASTY_SEAT_RESIDENT(RecWrite);
+
+public:
+    static constexpr unsigned kSidecarMsgsPerPass = 256;
+
+    RecWriteMain(
+        SidecarWriter& writer,
+        AviWriter& avi,
+        SidecarRing& sidecar,
+        xthread::ParkFds fds
+    ) noexcept
+        : writer_(writer),
+          avi_(avi),
+          sidecar_(sidecar),
+          wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
+          park_(wake_, stop_) {}
+
+    RecWriteMain(const RecWriteMain&) = delete;
+    RecWriteMain& operator=(const RecWriteMain&) = delete;
+    RecWriteMain(RecWriteMain&&) = delete;
+    RecWriteMain& operator=(RecWriteMain&&) = delete;
+
+    void start() noexcept;
+
+    void stop() noexcept { stop_.request(); }
+
+    void serve() noexcept;
+
+    [[nodiscard]] bool idle() const noexcept { return sidecar_.empty() && avi_.idle(); }
+
+    [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return avi_.park_ms(); }
+
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
+
+    [[nodiscard]] bool paused() noexcept { return false; }
+
+    [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
+    void settle() noexcept {
+        avi_.release();
+        writer_.release();
+    }
+
+private:
+    SidecarWriter& writer_;
+    AviWriter& avi_;
+    SidecarRing& sidecar_;
+    xthread::WakeFlag& wake_;
+    xthread::WakeFlag stop_;
+    xthread::SeatPark park_;
+};
+
+static_assert(xthread::SeatBody<RecWriteMain>);
+
+}

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/enum_set.h"
 #include "infra/seat.h"
 
 namespace mister::reactor {
@@ -15,7 +16,6 @@ enum class Cause : std::uint8_t {
     Ring,
     CoreTick,
     Test,
-    Sys,
     kCount,
 };
 
@@ -24,12 +24,17 @@ class CauseSet {
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    using Bits = infra::EnumSet<Cause, std::uint16_t>;
+
     constexpr CauseSet() noexcept = default;
 
-    constexpr explicit CauseSet(Cause c) noexcept : bits_(bit(c)) {}
+    constexpr explicit CauseSet(Cause c) noexcept {
+        if (c != Cause::None)
+            bits_.insert(c);
+    }
 
     constexpr CauseSet& operator|=(CauseSet o) noexcept {
-        bits_ = static_cast<std::uint16_t>(bits_ | o.bits_);
+        bits_ = bits_.united(o.bits_);
         return *this;
     }
 
@@ -40,19 +45,15 @@ public:
 
     friend constexpr bool operator==(CauseSet, CauseSet) = default;
 
-    constexpr bool has(Cause c) const noexcept { return (bits_ & bit(c)) != 0u; }
+    [[nodiscard]] constexpr bool contains(Cause c) const noexcept { return bits_.contains(c); }
 
-    constexpr bool empty() const noexcept { return bits_ == 0u; }
+    [[nodiscard]] constexpr bool is_empty() const noexcept { return bits_.is_empty(); }
 
 private:
-    static constexpr std::uint16_t bit(Cause c) noexcept {
-        return c == Cause::None ? std::uint16_t{0}
-                                : static_cast<std::uint16_t>(1u << static_cast<unsigned>(c));
-    }
-
-    std::uint16_t bits_ = 0;
+    Bits bits_{};
 };
 
+static_assert(sizeof(CauseSet) == 2);
 static_assert(
     static_cast<unsigned>(Cause::kCount) <= 16,
     "CauseSet packs one bit per Cause into a uint16_t. Keyed to the "

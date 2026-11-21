@@ -7,6 +7,7 @@
 #include "cores/companion_plan.h"
 #include "cores/servant_id.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

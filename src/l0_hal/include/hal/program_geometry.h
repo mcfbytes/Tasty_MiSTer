@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "hal/fact.h"
+#include "infra/prelude.h"
 #include "hal/fact_field.h"
 
 namespace mister::hal {

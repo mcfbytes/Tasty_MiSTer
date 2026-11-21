@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/file.h"
 #include "svc/vfs.h"

@@ -7,8 +7,8 @@
 #include <string>
 #include <utility>
 
-#include "app/hd_window.h"
-#include "app/page_description.h"
+#include "app/hd/hd_window.h"
+#include "app/hd/page_description.h"
 #include "proto/types.h"
 #include "ui/draw_classic.h"
 #include "ui/hd_focus_memory.h"
@@ -17,10 +17,11 @@
 #include "ui/page_row.h"
 #include "ui/page_walk.h"
 #include "ui/ui_event.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
-using RowKind = app::PageDescription::RowKind;
+using RowKind = app::hd::PageDescription::RowKind;
 
 HdListPage::HdListPage(std::unique_ptr<IHdPlan> plan, PageArg push_arg, HdFocusMemory& memory)
     : plan_(std::move(plan)),
@@ -50,7 +51,7 @@ PageFacts HdListPage::facts() const {
 }
 
 HdListPage::PageRows HdListPage::page_rows_() const {
-    const RowCount n = RowCount::of(plan_->rows().size());
+    const RowCount n = RowCount::truncating(plan_->rows().size());
     PageRows s{};
     s.pinned = std::min({plan_->pinned(), n, kMaxRows});
     const RowCount body = n - s.pinned;
@@ -59,8 +60,8 @@ HdListPage::PageRows HdListPage::page_rows_() const {
     return s;
 }
 
-IHdRow& HdListPage::row_(const PageRows& s, RowIndex page_row) const {
-    const RowSpan<const std::reference_wrapper<IHdRow>> plan_rows{plan_->rows()};
+IRow& HdListPage::row_(const PageRows& s, RowIndex page_row) const {
+    const RowSpan<const std::reference_wrapper<IRow>> plan_rows{plan_->rows()};
     const RowIndex at = page_row < row_after(s.body)
         ? page_row
         : row_after(plan_rows.size() - s.pinned) + (page_row - row_after(s.body));
@@ -73,7 +74,7 @@ bool HdListPage::shown_(const PageRows& s, RowIndex page_row) const {
 
 bool HdListPage::focusable_(RowIndex page_row) const {
     const PageRows s = page_rows_();
-    return shown_(s, page_row) && focusable(row_(s, page_row).describe());
+    return shown_(s, page_row) && focusable(row_(s, page_row).describe(plan_->row_cx()));
 }
 
 std::optional<RowIndex> HdListPage::first_focusable_from_(RowIndex from) const {
@@ -133,21 +134,21 @@ HdListPage::Window HdListPage::window_(RowIndex prev_first) const {
         }
         body.add(i);
     }
-    RowSet<app::PageDescription::kMaxRows> pinned{};
+    RowSet<app::hd::PageDescription::kMaxRows> pinned{};
     for (const RowIndex i : rows(row_after(s.body), s.pinned)) {
-        if (pinned.n >= RowCount::of(pinned.at.size()))
+        if (pinned.n >= RowCount::truncating(pinned.at.size()))
             break;
         if (shown_(s, i))
             pinned.add(i);
     }
     w.pinned = pinned.n;
-    const RowCount height = RowCount::of(app::PageDescription::kMaxRows) - w.pinned;
+    const RowCount height = RowCount::truncating(app::hd::PageDescription::kMaxRows) - w.pinned;
 
     const RowIndex selected = sel_in_body ? sel_at : prev_first;
-    const app::HdWindow bw = app::hd_window(selected, body.n, prev_first, height);
-    w.first = bw.first;
+    const app::hd::HdWindow bw = app::hd::hd_window(selected, body.n, prev_first, height);
+    w.first = bw.start;
     w.total = body.n + w.pinned;
-    for (const RowIndex k : rows(w.first, bw.count)) {
+    for (const RowIndex k : rows(w.first, bw.len)) {
         w.page_row[row_after(w.count)] = body[k];
         w.count += kOneRow;
     }
@@ -193,23 +194,24 @@ RowIndex HdListPage::selection() const {
 std::optional<Page::TierRun> HdListPage::tier_run(RowIndex at) const {
     TASTY_SEAT_BODY(HdListPage);
     const MenuMask m = mask();
-    if (!m.has(at))
+    if (!m.contains(at))
         return std::nullopt;
     const PageRows s = page_rows_();
-    const app::RowTier tier = row_(s, at).describe().tier;
+    const RowCx cx = plan_->row_cx();
+    const app::hd::RowTier tier = row_(s, at).describe(cx).tier;
     MenuMask run = row_bit(at);
     for (RowIndex i = at + kOneRow; i < row_after(kMaxRows); i += kOneRow) {
-        if (!m.has(i))
+        if (!m.contains(i))
             continue;
-        if (row_(s, i).describe().tier != tier)
+        if (row_(s, i).describe(cx).tier != tier)
             break;
         run = run.with(i);
     }
     for (RowIndex i = at; i > RowIndex{};) {
         i -= kOneRow;
-        if (!m.has(i))
+        if (!m.contains(i))
             continue;
-        if (row_(s, i).describe().tier != tier)
+        if (row_(s, i).describe(cx).tier != tier)
             break;
         run = run.with(i);
     }
@@ -221,7 +223,7 @@ bool HdListPage::empty() const {
     return !first_focusable_from_(RowIndex{}).has_value();
 }
 
-svc::Tally HdListPage::refusals() const noexcept {
+infra::Tally HdListPage::refusals() const noexcept {
     TASTY_SEAT_BODY(HdListPage);
     return refusals_.sum(plan_->refusals());
 }
@@ -250,6 +252,7 @@ bool HdListPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(HdListPage);
     const Window w = window_(out.page.first);
     const PageRows s = page_rows_();
+    const RowCx cx = plan_->row_cx();
     (void)out.page.title.assign(plan_->title());
     out.title_arrow = OsdRenderer::kArrowNone;
     out.page.first = w.first;
@@ -260,7 +263,7 @@ bool HdListPage::walk(PageWalk& out) const {
     for (const RowIndex k : rows(w.count)) {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
-        app::PageDescription::Row d = row_(s, w.page_row[k]).describe();
+        app::hd::PageDescription::Row d = row_(s, w.page_row[k]).describe(cx);
         d.selected = focusable(d) && w.page_row[k] == sel_;
         r.hd = d;
     }
@@ -268,7 +271,7 @@ bool HdListPage::walk(PageWalk& out) const {
     const Window c = window_(RowIndex{});
     for (const RowIndex line : rows(c.count)) {
         const RowIndex page_row = c.page_row[line];
-        const app::PageDescription::Row d = row_(s, page_row).describe();
+        const app::hd::PageDescription::Row d = row_(s, page_row).describe(cx);
         std::string text(d.label.view());
         if (d.kind == RowKind::Value && !d.value.empty())
             text.append("  ").append(d.value.view());
@@ -286,19 +289,20 @@ bool HdListPage::walk(PageWalk& out) const {
     return true;
 }
 
-bool HdListPage::describe_hub(app::PageDescription& out) const {
+bool HdListPage::describe_hub(app::hd::PageDescription& out) const {
     TASTY_SEAT_BODY(HdListPage);
     out.hub = {};
     if (!plan_->hub())
         return false;
     const PageRows s = page_rows_();
+    const RowCx cx = plan_->row_cx();
     for (const RowIndex i : rows(s.addressed())) {
         if (out.hub.count >= out.hub.items.size())
             break;
         if (!focusable_(i))
             continue;
-        const app::PageDescription::Row d = row_(s, i).describe();
-        app::PageDescription::Hub::Item& item = out.hub.items[out.hub.count];
+        const app::hd::PageDescription::Row d = row_(s, i).describe(cx);
+        app::hd::PageDescription::Hub::Item& item = out.hub.items[out.hub.count];
         (void)item.label.assign(d.label.view());
         item.icon = d.icon;
         item.enabled = d.enabled;
@@ -311,12 +315,12 @@ bool HdListPage::describe_hub(app::PageDescription& out) const {
 
 Transition HdListPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(HdListPage);
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (ev.buttons.intersects({UiEvent::Menu}))
         return Transition::close_all();
-    if (ev.buttons.has_any({UiEvent::Back}))
+    if (ev.buttons.intersects({UiEvent::Back}))
         return Transition::leave();
-    const bool select = ev.buttons.has_any({UiEvent::Select});
-    const bool step = ev.buttons.has_any({UiEvent::Plus | UiEvent::Minus});
+    const bool select = ev.buttons.intersects({UiEvent::Select});
+    const bool step = ev.buttons.intersects({UiEvent::Plus | UiEvent::Minus});
     if (!select && !step)
         return Transition{};
     if (!focusable_(sel_)) {
@@ -324,12 +328,13 @@ Transition HdListPage::handle(const UiEvent& ev) {
             refusals_.add();
         return Transition{};
     }
-    IHdRow& row = row_(page_rows_(), sel_);
+    const RowCx cx = plan_->row_cx();
+    IRow& row = row_(page_rows_(), sel_);
     if (select)
-        return row.select();
-    if (!row.describe().steps)
+        return row.select(cx);
+    if (!row.describe(cx).steps)
         return Transition{};
-    return row.step(ev.buttons.has_any({UiEvent::Plus}) ? CycleDir::Next : CycleDir::Back);
+    return row.step(ev.buttons.intersects({UiEvent::Plus}) ? CycleDir::Next : CycleDir::Back, cx);
 }
 
 void HdListPage::refocus_() {

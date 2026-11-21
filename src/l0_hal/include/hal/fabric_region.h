@@ -9,6 +9,7 @@
 #include "infra/error.h"
 #include "hal/fpga_aperture.h"
 #include "hal/phys_region.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

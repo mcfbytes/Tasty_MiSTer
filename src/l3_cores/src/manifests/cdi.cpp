@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/cdi_ladder.h"
+#include "cores/cdi/cdi_ladder.h"
 #include "cores/manifests/cdi.h"
 
 #include <array>
@@ -7,17 +7,17 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cores/cdi_block.h"
-#include "cores/cdi_core.h"
+#include "cores/cdi/cdi_block.h"
+#include "cores/cdi/cdi_core.h"
 
 namespace mister::cores::manifests {
 
 std::unique_ptr<Core> make_cdi(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<CdiCore>(p, kCdiCuePolicy, g.services);
+    return std::make_unique<cdi::CdiCore>(p, kCdiCuePolicy, g.services);
 }
 
 std::unique_ptr<BootLadder> make_cdi_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<CdiLadder>(p, ctx);
+    return std::make_unique<cdi::CdiLadder>(p, ctx);
 }
 
 static_assert(kCdi.kind == CoreKind::Cdi);
@@ -61,7 +61,7 @@ static_assert(
     "user_io.cpp:3476: no CD-i blank arm; a fresh save reads memset(-1)"
 );
 static_assert(
-    kCdi.image_rows_no_zip,
+    kCdi.host.image_rows_no_zip,
     "menu.cpp:2475/:2494: every CD-i S row gains CHD and loses zip"
 );
 static_assert(
@@ -96,11 +96,11 @@ static_assert(
     "user_io.cpp:1612-1625: boot0..3.rom at i << 6 under HomeDir(), then boot.rom at 0"
 );
 static_assert(
-    svc::unimplemented_axis(kCdiCuePolicy) == svc::CueAxis::None,
+    svc::disc::unimplemented_axis(kCdiCuePolicy) == svc::disc::CueAxis::None,
     "cdi.cpp:145-367: the IndexPair program is built"
 );
 static_assert(
-    kCdiCuePolicy.frame_shaping == svc::CuePolicy::FrameShaping::DescrambleByHeader,
+    kCdiCuePolicy.frame_shaping == svc::disc::CuePolicy::FrameShaping::DescrambleByHeader,
     "cdi.cpp:1066: check_scramble runs on every track sector read"
 );
 

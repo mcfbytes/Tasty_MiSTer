@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/megacd_ladder.h"
+#include "cores/cd/megacd_ladder.h"
 #include "cores/manifests/megacd.h"
 
 namespace mister::cores::manifests {
@@ -25,24 +25,24 @@ static_assert(
 );
 
 static_assert(
-    std::holds_alternative<CdProfile::SegaCddFacts>(kMegaCdProfile.row),
+    std::holds_alternative<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row),
     "req: MegaCD is the SegaBcdNibble dialect"
 );
 static_assert(
-    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).crc_start == 0,
+    std::get<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row).crc_start == 0,
     "megacd.cpp:43,:77: MegaCD crc_start seed is 0 (NeoGeoCD is 5)"
 );
 
 static_assert(
-    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).status_carries_is_data,
+    std::get<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row).status_carries_is_data,
     "megacd.cpp:46: MegaCD ORs isData into word2 bit 8 (NeoGeoCD does not)"
 );
 static_assert(
-    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).ready_probe_skips_mode1,
+    std::get<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row).ready_probe_skips_mode1,
     "megacd.cpp:288-290: MegaCD's MODE1 ready probe has no round trip (NeoGeoCD's does)"
 );
 static_assert(
-    !std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).stream_on_data_track,
+    !std::get<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row).stream_on_data_track,
     "megacd.cpp:32: MegaCD streams the CD-DA track (NeoGeoCD streams the data track)"
 );
 
@@ -65,20 +65,23 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kMegaCdTicks.speeds == CdSpeedCount{}, "MegaCD engages no speed-indexed override");
+static_assert(
+    kMegaCdTicks.speeds == cd::CdSpeedCount{},
+    "MegaCD engages no speed-indexed override"
+);
 
 static_assert(
-    kMegaCdCuePolicy.offset_op == svc::CuePolicy::OffsetOp::Accumulate,
+    kMegaCdCuePolicy.offset_op == svc::disc::CuePolicy::OffsetOp::Accumulate,
     "megacdd.cpp:195,211: MegaCD accumulates (`+=`) a hardcoded "
     "2352; PCE-CD assigns (`=`) the track's real size"
 );
 static_assert(
-    kMegaCdCuePolicy.sub_naming == svc::CuePolicy::SubNaming::LastTrackFilename,
+    kMegaCdCuePolicy.sub_naming == svc::disc::CuePolicy::SubNaming::LastTrackFilename,
     "megacdd.cpp:234-235: track05.bin -> track05.sub — a "
     "user-visible on-disk contract PCE-CD disagrees with"
 );
 static_assert(
-    kMegaCdCuePolicy.type_detect == svc::CuePolicy::TypeDetect::Track0Only,
+    kMegaCdCuePolicy.type_detect == svc::disc::CuePolicy::TypeDetect::Track0Only,
     "megacdd.cpp:147-167: MegaCD detects type/size on track 0 only"
 );
 static_assert(
@@ -97,7 +100,7 @@ static_assert(
 );
 
 static_assert(
-    !std::holds_alternative<CdProfile::PceScsiFacts>(kMegaCdProfile.row),
+    !std::holds_alternative<cd::CdProfile::PceScsiFacts>(kMegaCdProfile.row),
     "megacdd.cpp:878-887: MegaCD has no per-title seek fast paths"
 );
 
@@ -156,18 +159,18 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdServices[0].impl == &kCdCommandEdge<kMegaCd>
-        && kMegaCdServices[1].impl == &kCdServiceTick<kMegaCd>,
+    kMegaCdServices[0].impl == &cd::kCdCommandEdge<kMegaCd>
+        && kMegaCdServices[1].impl == &cd::kCdServiceTick<kMegaCd>,
     "the two rows are the SHARED CD obligations keyed to this "
     "profile, never a per-manifest ILinkDecoder copy"
 );
 
 std::unique_ptr<Core> make_megacd(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<CdCore>(p, kMegaCdProfile, g.services);
+    return std::make_unique<cd::CdCore>(p, kMegaCdProfile, g.services);
 }
 
 std::unique_ptr<BootLadder> make_megacd_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<MegaCdLadder>(p, ctx);
+    return std::make_unique<cd::MegaCdLadder>(p, ctx);
 }
 
 static_assert(start_mount_of(kMegaCdSlots, IoIndex{0}) == StartMount::AsPick);

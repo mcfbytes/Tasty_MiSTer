@@ -107,7 +107,11 @@ inline constexpr BoardProfile kDe10Profile{
     .irq_pins = kDe10IrqPins,
     .video = {.i2c_buses = I2cBusRange{.first = 0u, .last = 2u}, .vsync_device = "/dev/fb0"},
 
-    .kernel = {.doorbell_prefix = "mister_f2h_irq", .sd_block = "mmcblk0", .activity_led = {}},
+    .kernel =
+        {.doorbell_prefix = "mister_f2h_irq",
+         .sd_block = "mmcblk0",
+         .activity_led = {},
+         .ddr_aperture = "mister_ddr_aperture"},
     .threads = kDe10ThreadMap,
     .main_cpu = os::CpuId{0},
     .verified = true,
@@ -371,22 +375,11 @@ static_assert(
 );
 
 static_assert(
-    every_thread_map([](const ThreadMap& m) { return rt_holds_highest_fifo_prio(m); }),
-    "T-RT must hold the strictly "
-    "highest SCHED_FIFO priority of any seat. If you raised another "
-    "seat to or above T-RT, that seat can now preempt the sole GPO "
-    "owner mid-SPI-transaction — the gpo_copy shadow hazard by its "
-    "real name."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return fifo_order_holds(m); }),
-    "Exactly the kFifoOrder seats are SCHED_FIFO, at strictly "
-    "falling priority (T-RT, T-FRAME, T-INPUT, T-IO, T-PCM, T-CAPTURE, T-PREFETCH), and "
-    "every other seat is SCHED_OTHER. Deadline-monotonic: each edge is a deadline, and "
-    "inverting one queues the shorter deadline behind the longer. A tie is the "
-    "kernel's run-queue accident; a seat moved to SCHED_OTHER loses the bounded wake it "
-    "exists to buy. Change the order and the row together, never the number alone."
+    every_thread_map([](const ThreadMap& m) { return carries_seat_table(m); }),
+    "Every board's map is the seat table joined to that board's placement "
+    "(join_threads): its policy, priority, stack, spawn, DDR and pause columns are "
+    "kSeatPolicyTable's, so the seat table's rules hold on it. A board states its CPUs "
+    "and nothing else; a seat rule changes in thread_map.h, never in one board's map."
 );
 
 static_assert(
@@ -395,63 +388,6 @@ static_assert(
     "CPU, at any policy. Every other seat does blocking I/O, payload-sized copies or "
     "SCHED_OTHER work, and on that core it contends with the round the executive's 5 ms "
     "cadence is measured on; a SCHED_OTHER thread there is unthrottled contention."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return ddr_owners_are(m); }),
-    "every board's DdrMapping::Owner rows are exactly kDdrMappingOwners: a late owner "
-    "refuses the program, so an unmarked seat holding a DDR mapping would be programmed "
-    "under, and a marked seat that never parks would wedge every switch."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return pause_edges_are(m); }),
-    "every board's PauseEdge::Receipt rows are exactly kReceiptPauseSeats: a seat that "
-    "pauses at the ask before T-RT queued the teardown's jobs drains nothing, and a seat "
-    "that waits for a receipt after the jobs would hold every switch to its deadline."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return policy_prio_consistent(m); }),
-    "`policy` and `prio` are ONE decision. A "
-    "SchedPolicy::Fifo row must carry a POSIX priority in 1..99 and "
-    "a SchedPolicy::Other row must carry 0. Both `{Fifo, 0}` and "
-    "`{Fifo, 120}` used to compile and then fail at runtime as an "
-    "EINVAL from pthread_attr_setschedparam, taking spawn_seat's "
-    "rung-2 degrade with no witness but an evidence row nobody "
-    "reads. If you meant to move a seat off SCHED_FIFO, change BOTH "
-    "fields and re-read the SCHED_FIFO ordering rule first."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return spawn_stack_consistent(m); }),
-    "`spawn` and `stack_bytes` are ONE decision. A "
-    "SpawnKind::Create row with stack_bytes == 0 is an EINVAL from "
-    "pthread_attr_setstacksize that spawn_seat's rung-2 degrade "
-    "swallows with no witness (the attr is discarded and the seat is "
-    "born on glibc's default stack, unpinned by this table); a "
-    "PromoteInPlace row with a stack owns memory nothing allocates. "
-    "Change BOTH fields or neither."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) {
-        return seat_of(m, SeatTag::RT).spawn == SpawnKind::Create;
-    }),
-    "pass ST (c): T-RT is a CREATED thread on its own row-declared "
-    "stack, spawned LAST, and ::main is the supervisor that joins it "
-    "under a deadline. A PromoteInPlace T-RT IS main, and a thread "
-    "cannot time-join itself — a wedged executive would then have no "
-    "witness but a silent hang."
-);
-
-static_assert(
-    names_fit_comm(kSeatRoles),
-    "Every seat's comm ROLE must be non-empty and <= 15 chars, "
-    "because pthread_setname_np takes 16 bytes INCLUDING the NUL "
-    "(glibc returns ERANGE; the kernel truncates). A role that does "
-    "not survive is a /proc witness that no longer matches this "
-    "table, which is the only channel RT engagement is verified on."
 );
 
 static_assert(
@@ -465,7 +401,7 @@ static_assert(
 static_assert(
     max_cpu(kDe10Profile.threads) == os::CpuId{1},
     "The DE10-Nano row's map is 2x Cortex-A9. A row naming "
-    "CPU2+ belongs to another board, which gets its own table in its "
+    "CPU2+ belongs to another board, which gets its own placement in its "
     "own row, never an edit to this one; re-read the runtime sysconf "
     "gate in fw::rt_topology_init before that happens."
 );

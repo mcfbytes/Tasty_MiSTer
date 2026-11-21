@@ -105,14 +105,14 @@ bool SelectIniPage::walk(PageWalk& out) const {
 
 Transition SelectIniPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(SelectIniPage);
-    if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Up}))
+    if (ev.buttons.intersects({UiEvent::Menu | UiEvent::Up}))
         return leave_();
 
-    if (ev.buttons.has_any({UiEvent::Left})) {
+    if (ev.buttons.intersects({UiEvent::Left})) {
         switch_to_(svc::IniChoice::Alt1);
-    } else if (ev.buttons.has_any({UiEvent::Down})) {
+    } else if (ev.buttons.intersects({UiEvent::Down})) {
         switch_to_(svc::IniChoice::Alt2);
-    } else if (ev.buttons.has_any({UiEvent::Right})) {
+    } else if (ev.buttons.intersects({UiEvent::Right})) {
         switch_to_(svc::IniChoice::Alt3);
     }
     return Transition{};

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <optional>
 #include <string_view>
 
-#include "cores/save_image.h"
+#include "cores/nvram_save.h"
 
 namespace mister::cores {
 
@@ -14,7 +14,7 @@ public:
 
     [[nodiscard]] virtual std::string_view save_file_name() const noexcept = 0;
 
-    [[nodiscard]] virtual SaveImage save_image() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<mra::NvramSave> save_image() const noexcept = 0;
 
 protected:
     ISaveUpload() = default;

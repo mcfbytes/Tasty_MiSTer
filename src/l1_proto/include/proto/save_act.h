@@ -27,18 +27,18 @@ struct SaveAct {
 
 static_assert(std::is_trivially_copyable_v<SaveAct>);
 
-[[nodiscard]] constexpr std::uint32_t save_act_words(const SaveAct& a, hal::Width w) noexcept {
+[[nodiscard]] constexpr FioWordCount save_act_words(const SaveAct& a, hal::Width w) noexcept {
     switch (a.kind) {
         case SaveAct::Kind::Done:
-            return 0;
+            return FioWordCount{};
         case SaveAct::Kind::Open:
-            return 4;
+            return FioWordCount{4};
         case SaveAct::Kind::Read:
-            return 1u + static_cast<std::uint32_t>(hal::words(w, a.len));
+            return FioWordCount{1u + static_cast<std::uint32_t>(hal::words(w, a.len))};
         case SaveAct::Kind::Close:
-            return 2;
+            return FioWordCount{2};
     }
-    return 0;
+    return FioWordCount{};
 }
 
 }

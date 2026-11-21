@@ -6,11 +6,12 @@
 #include "app/save_upload_relay.h"
 #include "cores/core_support.h"
 #include "cores/save_upload.h"
-#include "infra/log_rec.h"
+#include "app/log_rec.h"
+#include "infra/prelude.h"
 #include "proto/save_request.h"
-#include "proto/link.h"
-#include "proto/link_ops.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/link.h"
+#include "proto/link/link_ops.h"
+#include "proto/link/spi_fio_queue.h"
 
 namespace mister::app {
 
@@ -35,20 +36,20 @@ bool NvramUpload::settle_step(bool fio_free) {
 
     if (!fio_free && !saves_.holds_fio())
         return false;
-    saves_.service_rt(proto::SpiFioQueue::kUnbudgeted, fio_free);
+    saves_.service_rt(proto::FioWordCount{proto::link::SpiFioQueue::kUnbudgeted}, fio_free);
     return true;
 }
 
 Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up) {
-    const auto rel = config_rel("config/nvram/", up.save_file_name());
+    const auto rel = config_rel("nvram/", up.save_file_name());
     if (rel.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
 
-    const cores::SaveImage image = up.save_image();
-    if (!saves_.order(image, rel.view())) {
+    const std::optional<cores::mra::NvramSave> image = up.save_image();
+    if (!image || !saves_.order(*image, rel.view())) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    return image.size;
+    return image->size.file_word<std::size_t>();
 }
 
 Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
@@ -68,8 +69,8 @@ Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
     if (up->save_file_name().empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    proto::Link link{link_};
-    proto::LinkOps ops{link};
+    proto::link::Link link{link_};
+    proto::link::LinkOps ops{link};
     auto req = ops.read_save_request();
     if (!req)
         return std::unexpected(req.error());

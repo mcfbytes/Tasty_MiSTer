@@ -7,7 +7,10 @@
 #include <ctime>
 #include <type_traits>
 
+#include "hal/spi_halves.h"
+#include "hal/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -47,9 +50,9 @@ struct RtcImage {
         return image;
     }
 
-    [[nodiscard]] std::array<std::uint16_t, 4> rtc_words() const noexcept;
+    [[nodiscard]] std::array<hal::SpiWord, 4> rtc_words() const noexcept;
 
-    [[nodiscard]] std::array<std::uint16_t, 2> stamp_words() const noexcept;
+    [[nodiscard]] std::array<hal::SpiWord, 2> stamp_words() const noexcept;
 
     [[nodiscard]] constexpr bool operator==(const RtcImage&) const = default;
 };

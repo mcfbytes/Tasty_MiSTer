@@ -19,6 +19,7 @@
 #include "cores/manifest_stager.h"
 #include "hal/fpga_aperture.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
 
@@ -39,7 +40,7 @@ public:
         ILoadWindowMap<seat_owner::Main>& map;
         hal::FpgaAperture aperture;
         WindowTally& windows;
-        std::chrono::nanoseconds now_ns{};
+        os::RawMonotonicClock::time_point now{};
     };
 
     ManifestLadder(std::unique_ptr<cores::IManifestStager> stager, PathText rel) noexcept

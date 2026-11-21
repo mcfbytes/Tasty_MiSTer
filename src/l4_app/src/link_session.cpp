@@ -5,16 +5,16 @@
 #include "app/core_switch.h"
 #include "app/log_clock.h"
 #include "app/disk_relay.h"
-#include "app/mailbox_relay.h"
+#include "app/pcm/mailbox_relay.h"
 #include "app/save_upload_relay.h"
 #include "infra/byte_view.h"
 
 #include "app/core_block_roles.h"
 #include "app/core_init.h"
 
-#include "svc/chd_prefetch.h"
+#include "svc/disc/chd_prefetch.h"
 
-#include "app/rumble_players_cell.h"
+#include "app/input/rumble_players_cell.h"
 
 #include "app/osd_wire.h"
 #include "app/window_job_service.h"
@@ -43,7 +43,7 @@
 #include "app/bitstream_programmer.h"
 #include "app/supervisor_parts.h"
 #include "app/video_wire.h"
-#include "cores/cd_core.h"
+#include "cores/cd_diagnostics.h"
 #include "cores/config_slots.h"
 #include "cores/dip_switches.h"
 #include "cores/option_rows.h"
@@ -51,15 +51,16 @@
 #include "cores/staging_core.h"
 #include "cores/mounted_path.h"
 #include "cores/generic_core.h"
+#include "infra/prelude.h"
 #include "reactor/executive.h"
 #include "svc/audio_service.h"
 #include "svc/config.h"
 #include "svc/config_parser.h"
 #include "svc/config_snapshot.h"
 #include "proto/save_request.h"
-#include "proto/spi_fio_queue.h"
-#include "proto/spi_frame.h"
-#include "proto/link.h"
+#include "proto/link/spi_fio_queue.h"
+#include "proto/link/spi_frame.h"
+#include "proto/link/link.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -70,7 +71,7 @@ LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
     return LinkBinder::Wiring{
         .exec = parts.exec,
         .state = parts.core_state,
-        .feeder = infra::OptRef<PcmRingFeeder>{parts.services.feeder},
+        .feeder = infra::OptRef<pcm::PcmRingFeeder>{parts.services.feeder},
         .tenant = infra::OptRef<proto::IFioTenant>{parts.services.saves},
     };
 }
@@ -126,7 +127,7 @@ LinkSession::LinkSession(
       fabric_cell_(parts.fabric_cell),
       switch_park_(parts.switch_park),
 
-      session_(proto::CoreSession::detached(link, fenced_signals_, &binder_.fio_queue())),
+      session_(proto::link::CoreSession::detached(link, fenced_signals_, &binder_.fio_queue())),
       uart_(parts.uart_handoffs),
       log_lane_(parts.log_lane.producer()),
       diag_ask_(parts.diag_ask),
@@ -152,6 +153,7 @@ LinkSession::LinkSession(
           .doorbells = parts.doorbells,
           .lw_window = parts.lw_window,
           .lw_image = parts.lw_image,
+          .lw_header = parts.lw_header,
           .doorbell_nodes = parts.doorbell_nodes,
           .doorbell_cpus = parts.doorbell_cpus
       },
@@ -252,13 +254,13 @@ std::string_view LinkSession::conf_str_name() const noexcept {
 
 bool LinkSession::core_supports_mgl() const noexcept {
 
-    if (session_.type() == proto::CoreType::SharpMz)
+    if (!session_.terms().plays_mgl)
         return false;
     return bindings_.record().mgl_playable;
 }
 
 void LinkSession::reset_video_geometry() {
-    video_.reset_geometry(core_edge_seq_.v);
+    video_.reset_geometry(core_edge_seq_);
 }
 
 void LinkSession::bind_video_prelude() {
@@ -323,14 +325,12 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
         const hal::SpiSample& g = sampler_.level();
 
         core_ready_ = g.ready;
-
-        encoder_.trust_pads(core_ready_);
         if (core_ready_) {
             const hal::ButtonMask but = g.buttons;
 
             if (prelude_settled_now) {
 
-                proto::Link link{link_};
+                proto::link::Link link{link_};
                 (void)video_.update_but_sw(
                     link,
                     but,
@@ -367,10 +367,10 @@ void LinkSession::tick(RoundEntry entry) {
     reboot_.answer_reboot(*this);
 
     if (live_at_entry && session_live() && core_ready_) {
-        proto::Link link{link_};
+        proto::link::Link link{link_};
         video_.on_rt_round(
             link,
-            clock().now().time_since_epoch().count(),
+            os::since_boot(clock().now()).count(),
             infra::OptRef<proto::IResetFence>{binder_.fio_queue()}
         );
     }
@@ -378,7 +378,7 @@ void LinkSession::tick(RoundEntry entry) {
     const auto cd = tenancy_.core().has_value() ? tenancy_.core()->cd_diagnostics()
                                                 : infra::OptRef<const cores::ICdDiagnostics>{};
     if (cd) {
-        if (const std::optional<svc::DiscCounters> dc = cd->disc_counters(); dc.has_value()) {
+        if (const std::optional<svc::disc::DiscCounters> dc = cd->disc_counters(); dc.has_value()) {
             disc_sync_decompress_ = dc->sync_decompress;
             disc_park_timeouts_ = dc->park_timeouts;
             disc_prefetch_refusals_ = dc->prefetch_refusals;
@@ -392,10 +392,7 @@ void LinkSession::tick(RoundEntry entry) {
     if (park_.asked()) {
         const bool torn_down = dropped_gen_ == park_.gen() && encoder_.holds() != holds_at_drop_;
 
-        const bool held_back = !torn_down
-            || binder_.bridge_windows_live()
-            || encoder_.pads_on_lw()
-            || tenancy_.drop_owed();
+        const bool held_back = !torn_down || binder_.bridge_windows_live() || tenancy_.drop_owed();
         park_.step(switch_park_, held_back);
     }
 
@@ -465,7 +462,7 @@ Delivered LinkSession::deliver(
                 break;
             case OpTarget::Frame: {
 
-                proto::Link link{link_};
+                proto::link::Link link{link_};
                 const auto
                     d = infra::dispatch<LinkOpRoutes<OpTarget::Frame>>(op, video_, ctx, link);
                 r = d.outcome;
@@ -577,7 +574,7 @@ ILinkEncoder::Outcome LinkSession::on(
         return ILinkEncoder::Outcome::Dropped;
     }
     const auto w = proto::command_words(a.opcode, a.words);
-    proto::SpiFioQueue& q = binder_.fio_queue();
+    proto::link::SpiFioQueue& q = binder_.fio_queue();
     bool queued = q.append_command(w).has_value();
     if (!queued) {
         (void)q.flush();
@@ -607,7 +604,7 @@ ILinkEncoder::Outcome LinkSession::on(
     bind_routes_(
         slot ? infra::OptRef<const SessionRoutes>{slot->routes}
              : infra::OptRef<const SessionRoutes>{},
-        slot ? proto::BuildGeneration::of_wire(slot->gen) : proto::BuildGeneration{},
+        slot ? slot->gen : proto::BuildGeneration{},
         made.has_value()
     );
     const infra::OptRef<cores::Core> current = tenancy_.core();
@@ -634,23 +631,29 @@ ILinkEncoder::Outcome LinkSession::on(
     return ILinkEncoder::Outcome::Encoded;
 }
 
+bool LinkSession::drops_live_pad(const proto::LinkOp& op) noexcept {
+    if (!encoder_.pads_relayed())
+        return false;
+    LinkOpJoyPort pad;
+    if (!infra::dispatch<LinkOpPadRoutes>(op, pad))
+        return false;
+    tally_.pad_ops_off_carrier.add();
+    return true;
+}
+
 void LinkSession::bind_routes_(
     infra::OptRef<const SessionRoutes> routes,
     proto::BuildGeneration gen,
     bool made
 ) noexcept {
-    osd_.bind_rows(routes ? routes->osd : OsdPageRoute::Link);
-    encoder_.bind_pads(
-        routes && routes->pads ? infra::OptRef<const LwPads>{*routes->pads}
-                               : infra::OptRef<const LwPads>{}
+    osd_.bind_rows(routes ? routes->osd : Carrier::Link);
+    encoder_.bind_pads(routes ? routes->pads : Carrier::Link, gen);
+
+    rows_.bind_status_route(routes ? routes->status : Carrier::Link, gen);
+
+    rows_.bind_block_poll(
+        made && routes ? routes->block_poll() : proto::link::BlockPollRoute::Link
     );
-
-    rows_.bind_status_route(routes ? routes->status : StatusRoute::Link, gen);
-
-    if (made && routes)
-        slot_bindings_.slots().bind_lw_slots(routes->lw_slots);
-
-    rows_.bind_block_poll(made && routes ? routes->block_poll : BlockPollRoute::Link);
 }
 
 ILinkEncoder::Outcome LinkSession::on(
@@ -688,7 +691,7 @@ ILinkEncoder::Outcome LinkSession::on(
     if (a.waitmount_exhausted) {
         push(Event::SessionAdvisory{.why = Errc::timeout});
     }
-    if (a.cfg != proto::TxSlabId{} && session_.type() == proto::CoreType::EightBit) {
+    if (a.cfg != proto::TxSlabId{} && session_.terms().bursts_status) {
 
         if (const auto word = proto::StatusWord::of(ctx.tx.bytes(a.cfg))) {
             session_.stage(proto::StatusEdit::whole(*word));
@@ -884,12 +887,14 @@ void LinkSession::adopt_programmed_core_() {
 
     fenced_signals_.clear_gpo();
     fenced_signals_.set_core_reset(false);
-    session_ = proto::CoreSession::adopted(
+    session_ = proto::link::CoreSession::adopted(
         link_,
         fenced_signals_,
         proto::MemSizeCookie{fabric_.cookie()},
         &binder_.fio_queue()
     );
+
+    rows_.on_fabric_reprogrammed();
 }
 
 Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
@@ -906,7 +911,7 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     start_.end(op);
     osd_.on_fabric_reprogrammed();
     machine_.transition(SessionState::Running);
-    const bool front_end = bindings_.record().identity.front_end;
+    const bool front_end = bindings_.record().identity.policy().front_end;
     cores::CoreInitContext init_ctx{link_, session_, *this, tenancy_.core()};
     const infra::OptRef<cores::Core> current = tenancy_.core();
     (void)run_core_init(
@@ -993,17 +998,17 @@ void LinkSession::arm_request() {
     load_start_ = log_now();
 }
 
-static_assert(requires(const proto::SpiBlockDecoder& d) { d.osd_claims(); });
+static_assert(requires(const proto::link::SpiBlockDecoder& d) { d.osd_claims(); });
 static_assert(
-    cores::CoreProfile{}.block_drain_budget == proto::SpiBlockDecoder::kDrainBudget,
+    cores::CoreProfile{}.block_drain_budget == proto::link::SpiBlockDecoder::kDrainBudget,
     "the generic profile's drain bound is stock's four-iteration loop"
 );
 
 void LinkSession::drop_routes_() noexcept {
     encoder_.drop_pads();
-    osd_.bind_rows(OsdPageRoute::Link);
-    rows_.bind_status_route(StatusRoute::Link, proto::BuildGeneration{});
-    rows_.bind_block_poll(BlockPollRoute::Link);
+    osd_.bind_rows(Carrier::Link);
+    rows_.bind_status_route(Carrier::Link, proto::BuildGeneration{});
+    rows_.bind_block_poll(proto::link::BlockPollRoute::Link);
 }
 
 void LinkSession::release_pads_() noexcept {
@@ -1036,7 +1041,7 @@ Ex<void> LinkSession::detach() {
     (void)slot_bindings_.slots().install_completions(none);
     tenancy_.settle_retire(CoreTenancy::RetireEnd::Poll);
 
-    session_ = proto::CoreSession::detached(link_, fenced_signals_, &binder_.fio_queue());
+    session_ = proto::link::CoreSession::detached(link_, fenced_signals_, &binder_.fio_queue());
     return {};
 }
 
@@ -1065,7 +1070,7 @@ void LinkSession::reap_storage() noexcept {
 void LinkSession::service_saves(proto::FioWordCount budget_words) noexcept {
     TASTY_SEAT_BODY(LinkSession);
     const std::uint32_t drops = saves_.liveness_drops();
-    saves_.service_rt(budget_words.v, fio_free_());
+    saves_.service_rt(budget_words, fio_free_());
     if (saves_.liveness_drops() != drops)
         log_edge(LogRec::Refusal{Errc::timeout, ERR_SITE()});
 }
@@ -1079,7 +1084,7 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.core_shutdowns = tenancy_.tally().core_shutdowns;
     out.stage_status_change = rows_.status_decoder().last().nibble();
     out.status_reply_refusals = rows_.status_decoder().flush_refusals();
-    out.status_lw = rows_.status_route() == StatusRoute::Lw;
+    out.status_lw = rows_.status_route() == Carrier::Lw;
     out.status_lw_adopts = rows_.axi_status_source().adopted();
     out.status_lw_stale = rows_.axi_status_source().stale();
     out.prefetch_park_timeouts = slot_bindings_.tally().prefetch_park_timeouts;
@@ -1088,7 +1093,6 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.core_abandons = tenancy_.tally().core_abandons;
     out.info_poll_pushes = rows_.info_poll().pushes();
     out.fed_refusals = binder_.fed_refusals();
-    out.pads_on_lw = encoder_.pads_on_lw();
     out.osd_page_rows_link = osd_.page_rows_sent();
     out.osd_status_rows_link = osd_.status_rows_sent();
 
@@ -1124,13 +1128,13 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
 
     out.file_tx_index = proto::WideIoIndex::of(download);
 
-    const proto::SpiBlockDecoder::Counters& bc = rows_.block_decoder().counters();
+    const proto::link::SpiBlockDecoder::Counters& bc = rows_.block_decoder().counters();
     out.blk_rounds = bc.passes;
     out.blk_served = bc.served;
     out.blk_errors = bc.errors;
     out.blk_err_code = bc.err_code;
-    const proto::BlockSlots::Diagnostics& bd = slot_bindings_.slots().diagnostics();
-    const proto::DecodeCounters& dc = slot_bindings_.slots().block_poll().diagnostics();
+    const proto::link::BlockSlots::Diagnostics& bd = slot_bindings_.slots().diagnostics();
+    const proto::link::DecodeCounters& dc = slot_bindings_.slots().block_poll().diagnostics();
     out.blk_blocks = bd.blocks_served;
     out.blk_oversize = dc.oversize_requests;
     out.blk_unencodable = bd.unencodable_announce;
@@ -1211,7 +1215,7 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
 
     const std::string_view eff = effective_name(name, bindings_.facts());
 
-    if (session_.type() == proto::CoreType::EightBit) {
+    if (session_.terms().sends_preamble) {
 
         if (auto r = session_.load_saved_config(); !r)
             return r;
@@ -1234,7 +1238,7 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
         return r;
     }
 
-    if (session_.type() == proto::CoreType::EightBit) {
+    if (session_.terms().releases_reset) {
         if (auto r = session_.release_reset(); !r)
             return r;
     }
@@ -1243,7 +1247,7 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
 
         uart_.bind_identity(CoreNames{eff, name});
 
-        proto::SpiFrame frame{link_};
+        proto::link::SpiFrame frame{link_};
         (void)uart_.load_for_core(frame, bindings_.uart());
     }
 
@@ -1292,7 +1296,7 @@ NvramUpload::SaveCtx LinkSession::save_ctx_() noexcept {
 }
 
 bool LinkSession::fio_free_() noexcept {
-    proto::SpiFioQueue& q = binder_.fio_queue();
+    proto::link::SpiFioQueue& q = binder_.fio_queue();
     return !held_.fio_held() && q.idle() && !q.held();
 }
 

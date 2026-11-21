@@ -7,9 +7,10 @@
 #include <tuple>
 #include <type_traits>
 
-#include "infra/counted_lane.h"
+#include "infra/xthread/counted_lane.h"
 #include "infra/message_sum.h"
-#include "infra/rt_stats.h"
+#include "infra/prelude.h"
+#include "infra/xthread/rt_stats.h"
 #include "infra/seat.h"
 #include "reactor/round_timing.h"
 #include "reactor/types.h"

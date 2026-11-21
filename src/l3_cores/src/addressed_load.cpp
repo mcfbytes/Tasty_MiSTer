@@ -2,6 +2,7 @@
 #include "cores/addressed_load.h"
 
 #include "hal/fabric_region.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 
@@ -20,8 +21,7 @@ std::optional<TransferRow> AddressedLoad::window_row(
     TransferRow r{};
     r.dest = RowDest::Window;
     r.index = index;
-    r.addr = addr.v;
-    r.window = WindowRef::physical();
+    r.place = addr;
     r.bracket = RowBracket::AroundWithLength;
     r.file_len = bytes;
     return r;

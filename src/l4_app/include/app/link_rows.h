@@ -7,6 +7,7 @@
 #include <span>
 
 #include "app/link_tx_channel.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -81,13 +82,13 @@ inline constexpr auto kLinkRows = std::to_array<LinkRow>({
      MainAct::GrantPads,
      RtAct::None,
      "AXI:",
-     "MAIN grants a declared LW window's SYS1 PAD block; T-RT stores pads there, else the link"},
+     "MAIN grants a declared LW window's PAD block; T-RT stores pads there, else the link"},
     {LinkKind::Sectors,
      BindPhase::Grant,
      MainAct::GrantSector,
      RtAct::None,
      "AXI:",
-     "MAIN grants a SYS1 SECTOR block and its BLK row to T-IO; else the slot stays on the link"},
+     "MAIN grants a SECTOR block and its BLK row to T-IO; else the slot stays on the link"},
 });
 
 [[nodiscard]] consteval bool grants_before_core(MainAct act) noexcept {

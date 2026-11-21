@@ -5,21 +5,19 @@
 #include <string>
 #include <string_view>
 
+#include "app/core_name.h"
 #include "app/game_id.h"
-#include "infra/fixed_str.h"
 #include "proto/rotation_dir.h"
 
 namespace mister::app {
 
 struct MraFacts {
 
-    static constexpr std::size_t kSetnameCap = 64;
-
     bool is_arcade = false;
     bool vertical = false;
 
     proto::RotationDir rotation = proto::RotationDir::None;
-    FixedStr<kSetnameCap, StrFit::Clip> setname{};
+    CoreName setname{};
     bool setname_same_dir = false;
 };
 

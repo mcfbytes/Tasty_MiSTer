@@ -37,6 +37,7 @@
 #include "app/link_rx_channel.h"
 #include "app/manifest_ladder.h"
 #include "app/mount_queue.h"
+#include "app/game_id.h"
 #include "app/mount_status_cell.h"
 #include "app/option_cell.h"
 #include "app/negotiated_core.h"
@@ -61,10 +62,11 @@
 #include "app/window_tally.h"
 #include "cores/boot_ladder.h"
 #include "cores/companion_load.h"
-#include "infra/counter.h"
-#include "infra/log_lane.h"
+#include "infra/xthread/counter.h"
+#include "app/log_lane.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
+#include "infra/prelude.h"
 #include "os/clock.h"
 #include "proto/reset_edge.h"
 #include "proto/status_cell.h"
@@ -99,7 +101,7 @@ public:
         infra::OptRef<hal::IBootHandoff> boot_handoff{};
 
         bool stdout_routing = false;
-        infra::OptRef<LauncherDemandCell> launcher_demand{};
+        infra::OptRef<launcher::LauncherDemandCell> launcher_demand{};
         infra::OptRef<xthread::WakeFlag> launcher_wake{};
         BitstreamProgrammer& programmer;
         const svc::Vfs& storage;
@@ -119,16 +121,17 @@ public:
         const BayReleasesCell& bay_releases;
         const CoreTerms& core_terms;
         infra::OptRef<hal::IDoorbellSource> doorbell_source{};
-        infra::OptRef<CompanionHost::Binds> companion_binds{};
+        infra::OptRef<pcm::CompanionHost::Binds> companion_binds{};
 
         std::optional<CoreBuilder::SectorCells> sectors{};
         std::optional<CoreBuilder::OsdCells> osds{};
         std::optional<CoreBuilder::SysCells> sys{};
+        std::optional<CoreBuilder::PadCells> pads{};
 
         infra::OptRef<xthread::WakeFlag> io_wake{};
 
         std::optional<SaveStageDirector::Ends> save_stages{};
-        infra::OptRef<xthread::MainLogLane> log_lane{};
+        infra::OptRef<MainLogLane> log_lane{};
         hal::FpgaAperture aperture{};
 
         infra::OptRef<const OsdMaskCell> osd_mask_cell{};
@@ -136,7 +139,6 @@ public:
     };
     template <class T>
     using Cell = xthread::Telemetry<T, SeatTag::Main>;
-    using Count = Cell<std::uint32_t>;
 
     SessionOwner(SwitchPark& park, const Link& link) noexcept;
     SessionOwner(const SessionOwner&) = delete;
@@ -244,7 +246,7 @@ public:
 
     [[nodiscard]] const std::string& boot_handoff() const noexcept { return ini_.boot_handoff(); }
 
-    [[nodiscard]] infra::OptRef<const LauncherProfile> launcher() const noexcept;
+    [[nodiscard]] infra::OptRef<const launcher::LauncherProfile> launcher() const noexcept;
 
     void retire_lw_at_exit() noexcept;
 
@@ -255,7 +257,10 @@ public:
     [[nodiscard]] const OwnerTally& tally() const noexcept { return tally_; }
 
     [[nodiscard]] const xthread::Counter& pause_expiries_cell() const noexcept;
-    [[nodiscard]] const Count& recover_polls_cell() const noexcept;
+
+    [[nodiscard]] const GameIdCell& game_id_cell() const noexcept { return game_id_cell_; }
+
+    [[nodiscard]] const xthread::Counter& recover_polls_cell() const noexcept;
 
     [[nodiscard]] const xthread::Counter& mgl_row0_cell() const noexcept { return tally_.mgl_row0; }
 
@@ -356,7 +361,7 @@ private:
     void hold_for_savestates(
         const PickedLoad& load,
         proto::ActKey gen,
-        std::chrono::nanoseconds due
+        os::RawMonotonicClock::time_point due
     );
     void begin_companion(std::string_view path);
 
@@ -558,6 +563,7 @@ private:
     LoadBelt belt_;
     ContentPick content_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
+    GameIdCell game_id_cell_;
     LadderHostAdapter ladder_host_;
     CoreBuilder builder_;
 
@@ -569,7 +575,7 @@ private:
     BootHandoff exec_handoff_;
     PathText boot_companion_{};
     phase::SwitchPhase phase_{};
-    std::optional<xthread::MainLogLane::Producer> log_{};
+    std::optional<MainLogLane::Producer> log_{};
 };
 
 }

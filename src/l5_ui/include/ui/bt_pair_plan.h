@@ -5,7 +5,7 @@
 #include <optional>
 
 #include "infra/seat.h"
-#include "svc/prompt_gen.h"
+#include "svc/connect/prompt_gen.h"
 #include "ui/bt_prompt_rows.h"
 #include "ui/connect_slot_plan.h"
 #include "ui/pair_start.h"
@@ -27,18 +27,18 @@ public:
     bool holds_pairing() const override;
 
     bool slot_shown(SlotId slot) const override;
-    app::PageDescription::Row slot_describe(SlotId slot) const override;
+    app::hd::PageDescription::Row slot_describe(SlotId slot) const override;
     Transition slot_select(SlotId slot) override;
     Transition slot_entered(SlotId slot, const TextEntryResult& result) override;
 
 private:
     [[nodiscard]] std::optional<BtPromptRows> prompt_() const;
-    bool answer_(svc::PromptAnswer answer);
+    bool answer_(svc::connect::PromptAnswer answer);
 
     PairStart start_;
     bool show_all_ = false;
-    std::optional<svc::PromptGen> entry_gen_{};
-    std::optional<svc::PromptGen> shown_gen_{};
+    std::optional<svc::connect::PromptGen> entry_gen_{};
+    std::optional<svc::connect::PromptGen> shown_gen_{};
 };
 
 }

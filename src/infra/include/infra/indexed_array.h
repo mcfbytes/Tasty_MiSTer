@@ -8,16 +8,15 @@
 #include <type_traits>
 #include <utility>
 
+#include "infra/affine.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/span_cut.h"
 
 namespace mister::infra {
 
 template <class Index>
-concept ArrayIndex = std::is_trivially_copyable_v<Index>
-    && std::is_aggregate_v<Index>
-    && requires(Index i) { requires std::is_integral_v<decltype(i.v)>; }
-    && sizeof(Index) == sizeof(decltype(std::declval<Index&>().v));
+concept ArrayIndex = VShape<Index>;
 
 template <class T, std::size_t N, ArrayIndex Index>
 class IndexedArray {
@@ -56,14 +55,16 @@ public:
 
     constexpr auto end() const noexcept { return elems_.end(); }
 
-    template <ArrayIndex Count>
+    template <class Count>
+        requires affine::CountOf<Index, Count>
     [[nodiscard]] constexpr std::span<T> prefix(Count count) noexcept {
-        return std::span<T>(elems_).first(static_cast<std::size_t>(count.v));
+        return affine::first(std::span<T>(elems_), count);
     }
 
-    template <ArrayIndex Count>
+    template <class Count>
+        requires affine::CountOf<Index, Count>
     [[nodiscard]] constexpr std::span<const T> prefix(Count count) const noexcept {
-        return std::span<const T>(elems_).first(static_cast<std::size_t>(count.v));
+        return affine::first(std::span<const T>(elems_), count);
     }
 
 private:

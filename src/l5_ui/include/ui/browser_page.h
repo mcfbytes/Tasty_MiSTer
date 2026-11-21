@@ -8,6 +8,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "os/clock.h"
 #include "ui/browse_source.h"
 #include "ui/browser_session.h"
@@ -79,7 +80,7 @@ public:
 
     const BrowserSession& session() const noexcept { return session_; }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(BrowserPage);
         return refusals_.sum(session_.refusals());
     }
@@ -93,8 +94,8 @@ private:
 
     Transition open_recents_list();
 
-    std::chrono::nanoseconds now_ns() const noexcept {
-        return clock_ ? clock_->now().time_since_epoch() : std::chrono::nanoseconds::zero();
+    os::RawMonotonicClock::time_point now() const noexcept {
+        return clock_ ? clock_->now() : os::RawMonotonicClock::time_point{};
     }
 
     BrowserSession session_{};
@@ -103,8 +104,8 @@ private:
     RowCount height_{kFullOsdRows};
     infra::OptRef<const os::IClock> clock_;
 
-    infra::OptRef<app::RecentsStore> recents_{};
-    svc::Tally refusals_{};
+    infra::OptRef<app::recents::RecentsStore> recents_{};
+    infra::Tally refusals_{};
 };
 
 }

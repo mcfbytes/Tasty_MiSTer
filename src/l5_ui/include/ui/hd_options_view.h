@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/options_view.h"
 #include "ui/placer.h"
 #include "svc/types.h"
@@ -53,7 +54,7 @@ public:
     RowIndex selection() const override;
     bool empty() const override;
 
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
 
 private:
     [[nodiscard]] std::unique_ptr<HdListPage> make_list_() const;
@@ -61,7 +62,7 @@ private:
     IOptionsSurface& surface_;
     Spec spec_;
     std::unique_ptr<HdListPage> list_;
-    svc::Tally retired_refusals_{};
+    infra::Tally retired_refusals_{};
 };
 
 }

@@ -6,8 +6,9 @@
 #include <utility>
 
 #include "infra/json_out.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "os/child_process.h"
 
 namespace mister::fw {

@@ -10,6 +10,7 @@
 #include "cores/window_job_order.h"
 #include "hal/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/reset_edge.h"
 #include "proto/status_word.h"
 #include "proto/types.h"

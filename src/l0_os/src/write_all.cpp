@@ -5,6 +5,8 @@
 
 #include <cerrno>
 
+#include "infra/prelude.h"
+
 namespace mister::os {
 
 namespace {
@@ -24,7 +26,7 @@ template <class Step>
             return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
         }
         if (n == 0)
-            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), EIO));
+            return std::unexpected(Error{Errc::short_write, ERR_SITE(), 0});
         off += static_cast<std::size_t>(n);
     }
     return {};
@@ -47,6 +49,13 @@ template <class Step>
             rest.size(),
             head_offset(bytes.size() - rest.size())
         );
+    });
+}
+
+void write_all_best_effort(const UniqueFd& fd, std::span<const std::byte> bytes) noexcept {
+
+    (void)transfer(bytes, [&](std::span<const std::byte> rest) {
+        return ::write(fd.get(), rest.data(), rest.size());
     });
 }
 

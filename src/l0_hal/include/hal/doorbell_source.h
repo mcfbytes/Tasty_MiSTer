@@ -5,6 +5,7 @@
 #include "hal/cause_reg.h"
 #include "hal/register_window.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 #include "os/uio_handle.h"
 

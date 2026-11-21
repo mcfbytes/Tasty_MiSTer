@@ -6,7 +6,7 @@
 #include <span>
 #include <string>
 
-#include "app/replay_feeder.h"
+#include "app/replay/replay_feeder.h"
 #include "app/types.h"
 #include "infra/seat.h"
 #include "tasty_refusal.h"
@@ -34,7 +34,7 @@ public:
 
     virtual ~IReplayPort() = default;
 
-    [[nodiscard]] virtual bool take_play(const app::ReplayFeeder::Play& play) noexcept = 0;
+    [[nodiscard]] virtual bool take_play(const app::replay::ReplayFeeder::Play& play) noexcept = 0;
     virtual void take_stop() noexcept = 0;
 
     [[nodiscard]] virtual app::MovieFrameCount movie_frames() const noexcept = 0;

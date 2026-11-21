@@ -8,6 +8,7 @@
 #include "app/file_tx_level.h"
 #include "cores/ladder_host.h"
 #include "infra/seat.h"
+#include "os/deadline.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -22,7 +23,7 @@ public:
 
     void arm(
         proto::ActKey16 act,
-        std::chrono::nanoseconds now,
+        os::RawMonotonicClock::time_point now,
         proto::FileSize bytes,
         EchoRate rate
     ) noexcept;
@@ -31,29 +32,29 @@ public:
 
     [[nodiscard]] Answer poll(
         const FileTxLevelCell& level,
-        std::chrono::nanoseconds now
+        os::RawMonotonicClock::time_point now
     ) const noexcept;
 
 private:
     proto::ActKey16 act_{};
-    std::chrono::nanoseconds due_{};
+    os::Deadline due_{os::Deadline::immediate()};
 };
 
 inline proto::ActKey16 EchoWait::mint(cores::ILadderHost& host) noexcept {
     proto::ActKey16 next{};
     while (!next || next == act_)
-        next = host.next_generation().narrow();
+        next = host.next_act().narrow();
     return next;
 }
 
 inline void EchoWait::arm(
     proto::ActKey16 act,
-    std::chrono::nanoseconds now,
+    os::RawMonotonicClock::time_point now,
     proto::FileSize bytes,
     EchoRate rate
 ) noexcept {
     act_ = act;
-    due_ = now + echo_bound(bytes, rate);
+    due_ = os::Deadline::at_point(now + echo_bound(bytes, rate));
 }
 
 inline bool EchoWait::ready(const FileTxLevelCell& level) const noexcept {
@@ -63,11 +64,11 @@ inline bool EchoWait::ready(const FileTxLevelCell& level) const noexcept {
 
 inline EchoWait::Answer EchoWait::poll(
     const FileTxLevelCell& level,
-    std::chrono::nanoseconds now
+    os::RawMonotonicClock::time_point now
 ) const noexcept {
     const auto s = level.sample();
     if (!s || !s.value.payload || s.value.act != act_.widen())
-        return now < due_ ? Answer::Waiting : Answer::TimedOut;
+        return due_.expired_at(now) ? Answer::TimedOut : Answer::Waiting;
     return s.value.open ? Answer::Answered : Answer::Dropped;
 }
 

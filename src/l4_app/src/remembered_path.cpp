@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/byte_view.h"
+#include "svc/card_dirs.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -24,12 +25,15 @@ std::string read_remembered_path(
 ) {
     if (stem.empty())
         return {};
-    auto f = vfs.open("config/" + remembered_blob_name(stem, row), svc::OpenMode::ReadWhole);
+    auto f = vfs.open(
+        svc::card_rel({svc::kConfigDir, remembered_blob_name(stem, row)}),
+        svc::OpenMode::ReadWhole
+    );
     if (!f)
         return {};
     std::array<std::byte, kRememberedBlob> blob{};
     auto n = (*f)->read_at(proto::kFileStart, blob);
-    if (!n || *n == 0)
+    if (!n || n->empty())
         return {};
     return std::string{infra::text_until_nul(std::span{blob})};
 }

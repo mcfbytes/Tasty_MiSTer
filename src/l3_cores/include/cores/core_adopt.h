@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-namespace mister::proto {
+namespace mister::proto::link {
 class CoreSession;
 }
 
 namespace mister::cores {
 
 struct CoreAdopt {
-    proto::CoreSession& session;
+    proto::link::CoreSession& session;
 
     bool declares_turbo = false;
 };

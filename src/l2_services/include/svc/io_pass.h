@@ -10,8 +10,9 @@
 #include <ratio>
 #include <type_traits>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "svc/types.h"
 
 namespace mister::svc {

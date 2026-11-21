@@ -15,7 +15,6 @@ namespace mister::app {
 struct OutputPixels {
     std::uint32_t v = 0;
     using affine_count = OutputPixels;
-    static constexpr std::uint32_t kHalfDivisor = 2;
 
     template <std::integral I>
     [[nodiscard]] static constexpr OutputPixels of(I n) noexcept {
@@ -23,10 +22,6 @@ struct OutputPixels {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
-
-    [[nodiscard]] constexpr OutputPixels halved() const noexcept {
-        return OutputPixels{v / kHalfDivisor};
-    }
 
     template <std::integral I>
     [[nodiscard]] constexpr OutputPixels divided_by(I divisor) const noexcept {

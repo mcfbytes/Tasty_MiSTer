@@ -2,7 +2,7 @@
 #pragma once
 
 #include "app/hps_framebuffer.h"
-#include "app/launcher_screen.h"
+#include "app/launcher/launcher_screen.h"
 #include "app/map_save_verdict.h"
 #include "app/mgl_pump.h"
 #include "app/save_state_attach.h"
@@ -75,7 +75,7 @@ private:
     ui::UiRound ui_round_;
 
     app::SaveStateAttach save_states_;
-    app::LauncherScreen launcher_screen_;
+    app::launcher::LauncherScreen launcher_screen_;
 };
 
 }

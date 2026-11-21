@@ -3,10 +3,12 @@
 
 #include <optional>
 
+#include "app/block_grant.h"
 #include "infra/error.h"
-#include "infra/grant_lease.h"
+#include "infra/xthread/grant_lease.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/build_generation.h"
 
 namespace mister::app {
@@ -17,13 +19,14 @@ class LwBlockEndpoint {
 
 public:
     using GrantCell = xthread::Telemetry<Grant, SeatTag::Main>;
-    using LeaseCell = xthread::Telemetry<xthread::GrantGen, Owner::kSeatDecl>;
+    using LeaseCell = xthread::Telemetry<infra::CellGen, Owner::kSeatDecl>;
     using Lease = xthread::GrantLease<Grant, Owner>;
 
     static_assert(
         Owner::kSeatDecl != SeatTag::Unbound,
         "a block endpoint's owner tag must declare a seat"
     );
+    static_assert(BlockGrantRecord<Grant>, "a block endpoint takes a BlockGrant head's record");
 
     LwBlockEndpoint(const GrantCell& cell, LeaseCell& lease) noexcept : grant_lease_(cell, lease) {}
 
@@ -64,7 +67,7 @@ protected:
     [[nodiscard]] bool lease_() noexcept {
         if (grant_lease_.lease())
             return true;
-        ++tally_.revoked;
+        count_one_(tally_.revoked);
         unbind_();
         return false;
     }
@@ -90,7 +93,7 @@ private:
             bind_(t->grant, t->gen);
     }
 
-    void bind_(const Grant& g, xthread::GrantGen gen) noexcept {
+    void bind_(const Grant& g, infra::CellGen gen) noexcept {
         grant_ = g;
         grant_lease_.bind(gen);
         prepare_hook_(g);
@@ -124,6 +127,14 @@ private:
     }
 
     static constexpr bool kRouteCountsRefusal = requires(const Route& r) { r.bind_refusals; };
+
+    template <class N>
+    static constexpr void count_one_(N& n) noexcept {
+        if constexpr (requires { n.add(); })
+            n.add();
+        else
+            ++n;
+    }
 
     virtual void publish_hook_(const Route& r) noexcept = 0;
 

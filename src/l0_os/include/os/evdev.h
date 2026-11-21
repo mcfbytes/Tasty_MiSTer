@@ -12,6 +12,7 @@
 
 #include "infra/byte_view.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/ff_effect_id.h"

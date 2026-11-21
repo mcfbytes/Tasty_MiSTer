@@ -4,6 +4,7 @@
 #include "app/link_tx_channel.h"
 #include "app/owner_tally.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {

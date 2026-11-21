@@ -5,62 +5,48 @@
 #include <span>
 #include <string_view>
 
+#include "app/core_name.h"
 #include "app/game_id.h"
 #include "app/remembered_path.h"
-#include "cores/cheat_lookup.h"
 #include "cores/file_slot.h"
-#include "cores/pause_on_osd.h"
+#include "cores/host_policy.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "proto/rotation_dir.h"
-#include "svc/joy_plan.h"
-
-namespace mister::svc {
-class IAnalogReshape;
-}
+#include "svc/input/joy_plan.h"
 
 namespace mister::app {
 
 struct SessionIdentity {
-    static constexpr std::size_t kMax = 64;
 
-    FixedStr<kMax, StrFit::Clip> core{};
+    CoreName core{};
 
-    FixedStr<kMax, StrFit::Clip> rbf{};
+    CoreName conf_name{};
 
     RememberedStem stem{};
 
     proto::RotationDir rotation{};
 
     bool setname_same_dir = false;
-    svc::JoyPlan joy{};
+    svc::input::JoyPlan joy{};
 
     static constexpr std::size_t kJNamesCap = 1024;
     FixedStr<kJNamesCap, StrFit::Clip> j_names{};
 
-    bool front_end = false;
-
-    bool suppress_analog_followup = false;
-
-    infra::OptRef<const svc::IAnalogReshape> analog_reshape{};
-
-    std::string_view cue_dir{};
-
-    infra::OptRef<const cores::CheatLookup> cheats{};
+    infra::OptRef<const cores::HostPolicy> host{};
 
     std::span<const cores::FileSlot> slots{};
 
-    bool image_no_zip = false;
-
     GameId game_id{};
 
-    cores::PauseOnOsd pause = cores::PauseOnOsd::Option;
+    [[nodiscard]] constexpr const cores::HostPolicy& policy() const noexcept {
+        return cores::policy_of(host);
+    }
 };
 
 [[nodiscard]] inline std::string_view home_name(const SessionIdentity& id) noexcept {
-    return id.setname_same_dir ? id.rbf.view() : id.core.view();
+    return id.setname_same_dir ? id.conf_name.view() : id.core.view();
 }
-
-static_assert(RememberedStem::kMax == SessionIdentity::kMax, "the stem clips as `core` does");
 
 }

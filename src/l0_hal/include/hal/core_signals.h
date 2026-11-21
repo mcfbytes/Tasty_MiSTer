@@ -5,8 +5,8 @@
 
 #include "infra/error.h"
 #include "hal/core_capabilities.h"
-#include "hal/core_identity.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 
@@ -22,7 +22,7 @@ protected:
     ICoreSignals& operator=(ICoreSignals&&) = default;
 
 public:
-    [[nodiscard]] virtual Ex<CoreIdentity> identify() = 0;
+    [[nodiscard]] virtual Ex<CoreTypeByte> identify() = 0;
 
     virtual CoreCapabilities latch_capabilities() = 0;
 

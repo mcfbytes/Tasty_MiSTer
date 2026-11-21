@@ -54,7 +54,7 @@ bool ConfigSlotsPage::selectable(cores::ConfigSlot slot) const noexcept {
         return false;
     if (mode_ == Mode::Save || slot == cores::kStartupSlot)
         return true;
-    return table_->exists.has(slot);
+    return table_->exists.contains(slot);
 }
 
 SlotChoice ConfigSlotsPage::choice_of(RowIndex at) const noexcept {
@@ -163,7 +163,7 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
         drawn_n += kOneRow;
     }
 
-    const app::HdWindow win = out.window(selected, drawn_n);
+    const app::hd::HdWindow win = out.window(selected, drawn_n);
     const RowSpan<const Drawn> drawn{std::span<const Drawn>{storage}};
 
     const auto inverted = [&](OsdRow row) {
@@ -173,20 +173,20 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
         return row == last_osd_row(height) && sel.back();
     };
 
-    const RowRange window = rows(win.first, win.count);
+    const RowRange window = rows(win.start, win.len);
     for (const RowIndex at : window) {
         const Drawn& d = drawn[at];
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         (void)r.hd.label.assign(plain_label(d.text));
         if (d.slot) {
-            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.kind = app::hd::PageDescription::RowKind::Action;
             r.hd.selected = d.slot == sel.slot;
         } else if (d.is_back) {
-            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.kind = app::hd::PageDescription::RowKind::Action;
             r.hd.selected = sel.back();
         } else {
-            r.hd.kind = app::PageDescription::RowKind::Text;
+            r.hd.kind = app::hd::PageDescription::RowKind::Text;
         }
         r.classic = classic_row(
             d.row,
@@ -221,10 +221,10 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
 
 Transition ConfigSlotsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ConfigSlotsPage);
-    if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Left | UiEvent::Back})) {
+    if (ev.buttons.intersects({UiEvent::Menu | UiEvent::Left | UiEvent::Back})) {
         return Transition::pop();
     }
-    if (!ev.buttons.has_any({UiEvent::Select}))
+    if (!ev.buttons.intersects({UiEvent::Select}))
         return Transition{};
 
     const SlotChoice sel = choice_of(sel_);

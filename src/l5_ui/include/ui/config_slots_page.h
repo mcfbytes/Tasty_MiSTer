@@ -6,9 +6,10 @@
 #include <string>
 
 #include "app/config_slot_cell.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "proto/types.h"
 #include "app/ui_request_ring.h"
 #include "ui/config_slots_mode.h"
@@ -70,7 +71,7 @@ public:
         return sel_;
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(ConfigSlotsPage);
         return refusals_;
     }
@@ -92,7 +93,7 @@ private:
     infra::OptRef<app::UiRequestRing> asks_{};
     MenuMask mask_{};
     RowIndex sel_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

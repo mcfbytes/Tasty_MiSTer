@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "cores/mra/mra_stager.h"
+#include "infra/span_cut.h"
+
+#include <algorithm>
+#include <utility>
+
+#include "cores/mra/assembled_rom.h"
+#include "cores/mra/mra_doc.h"
+#include "cores/mra/rom.h"
+#include "cores/mra/rom_bytes.h"
+#include "cores/mra/rom_set_assembler.h"
+#include "cores/mra/rom_stream.h"
+#include "hal/types.h"
+#include "infra/byte_view.h"
+#include "infra/prelude.h"
+#include "svc/card_dirs.h"
+#include "svc/read_bounded.h"
+
+namespace mister::cores::mra {
+
+namespace {
+
+class ImageFile final : public svc::IFile {
+public:
+    ImageFile(RomBytes bytes, std::vector<FillRun> runs) noexcept
+        : bytes_(std::move(bytes)),
+          runs_(std::move(runs)) {
+        end_ = bytes_.extent();
+        for (const FillRun& r : runs_) {
+            end_ += r.len;
+        }
+    }
+
+    explicit ImageFile(RomStream stream) noexcept : stream_(std::move(stream)) {
+        end_ = stream_->end();
+    }
+
+    [[nodiscard]] Ex<infra::ByteCount> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) override {
+        const std::optional<RomOffset> from = end_.read_from(at);
+        if (!from)
+            return infra::ByteCount{};
+        if (stream_) {
+            const std::span<std::uint8_t> out = infra::affine::first_clamped(
+                infra::byte_cast<std::uint8_t>(dst),
+                end_ - *from
+            );
+            if (auto r = stream_->read(*from, out); !r)
+                return std::unexpected(r.error());
+            return infra::ByteCount{out.size()};
+        }
+        RomOffset p = *from;
+        std::span<std::uint8_t> out = infra::affine::first_clamped(
+            infra::byte_cast<std::uint8_t>(dst),
+            end_ - p
+        );
+        const std::size_t n = out.size();
+        RomLength before{};
+
+        const auto take = [&](std::span<const std::uint8_t> src) {
+            const std::span<std::uint8_t> m = infra::affine::first_clamped(out, RomLength::of(src));
+            std::ranges::copy(src.first(m.size()), m.begin());
+            p += RomLength::of(m);
+            out = out.subspan(m.size());
+        };
+        for (const FillRun& r : runs_) {
+            if (out.empty())
+                break;
+            if (p < r.at)
+                take(infra::affine::first_clamped(bytes_.from(p - before), r.at - p));
+            if (!out.empty() && p < r.end()) {
+                const std::span<std::uint8_t> m = infra::affine::first_clamped(out, r.end() - p);
+                r.write_to(m, p - r.at);
+                p += RomLength::of(m);
+                out = out.subspan(m.size());
+            }
+            before += r.len;
+        }
+        if (!out.empty())
+            take(bytes_.from(p - before));
+        return infra::ByteCount{n};
+    }
+
+    [[nodiscard]] Ex<infra::ByteCount> write_at(
+        proto::FileOffset,
+        std::span<const std::byte>
+    ) override {
+        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    }
+
+    [[nodiscard]] Ex<svc::FileSize> size() const override {
+        return (end_ - RomOffset{}).file_size();
+    }
+
+    [[nodiscard]] Ex<void> flush() override { return {}; }
+
+private:
+    RomBytes bytes_;
+    std::vector<FillRun> runs_;
+    std::optional<RomStream> stream_;
+    RomOffset end_{};
+};
+
+}
+
+std::unique_ptr<IManifestStager> MraStager::of(
+    std::string_view doc,
+    std::string_view manifest_rel,
+    const svc::Vfs& vfs
+) {
+    if (manifest_rel.empty())
+        return nullptr;
+    return std::make_unique<MraStager>(doc, manifest_rel, mame_root_of(vfs, manifest_rel), vfs);
+}
+
+struct MraStager::Assembly {
+    std::vector<Rom> roms;
+    std::size_t at = 0;
+    RomSetAssembler assembler;
+};
+
+MraStager::MraStager(
+    std::string_view doc,
+    std::string_view manifest_rel,
+    std::string_view mame_root,
+    const svc::Vfs& vfs
+)
+    : vfs_(vfs) {
+    auto parsed = read_arcade_document(doc, manifest_rel, vfs);
+    if (!parsed) {
+
+        const bool missing = parsed.error().code == Errc::not_found;
+        error_.assign(manifest_rel);
+        error_.append(missing ? "\nmanifest not found" : "\nmanifest unreadable");
+        leg_ = Leg::Done;
+    }
+    ArcadeDocument d = parsed ? std::move(*parsed) : ArcadeDocument{};
+    a_ = std::make_unique<Assembly>(
+        Assembly{std::move(d.roms), 0, RomSetAssembler(vfs, mame_root)}
+    );
+    nvrams_ = std::move(d.nvrams);
+    facts_ = std::move(d.facts);
+}
+
+MraStager::~MraStager() = default;
+
+std::optional<ManifestAct> MraStager::next() {
+    TASTY_SEAT_BODY(MraStager);
+    image_.reset();
+    while (true) {
+        switch (leg_) {
+            case Leg::Roms:
+                if (auto act = rom_())
+                    return act;
+                finish_();
+                leg_ = refused_ ? Leg::Done : Leg::Dips;
+                break;
+            case Leg::Dips:
+                leg_ = Leg::Done;
+
+                if (!facts_.switches.rows.empty()) {
+                    const auto pack = facts_.dip_cur.le_bytes();
+                    return SendBracket{.index = kDipIndex, .bytes = {pack.begin(), pack.end()}};
+                }
+                break;
+            case Leg::Done:
+                return std::nullopt;
+        }
+    }
+}
+
+std::optional<ManifestAct> MraStager::rom_() {
+    if (window_) {
+        const Window w = *std::exchange(window_, std::nullopt);
+        if (w.torn) {
+
+            ++counts_.ddr_refusals;
+            ++counts_.discarded;
+        } else {
+            ++counts_.sent;
+            ++counts_.staged;
+            return SendBracket{.index = w.index, .bytes = {}, .aux = w.bytes};
+        }
+    }
+    auto& roms = a_->roms;
+    while (true) {
+
+        if (nvram_next_ < nvrams_.size() && nvrams_[nvram_next_].after <= a_->at) {
+            const NvramDecl d = nvrams_[nvram_next_++];
+            if (auto act = nvram_(d))
+                return act;
+            continue;
+        }
+        if (a_->at >= roms.size())
+            break;
+        const Rom& rom = roms[a_->at++];
+
+        const bool windowed = rom.address != hal::FabricAddr{};
+        AssembledRom out = windowed ? a_->assembler.plan(rom) : a_->assembler.assemble(rom);
+        const RomLength len = out.length();
+        if (!out.send || len.empty()) {
+            ++counts_.discarded;
+            continue;
+        }
+        if (!out.index) {
+
+            ++counts_.discarded;
+            continue;
+        }
+        const proto::WideIoIndex index = *out.index;
+        const std::uint32_t bytes = len.v;
+        if (windowed) {
+            window_ = Window{.index = index, .bytes = bytes};
+            image_ = std::move(out.plan);
+            return StageWindow{.index = index, .address = rom.address, .bytes = bytes};
+        }
+        if (out.runs.empty()) {
+            ++counts_.sent;
+
+            std::vector<std::uint8_t> wire(out.bytes.begin(), out.bytes.end());
+            return SendBracket{.index = index, .bytes = std::move(wire)};
+        }
+        if (bytes > kPlainFillMax) {
+
+            ++fill_refusals_;
+            ++counts_.discarded;
+            refused_ = Errc::bad_format;
+            return std::nullopt;
+        }
+        ++counts_.sent;
+
+        std::vector<std::uint8_t> flat(bytes);
+        ImageFile f(std::move(out.bytes), std::move(out.runs));
+        (void)f.read_at(proto::kFileStart, std::as_writable_bytes(std::span<std::uint8_t>(flat)));
+        return SendBracket{.index = index, .bytes = std::move(flat)};
+    }
+    return std::nullopt;
+}
+
+std::optional<ManifestAct> MraStager::nvram_(const NvramDecl& d) {
+    if (!d.save)
+        return std::nullopt;
+    auto f = vfs_.open(
+        svc::card_rel({svc::kConfigDir, "nvram", facts_.nvm_name}),
+        svc::OpenMode::Read
+    );
+    if (!f)
+        return std::nullopt;
+    std::vector<std::uint8_t> buf = d.save->size.zeroed<std::vector<std::uint8_t>>();
+    auto read = svc::read_bounded(**f, buf.size());
+    if (!read)
+        return std::nullopt;
+    const auto got = infra::byte_cast<const std::uint8_t>(std::span(*read));
+    std::copy(got.begin(), got.end(), buf.begin());
+    ++counts_.nvram_loads;
+    return SendBracket{.index = d.save->index, .bytes = std::move(buf)};
+}
+
+void MraStager::finish_() noexcept {
+    const auto& a = a_->assembler;
+    counts_.repeat_refusals = a.repeat_refusals() + fill_refusals_;
+    if (!a.valid_rom0() && !a.error().empty())
+        error_.assign(a.error());
+}
+
+std::unique_ptr<svc::IFile> MraStager::take_image() {
+    TASTY_SEAT_BODY(MraStager);
+    RomPlan plan = image_ ? std::move(*image_) : RomPlan{};
+    image_.reset();
+    return std::make_unique<ImageFile>(RomStream(vfs_, std::move(plan)));
+}
+
+void MraStager::mark_staged() noexcept {
+    TASTY_SEAT_BODY(MraStager);
+    if (window_)
+        window_->staged = true;
+}
+
+void MraStager::mark_torn() noexcept {
+    TASTY_SEAT_BODY(MraStager);
+    if (window_)
+        window_->torn = true;
+}
+
+}

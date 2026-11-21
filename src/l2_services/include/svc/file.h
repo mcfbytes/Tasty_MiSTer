@@ -5,7 +5,10 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/byte_count.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
+#include "os/positioned_io.h"
 #include "proto/types.h"
 
 namespace mister::svc {
@@ -18,6 +21,10 @@ enum class OpenMode : std::uint8_t { Read, ReadWhole, ReadWrite, Create, Truncat
     return m == OpenMode::Read || m == OpenMode::ReadWhole;
 }
 
+[[nodiscard]] constexpr bool mode_creates(OpenMode m) noexcept {
+    return m == OpenMode::Create || m == OpenMode::Truncate || m == OpenMode::Sync;
+}
+
 [[nodiscard]] constexpr Error read_only_refusal(OpenMode m, infra::ErrorSite at) noexcept {
     return Error{Errc::contract, at, static_cast<std::uint32_t>(m)};
 }
@@ -26,19 +33,22 @@ class IFile {
 public:
     virtual ~IFile() = default;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> read_at(
         proto::FileOffset at,
         std::span<std::byte> dst
     ) = 0;
-    [[nodiscard]] virtual Ex<std::size_t> write_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> write_at(
         proto::FileOffset at,
         std::span<const std::byte> src
     ) = 0;
 
+    [[nodiscard]] Ex<void> read_exact_at(proto::FileOffset at, std::span<std::byte> dst);
+    [[nodiscard]] Ex<void> write_all_at(proto::FileOffset at, std::span<const std::byte> src);
+
     [[nodiscard]] virtual Ex<FileSize> size() const = 0;
     [[nodiscard]] virtual Ex<void> flush() = 0;
 
-    enum class Access : std::uint8_t { Sequential, WillNeed };
+    using Access = os::Advice;
 
     [[nodiscard]] virtual Ex<void> advise(Access, proto::FileOffset, FileSize) { return {}; }
 
@@ -48,34 +58,31 @@ protected:
     IFile& operator=(const IFile&) = default;
 };
 
-[[nodiscard]] inline Ex<void> read_exact(IFile& f, proto::FileOffset at, std::span<std::byte> dst) {
-    std::size_t got = 0;
-    while (got < dst.size()) {
-        const auto n = f.read_at(at, dst.subspan(got));
+[[nodiscard]] inline Ex<void> IFile::read_exact_at(proto::FileOffset at, std::span<std::byte> dst) {
+    while (!dst.empty()) {
+        const auto n = read_at(at, dst);
         if (!n)
             return std::unexpected(n.error());
-        if (*n == 0)
+        if (n->empty())
             return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
-        at += proto::FileSize{*n};
-        got += *n;
+        at += proto::FileSize::of(*n);
+        dst = n->past_in(dst);
     }
     return {};
 }
 
-[[nodiscard]] inline Ex<void> write_all(
-    IFile& f,
+[[nodiscard]] inline Ex<void> IFile::write_all_at(
     proto::FileOffset at,
     std::span<const std::byte> src
 ) {
-    std::size_t put = 0;
-    while (put < src.size()) {
-        const auto n = f.write_at(at, src.subspan(put));
+    while (!src.empty()) {
+        const auto n = write_at(at, src);
         if (!n)
             return std::unexpected(n.error());
-        if (*n == 0)
+        if (n->empty())
             return std::unexpected(Error{Errc::short_write, ERR_SITE(), 0});
-        at += proto::FileSize{*n};
-        put += *n;
+        at += proto::FileSize::of(*n);
+        src = n->past_in(src);
     }
     return {};
 }

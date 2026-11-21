@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "boards/refusing_link_port.h"
 
+#include "infra/prelude.h"
+
 namespace mister::boards {
 
 bool RefusingLinkPort::ready() const {
@@ -13,7 +15,7 @@ hal::SpiSample RefusingLinkPort::sample() const noexcept {
     return {};
 }
 
-Ex<hal::CoreIdentity> RefusingLinkPort::identify() {
+Ex<hal::CoreTypeByte> RefusingLinkPort::identify() {
     TASTY_SEAT_BODY(RefusingLinkPort);
     return unimplemented(ERR_SITE());
 }

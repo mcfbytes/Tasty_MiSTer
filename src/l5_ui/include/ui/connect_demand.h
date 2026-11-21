@@ -4,7 +4,7 @@
 #include <type_traits>
 
 #include "infra/seat.h"
-#include "svc/bt_page_mode.h"
+#include "svc/connect/bt_page_mode.h"
 #include "ui/pair_start.h"
 
 namespace mister::ui {
@@ -22,7 +22,7 @@ public:
     }
 
     [[nodiscard]] static constexpr ConnectDemand bluetooth(
-        svc::BtPageMode mode,
+        svc::connect::BtPageMode mode,
         PairStart start
     ) noexcept {
         ConnectDemand out;
@@ -45,7 +45,7 @@ public:
 
     [[nodiscard]] constexpr bool wifi_open() const noexcept { return wifi_; }
 
-    [[nodiscard]] constexpr svc::BtPageMode bt_mode() const noexcept { return mode_; }
+    [[nodiscard]] constexpr svc::connect::BtPageMode bt_mode() const noexcept { return mode_; }
 
     [[nodiscard]] constexpr PairStart pair_start() const noexcept { return start_; }
 
@@ -74,16 +74,16 @@ public:
 
 private:
     bool wifi_ = false;
-    svc::BtPageMode mode_ = svc::BtPageMode::Closed;
+    svc::connect::BtPageMode mode_ = svc::connect::BtPageMode::Closed;
     PairStart start_ = PairStart::Pick;
 };
 
 static_assert(std::is_trivially_copyable_v<ConnectDemand>);
 
 static_assert(
-    svc::BtPageMode::Closed < svc::BtPageMode::Paired
-    && svc::BtPageMode::Paired < svc::BtPageMode::Pairing
-    && svc::BtPageMode::Pairing < svc::BtPageMode::PairingAll
+    svc::connect::BtPageMode::Closed < svc::connect::BtPageMode::Paired
+    && svc::connect::BtPageMode::Paired < svc::connect::BtPageMode::Pairing
+    && svc::connect::BtPageMode::Pairing < svc::connect::BtPageMode::PairingAll
 );
 
 }

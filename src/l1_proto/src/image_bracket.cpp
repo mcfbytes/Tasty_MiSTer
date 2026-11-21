@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/image_bracket.h"
 
+#include "infra/prelude.h"
+
 namespace mister::proto {
 
 Ex<ImageBracket> ImageBracket::open(

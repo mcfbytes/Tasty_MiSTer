@@ -10,13 +10,13 @@
 #include <cstdint>
 #include <memory>
 
-#include "cores/cd_census_rows.h"
-#include "cores/cd_core.h"
-#include "cores/cd_io_indices.h"
-#include "cores/cd_profile.h"
-#include "cores/cd_tick_periods.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_core.h"
+#include "cores/cd/cd_io_indices.h"
+#include "cores/cd/cd_profile.h"
+#include "cores/cd/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "svc/cue_policy.h"
+#include "svc/disc/cue_policy.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
@@ -27,7 +27,7 @@ inline constexpr auto kPceCdServices = std::to_array<LinkDecoderDecl>({
     {
         "pcecd.cmd_edge",
         reactor::Cause::Ring,
-        &kCdCommandEdge<kPceCd>,
+        &cd::kCdCommandEdge<kPceCd>,
 
         reactor::kEveryRound,
         RoundClaim::Never,
@@ -35,48 +35,48 @@ inline constexpr auto kPceCdServices = std::to_array<LinkDecoderDecl>({
     {
         "pcecd.service_tick",
         reactor::Cause::Tick,
-        &kCdServiceTick<kPceCd>,
+        &cd::kCdServiceTick<kPceCd>,
         std::chrono::milliseconds{13},
         RoundClaim::Always,
     },
 });
 
-inline constexpr CdTickPeriods kPceCdTicks{
+inline constexpr cd::CdTickPeriods kPceCdTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{16'000},
     .caller = std::chrono::microseconds{13'000},
-    .speeds = CdSpeedCount{},
+    .speeds = cd::CdSpeedCount{},
     .speed = {},
 };
 
-inline constexpr CdIoIndices kPceCdIoIndices{
+inline constexpr cd::CdIoIndices kPceCdIoIndices{
     .data = IoIndex{2},
     .cdda = IoIndex{3},
     .subcode = IoIndex{4},
     .info = std::nullopt,
 };
 
-inline constexpr svc::CuePolicy kPceCdCuePolicy{
-    .type_detect = svc::CuePolicy::TypeDetect::PerTrack,
-    .offset_op = svc::CuePolicy::OffsetOp::Assign,
-    .sub_naming = svc::CuePolicy::SubNaming::ImageFilename,
+inline constexpr svc::disc::CuePolicy kPceCdCuePolicy{
+    .type_detect = svc::disc::CuePolicy::TypeDetect::PerTrack,
+    .offset_op = svc::disc::CuePolicy::OffsetOp::Assign,
+    .sub_naming = svc::disc::CuePolicy::SubNaming::ImageFilename,
     .wav_header_skip = true,
     .sniff_sega_disc_system = false,
-    .subcode_shaping = svc::CuePolicy::SubcodeShaping::Interleave,
+    .subcode_shaping = svc::disc::CuePolicy::SubcodeShaping::Interleave,
 };
 
-inline constexpr auto kPceCdSeekFastPaths = std::to_array<CdProfile::SeekFastPath>({
-    {.count = SectorCount{120}, .latency_ticks = PollTicks{}},
-    {.count = SectorCount{252}, .latency_ticks = PollTicks{5}},
+inline constexpr auto kPceCdSeekFastPaths = std::to_array<cd::CdProfile::SeekFastPath>({
+    {.count = SectorCount{120}, .latency_ticks = cd::PollTicks{}},
+    {.count = SectorCount{252}, .latency_ticks = cd::PollTicks{5}},
 });
 
-inline constexpr CdProfile kPceCdProfile{
+inline constexpr cd::CdProfile kPceCdProfile{
     .io = kPceCdIoIndices,
     .cue = kPceCdCuePolicy,
     .ticks = kPceCdTicks,
 
     .reset = proto::ResetTerms::framework().with_raised(proto::StatusBit{16}),
-    .row = CdProfile::PceScsiFacts{.seek_fast_paths = kPceCdSeekFastPaths},
+    .row = cd::CdProfile::PceScsiFacts{.seek_fast_paths = kPceCdSeekFastPaths},
 };
 
 inline constexpr auto kPceCdSlots = std::to_array<FileSlot>({
@@ -164,10 +164,11 @@ inline constexpr CoreProfile kPceCd{
     .signatures = kPceCdSignatures,
     .blank_save = kPceCdBlankSave,
     .staging = kPceCdStaging,
-    .cue_browse_dir = "TGFX16-CD",
-    .image_rows_no_zip = true,
-    .cheats = {.cd_dir_suffix = "CD", .cd_asset_layout = true, .reset_on_remount = true},
     .reset = {.toggle_reacts = true, .button_reacts = true},
+    .host =
+        {.cue_browse_dir = "TGFX16-CD",
+         .image_rows_no_zip = true,
+         .cheats = {.cd_dir_suffix = "CD", .cd_asset_layout = true, .reset_on_remount = true}},
 
     .grants = {Grant::Lamp, Grant::Discs},
 };

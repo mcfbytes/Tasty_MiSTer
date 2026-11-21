@@ -7,6 +7,7 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/entry_buffer.h"
 #include "ui/key_grid.h"
 #include "ui/page.h"
@@ -28,7 +29,7 @@ public:
     MenuMask mask() const override;
     void set_selection(RowIndex i) override;
     RowIndex selection() const override;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
 
 private:
     enum class Line : std::uint8_t {
@@ -76,7 +77,7 @@ private:
     bool revealed_ = false;
     bool typing_ = false;
     RowIndex sel_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 };
 
 }

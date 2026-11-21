@@ -4,9 +4,10 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "infra/grant_gen.h"
+#include "infra/cell_gen.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/build_generation.h"
 
 namespace mister::app {
@@ -27,6 +28,6 @@ struct SysRoute {
 static_assert(std::is_trivially_copyable_v<SysRoute>);
 using SysRouteCell = xthread::Telemetry<SysRoute, SeatTag::Io>;
 
-using SysLeaseCell = xthread::Telemetry<xthread::GrantGen, SeatTag::Io>;
+using SysLeaseCell = xthread::Telemetry<infra::CellGen, SeatTag::Io>;
 
 }

@@ -78,7 +78,7 @@ std::string_view HdAboutPlan::title() const {
     return "About";
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdAboutPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdAboutPlan::rows() const {
     TASTY_SEAT_BODY(HdAboutPlan);
     return refs_;
 }

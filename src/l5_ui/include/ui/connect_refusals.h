@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 
 namespace mister::ui {
@@ -14,15 +15,15 @@ public:
 
     void note_unwired() noexcept { unwired_.add(); }
 
-    [[nodiscard]] svc::Tally full() const noexcept { return full_; }
+    [[nodiscard]] infra::Tally full() const noexcept { return full_; }
 
-    [[nodiscard]] svc::Tally unwired() const noexcept { return unwired_; }
+    [[nodiscard]] infra::Tally unwired() const noexcept { return unwired_; }
 
-    [[nodiscard]] svc::Tally total() const noexcept { return full_.sum(unwired_); }
+    [[nodiscard]] infra::Tally total() const noexcept { return full_.sum(unwired_); }
 
 private:
-    svc::Tally full_{};
-    svc::Tally unwired_{};
+    infra::Tally full_{};
+    infra::Tally unwired_{};
 };
 
 }

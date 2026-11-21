@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/threedo_ladder.h"
+#include "cores/cd/threedo_ladder.h"
 #include "cores/manifests/threedo.h"
 
 #include <string_view>
@@ -25,12 +25,12 @@ static_assert(
 );
 
 static_assert(
-    std::holds_alternative<CdProfile::ThreeDoFacts>(kThreeDoProfile.row),
+    std::holds_alternative<cd::CdProfile::ThreeDoFacts>(kThreeDoProfile.row),
     "spec 1.5.2.1: 3DO reads 4 command words and writes 4 status words"
 );
 
 static_assert(
-    kThreeDoCuePolicy.type_detect == svc::CuePolicy::TypeDetect::PerTrackRunningSize,
+    kThreeDoCuePolicy.type_detect == svc::disc::CuePolicy::TypeDetect::PerTrackRunningSize,
     "3docdd.cpp:148-166: LoadCUE types EVERY track and knows MODE2/2352, "
     "which the Track0Only program neither does nor can"
 );
@@ -50,7 +50,7 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kThreeDoTicks.speeds == CdSpeedCount{}, "3DO engages no speed-indexed override");
+static_assert(kThreeDoTicks.speeds == cd::CdSpeedCount{}, "3DO engages no speed-indexed override");
 
 static_assert(kThreeDoServices.size() == 2, "ARCHITECTURE.md 3.4: 3DO has exactly two census rows");
 static_assert(
@@ -77,8 +77,8 @@ static_assert(
     "3.4: both rows are unconditionally active"
 );
 static_assert(
-    kThreeDoServices[0].impl == &kCdCommandEdge<kThreeDo>
-        && kThreeDoServices[1].impl == &kCdServiceTick<kThreeDo>,
+    kThreeDoServices[0].impl == &cd::kCdCommandEdge<kThreeDo>
+        && kThreeDoServices[1].impl == &cd::kCdServiceTick<kThreeDo>,
     "the two rows are the SHARED CD obligations keyed to this "
     "profile, never a per-manifest ILinkDecoder copy"
 );
@@ -104,18 +104,18 @@ static_assert(
     "and no magic sniff to transcribe"
 );
 static_assert(
-    kThreeDo.cheats.cd_dir_suffix.empty()
-        && !kThreeDo.cheats.cd_asset_layout
-        && !kThreeDo.cheats.reset_on_remount
-        && !kThreeDo.cheats.reset_on_mount,
+    kThreeDo.host.cheats.cd_dir_suffix.empty()
+        && !kThreeDo.host.cheats.cd_asset_layout
+        && !kThreeDo.host.cheats.reset_on_remount
+        && !kThreeDo.host.cheats.reset_on_mount,
     "3do.cpp:11 includes cheats.h and calls nothing; `is_3do()` "
     "appears in neither cheats.cpp nor file_io.cpp, and no arm of "
     "menu.cpp/user_io.cpp calls cheats_init for it"
 );
 static_assert(
-    !kThreeDo.cheats.reset_on_mount
-        && kMegaCd.cheats.reset_on_mount
-        && kPceCd.cheats.reset_on_mount,
+    !kThreeDo.host.cheats.reset_on_mount
+        && kMegaCd.host.cheats.reset_on_mount
+        && kPceCd.host.cheats.reset_on_mount,
     "the ONLY shipped CD family whose mount emits no index-255 "
     "cheat-reset bracket (megacd.cpp:175 / menu.cpp:2812 do)"
 );
@@ -124,7 +124,7 @@ static_assert(
     kThreeDoSlots.size() == 1
         && kThreeDoSlots[0].role == SlotRole::Disc
         && kThreeDoSlots[0].index == kThreeDo.staging.disc_slot,
-    "CdCore::mount_disc validates the disc against this table, so "
+    "cd::CdCore::mount_disc validates the disc against this table, so "
     "the disc row and the staging policy cannot disagree"
 );
 static_assert(
@@ -230,12 +230,12 @@ static_assert(
 );
 
 static_assert(
-    kThreeDoCuePolicy.iso_sizing == svc::CuePolicy::IsoSizing::Declared2048,
+    kThreeDoCuePolicy.iso_sizing == svc::disc::CuePolicy::IsoSizing::Declared2048,
     "3docdd.cpp:315-390: LoadISO asserts 2048/TT_MODE1 and reads no "
     "volume descriptor — the one classic CD engine with an ISO arm"
 );
 static_assert(
-    kThreeDoCuePolicy.sub_naming == svc::CuePolicy::SubNaming::None,
+    kThreeDoCuePolicy.sub_naming == svc::disc::CuePolicy::SubNaming::None,
     "3docdd.cpp:59-291: this parser opens no `.sub` sidecar"
 );
 static_assert(
@@ -244,27 +244,27 @@ static_assert(
     "SEGADISCSYSTEM one MegaCD's"
 );
 static_assert(
-    kThreeDoCuePolicy.program == svc::CuePolicy::Program::SentinelPregapRelative,
+    kThreeDoCuePolicy.program == svc::disc::CuePolicy::Program::SentinelPregapRelative,
     "3docdd.cpp:226 closes at the accumulated pregap and :237 at "
     "`start - pregap`; MegaCD/PCE-CD close at the INDEX 00 position"
 );
 static_assert(
-    kThreeDoCuePolicy.offset_op == svc::CuePolicy::OffsetOp::Accumulate,
+    kThreeDoCuePolicy.offset_op == svc::disc::CuePolicy::OffsetOp::Accumulate,
     "3docdd.cpp:230 is `offset += pregap * 2352`, a HARDCODED 2352; "
     "the running-size multiply is Saturn's, not this family's"
 );
 static_assert(
-    svc::unimplemented_axis(kThreeDoCuePolicy) == svc::CueAxis::None,
+    svc::disc::unimplemented_axis(kThreeDoCuePolicy) == svc::disc::CueAxis::None,
     "3DO rides the Console program: only the container axis and the "
     "track close move, and both name arms DiscEngine has"
 );
 
 std::unique_ptr<Core> make_threedo(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<CdCore>(p, kThreeDoProfile, g.services);
+    return std::make_unique<cd::CdCore>(p, kThreeDoProfile, g.services);
 }
 
 std::unique_ptr<BootLadder> make_threedo_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<ThreeDoLadder>(p, ctx);
+    return std::make_unique<cd::ThreeDoLadder>(p, ctx);
 }
 
 }

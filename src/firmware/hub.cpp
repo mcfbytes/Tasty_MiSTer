@@ -5,13 +5,17 @@
 #include <utility>
 
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/wired_end.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
-#include "svc/deadzone_rule.h"
+#include "svc/input/deadzone_rule.h"
+#include "handoff_root.h"
 
 namespace mister::fw {
+
+using app::input::MenuKeyInbox;
 
 using infra::wired_end;
 
@@ -56,6 +60,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
       shot_pump_{
           app::ScreenshotPump::Wiring{.queue = device_.shots_, .sink = face_parts_.shot_sink}
       },
+      game_id_pump_{device_.owner_.game_id_cell(), kHandoffRoot},
       replay_{plat, device_.parts(), shot_pump_, face_parts_.osd_close},
       rec_{plat, device_.parts(), device_.verdict(), replay_.replay_status_},
       tail_{mode.tail(plat, device_, replay_, rec_)},
@@ -75,14 +80,14 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
           plat.link_timing,
           app::RtMain::Wiring{
               .session = infra::OptRef<app::LinkSession>{device_.session_},
-              .input = infra::OptRef<app::InputEmit>{device_.input_emit_},
+              .input = infra::OptRef<app::input::InputEmit>{device_.input_emit_},
               .osd = infra::OptRef<app::OsdWire>{device_.osd_wire_},
               .timer = infra::OptRef<reactor::RoundTimer>{plat.round_timer},
               .input_kick = infra::OptRef<
                   xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>>{device_.rt_input_kick_},
               .frames = infra::OptRef<app::CoreFrameCounter>{device_.frame_counter_},
               .scanout = front_->scanout(),
-              .replay = infra::OptRef<app::ReplayGate>{replay_.replay_gate_},
+              .replay = infra::OptRef<app::replay::ReplayGate>{replay_.replay_gate_},
               .replay_ring = wired_end(replay_.replay_ring_.receiver(), "ReplayRing receiver"),
               .lamp = plat.disk_lamp,
               .disk_activity = infra::OptRef<const xthread::WakeFlag>{device_.disk_activity_},
@@ -108,11 +113,12 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .recorder = rec_.recorder_,
               .launcher_screen = face_parts_.launcher_screen,
               .ui_round = face_parts_.ui_round,
-              .menu_keys = infra::OptRef<app::MenuKeyInbox>{device_.menu_keys_},
+              .menu_keys = infra::OptRef<MenuKeyInbox>{device_.menu_keys_},
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
-              .ui_writes = infra::OptRef<app::UiWriteLane>{device_.ui_writes_},
+              .ui_writes = infra::OptRef<app::recents::UiWriteLane>{device_.ui_writes_},
               .verdicts = face_parts_.verdicts,
+              .game_id = infra::OptRef<app::GameIdPump>{game_id_pump_},
               .owner_tick = tail_->owner_tick(),
               .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
           },
@@ -169,7 +175,7 @@ void Hub::latch_boot_config() noexcept {
     if (p.cells.config.sample_into(*c) == 0)
         c = std::make_unique<svc::ConfigSnapshot>();
 
-    const auto deadzones = svc::parse_deadzone_rules(*c);
+    const auto deadzones = svc::input::parse_deadzone_rules(*c);
     device_.input_build_.set_cfg_deadzone_rules(deadzones);
     seated(device_.input_pipeline_, "T-INPUT latched past a refused open")
         .latch_cfg(deadzones, c->rumble != 0);

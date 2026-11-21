@@ -9,10 +9,11 @@
 #include <string_view>
 
 #include "app/path_text.h"
-#include "app/rec_options.h"
+#include "app/capture/rec_options.h"
 #include "app/types.h"
-#include "cores/movie_codec.h"
+#include "cores/tas/movie_codec.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::fw {
 
@@ -42,7 +43,7 @@ struct TastyArgs {
     std::optional<std::chrono::microseconds> phase_us{};
 
     std::optional<app::MoviePosition> stop_at{};
-    std::optional<cores::IReplayCore::RamFill> ram_fill{};
+    std::optional<cores::tas::IReplayCore::RamFill> ram_fill{};
 
     std::optional<app::PathText> save{};
 
@@ -53,7 +54,7 @@ struct TastyArgs {
     bool no_splash = false;
     bool loop = false;
     bool hashes_only = false;
-    app::RecOptions rec{};
+    app::capture::RecOptions rec{};
 };
 
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept;

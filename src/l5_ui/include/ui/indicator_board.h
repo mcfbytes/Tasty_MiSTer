@@ -10,7 +10,10 @@
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
+#include "os/raw_monotonic_clock.h"
 #include "proto/osd_target.h"
 #include "proto/types.h"
 #include "svc/types.h"
@@ -42,7 +45,10 @@ public:
 
     [[nodiscard]] bool lower(app::IndicatorId id) noexcept;
 
-    [[nodiscard]] bool round(std::chrono::nanoseconds now, app::IndicatorSet shown) noexcept;
+    [[nodiscard]] bool round(
+        os::RawMonotonicClock::time_point now,
+        app::IndicatorSet shown
+    ) noexcept;
 
     [[nodiscard]] app::IndicatorSet active() const noexcept { return active_; }
 
@@ -64,12 +70,12 @@ public:
 
     [[nodiscard]] app::InfoAnchor anchor() const noexcept;
 
-    [[nodiscard]] svc::Tally refusals() const noexcept { return refusals_; }
+    [[nodiscard]] infra::Tally refusals() const noexcept { return refusals_; }
 
 private:
     struct Slot {
         Lifetime lifetime{};
-        std::optional<std::chrono::nanoseconds> shown_at{};
+        std::optional<os::RawMonotonicClock::time_point> shown_at{};
         infra::OptRef<const IIndicatorSource> source{};
         SourceRevision seen{};
     };
@@ -91,7 +97,7 @@ private:
         lines_{};
     proto::OsdRow next_line_{};
     Text text_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     bool dirty_ = false;
 };
 

@@ -39,7 +39,7 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
     bool gap = false;
     bool about = false;
     for (const std::unique_ptr<OptionItem>& owned : walk.items()) {
-        const OptionItem& it = *owned;
+        OptionItem& it = *owned;
         const Placement p = placer_.of(it);
         about = about || host_of(p) == PageId::HdCoreAbout;
         if (!it.drawn_row || host_of(p) != PageId::HdCoreSettings)
@@ -54,8 +54,7 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
         if (gap)
             refs_.emplace_back(separator_());
         gap = false;
-        rows_.push_back(std::make_unique<HdOptionRow>(it, surface_));
-        refs_.emplace_back(*rows_.back());
+        refs_.emplace_back(it);
     }
     if (walk.page() != proto::kRootSubmenu)
         return;
@@ -77,7 +76,7 @@ bool HdOptionsPlan::acts_(const OptionItem& it) const {
     return !probe.refused;
 }
 
-IHdRow& HdOptionsPlan::separator_() {
+IRow& HdOptionsPlan::separator_() {
     separators_.push_back(std::make_unique<HdSeparatorRow>());
     return *separators_.back();
 }
@@ -92,9 +91,14 @@ std::string_view HdOptionsPlan::title() const {
     return surface_.heading();
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdOptionsPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdOptionsPlan::rows() const {
     TASTY_SEAT_BODY(HdOptionsPlan);
     return refs_;
+}
+
+RowCx HdOptionsPlan::row_cx() const {
+    TASTY_SEAT_BODY(HdOptionsPlan);
+    return RowCx{.host = infra::OptRef<IOptionHost>{surface_}};
 }
 
 RowCount HdOptionsPlan::pinned() const noexcept {

@@ -14,6 +14,7 @@
 #include "hal/axi.h"
 #include "hal/phys_region.h"
 #include "hal/reg_block.h"
+#include "infra/prelude.h"
 #include "hal/reg_word.h"
 #include "os/mmio_region.h"
 #include "os/types.h"

@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/kernel_rt.h"
 #include "os/vm_compaction.h"
 #include "rt_setup.h"

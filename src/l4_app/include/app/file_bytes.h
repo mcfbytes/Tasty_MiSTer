@@ -12,9 +12,10 @@
 #include "svc/types.h"
 #include "app/file_intern.h"
 #include "app/interned_file.h"
-#include "app/ring_slab.h"
 #include "app/types.h"
+#include "infra/prelude.h"
 #include "infra/error.h"
+#include "infra/xthread/ring_slab.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
@@ -59,7 +60,7 @@ public:
     [[nodiscard]] infra::OptRef<const InternedFile> get(proto::FileId id) const noexcept;
 
 private:
-    using Slab = RingSlab<InternedFile, kPool, Producer, SeatTag::RT>;
+    using Slab = xthread::RingSlab<InternedFile, proto::SlotIndex, kPool, Producer, SeatTag::RT>;
 
     [[nodiscard]] static std::optional<proto::SlotIndex> pooled_slot_(proto::FileId id) noexcept;
 

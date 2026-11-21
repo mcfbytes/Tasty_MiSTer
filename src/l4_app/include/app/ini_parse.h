@@ -10,7 +10,8 @@
 #include "app/idle_knobs.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
-#include "infra/telemetry.h"
+#include "infra/prelude.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/conf_switches.h"
 #include "svc/config_snapshot.h"
 

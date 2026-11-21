@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
@@ -33,12 +33,12 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
 
 private:
-    class SlotRow final : public IHdRow {
+    class SlotRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
@@ -48,8 +48,8 @@ private:
               row_(row) {}
 
         std::optional<RowKey> key() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdMediaPlan& plan_;
@@ -68,7 +68,7 @@ private:
     const bool front_end_;
     HdPage0Walk page0_;
     std::vector<SlotRow> rows_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

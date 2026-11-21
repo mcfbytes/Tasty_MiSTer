@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_state_attach.h"
 
-#include <cerrno>
 #include <utility>
 
 #include "app/event.h"
-#include "infra/polled.h"
+#include "infra/xthread/polled.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 
 namespace mister::app {
@@ -21,11 +21,11 @@ SaveStateAttach::SaveStateAttach(const Wiring& w) noexcept
       ui_map_(w.ui_map),
       chan_(w.io_wake, xthread::Polled{}),
       ui_(w.aperture,
-          proto::SaveStateEngine::Environment{
+          proto::link::SaveStateEngine::Environment{
               files_,
               w.clock,
               ui_map_,
-              infra::OptRef<proto::SaveStateEngine::ISaveToast>{*this}
+              infra::OptRef<proto::link::SaveStateEngine::ISaveToast>{*this}
           }) {}
 
 Ex<std::size_t> SaveStateAttach::Files::read_at(
@@ -35,21 +35,19 @@ Ex<std::size_t> SaveStateAttach::Files::read_at(
 ) {
     auto f = vfs_.open(path, svc::OpenMode::Read);
 
-    if (!f && f.error().code == Errc::os && f.error().detail == ENOENT) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), ENOENT});
-    }
     if (!f)
         return std::unexpected(f.error());
-    std::size_t got = 0;
-    while (got < dst.size()) {
-        auto n = (*f)->read_at(at + proto::FileSize{got}, dst.subspan(got));
+    std::span<std::byte> left = dst;
+    while (!left.empty()) {
+        auto n = (*f)->read_at(at, left);
         if (!n)
             return std::unexpected(n.error());
-        if (*n == 0)
+        if (n->empty())
             break;
-        got += *n;
+        at += proto::FileSize::of(*n);
+        left = n->past_in(left);
     }
-    return got;
+    return dst.size() - left.size();
 }
 
 Ex<void> SaveStateAttach::Files::write_all_sync(
@@ -80,7 +78,7 @@ void SaveStateAttach::tick() noexcept {
 
 void SaveStateAttach::take_ask_(const Ask& ask) noexcept {
     copy_.invalidate();
-    ui_.held = ask.generation;
+    ui_.held = ask.act;
     ui_.facts.live = false;
     const proto::SaveTarget target{
         ask.core_name.view(),
@@ -193,7 +191,7 @@ void SaveStateAttach::on_ui_pause() noexcept {
 
     std::uint32_t dropped = 0;
     while (const auto ask = asks_.pop()) {
-        ui_.held = ask->generation;
+        ui_.held = ask->act;
         ++dropped;
     }
     if (dropped == 0 && !ui_.facts.live)
@@ -215,7 +213,7 @@ void SaveStateAttach::finish_(bool ok, Error err) noexcept {
 
 void SaveStateAttach::serve() noexcept {
     seat_assert<SeatTag::Io>(ERR_SITE(), "SaveStateAttach::serve off T-IO");
-    const proto::SavePrimer::Env env{files_, io_map_};
+    const proto::link::SavePrimer::Env env{files_, io_map_};
     if (!io_.job) {
         io_.job = chan_.take();
         if (!io_.job)

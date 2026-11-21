@@ -9,6 +9,7 @@
 #include "hal/board_windows.h"
 #include "hal/taken_window.h"
 #include "hal/boards_table.h"
+#include "infra/prelude.h"
 
 namespace mister::boards::cyclone_v {
 
@@ -65,22 +66,22 @@ void Bridges::apply(std::span<const BridgeStep> steps) {
         switch (step.block) {
             case BridgeBlock::Sdr: {
                 hal::RegisterWindow<SdrCtl>::Transaction t(sdr_.regs);
-                sdr_.regs.write(SdrCtl::Reg::FpgaPortRst, step.value);
+                sdr_.regs.write(SdrCtl::Reg::FpgaPortRst, hal::RegWord{step.value});
                 break;
             }
             case BridgeBlock::RstMgr: {
                 hal::RegisterWindow<RstMgr>::Transaction t(rst_.regs);
-                rst_.regs.write(RstMgr::Reg::BrgModReset, step.value);
+                rst_.regs.write(RstMgr::Reg::BrgModReset, hal::RegWord{step.value});
                 break;
             }
             case BridgeBlock::SysMgr: {
                 hal::RegisterWindow<SysMgr>::Transaction t(sys_.regs);
-                sys_.regs.write(SysMgr::Reg::FpgaIntfGrpModule, step.value);
+                sys_.regs.write(SysMgr::Reg::FpgaIntfGrpModule, hal::RegWord{step.value});
                 break;
             }
             case BridgeBlock::Nic301: {
                 hal::RegisterWindow<Nic301>::Transaction t(nic_.regs);
-                nic_.regs.write(Nic301::Reg::Remap, step.value);
+                nic_.regs.write(Nic301::Reg::Remap, hal::RegWord{step.value});
                 break;
             }
         }
@@ -102,7 +103,7 @@ Ex<void> Bridges::post_program() {
 Ex<void> Bridges::request_board_reset() {
     TASTY_SEAT_BODY(Bridges);
     hal::RegisterWindow<RstMgr>::Transaction t(rst_.regs);
-    rst_.regs.write(RstMgr::Reg::Ctrl, RstMgr::kResetRequest);
+    rst_.regs.write(RstMgr::Reg::Ctrl, hal::RegWord{RstMgr::kResetRequest});
     return {};
 }
 

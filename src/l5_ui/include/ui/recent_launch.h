@@ -7,9 +7,10 @@
 #include <string>
 #include <string_view>
 
-#include "app/recent_games.h"
+#include "app/recents/recent_games.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/confirm_host.h"
 #include "ui/hd_page0_walk.h"
 #include "ui/slot_pick_host.h"
@@ -41,9 +42,9 @@ public:
     RecentLaunch(const RecentLaunch&) = delete;
     RecentLaunch& operator=(const RecentLaunch&) = delete;
 
-    [[nodiscard]] bool asks_first(const app::RecentGames::Record& r) const;
+    [[nodiscard]] bool asks_first(const app::recents::RecentGames::Record& r) const;
 
-    Transition launch(const app::RecentGames::Record& r);
+    Transition launch(const app::recents::RecentGames::Record& r);
 
     [[nodiscard]] Transition ask(
         IConfirmHost& host,
@@ -51,12 +52,12 @@ public:
         std::span<const std::string_view> body
     );
 
-    [[nodiscard]] svc::Tally refusals() const noexcept;
+    [[nodiscard]] infra::Tally refusals() const noexcept;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
     [[nodiscard]] infra::OptRef<const OptionItem> slot_for_(
-        const app::RecentGames::Record& r
+        const app::recents::RecentGames::Record& r
     ) const;
 
     PageContext& ctx_;
@@ -65,7 +66,7 @@ private:
     HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     bool front_end_ = false;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

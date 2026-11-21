@@ -5,12 +5,12 @@
 
 #include "infra/decimal_text.h"
 #include "infra/message_sum.h"
-#include "os/passkey_digits.h"
+#include "os/connect/passkey_digits.h"
 
 namespace mister::ui {
 namespace {
 
-using Prompt = svc::BtPrompt;
+using Prompt = svc::connect::BtPrompt;
 
 constexpr char kOf = '/';
 
@@ -22,7 +22,7 @@ struct Projector {
         out.headline.append(p.passkey.format6().view()).append(" on the controller, then Enter");
         out.value = std::string{p.digits.text().view()};
         out.value.push_back(kOf);
-        out.value.append(infra::DecimalText{os::PasskeyDigits::kMax}.view());
+        out.value.append(infra::DecimalText{os::connect::PasskeyDigits::kMax}.view());
         out.gen = p.gen;
     }
 
@@ -62,7 +62,7 @@ struct Projector {
 
 }
 
-BtPromptRows BtPromptRows::of(const svc::BtPrompt& prompt) {
+BtPromptRows BtPromptRows::of(const svc::connect::BtPrompt& prompt) {
     Projector projector;
     infra::dispatch<infra::AllRouted>(prompt, projector);
     return std::move(projector.out);

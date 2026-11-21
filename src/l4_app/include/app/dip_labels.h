@@ -5,11 +5,12 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "cores/dip_row.h"
-#include "cores/switch_table.h"
+#include "cores/mra/dip_row.h"
+#include "cores/mra/switch_table.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -28,7 +29,7 @@ struct DipLabels {
     };
 
     proto::DipRowCount count{};
-    Row rows[cores::mra::kMaxDipRows] = {};
+    std::array<Row, cores::mra::kMaxDipRows> rows{};
 };
 
 static_assert(std::is_trivially_copyable_v<DipLabels>);

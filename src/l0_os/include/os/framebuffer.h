@@ -5,6 +5,7 @@
 #include <optional>
 #include <utility>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/map_length.h"

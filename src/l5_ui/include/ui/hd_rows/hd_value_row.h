@@ -3,17 +3,17 @@
 
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
-class HdValueRow final : public IHdRow {
+class HdValueRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    using Value = decltype(app::PageDescription::Row::value);
+    using Value = decltype(app::hd::PageDescription::Row::value);
 
     struct Spec {
         std::string_view label;
@@ -22,9 +22,9 @@ public:
 
     explicit HdValueRow(const Spec& spec) noexcept : spec_(spec) {}
 
-    app::PageDescription::Row describe() const override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
 
-    Transition select() override;
+    Transition select(const RowCx&) override;
 
 private:
     Spec spec_;

@@ -7,8 +7,9 @@
 #include "cores/cd_drive_state.h"
 #include "cores/ladder_pc.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -100,8 +101,6 @@ struct DiagCounters {
     std::uint32_t info_poll_pushes = 0;
 
     std::uint32_t fed_refusals = 0;
-
-    bool pads_on_lw = false;
 
     std::uint32_t osd_page_rows_link = 0;
     std::uint32_t osd_status_rows_link = 0;

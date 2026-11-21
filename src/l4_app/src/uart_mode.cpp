@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/uart_mode.h"
+#include "infra/prelude.h"
 #include "proto/link_frame.h"
 #include "proto/uio_opcodes.h"
 

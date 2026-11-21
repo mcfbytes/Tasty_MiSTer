@@ -11,13 +11,13 @@
 #include <optional>
 #include <string_view>
 
-#include "cores/cd_census_rows.h"
-#include "cores/cd_core.h"
-#include "cores/cd_io_indices.h"
-#include "cores/cd_profile.h"
-#include "cores/cd_tick_periods.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_core.h"
+#include "cores/cd/cd_io_indices.h"
+#include "cores/cd/cd_profile.h"
+#include "cores/cd/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "svc/cue_policy.h"
+#include "svc/disc/cue_policy.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
@@ -28,50 +28,50 @@ inline constexpr auto kThreeDoServices = std::to_array<LinkDecoderDecl>({
     {
         "3do.cmd_edge",
         reactor::Cause::Ring,
-        &kCdCommandEdge<kThreeDo>,
+        &cd::kCdCommandEdge<kThreeDo>,
         std::chrono::milliseconds{3},
         RoundClaim::Always,
     },
     {
         "3do.service_tick",
         reactor::Cause::Tick,
-        &kCdServiceTick<kThreeDo>,
+        &cd::kCdServiceTick<kThreeDo>,
         std::chrono::milliseconds{3},
         RoundClaim::Always,
     },
 });
 
-inline constexpr CdTickPeriods kThreeDoTicks{
+inline constexpr cd::CdTickPeriods kThreeDoTicks{
     .idle = std::chrono::microseconds{3'000},
     .stream = std::chrono::microseconds{3'000},
     .caller = std::chrono::microseconds{3'000},
-    .speeds = CdSpeedCount{},
+    .speeds = cd::CdSpeedCount{},
     .speed = {},
 };
 
-inline constexpr CdIoIndices kThreeDoIoIndices{
+inline constexpr cd::CdIoIndices kThreeDoIoIndices{
     .data = IoIndex{8},
     .cdda = std::nullopt,
     .subcode = std::nullopt,
     .info = IoIndex{0xC},
 };
 
-inline constexpr svc::CuePolicy kThreeDoCuePolicy{
-    .type_detect = svc::CuePolicy::TypeDetect::PerTrackRunningSize,
-    .offset_op = svc::CuePolicy::OffsetOp::Accumulate,
-    .sub_naming = svc::CuePolicy::SubNaming::None,
+inline constexpr svc::disc::CuePolicy kThreeDoCuePolicy{
+    .type_detect = svc::disc::CuePolicy::TypeDetect::PerTrackRunningSize,
+    .offset_op = svc::disc::CuePolicy::OffsetOp::Accumulate,
+    .sub_naming = svc::disc::CuePolicy::SubNaming::None,
     .wav_header_skip = false,
     .sniff_sega_disc_system = false,
-    .layout = svc::CuePolicy::Layout::Console,
-    .program = svc::CuePolicy::Program::SentinelPregapRelative,
-    .iso_sizing = svc::CuePolicy::IsoSizing::Declared2048,
+    .layout = svc::disc::CuePolicy::Layout::Console,
+    .program = svc::disc::CuePolicy::Program::SentinelPregapRelative,
+    .iso_sizing = svc::disc::CuePolicy::IsoSizing::Declared2048,
 };
 
-inline constexpr CdProfile kThreeDoProfile{
+inline constexpr cd::CdProfile kThreeDoProfile{
     .io = kThreeDoIoIndices,
     .cue = kThreeDoCuePolicy,
     .ticks = kThreeDoTicks,
-    .row = CdProfile::ThreeDoFacts{},
+    .row = cd::CdProfile::ThreeDoFacts{},
 };
 
 inline constexpr auto kThreeDoSlots = std::to_array<FileSlot>({
@@ -185,11 +185,12 @@ inline constexpr CoreProfile kThreeDo{
     .signatures = {},
     .blank_save = kThreeDoBlankSave,
     .staging = kThreeDoStaging,
-    .image_rows_no_zip = true,
-
-    .cheats = {.reset_on_mount = false},
 
     .reset = {.toggle_reacts = true, .button_reacts = true},
+    .host =
+        {.image_rows_no_zip = true,
+
+         .cheats = {.reset_on_mount = false}},
 
     .grants = {Grant::Lamp, Grant::Discs},
 };

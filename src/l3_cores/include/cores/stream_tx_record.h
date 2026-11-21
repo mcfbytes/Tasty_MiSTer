@@ -8,6 +8,7 @@
 #include "cores/stream_load_end.h"
 #include "infra/fixed_str.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/types.h"

@@ -6,6 +6,7 @@
 
 #include "app/cmd_fifo.h"
 #include "connect_paths.h"
+#include "hal/aperture_node_decl.h"
 #include "hal/bridge_sequencer.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
@@ -19,14 +20,15 @@
 #include "hal/program_geometry.h"
 #include "hal/thread_map.h"
 #include "hal/video_out_decl.h"
-#include "infra/log_lane.h"
-#include "infra/rt_stats.h"
+#include "app/log_lane.h"
+#include "infra/xthread/rt_stats.h"
+#include "infra/prelude.h"
 #include "os/kernel_rt.h"
 #include "os/types.h"
 #include "os/uio_line_space.h"
 #include "reactor/executive.h"
 #include "reactor/round_timer.h"
-#include "svc/input_enumerator.h"
+#include "svc/input/input_enumerator.h"
 #include "svc/vfs.h"
 #include "infra/error.h"
 
@@ -50,6 +52,7 @@ struct BootParts {
     std::span<const hal::PhysRegion> regions;
     hal::DoorbellPolicy doorbells;
     os::UioLineSpace doorbell_nodes;
+    hal::ApertureNodeDecl aperture_node{};
     hal::VideoOutDecl video;
 
     hal::WriteCombine write_combine = hal::WriteCombine::Forbidden;
@@ -61,10 +64,10 @@ struct BootParts {
     xthread::RtStats& stats;
 
     reactor::RoundTimer& round_timer;
-    xthread::LogLane& rt_lane;
+    app::LogLane& rt_lane;
     const svc::Vfs& vfs;
 
-    std::string_view input_dir = svc::kDefaultInputDir;
+    std::string_view input_dir = svc::input::kDefaultInputDir;
 
     RtEvidence& rt_evidence;
 

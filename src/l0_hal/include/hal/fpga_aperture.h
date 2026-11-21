@@ -7,6 +7,7 @@
 #include "hal/aperture_region.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 
 namespace mister::hal {
@@ -42,6 +43,8 @@ struct FpgaAperture {
         }
         return ApertureRegion{PhysRegion{addr, static_cast<std::size_t>(len), name}};
     }
+
+    [[nodiscard]] constexpr Ex<os::PhysAddr> physical_of(FabricAddr addr) const;
 };
 
 constexpr std::optional<os::PhysAddr> FabricAddr::physical_in(
@@ -52,6 +55,15 @@ constexpr std::optional<os::PhysAddr> FabricAddr::physical_in(
     if (!low || !high || *this < *low || *this >= *high)
         return std::nullopt;
     return os::PhysAddr{v};
+}
+
+[[nodiscard]] constexpr Ex<os::PhysAddr> FpgaAperture::physical_of(FabricAddr addr) const {
+    if (region.len == 0)
+        return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
+    const std::optional<os::PhysAddr> at = addr.physical_in(*this);
+    if (!at)
+        return std::unexpected(addr.refusal(Errc::aperture_range, ERR_SITE()));
+    return at.value_or(os::PhysAddr{});
 }
 
 }

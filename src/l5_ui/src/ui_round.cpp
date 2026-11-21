@@ -4,14 +4,14 @@
 #include <algorithm>
 #include <cstdint>
 
-#include "app/hd_osd_screen.h"
+#include "app/hd/hd_osd_screen.h"
 #include "app/hps_framebuffer.h"
 #include "app/info_origin.h"
 #include "app/info_plane.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "app/link_event_dispatch.h"
-#include "app/recents_store.h"
-#include "app/ui_write_lane.h"
+#include "app/recents/recents_store.h"
+#include "app/recents/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "ui/host_sampler.h"
 #include "ui/key_decoder.h"
@@ -33,11 +33,11 @@ bool UiRound::on(const proto::LinkEvent::ButtonLevel& b) noexcept {
     return false;
 }
 
-void UiRound::on(const app::RawKeyEdge& edge) noexcept {
+void UiRound::on(const app::input::RawKeyEdge& edge) noexcept {
     TASTY_SEAT_BODY(UiRound);
     ++keys_drained_;
 
-    if (edge.intent == app::KeyIntent::IniSwitch && model_.allow_cfg_switch()) {
+    if (edge.intent == app::input::KeyIntent::IniSwitch && model_.allow_cfg_switch()) {
         const app::UiRequest::SwitchIni ask{.ini = svc::ini_choice_of_direction(edge.code)};
         (void)push_ask(ctx_.ui_requests, ask);
         return;
@@ -56,7 +56,7 @@ void UiRound::on(const app::RawKeyEdge& edge) noexcept {
 
 bool UiRound::on(const proto::LinkEvent::OsdMask& m) noexcept {
     TASTY_SEAT_BODY(UiRound);
-    model_.on_hd_mask(m.mask.widened<HdMask>(), m.front_end, ctx_.ui_requests);
+    model_.on_hd_mask(m.mask, m.front_end, ctx_.ui_requests);
     return false;
 }
 
@@ -98,7 +98,7 @@ bool UiRound::poll_buttons(bool link_work) {
             boot_select_ini_ = held_at_boot;
         }
     }
-    const std::chrono::nanoseconds now = clock_.now().time_since_epoch();
+    const os::RawMonotonicClock::time_point now = clock_.now();
 
     {
         const bool but = osd_held_;
@@ -194,16 +194,17 @@ bool UiRound::publish_visibility(proto::LinkOp::OsdShow show, proto::OsdTarget t
 }
 
 void UiRound::publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show) {
-    const app::KeyFocus focus = last_show_ != proto::LinkOp::OsdShow::Menu
-        ? app::KeyFocus::Core
-        : (model_.allow_cfg_switch() ? app::KeyFocus::MenuIniSwitch : app::KeyFocus::Menu);
+    const app::input::KeyFocus focus = last_show_ != proto::LinkOp::OsdShow::Menu
+        ? app::input::KeyFocus::Core
+        : (model_.allow_cfg_switch() ? app::input::KeyFocus::MenuIniSwitch
+                                     : app::input::KeyFocus::Menu);
     const bool focus_edge = focus != last_focus_;
     if (focus_edge) {
         last_focus_ = focus;
         key_focus_.publish(focus);
     }
     if (focus_edge || published_show.has_value()) {
-        osd_file_.on_visible(focus != app::KeyFocus::Core);
+        osd_file_.on_visible(focus != app::input::KeyFocus::Core);
     }
 }
 
@@ -225,7 +226,7 @@ void UiRound::publish_page_record() {
     const PageStack& st = model_.stack();
     app::UiPageRecord rec{
         static_cast<std::uint32_t>(st.depth()),
-        static_cast<std::uint32_t>(st.top_id()),
+        label_of(st.top_id()),
         vis_pubs_,
         model_.cell_refusals(),
         model_.page_refusals()
@@ -238,7 +239,7 @@ void UiRound::publish_page_record() {
     rec.button_core_resets = button_core_resets_;
     rec.button_actions = button_actions_;
     rec.last_hold_ms = static_cast<std::uint32_t>(last_hold_.count());
-    const app::RecentGames& rg = model_.recent_games();
+    const app::recents::RecentGames& rg = model_.recent_games();
     rec.recent_build_us = us_of(rg.build_ns());
     rec.recent_update_us_max = us_of(rg.update_ns_max());
 
@@ -248,9 +249,9 @@ void UiRound::publish_page_record() {
     page_cell_.publish(rec);
 }
 
-bool UiRound::host_board_(std::chrono::nanoseconds now) {
+bool UiRound::host_board_(os::RawMonotonicClock::time_point now) {
     bool moved = false;
-    if (board_.active().any() && model_.stack().empty()) {
+    if (!board_.active().is_empty() && model_.stack().empty()) {
         moved = model_.open_indicators(ctx_, board_);
     }
     const bool up = model_.stack().top_id() == PageId::Indicators;
@@ -260,7 +261,7 @@ bool UiRound::host_board_(std::chrono::nanoseconds now) {
         now,
         up || shown_on_hd ? board_.active() : app::IndicatorSet{}
     );
-    if (up && !board_.active().any())
+    if (up && board_.active().is_empty())
         moved = model_.close_indicators(ctx_) || moved;
     if (changed && up)
         model_.request_repaint();
@@ -283,7 +284,7 @@ std::optional<app::InfoPlane> UiRound::info_plane_() const noexcept {
     );
 }
 
-void UiRound::tick_autosave_([[maybe_unused]] std::chrono::nanoseconds now) {
+void UiRound::tick_autosave_([[maybe_unused]] os::RawMonotonicClock::time_point now) {
 
     if (menu_focus_) {
         const bool focus = model_.menu_has_focus();
@@ -318,10 +319,10 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
             drained = true;
     }
 
-    if (host_board_(clock_.now().time_since_epoch()))
+    if (host_board_(clock_.now()))
         drained = true;
 
-    const bool deadline_due = model_.deadline_due(clock_.now().time_since_epoch());
+    const bool deadline_due = model_.deadline_due(clock_.now());
     const auto top = model_.stack().top();
     const bool page_poll = top && top->facts().wake_every_round;
 
@@ -374,7 +375,7 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         ini_label_ = catalog ? catalog.value.index.label_for(catalog.value.active) : std::string{};
     }
 
-    const std::chrono::nanoseconds now = clock_.now().time_since_epoch();
+    const os::RawMonotonicClock::time_point now = clock_.now();
     const app::IdleKnobsCell::Sample knobs = idle_.sample();
     const FrontEndIdleClock::Result idle_state = idle_clock_.round(
         FrontEndIdleClock::Inputs{
@@ -395,11 +396,11 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
     tick_autosave_(now);
 
     if (hd_) {
-        app::PageDescription described{};
-        const app::PageDescription* page = nullptr;
+        app::hd::PageDescription described{};
+        const app::hd::PageDescription* page = nullptr;
         if (model_.hd_tree() && model_.describe_top(described))
             page = &described;
-        const app::HdStatusSlots slots{
+        const app::hd::HdStatusSlots slots{
             .bluetooth = ctx_.status.bluetooth,
             .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt,
             .indicators = page ? board_.active() : app::IndicatorSet{}
@@ -433,7 +434,7 @@ void UiRound::publish_edges_(const app::UiRoundEdge& edge) {
     const proto::LinkOp::OsdShow show = edge.pumped || vis_unlatched_ ? model_.osd_show()
                                                                       : last_show_;
 
-    const bool awake = idle_clock_.idle() == app::FrontEndIdle::Awake;
+    const bool awake = idle_clock_.idle() == app::hd::FrontEndIdle::Awake;
     std::optional<proto::LinkOp::OsdShow> vis_edge{};
     if (awake && (edge.pumped ? (show != last_show_ || target != last_target_) : owed)) {
 

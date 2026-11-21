@@ -4,13 +4,15 @@
 #include <cstdint>
 #include <optional>
 
-#include "app/osd_grant.h"
+#include "app/carrier.h"
 #include "app/spi_osd_rows.h"
 #include "infra/error.h"
 #include "hal/spi_transport.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
-#include "proto/osd_transport.h"
+#include "proto/link/osd_transport.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -31,12 +33,12 @@ public:
     bool flush_one() noexcept {
         if (emit_info_window_())
             return true;
-        return route_ == OsdPageRoute::Lw ? lw_rows_.flush_one() : link_rows_.flush_one();
+        return route_ == Carrier::Lw ? lw_rows_.flush_one() : link_rows_.flush_one();
     }
 
-    void bind_rows(OsdPageRoute r) noexcept { route_ = r; }
+    void bind_rows(Carrier r) noexcept { route_ = r; }
 
-    [[nodiscard]] OsdPageRoute page_route() const noexcept { return route_; }
+    [[nodiscard]] Carrier page_route() const noexcept { return route_; }
 
     void bind_rotation(proto::OsdRotation rotation) noexcept { rotation_ = rotation; }
 
@@ -97,19 +99,19 @@ public:
 
     std::uint32_t status_rows_sent() const noexcept { return tally_.status_rows_sent; }
 
-    svc::Tally visibility_writes() const noexcept { return vis_writes_; }
+    infra::Tally visibility_writes() const noexcept { return vis_writes_; }
 
-    svc::Tally menu_ctls_sent() const noexcept { return tally_.menu_ctls_sent; }
+    infra::Tally menu_ctls_sent() const noexcept { return tally_.menu_ctls_sent; }
 
     bool asleep() const noexcept { return asleep_; }
 
-    svc::Tally info_window_writes() const noexcept { return info_writes_; }
+    infra::Tally info_window_writes() const noexcept { return info_writes_; }
 
-    svc::Tally info_window_failures() const noexcept { return info_failures_; }
+    infra::Tally info_window_failures() const noexcept { return info_failures_; }
 
-    svc::Tally rotations_sent() const noexcept { return tally_.rotations_sent; }
+    infra::Tally rotations_sent() const noexcept { return tally_.rotations_sent; }
 
-    svc::Tally rotation_failures() const noexcept { return tally_.rotation_failures; }
+    infra::Tally rotation_failures() const noexcept { return tally_.rotation_failures; }
 
     proto::LinkOp::OsdShow show() const noexcept { return show_; }
 
@@ -118,7 +120,7 @@ public:
     bool has_focus() const noexcept { return show_ == proto::LinkOp::OsdShow::Menu; }
 
     proto::OsdRowCount backlog() const noexcept {
-        return route_ == OsdPageRoute::Lw ? lw_rows_.backlog() : link_rows_.backlog();
+        return route_ == Carrier::Lw ? lw_rows_.backlog() : link_rows_.backlog();
     }
 
     proto::OsdSurface& surface() noexcept { return *surface_; }
@@ -142,12 +144,12 @@ private:
     OsdRowTally tally_{};
     SpiOsdRows<proto::OsdRow{}> link_rows_;
     SpiOsdRows<proto::OsdSurface::kStatusRow> lw_rows_;
-    OsdPageRoute route_ = OsdPageRoute::Link;
-    proto::OsdTransport osd_{};
+    Carrier route_ = Carrier::Link;
+    proto::link::OsdTransport osd_{};
     xthread::Telemetry<proto::InfoWindow>::Reader info_seen_{};
-    svc::Tally vis_writes_{};
-    svc::Tally info_writes_{};
-    svc::Tally info_failures_{};
+    infra::Tally vis_writes_{};
+    infra::Tally info_writes_{};
+    infra::Tally info_failures_{};
     proto::LinkOp::OsdShow show_ = proto::LinkOp::OsdShow::Off;
 
     std::optional<ShowOwner> opener_{};

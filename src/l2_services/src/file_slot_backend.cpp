@@ -8,6 +8,7 @@
 #include "infra/byte_view.h"
 #include "infra/errno.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/save_stage_keeper.h"
 #include "svc/staged_save.h"
 #include "svc/vfs.h"
@@ -22,14 +23,6 @@ SaveSlotBackends make_backends(
     SaveStageKeeper& keeper
 ) noexcept {
     return SaveSlotBackends{((void)I, FileSlotBackend{vfs, keeper})...};
-}
-
-std::span<std::byte> as_bytes_mut(std::span<std::uint8_t> s) noexcept {
-    return infra::byte_cast<std::byte>(s);
-}
-
-std::span<const std::byte> as_bytes_const(std::span<const std::uint8_t> s) noexcept {
-    return infra::byte_cast<const std::byte>(s);
 }
 
 std::unexpected<Error> no_file(infra::ErrorSite at) noexcept {
@@ -92,17 +85,14 @@ Ex<proto::FileSize> FileSlotBackend::open_save_extent(
     return *(*grant)->extent;
 }
 
-Ex<std::span<std::uint8_t>> FileSlotBackend::read_at(
-    proto::FileOffset at,
-    std::span<std::uint8_t> dst
-) {
+Ex<infra::ByteCount> FileSlotBackend::read_at(proto::FileOffset at, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(FileSlotBackend);
     return file_.get().read_at(at, dst);
 }
 
-Ex<std::span<const std::uint8_t>> FileSlotBackend::write_at(
+Ex<infra::ByteCount> FileSlotBackend::write_at(
     proto::FileOffset at,
-    std::span<const std::uint8_t> src
+    std::span<const std::byte> src
 ) {
     TASTY_SEAT_BODY(FileSlotBackend);
     auto n = file_.get().write_at(at, src);
@@ -111,9 +101,9 @@ Ex<std::span<const std::uint8_t>> FileSlotBackend::write_at(
     return n;
 }
 
-Ex<std::span<const std::uint8_t>> FileSlotBackend::demote_(
+Ex<infra::ByteCount> FileSlotBackend::demote_(
     proto::FileOffset at,
-    std::span<const std::uint8_t> src
+    std::span<const std::byte> src
 ) {
     if (auto d = staged_.demote(); !d)
         return std::unexpected(d.error());
@@ -125,7 +115,7 @@ Ex<std::span<const std::uint8_t>> FileSlotBackend::demote_(
     return in_place_.write_at(at, src);
 }
 
-Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first) {
+Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::byte> first) {
     TASTY_SEAT_BODY(FileSlotBackend);
     return file_.get().create(first);
 }
@@ -162,13 +152,9 @@ Ex<proto::FileSize> FileSlotBackend::InPlace::open_file() {
     TASTY_SEAT_BODY(InPlace);
     file_.reset();
     auto f = card_.open(path_.view(), OpenMode::ReadWrite);
-    if (!f) {
 
-        if (f.error().code == Errc::os && f.error().os_errno() == infra::Errno{ENOENT}) {
-            return absent(ERR_SITE());
-        }
+    if (!f)
         return std::unexpected(f.error());
-    }
     auto size = (*f)->size();
     if (!size)
         return std::unexpected(size.error());
@@ -182,27 +168,27 @@ void FileSlotBackend::InPlace::counted_by(SaveStageKeeper& keeper) noexcept {
     counted_by_ = infra::OptRef<SaveStageKeeper>{keeper};
 }
 
-Ex<std::span<std::uint8_t>> FileSlotBackend::InPlace::read_at(
+Ex<infra::ByteCount> FileSlotBackend::InPlace::read_at(
     proto::FileOffset at,
-    std::span<std::uint8_t> dst
+    std::span<std::byte> dst
 ) {
     TASTY_SEAT_BODY(InPlace);
     if (file_ == nullptr)
         return no_file(ERR_SITE());
-    auto n = file_->read_at(at, as_bytes_mut(dst));
+    auto n = file_->read_at(at, dst);
     if (!n)
         return std::unexpected(n.error());
-    return dst.first(*n);
+    return infra::ByteCount{*n};
 }
 
-Ex<std::span<const std::uint8_t>> FileSlotBackend::InPlace::write_at(
+Ex<infra::ByteCount> FileSlotBackend::InPlace::write_at(
     proto::FileOffset at,
-    std::span<const std::uint8_t> src
+    std::span<const std::byte> src
 ) {
     TASTY_SEAT_BODY(InPlace);
     if (file_ == nullptr)
         return no_file(ERR_SITE());
-    auto n = file_->write_at(at, as_bytes_const(src));
+    auto n = file_->write_at(at, src);
 
     if (n) {
         if (auto r = file_->flush(); !r)
@@ -210,10 +196,10 @@ Ex<std::span<const std::uint8_t>> FileSlotBackend::InPlace::write_at(
     }
     if (!n)
         return std::unexpected(n.error());
-    return src.first(*n);
+    return infra::ByteCount{*n};
 }
 
-Ex<proto::FileSize> FileSlotBackend::InPlace::create(std::span<const std::uint8_t> first) {
+Ex<proto::FileSize> FileSlotBackend::InPlace::create(std::span<const std::byte> first) {
     TASTY_SEAT_BODY(InPlace);
     const std::string_view path = path_.view();
     if (path.empty())
@@ -222,13 +208,8 @@ Ex<proto::FileSize> FileSlotBackend::InPlace::create(std::span<const std::uint8_
     auto f = card_.open(path, OpenMode::Create);
     if (!f)
         return std::unexpected(f.error());
-    auto n = (*f)->write_at(proto::kFileStart, as_bytes_const(first));
-    if (!n)
-        return std::unexpected(n.error());
-    if (*n != first.size()) {
-        return std::unexpected(
-            Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(*n)}
-        );
+    if (auto w = (*f)->write_all_at(proto::kFileStart, first); !w) {
+        return std::unexpected(w.error());
     }
     if (auto r = (*f)->flush(); !r)
         return std::unexpected(r.error());
@@ -272,9 +253,9 @@ Ex<void> FileSlotBackend::Staged::demote() {
     return {};
 }
 
-Ex<std::span<std::uint8_t>> FileSlotBackend::Staged::read_at(
+Ex<infra::ByteCount> FileSlotBackend::Staged::read_at(
     proto::FileOffset at,
-    std::span<std::uint8_t> dst
+    std::span<std::byte> dst
 ) {
     TASTY_SEAT_BODY(Staged);
     if (!key_)
@@ -282,9 +263,9 @@ Ex<std::span<std::uint8_t>> FileSlotBackend::Staged::read_at(
     return keeper_.read(*key_, at, dst);
 }
 
-Ex<std::span<const std::uint8_t>> FileSlotBackend::Staged::write_at(
+Ex<infra::ByteCount> FileSlotBackend::Staged::write_at(
     proto::FileOffset at,
-    std::span<const std::uint8_t> src
+    std::span<const std::byte> src
 ) {
     TASTY_SEAT_BODY(Staged);
     if (!key_)
@@ -292,7 +273,7 @@ Ex<std::span<const std::uint8_t>> FileSlotBackend::Staged::write_at(
     return keeper_.write(*key_, at, src);
 }
 
-Ex<proto::FileSize> FileSlotBackend::Staged::create(std::span<const std::uint8_t> first) {
+Ex<proto::FileSize> FileSlotBackend::Staged::create(std::span<const std::byte> first) {
     TASTY_SEAT_BODY(Staged);
     if (!key_)
         return no_file(ERR_SITE());

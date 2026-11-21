@@ -9,6 +9,7 @@
 #include "hal/types.h"
 #include "infra/endian.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/fio_opcodes.h"
 #include "proto/link_sel.h"
 #include "proto/osd_opcodes.h"
@@ -30,15 +31,11 @@ public:
 
     [[nodiscard]] Ex<void> begin(OsdOp op) { return begin(LinkSel::Osd, proto::word(op)); }
 
-    [[nodiscard]] virtual Ex<void> word(std::uint16_t w) = 0;
-
-    [[nodiscard]] Ex<void> word(hal::SpiWord w) {
-        return w.decoded([this](std::uint16_t b) { return word(b); });
-    }
+    [[nodiscard]] virtual Ex<void> word(hal::SpiWord w) = 0;
 
     [[nodiscard]] virtual Ex<void> end() = 0;
 
-    [[nodiscard]] virtual std::optional<std::uint16_t> opcode_reply() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<hal::SpiWord> opcode_reply() const noexcept = 0;
 
 protected:
     ILinkFrame() = default;
@@ -50,11 +47,11 @@ protected:
     ILinkFrame& frame,
     LinkSel sel,
     hal::SpiWord op,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 ) {
     if (auto r = frame.begin(sel, op); !r)
         return r;
-    for (const std::uint16_t w : words) {
+    for (const hal::SpiWord w : words) {
         if (auto r = frame.word(w); !r)
             return r;
     }
@@ -64,7 +61,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     UioOp op,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 ) {
     return send_frame(frame, LinkSel::Io, proto::word(op), words);
 }
@@ -72,7 +69,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     FioOp op,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 ) {
     return send_frame(frame, LinkSel::Fpga, proto::word(op), words);
 }
@@ -80,7 +77,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     OsdOp op,
-    std::span<const std::uint16_t> words
+    std::span<const hal::SpiWord> words
 ) {
     return send_frame(frame, LinkSel::Osd, proto::word(op), words);
 }

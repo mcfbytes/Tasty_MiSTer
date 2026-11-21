@@ -38,7 +38,7 @@ public:
 
     MenuMask mask() const override {
         TASTY_SEAT_BODY(ConfirmPage);
-        const RowCount n = RowCount::of(spec_.choices.size());
+        const RowCount n = RowCount::truncating(spec_.choices.size());
         if (n >= menu_mask_rows())
             return MenuMask{};
         return dense_mask(n);

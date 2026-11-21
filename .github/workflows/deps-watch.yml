@@ -1,6 +1,6 @@
 name: Deps watch
 # Reports newer upstream releases of the dependencies pinned by version and sha256 (the static
-# build's C libraries, the Noto Sans faces, Slint and the Bootlin toolchain). A bump also needs the
+# build's C libraries, Slint and the Bootlin toolchain). A bump also needs the
 # tarball's sha256, so this downloads each new tarball, hashes it, and keeps ONE tracking issue
 # current. It never opens a pull request or pushes. Actions and pip pins are Dependabot's.
 on:
@@ -35,7 +35,7 @@ jobs:
 
           TITLE = "Pinned dependency updates available"
           DEPS = Path("src/tools/build-static-deps.py")
-          SLINT = Path("src/tools/build-static-slint.sh")
+          SLINT = Path("src/tools/build-slint-sdk.sh")
           CI = Path(".github/workflows/ci.yml")
           BOOTLIN = "https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/"
           LZO_PAGE = "https://www.oberhumer.com/opensource/lzo/download/"
@@ -108,19 +108,6 @@ jobs:
               return (cur[:12], f"{new[:12]} ({branch}, {ahead} commits ahead)", [("LIBCHDR", url)],
                       f"{DEPS}: LIBCHDR_REV, LIBCHDR_SHA (no releases: tracks {branch})")
 
-          def noto():
-              cur = consts["NOTO_VER"]
-              tags = [r["tag_name"] for r in gh_api("repos/notofonts/latin-greek-cyrillic/releases?per_page=100")
-                      if not r.get("prerelease")]
-              vers = [m.group(1) for t in tags if (m := re.fullmatch(r"NotoSans-v([0-9.]+)", t))]
-              new = max(vers, key=key)
-              if key(new) <= key(cur):
-                  return None
-              url = (f"https://github.com/notofonts/latin-greek-cyrillic/releases/download/"
-                     f"NotoSans-v{new}/NotoSans-v{new}.zip")
-              return (cur, new, [("NOTO", url)],
-                      f"{DEPS}: NOTO_VER, NOTO_SHA (the pin matches the MiSTer image's copy; keep them in step)")
-
           def slint():
               cur = re.search(r"^SLINT_VERSION=(\S+)", SLINT.read_text(), re.M).group(1)
               new = latest_tag("slint-ui/slint").lstrip("v")
@@ -145,7 +132,7 @@ jobs:
               return cur, new, [("TOOLCHAIN", url)], f"{CI}: every armv7-eabihf--glibc--{cur} and its sha256"
 
           checks = [("zlib-ng", zlib_ng), ("zlib", zlib), ("lzo", lzo), ("libchdr", libchdr),
-                    ("Noto Sans", noto), ("Slint", slint), ("Bootlin glibc toolchain", bootlin)]
+                    ("Slint", slint), ("Bootlin glibc toolchain", bootlin)]
           bumps, failed = [], []
           for name, check in checks:
               try:

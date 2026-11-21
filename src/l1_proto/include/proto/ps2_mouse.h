@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/fixed_ring.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/frame_drops.h"
 #include "proto/mouse_delta.h"

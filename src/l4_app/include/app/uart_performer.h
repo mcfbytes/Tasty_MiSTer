@@ -5,7 +5,8 @@
 
 #include "app/uart_handoff.h"
 #include "app/uart_mode.h"
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {

@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "app/content_pick.h"
+#include "app/core_name.h"
 #include "app/ladder_cell.h"
 #include "app/link_tx_channel.h"
 #include "app/mount_queue.h"
@@ -17,6 +18,7 @@
 #include "cores/ladder_host.h"
 #include "cores/registry.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/reset_edge.h"
@@ -58,7 +60,7 @@ public:
         cores::ILadderHost& host
     );
     [[nodiscard]] bool arm_start(
-        const FixedStr<64, StrFit::Clip>& core_name,
+        const CoreName& core_name,
         bool index0_taken,
         cores::ILadderHost& host
     );

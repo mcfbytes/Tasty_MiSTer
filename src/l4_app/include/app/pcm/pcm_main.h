@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+#include <optional>
+
+#include "app/pcm/companion_host.h"
+#include "app/pcm/mailbox_relay.h"
+#include "app/pcm/pcm_ring_feeder.h"
+#include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/xthread/park_fds.h"
+#include "infra/park_timeout.h"
+#include "infra/xthread/pause_latch.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "infra/xthread/seat_main.h"
+#include "infra/xthread/seat_park.h"
+#include "infra/xthread/wake_flag.h"
+
+namespace mister::app::pcm {
+
+class PcmMain final : public xthread::SeatMain<PcmMain> {
+    TASTY_SEAT_RESIDENT(Pcm);
+
+public:
+    struct Mailbox {
+        MailboxRelay& relay;
+        CompanionHost& host;
+    };
+
+    PcmMain(
+        PcmRingFeeder& feeder,
+        xthread::ParkFds fds,
+        PcmRingFeeder::Commands& commands,
+        std::optional<Mailbox> mailbox = std::nullopt,
+        infra::OptRef<xthread::WakeFlag> asker = {}
+    ) noexcept;
+    PcmMain(const PcmMain&) = delete;
+    PcmMain& operator=(const PcmMain&) = delete;
+    PcmMain(PcmMain&&) = delete;
+    PcmMain& operator=(PcmMain&&) = delete;
+
+    void start() noexcept;
+
+    void stop() noexcept { stop_.request(); }
+
+    void serve() noexcept;
+    [[nodiscard]] bool idle() const noexcept;
+
+    [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return feeder_.rest_ms(); }
+
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
+
+    [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
+
+    [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
+
+    void settle() noexcept;
+
+    void on_pause() noexcept;
+
+    void on_resume() noexcept {}
+
+    [[nodiscard]] bool quiescent() const noexcept { return true; }
+
+    [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
+
+    [[nodiscard]] std::uint32_t paused_cmd_drops() const noexcept { return paused_cmd_drops_; }
+
+private:
+    [[nodiscard]] bool inboxes_empty_() const noexcept { return cmds_.empty(); }
+
+    std::uint32_t drain_() noexcept;
+
+    void serve_mailbox_() noexcept;
+    [[nodiscard]] bool mailbox_rest_() const noexcept;
+
+    PcmRingFeeder& feeder_;
+
+    std::optional<Mailbox> mailbox_;
+    xthread::WakeFlag& wake_;
+    xthread::WakeFlag stop_;
+    PcmRingFeeder::Commands& cmds_;
+    xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
+    std::uint32_t paused_cmd_drops_ = 0;
+    xthread::SeatPark park_;
+};
+
+static_assert(xthread::SeatBody<PcmMain>);
+
+}

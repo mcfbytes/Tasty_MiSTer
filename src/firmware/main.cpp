@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <span>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "menu_mode.h"
 #include "process_standup.h"

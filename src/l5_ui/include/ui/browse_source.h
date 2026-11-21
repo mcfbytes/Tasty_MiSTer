@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::ui {

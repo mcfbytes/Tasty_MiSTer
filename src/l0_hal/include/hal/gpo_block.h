@@ -11,7 +11,7 @@ namespace mister::hal {
 struct GpoBlock {
     enum class Reg : std::uint32_t { Gpo = 0 };
     static constexpr std::size_t kSize = sizeof(std::uint32_t);
-    static constexpr RegAccess kAccess = RegAccess::WriteOnly;
+    static constexpr RegAccess kAccess = RegAccess::ReadWrite;
 };
 
 }

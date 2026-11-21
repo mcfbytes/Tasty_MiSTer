@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

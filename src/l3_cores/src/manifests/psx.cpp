@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/psx_ladder.h"
+#include "cores/psx/psx_ladder.h"
 #include "cores/manifests/psx.h"
 
 #include <string_view>
 
-#include "cores/psx_core.h"
+#include "cores/psx/psx_core.h"
 
 namespace mister::cores::manifests {
 
 std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<PsxCore>(p, kPsxCuePolicy, g.services);
+    return std::make_unique<psx::PsxCore>(p, kPsxCuePolicy, g.services);
 }
 
 static_assert(kPsxMcdHeader.size() == 8192, "mcdheader.h:2: static const uint8_t mcdheader[8192]");
@@ -139,6 +139,24 @@ static_assert(
 );
 
 static_assert(
+    kPsx.host_bits.size() == 1
+        && kPsx.host_bits[0].fact == HostFact::SaveAutomountInhibit
+        && kPsx.host_bits[0].bits == proto::BitField{proto::StatusBit{63}, 1}
+        && kPsx.host_bits[0].dir == HostBitRow::Dir::Read,
+    "captured CONF_STR: O[63],Automount Memory Card 1,Yes,No; psx.cpp:762 reads it"
+);
+static_assert(
+    host_value(
+        proto::StatusWord{}.with(proto::StatusBit{63}, true),
+        kPsx.host_bits,
+        HostFact::SaveAutomountInhibit
+    ) == proto::FieldValue{1}
+        && host_value(proto::StatusWord{}, kPsx.host_bits, HostFact::SaveAutomountInhibit)
+            == proto::FieldValue{},
+    "bit 63 set inhibits the card automount; clear automounts"
+);
+
+static_assert(
     kPsxBootAssets.size() == 2,
     "psx.cpp:732-756: cd_bios.rom from the game dir, then its parent"
 );
@@ -168,21 +186,21 @@ static_assert(
 );
 
 static_assert(
-    kPsxCuePolicy.program == svc::CuePolicy::Program::IndexTriple,
+    kPsxCuePolicy.program == svc::disc::CuePolicy::Program::IndexTriple,
     "psx.cpp:164-331 plus :315 and :136-156: the provisional close, the "
     "three-field pregap model and the 150-sector CHD lead-in are one program"
 );
 static_assert(
-    svc::unimplemented_axis(kPsxCuePolicy) == svc::CueAxis::None,
+    svc::disc::unimplemented_axis(kPsxCuePolicy) == svc::disc::CueAxis::None,
     "the IndexTriple program is built"
 );
 static_assert(
-    kPsxCuePolicy.sub_naming == svc::CuePolicy::SubNaming::None,
+    kPsxCuePolicy.sub_naming == svc::disc::CuePolicy::SubNaming::None,
     "support/psx: no .sub sidecar arm exists in this family"
 );
 
 std::unique_ptr<BootLadder> make_psx_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<PsxLadder>(p, ctx);
+    return std::make_unique<psx::PsxLadder>(p, ctx);
 }
 
 static_assert(start_mount_of(kPsxSlots, IoIndex{1}) == StartMount::Generic);

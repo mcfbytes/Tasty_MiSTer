@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/filter_wire_image.h"

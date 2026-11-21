@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "infra/prelude.h"
+
 namespace mister::fw {
 
 namespace {

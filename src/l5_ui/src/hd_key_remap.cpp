@@ -4,8 +4,8 @@
 #include <array>
 #include <optional>
 
-#include "app/hd_themes.h"
-#include "app/page_description.h"
+#include "app/hd/hd_themes.h"
+#include "app/hd/page_description.h"
 #include "infra/message_sum.h"
 #include "ui/menu_model.h"
 #include "ui/page.h"
@@ -14,33 +14,37 @@ namespace mister::ui {
 
 bool HdKeyRemap::selected_row_steps(const MenuModel& model) const {
     const auto top = model.stack().top();
-    app::PageDescription d{};
+    app::hd::PageDescription d{};
     if (!top || !top->describe(d))
         return false;
     for (const RowIndex r : rows(d.listed())) {
-        const app::PageDescription::Row& row = d.row(r);
+        const app::hd::PageDescription::Row& row = d.row(r);
         if (row.selected)
             return row.steps;
     }
     return false;
 }
 
-HdKeyRemap::Axis HdKeyRemap::axis_of(const Page& top, app::TierSet across, UiButtonMask buttons) {
+HdKeyRemap::Axis HdKeyRemap::axis_of(
+    const Page& top,
+    app::hd::TierSet across,
+    UiButtonMask buttons
+) {
     TASTY_SEAT_BODY(HdKeyRemap);
     constexpr std::uint16_t kDirs = UiEvent::Up | UiEvent::Down | UiEvent::Left | UiEvent::Right;
-    if (!across.any() || !buttons.has_any({kDirs}))
+    if (across.is_empty() || !buttons.intersects({kDirs}))
         return Axis{};
     const std::optional<Page::TierRun> run = top.tier_run(top.selection());
-    if (!run || !across.has(run->tier))
+    if (!run || !across.contains(run->tier))
         return Axis{};
     using D = Navigator::Direction;
-    if (buttons.has_any({UiEvent::Left}))
+    if (buttons.intersects({UiEvent::Left}))
         return Axis{Axis::Move::Strip, D::Up, run->rows};
-    if (buttons.has_any({UiEvent::Right}))
+    if (buttons.intersects({UiEvent::Right}))
         return Axis{Axis::Move::Strip, D::Down, run->rows};
-    if (buttons.has_any({UiEvent::Up}))
+    if (buttons.intersects({UiEvent::Up}))
         return Axis{Axis::Move::Tier, D::Up, run->rows};
-    if (buttons.has_any({UiEvent::Down}))
+    if (buttons.intersects({UiEvent::Down}))
         return Axis{Axis::Move::Tier, D::Down, run->rows};
     return Axis{};
 }
@@ -50,9 +54,9 @@ HdKeyRemap::Axis HdKeyRemap::axis(const MenuModel& model, UiButtonMask buttons) 
     const auto top = model.stack().top();
     if (!top || !model.hd_tree())
         return Axis{};
-    const app::TierSet across = pinned_across_
+    const app::hd::TierSet across = pinned_across_
         ? *pinned_across_
-        : app::hd_horizontal_tiers(model.style().look().layout);
+        : app::hd::hd_horizontal_tiers(model.style().look().layout);
     return axis_of(*top, across, buttons);
 }
 
@@ -81,18 +85,20 @@ HdKeyRemap::Refresh HdKeyRemap::refresh(const MenuModel& model, const UiEvent& e
         return out;
 
     const auto top = model.stack().top();
-    if (ev.buttons.has_any({UiEvent::Back}) && top && top->back_is_idle())
+    if (ev.buttons.intersects({UiEvent::Back}) && top && top->back_is_idle())
         out.ev.buttons = ev.buttons.without({UiEvent::Back})
                              .with({UiEvent::Menu | UiEvent::PadBack});
-    if (out.ev.buttons.has_any({UiEvent::PadBack})) {
+    if (out.ev.buttons.intersects({UiEvent::PadBack})) {
         out.one_page = true;
         ++backs_;
         return out;
     }
     constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
-    if (!ev.buttons.has_any({kSides}) || !selected_row_steps(model))
+    if (!ev.buttons.intersects({kSides}) || !selected_row_steps(model))
         return out;
-    const UiButtonMask step{ev.buttons.has_any({UiEvent::Right}) ? UiEvent::Plus : UiEvent::Minus};
+    const UiButtonMask step{
+        ev.buttons.intersects({UiEvent::Right}) ? UiEvent::Plus : UiEvent::Minus
+    };
     out.ev.buttons = ev.buttons.without({kSides}).with(step);
     ++steps_;
     return out;

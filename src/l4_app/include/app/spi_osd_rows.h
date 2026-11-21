@@ -9,7 +9,7 @@
 #include "hal/spi_transport.h"
 #include "infra/seat.h"
 #include "proto/osd_surface.h"
-#include "proto/osd_transport.h"
+#include "proto/link/osd_transport.h"
 
 namespace mister::app {
 
@@ -47,10 +47,10 @@ private:
     const proto::OsdSurface* surface_;
     hal::ISpiTransport* link_;
     OsdRowTally* tally_;
-    proto::OsdTransport rows_{};
+    proto::link::OsdTransport rows_{};
     proto::OsdSurface::Row scratch_{};
 
-    proto::OsdRowCells<std::uint32_t, proto::OsdSurface::kMaxRows.size()> seen_{};
+    proto::OsdRowCells<infra::CellGen, proto::OsdSurface::kMaxRows.size()> seen_{};
 };
 
 extern template class SpiOsdRows<proto::OsdRow{}>;

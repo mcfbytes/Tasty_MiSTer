@@ -7,7 +7,7 @@
 #include "ui/page_id.h"
 #include "ui/types.h"
 
-namespace mister::app {
+namespace mister::app::recents {
 class RecentGames;
 }
 
@@ -31,7 +31,7 @@ struct HdPlanInputs final {
     const StatusView& status;
     const CoreVerbs& verbs;
     const NowPlaying& now_playing;
-    const app::RecentGames& recent_games;
+    const app::recents::RecentGames& recent_games;
     BuildEnv env;
     PageArg arg;
     PageId classic;

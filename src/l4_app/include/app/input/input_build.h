@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+#include <span>
+#include <string_view>
+
+#include "app/core_input_facts.h"
+#include "app/input/device_table_loans.h"
+#include "hal/boards_table.h"
+#include "svc/input/input_enumerator.h"
+#include "infra/tally.h"
+#include "infra/prelude.h"
+#include "svc/vfs.h"
+#include "infra/xthread/counter.h"
+#include "infra/xthread/polled.h"
+#include "infra/seat.h"
+#include "infra/xthread/wake_flag.h"
+
+namespace mister::app::input {
+
+class InputBuild {
+    TASTY_SEAT_RESIDENT(Diag);
+
+public:
+    static constexpr SeatTag kSeat = SeatTag::Diag;
+
+    struct Counts {
+        std::uint32_t enumerate_failures = 0;
+        std::uint32_t devices = 0;
+        std::uint32_t rejected = 0;
+        infra::Tally rebuilds_done{};
+        infra::Tally rebuilds_refused{};
+    };
+
+    struct Ends {
+        const CoreInputCell& facts;
+        const xthread::WakeFlag& hotplug;
+        xthread::WakeFlag::Kicker input_ctrl;
+    };
+
+    InputBuild(
+        const svc::Vfs& vfs,
+        Ends ends,
+        std::string_view input_dir = svc::input::kDefaultInputDir
+    );
+    InputBuild(const InputBuild&) = delete;
+    InputBuild& operator=(const InputBuild&) = delete;
+
+    void set_cfg_deadzone_rules(std::span<const svc::input::DeadzoneRule> rows);
+
+    bool rebind_round();
+
+    svc::input::InputEnumerator& enumerator() noexcept { return en_; }
+
+    const svc::input::InputEnumerator& enumerator() const noexcept { return en_; }
+
+    DeviceTableLoans& tables() noexcept { return tables_; }
+
+    Counts counts() const noexcept;
+
+private:
+    void hand_over_(DeviceTableLoans::Loan loan);
+
+    Ends ends_;
+    xthread::WakeFlag::Cursor hotplug_seen_{};
+    svc::input::InputEnumerator en_;
+    DeviceTableLoans tables_{xthread::Polled{}, xthread::Polled{}};
+    DeviceTableLoans::Owner tx_{tables_.owner()};
+
+    xthread::Counter n_enum_fail_{};
+
+    infra::Tally rebuilds_done_{};
+    infra::Tally rebuilds_refused_{};
+};
+
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, InputBuild::kSeat).policy == hal::SchedPolicy::Other;
+    }),
+    "this lane runs opendir(3) over /dev/input, up to kMaxDevices open(2) "
+    "calls, EVIOCG* ioctls and the map-file reads behind load_maps_for: on a "
+    "SCHED_FIFO row that is a directory scan on the RT partition, "
+    "which is why enumeration never moves onto the decode lane."
+);
+static_assert(
+    InputBuild::kSeat != SeatTag::Input,
+    "build and decode must be TWO seats: the table is built whole on one and "
+    "installed whole on the other, and on one seat the build would run inside "
+    "the decode round it is meant to stay out of."
+);
+
+}

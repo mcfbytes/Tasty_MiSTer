@@ -12,8 +12,9 @@
 #include "cores/host_services.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "proto/spi_image_sink.h"
+#include "proto/link/spi_image_sink.h"
 #include "proto/types.h"
 #include "reactor/core_state.h"
 #include "reactor/core_token.h"
@@ -21,8 +22,11 @@
 
 namespace mister::proto {
 class StatusBit;
-class CoreSession;
 class IBlockServer;
+}
+
+namespace mister::proto::link {
+class CoreSession;
 }
 
 namespace mister::cores {
@@ -139,7 +143,7 @@ protected:
           spi_sink_(h.link, fio_queue_of_(h)),
           fio_cheats_(h.link, fio_queue_of_(h)) {}
 
-    [[nodiscard]] static infra::OptRef<proto::SpiFioQueue> fio_queue_of_(
+    [[nodiscard]] static infra::OptRef<proto::link::SpiFioQueue> fio_queue_of_(
         const HostServices& h
     ) noexcept {
         return h.fio_queue;
@@ -215,12 +219,12 @@ private:
 
     [[nodiscard]] virtual infra::OptRef<IWindowSave> on_window_save() noexcept { return {}; }
 
-    [[nodiscard]] Ex<void> pre_adopt_(proto::CoreSession& s);
+    [[nodiscard]] Ex<void> pre_adopt_(proto::link::CoreSession& s);
     [[nodiscard]] Ex<void> flush_dirty_state_();
 
     const CoreProfile* profile_;
     HostServices host_;
-    proto::SpiImageSink spi_sink_;
+    proto::link::SpiImageSink spi_sink_;
     FioCheatSink fio_cheats_;
     bool adopted_ = false;
 };

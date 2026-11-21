@@ -17,7 +17,10 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/affine.h"
+#include "infra/prelude.h"
+#include "infra/span_cut.h"
 #include "infra/endian.h"
+#include "os/types.h"
 #include "proto/types.h"
 
 namespace mister::svc {
@@ -33,6 +36,7 @@ namespace mister::cores {
 using ::mister::infra::affine::operator+;
 using ::mister::infra::affine::operator-;
 using ::mister::infra::affine::operator*;
+using ::mister::infra::affine::operator/;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
@@ -65,26 +69,18 @@ struct CoreWindowSlot {
     friend constexpr bool operator==(CoreWindowSlot, CoreWindowSlot) = default;
 };
 
-inline constexpr std::uint8_t kPhysicalWindow = 0xFF;
+struct WindowOffset {
+    std::uint32_t v = 0;
 
-struct WindowRef {
-    std::uint8_t v = kPhysicalWindow;
-
-    [[nodiscard]] static constexpr WindowRef physical() noexcept { return WindowRef{}; }
-
-    [[nodiscard]] static constexpr WindowRef at(CoreWindowSlot slot) noexcept {
-        return WindowRef{slot.v};
+    [[nodiscard]] constexpr os::PhysAddr past(os::PhysAddr window_base) const noexcept {
+        return window_base.advanced(v);
     }
 
-    [[nodiscard]] constexpr bool is_physical() const noexcept { return v == kPhysicalWindow; }
-
-    [[nodiscard]] constexpr std::optional<CoreWindowSlot> slot() const noexcept {
-        if (is_physical())
-            return std::nullopt;
-        return CoreWindowSlot{v};
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
     }
 
-    friend constexpr bool operator==(WindowRef, WindowRef) = default;
+    friend constexpr bool operator==(WindowOffset, WindowOffset) = default;
 };
 
 struct AcsiTarget {
@@ -177,8 +173,13 @@ struct BaudRate {
 
 inline constexpr BaudRate kDefaultUartBaud{115200};
 
+namespace n64 {
+struct SaveRowCount;
+}
+
 struct SaveRow {
     std::uint8_t v = 0;
+    using affine_count = n64::SaveRowCount;
 
     [[nodiscard]] constexpr SaveRow next() const noexcept {
         return SaveRow{static_cast<std::uint8_t>(v + 1u)};
@@ -195,16 +196,6 @@ struct SaveRow {
     friend constexpr bool operator==(SaveRow, SaveRow) = default;
 };
 
-struct SectorBytes {
-    std::uint32_t v = 0;
-
-    [[nodiscard]] static constexpr SectorBytes of(std::size_t bytes) noexcept {
-        return SectorBytes{static_cast<std::uint32_t>(bytes)};
-    }
-
-    friend constexpr bool operator==(SectorBytes, SectorBytes) = default;
-};
-
 struct SectorCount {
     std::int32_t v = 0;
     using affine_count = SectorCount;
@@ -217,10 +208,10 @@ struct SectorCount {
         return SectorCount{v < 0 ? -v : v};
     }
 
-    [[nodiscard]] constexpr proto::FileSize bytes(SectorBytes frame_bytes) const noexcept {
+    [[nodiscard]] constexpr proto::FileSize bytes(proto::BlockSize frame_size) const noexcept {
         if (v < 0)
             return proto::FileSize{};
-        return proto::FileSize{static_cast<std::uint64_t>(v) * frame_bytes.v};
+        return frame_size.bytes_of(proto::BlockCount{static_cast<std::uint32_t>(v)});
     }
 
     [[nodiscard]] constexpr std::uint32_t to_wire() const noexcept {
@@ -424,17 +415,16 @@ struct RomLength {
     [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
 
     template <class T>
-    [[nodiscard]] constexpr std::span<T> first_of(std::span<T> s) const noexcept {
-        return s.first(v < s.size() ? v : s.size());
-    }
-
-    template <class T>
     [[nodiscard]] constexpr std::span<T> phase_in(std::span<T> period) const noexcept {
         return period.subspan(v % period.size());
     }
 
     [[nodiscard]] constexpr UnitCount units_covering(RomLength unit) const noexcept {
-        return UnitCount{(v + unit.v - 1u) / unit.v};
+        return UnitCount{infra::affine::div_ceil(v, unit.v)};
+    }
+
+    [[nodiscard]] constexpr UnitCount units_within(RomLength unit) const noexcept {
+        return UnitCount{v / unit.v};
     }
 
     [[nodiscard]] constexpr proto::FileSize file_size() const noexcept {
@@ -474,7 +464,7 @@ struct RomOffset {
     }
 
     [[nodiscard]] constexpr RomLength span_to(RomOffset cap) const noexcept {
-        return v >= cap.v ? RomLength{} : RomLength{cap.v - v};
+        return cap > *this ? cap - *this : RomLength{};
     }
 
     [[nodiscard]] constexpr RomLength distance_from_origin() const noexcept { return RomLength{v}; }
@@ -488,16 +478,6 @@ struct RomOffset {
         if (len > span_to(cap))
             return std::nullopt;
         return len;
-    }
-
-    template <class T>
-    [[nodiscard]] constexpr std::span<T> before(std::span<T> s) const noexcept {
-        return RomLength{v}.first_of(s);
-    }
-
-    template <class T>
-    [[nodiscard]] constexpr std::span<T> onward(std::span<T> s) const noexcept {
-        return s.subspan(v < s.size() ? v : s.size());
     }
 
     friend constexpr bool operator==(RomOffset, RomOffset) = default;
@@ -571,18 +551,6 @@ struct HeaderLen {
         return HeaderLen{static_cast<std::uint32_t>(bytes.size())};
     }
 
-    [[nodiscard]] constexpr std::span<const std::uint8_t> first_of(
-        std::span<const std::uint8_t> bytes
-    ) const noexcept {
-        return bytes.first(v < bytes.size() ? v : bytes.size());
-    }
-
-    [[nodiscard]] constexpr std::span<const std::uint8_t> past(
-        std::span<const std::uint8_t> bytes
-    ) const noexcept {
-        return bytes.subspan(v < bytes.size() ? v : bytes.size());
-    }
-
     friend constexpr bool operator==(HeaderLen, HeaderLen) = default;
     friend constexpr auto operator<=>(HeaderLen, HeaderLen) = default;
 };
@@ -610,7 +578,7 @@ struct HeaderAddr {
     ) const noexcept {
         if (v < base.v || v - base.v >= window.size())
             return {};
-        return len.first_of(window.subspan(v - base.v));
+        return infra::affine::first_clamped(window.subspan(v - base.v), len);
     }
 
     [[nodiscard]] constexpr HeaderAddr bank_start() const noexcept {

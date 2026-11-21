@@ -3,6 +3,7 @@
 
 #include "infra/errno.h"
 #include "infra/persist.h"
+#include "infra/prelude.h"
 #include "os/map_length.h"
 #include "os/stack_touch.h"
 

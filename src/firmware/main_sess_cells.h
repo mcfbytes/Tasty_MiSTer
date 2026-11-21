@@ -4,8 +4,9 @@
 #include <cstdint>
 
 #include "app/fallback_counts.h"
-#include "infra/counter.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/counter.h"
+#include "infra/prelude.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::fw {
 
@@ -14,7 +15,7 @@ struct MainSessCells {
     using Main = xthread::Telemetry<T, SeatTag::Main>;
 
     const xthread::Counter& pause_expiries;
-    const Main<std::uint32_t>& recover_polls;
+    const xthread::Counter& recover_polls;
     const xthread::Counter& save_write_failures;
     const Main<app::FallbackCounts>& fallbacks;
     const xthread::Counter& ini_write_failures;

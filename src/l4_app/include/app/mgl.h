@@ -7,6 +7,7 @@
 #include "app/mgl_item.h"
 #include "app/path_text.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

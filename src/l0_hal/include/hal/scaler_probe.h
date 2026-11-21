@@ -9,6 +9,7 @@
 
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
+#include "infra/index_set.h"
 #include "infra/seat.h"
 #include "os/raw_monotonic_clock.h"
 
@@ -36,9 +37,9 @@ class ScalerProbe {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    using BufMask = std::array<bool, ScalerBuffers::kBuffers>;
+    using BufMask = infra::IndexSet<BufNo, ScalerBuffers::kBuffers, std::uint8_t>;
     static_assert(ScalerBuffers::kBuffers == 3, "kAllLive spells out every buffer");
-    static constexpr BufMask kAllLive{true, true, true};
+    static constexpr BufMask kAllLive = BufMask::all();
     static constexpr std::chrono::nanoseconds kProbeNs{std::chrono::milliseconds{250}};
 
     struct Pick {

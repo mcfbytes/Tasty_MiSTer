@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/stream_io.h"
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 [[nodiscard]] Ex<StreamFile> stream_open(
@@ -17,29 +19,8 @@ namespace mister::app {
     return StreamFile{std::move(*f), *sz};
 }
 
-namespace {
-
-template <class Buf, class Io>
-[[nodiscard]] Ex<void> pump(proto::FileOffset off, Buf buf, Errc stalled, Io io) {
-    proto::FileOffset at = off;
-    while (!buf.empty()) {
-        auto n = io(at, buf);
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0) {
-            return std::unexpected(at.refusal(stalled, ERR_SITE()));
-        }
-        buf = buf.subspan(*n);
-        at += proto::FileSize{*n};
-    }
-    return {};
-}
-}
-
 [[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileOffset off, std::span<std::byte> dst) {
-    return pump(off, dst, Errc::short_read, [&f](auto at, auto rest) {
-        return f.read_at(at, rest);
-    });
+    return f.read_exact_at(off, dst);
 }
 
 Ex<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size) {

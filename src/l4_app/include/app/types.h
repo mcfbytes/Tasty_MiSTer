@@ -22,7 +22,10 @@
 #include "infra/affine.h"
 #include "infra/decimal_text.h"
 #include "infra/json_out.h"
+#include "infra/niche.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/serial.h"
 #include "proto/types.h"
 #include "svc/types.h"
 
@@ -31,6 +34,7 @@ namespace mister::app {
 using ::mister::infra::affine::operator+;
 using ::mister::infra::affine::operator-;
 using ::mister::infra::affine::operator*;
+using ::mister::infra::affine::operator/;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
@@ -64,7 +68,7 @@ struct RowCount {
     using affine_count = RowCount;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr RowCount of(I n) noexcept {
+    [[nodiscard]] static constexpr RowCount truncating(I n) noexcept {
         return RowCount{static_cast<std::uint32_t>(n)};
     }
 
@@ -97,8 +101,6 @@ struct RowCount {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr RowCount half() const noexcept { return RowCount{v >> 1u}; }
-
     [[nodiscard]] constexpr RowExtent extent(RowPitch pitch) const noexcept {
         return RowExtent{static_cast<std::int32_t>(v) * pitch.v};
     }
@@ -118,7 +120,7 @@ struct RowIndex {
     using affine_count = RowCount;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr RowIndex of(I n) noexcept {
+    [[nodiscard]] static constexpr RowIndex truncating(I n) noexcept {
         return RowIndex{static_cast<std::uint32_t>(n)};
     }
 
@@ -144,20 +146,16 @@ constexpr bool RowCount::contains(RowIndex i) const noexcept {
     return RowIndex{count.v};
 }
 
-[[nodiscard]] constexpr RowCount saturating_sub(RowCount count, RowCount height) noexcept {
-    return RowCount{count.v > height.v ? count.v - height.v : 0u};
-}
-
 [[nodiscard]] constexpr proto::OsdRowCount osd_rows_of(RowCount height) noexcept {
-    return proto::OsdRowCount::of(height.v);
+    return proto::OsdRowCount::saturating(height.v);
 }
 
 [[nodiscard]] constexpr proto::OsdRow last_osd_row(RowCount height) noexcept {
-    return proto::OsdRow::of(height.v - 1u);
+    return proto::OsdRow::saturating(height.v - 1u);
 }
 
 [[nodiscard]] constexpr proto::OsdRow osd_row_at(RowCount offset) noexcept {
-    return proto::OsdRow::of(offset.v);
+    return proto::OsdRow::saturating(offset.v);
 }
 
 [[nodiscard]] constexpr RowIndex row_index_of(proto::OsdRow row) noexcept {
@@ -169,13 +167,8 @@ struct PixelCount {
     using affine_count = PixelCount;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr PixelCount of(I n) noexcept {
+    [[nodiscard]] static constexpr PixelCount truncating(I n) noexcept {
         return PixelCount{static_cast<std::uint64_t>(n)};
-    }
-
-    [[nodiscard]] constexpr PixelCount quarter() const noexcept {
-        constexpr std::uint64_t kQuarterDivisor = 4;
-        return PixelCount{v / kQuarterDivisor};
     }
 
     friend constexpr bool operator==(PixelCount, PixelCount) = default;
@@ -186,7 +179,7 @@ struct PixelIndex {
     std::uint32_t v = 0;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr PixelIndex of(I n) noexcept {
+    [[nodiscard]] static constexpr PixelIndex truncating(I n) noexcept {
         return PixelIndex{static_cast<std::uint32_t>(n)};
     }
 
@@ -195,7 +188,7 @@ struct PixelIndex {
         std::span<T> pixels,
         PixelCount available
     ) const noexcept {
-        if (PixelCount::of(v) > available)
+        if (PixelCount::truncating(v) > available)
             return std::nullopt;
         return pixels.subspan(v);
     }
@@ -204,7 +197,7 @@ struct PixelIndex {
     [[nodiscard]] constexpr std::optional<std::span<T>> subspan(
         std::span<T> pixels
     ) const noexcept {
-        return subspan_of(pixels, PixelCount::of(pixels.size()));
+        return subspan_of(pixels, PixelCount::truncating(pixels.size()));
     }
 
     friend constexpr bool operator==(PixelIndex, PixelIndex) = default;
@@ -212,7 +205,7 @@ struct PixelIndex {
 };
 
 [[nodiscard]] constexpr proto::DipRowIndex dip_row_of(RowIndex row) noexcept {
-    return proto::DipRowIndex::of(row.v);
+    return proto::DipRowIndex::truncating(row.v);
 }
 
 [[nodiscard]] constexpr cores::ConfigSlot config_slot_of(RowIndex i) noexcept {
@@ -328,14 +321,15 @@ struct DimQ8 {
 
 struct ControlGeneration {
     std::uint16_t v = 0;
+    using serial_rule = infra::serial::SkipZero<std::uint16_t>;
+    using serial_order = infra::serial::Order;
 
     [[nodiscard]] constexpr ControlGeneration next() const noexcept {
         return ControlGeneration{static_cast<std::uint16_t>(v + 1u)};
     }
 
     [[nodiscard]] constexpr ControlGeneration next_live() const noexcept {
-        const ControlGeneration n = next();
-        return n.v == 0 ? ControlGeneration{1} : n;
+        return infra::serial::next(*this);
     }
 
     [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
@@ -353,7 +347,7 @@ struct ControlGeneration {
     friend constexpr bool operator==(ControlGeneration, ControlGeneration) = default;
 
     [[nodiscard]] constexpr bool ahead_of(ControlGeneration earlier) const noexcept {
-        return static_cast<std::int16_t>(v - earlier.v) > 0;
+        return infra::serial::ahead(*this, earlier.v);
     }
 };
 
@@ -403,6 +397,12 @@ struct MoviePosition {
     std::int32_t v = 0;
     using affine_count = MovieFrameCount;
 
+    struct NichePolicy {
+        [[nodiscard]] static constexpr MoviePosition none() noexcept { return MoviePosition{-1}; }
+
+        [[nodiscard]] static constexpr bool is_none(MoviePosition p) noexcept { return p.v == -1; }
+    };
+
     [[nodiscard]] constexpr std::uint32_t to_wire() const noexcept {
         return static_cast<std::uint32_t>(v);
     }
@@ -415,7 +415,7 @@ struct MoviePosition {
     friend constexpr auto operator<=>(MoviePosition, MoviePosition) = default;
 };
 
-inline constexpr MoviePosition kNoMovieFrame{-1};
+inline constexpr MoviePosition kNoMovieFrame = MoviePosition::NichePolicy::none();
 
 [[nodiscard]] constexpr MoviePosition movie_frame_from_wire(std::uint32_t wire) noexcept {
     return MoviePosition{static_cast<std::int32_t>(wire)};
@@ -534,8 +534,6 @@ struct CoreFrameGap {
         return CoreFrameGap{unit.v * (v / unit.v)};
     }
 
-    [[nodiscard]] constexpr CoreFrameGap halved() const noexcept { return CoreFrameGap{v / 2}; }
-
     [[nodiscard]] constexpr bool odd() const noexcept { return (v & 1) != 0; }
 
     [[nodiscard]] constexpr bool beyond(CoreFrameGap tol) const noexcept {
@@ -627,9 +625,10 @@ struct WideCoreFrame {
 
 struct FabricGeneration {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
     [[nodiscard]] constexpr FabricGeneration next() const noexcept {
-        return FabricGeneration{v + 1u};
+        return infra::serial::next(*this);
     }
 
     friend constexpr bool operator==(FabricGeneration, FabricGeneration) = default;
@@ -637,27 +636,29 @@ struct FabricGeneration {
 
 struct CoreEdgeSeq {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
-    [[nodiscard]] constexpr CoreEdgeSeq next() const noexcept { return CoreEdgeSeq{v + 1u}; }
+    [[nodiscard]] constexpr CoreEdgeSeq next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(CoreEdgeSeq, CoreEdgeSeq) = default;
 };
 
 struct ResendSeq {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
-    [[nodiscard]] constexpr ResendSeq next() const noexcept { return ResendSeq{v + 1u}; }
+    [[nodiscard]] constexpr ResendSeq next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(ResendSeq, ResendSeq) = default;
 };
 
 struct CaptureToken {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::SkipZero<std::uint32_t>;
     static const CaptureToken kNone;
 
     [[nodiscard]] constexpr CaptureToken next() const noexcept {
-        const CaptureToken n{v + 1u};
-        return n == kNone ? CaptureToken{1} : n;
+        return infra::serial::next(*this);
     }
 
     friend constexpr bool operator==(CaptureToken, CaptureToken) = default;
@@ -745,7 +746,7 @@ struct KibCount {
     std::uint32_t v = 0;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr KibCount of(I n) noexcept {
+    [[nodiscard]] static constexpr KibCount truncating(I n) noexcept {
         return KibCount{static_cast<std::uint32_t>(n)};
     }
 
@@ -794,12 +795,6 @@ struct PreludeCompletions {
 
 struct FrameWordCount {
     std::uint8_t v = 0;
-
-    [[nodiscard]] constexpr std::span<const std::uint16_t> prefix_of(
-        std::span<const std::uint16_t> all
-    ) const noexcept {
-        return all.first(v);
-    }
 
     [[nodiscard]] constexpr bool is_empty() const noexcept { return v == 0; }
 

@@ -11,22 +11,25 @@
 #include "app/autosave_cells.h"
 #include "app/identity_record.h"
 #include "app/ini_parse.h"
-#include "app/rumble_players_cell.h"
+#include "app/input/rumble_players_cell.h"
 #include "app/uart_mode.h"
 #include "cores/save_copy_level.h"
-#include "infra/log_lane.h"
+#include "app/log_lane.h"
 #include "infra/opt_ref.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "hal/doorbell_policy.h"
+#include "infra/prelude.h"
 #include "hal/fpga_aperture.h"
 #include "hal/pin_levels.h"
+#include "hal/reg_port.h"
+#include "hal/sys_directory.h"
 #include "os/types.h"
 #include "os/uio_line_space.h"
-#include "proto/status_snapshot.h"
+#include "proto/link/status_snapshot.h"
 #include "svc/file_slot_backend.h"
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 struct RtStats;
 }
 
@@ -45,10 +48,16 @@ class IStorageChannel;
 
 namespace mister::svc {
 class Vfs;
-class DiscReadService;
-class ChdPrefetch;
 class IStorageLifecycle;
 class IStorageBackend;
+}
+
+namespace mister::svc::disc {
+class DiscReadService;
+class ChdPrefetch;
+}
+
+namespace mister::svc::input {
 class InputEmitter;
 }
 
@@ -66,8 +75,11 @@ template <SeatTag Consumer>
 class LinkRxChannel;
 class LinkRouter;
 class ICheatApply;
+
+namespace pcm {
 class PcmRingFeeder;
 class MailboxRelay;
+}
 class DiskRelay;
 class SaveUploadRelay;
 class WindowJobService;
@@ -76,12 +88,12 @@ class SwitchPark;
 struct SupervisorParts {
 
     struct Services {
-        PcmRingFeeder& feeder;
-        svc::ChdPrefetch& prefetch;
-        MailboxRelay& mailbox;
+        pcm::PcmRingFeeder& feeder;
+        svc::disc::ChdPrefetch& prefetch;
+        pcm::MailboxRelay& mailbox;
         DiskRelay& disks;
         SaveUploadRelay& saves;
-        svc::DiscReadService& discs;
+        svc::disc::DiscReadService& discs;
         WindowJobService& window_jobs;
         svc::SaveSlotBackends& save_backends;
 
@@ -91,7 +103,7 @@ struct SupervisorParts {
     };
 
     VideoWire& video;
-    const RumblePlayersCell& rumble_players;
+    const input::RumblePlayersCell& rumble_players;
     OsdWire& osd;
 
     LinkTxChannel<SeatTag::Main>& link_inbox;
@@ -109,7 +121,7 @@ struct SupervisorParts {
 
     infra::OptRef<const xthread::Telemetry<std::uint32_t, SeatTag::Diag>> diag_ask{};
 
-    svc::DiscReadService& unbound_discs;
+    svc::disc::DiscReadService& unbound_discs;
 
     hal::PinLevelCell& pin_levels;
     xthread::WakeFlag& main_wake;
@@ -117,8 +129,8 @@ struct SupervisorParts {
     reactor::CoreState& core_state;
     const os::IClock& clock;
 
-    svc::InputEmitter& input_emitter;
-    xthread::LogLane& log_lane;
+    svc::input::InputEmitter& input_emitter;
+    LogLane& log_lane;
 
     ICheatApply& cheats;
 
@@ -133,10 +145,12 @@ struct SupervisorParts {
     hal::FpgaAperture fpga_mem{};
     hal::PhysRegion lw_window{};
     std::span<std::uint32_t> lw_image{};
+
+    infra::OptRef<hal::IRegPort<hal::SysDirectory>> lw_header{};
     os::UioLineSpace doorbell_nodes{};
     os::CpuMask doorbell_cpus{};
 
-    infra::OptRef<const proto::StatusSnapshotCell> status_snapshots{};
+    infra::OptRef<const proto::link::StatusSnapshotCell> status_snapshots{};
 
     infra::OptRef<proto::IStorageChannel> storage_channel{};
 

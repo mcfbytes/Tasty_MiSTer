@@ -3,13 +3,13 @@
 
 #include <cstdint>
 
+#include "app/carrier.h"
 #include "app/link_encoder.h"
-#include "app/lw_pads.h"
 #include "app/session_tally.h"
-#include "infra/opt_ref.h"
-#include "proto/link.h"
+#include "proto/build_generation.h"
+#include "proto/link/link.h"
 #include "proto/link_op.h"
-#include "proto/spi_frame.h"
+#include "proto/link/spi_frame.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -17,12 +17,12 @@ class ISpiTransport;
 class ICoreSignals;
 }
 
-namespace mister::proto {
+namespace mister::proto::link {
 class CoreSession;
 class BlockSlots;
 }
 
-namespace mister::svc {
+namespace mister::svc::input {
 class InputEmitter;
 }
 
@@ -37,10 +37,10 @@ public:
     SpiEncoder(
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
-        proto::CoreSession& session,
+        proto::link::CoreSession& session,
         OsdWire& osd,
-        proto::BlockSlots& slots,
-        svc::InputEmitter& em,
+        proto::link::BlockSlots& slots,
+        svc::input::InputEmitter& em,
         SessionTally& session_tally
     ) noexcept;
 
@@ -70,12 +70,10 @@ public:
     Outcome on(const proto::LinkOp::SetCoreOption& a, const LinkOpCtx& ctx) noexcept;
     Outcome misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
-    void bind_pads(infra::OptRef<const LwPads> granted) noexcept;
+    void bind_pads(Carrier pads, proto::BuildGeneration gen) noexcept;
 
     void drop_pads() noexcept;
-
-    void trust_pads(bool ready) noexcept;
-    [[nodiscard]] bool pads_on_lw() const noexcept;
+    [[nodiscard]] bool pads_relayed() const noexcept;
 
     [[nodiscard]] std::uint32_t link_op_misrouted() const noexcept { return link_op_misrouted_; }
 
@@ -83,12 +81,12 @@ private:
     std::uint32_t holds_ = 0;
     hal::ISpiTransport& link_;
 
-    proto::SpiFrame frame_{link_};
+    proto::link::SpiFrame frame_{link_};
     hal::ICoreSignals& signals_;
-    proto::CoreSession& session_;
+    proto::link::CoreSession& session_;
     OsdWire& osd_;
-    proto::BlockSlots& slots_;
-    svc::InputEmitter& em_;
+    proto::link::BlockSlots& slots_;
+    svc::input::InputEmitter& em_;
 
     SessionTally& session_tally_;
     std::uint32_t link_op_misrouted_ = 0;

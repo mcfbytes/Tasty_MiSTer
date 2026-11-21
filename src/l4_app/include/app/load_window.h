@@ -13,6 +13,7 @@
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "infra/seat_owner_main.h"
+#include "infra/prelude.h"
 #include "hal/fpga_aperture.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 
 #include "proto/types.h"
 
@@ -16,7 +17,12 @@ struct EchoRate {
     proto::FileSize bytes,
     EchoRate rate
 ) noexcept {
-    return rate.floor + bytes.mib_share_of(rate.per_mib);
+    constexpr std::uint64_t kBytesPerMiB = 1u << 20;
+    return rate.floor
+        + std::chrono::nanoseconds{static_cast<std::int64_t>(
+            (bytes.file_word<std::uint64_t>() * static_cast<std::uint64_t>(rate.per_mib.count()))
+            / kBytesPerMiB
+        )};
 }
 
 }

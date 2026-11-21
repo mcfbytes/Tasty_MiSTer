@@ -4,38 +4,34 @@
 #include <optional>
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
-#include "ui/hd_label.h"
 #include "ui/page_context.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_close_row.h"
 #include "ui/hd_rows/hd_gated_row.h"
-#include "ui/hd_rows/hd_option_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_save_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
 #include "ui/hd_rows/hd_value_row.h"
-#include "ui/options_model.h"
-#include "ui/option_item.h"
 #include "ui/options_surface.h"
 #include "ui/saved_baseline.h"
 
 namespace mister::ui {
 namespace {
 
-using Row = app::PageDescription::Row;
-using RowKind = app::PageDescription::RowKind;
+using Row = app::hd::PageDescription::Row;
+using RowKind = app::hd::PageDescription::RowKind;
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 
 Row row_of(
     RowKind kind,
     std::string_view label,
-    app::RowTier tier = app::RowTier::Place,
-    app::PageDescription::RowIcon icon = app::PageDescription::RowIcon::None
+    app::hd::RowTier tier = app::hd::RowTier::Place,
+    app::hd::PageDescription::RowIcon icon = app::hd::PageDescription::RowIcon::None
 ) {
     Row r{};
     r.kind = kind;
@@ -47,7 +43,7 @@ Row row_of(
 
 }
 
-Row HdPushRow::describe() const {
+Row HdPushRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdPushRow);
     return row_of(RowKind::Submenu, spec_.label, spec_.tier, spec_.icon);
 }
@@ -57,39 +53,39 @@ std::optional<RowKey> HdPushRow::key() const {
     return push_row_key(spec_.page);
 }
 
-Transition HdPushRow::select() {
+Transition HdPushRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdPushRow);
     return Transition::push(spec_.page, spec_.arg);
 }
 
-Row HdCloseRow::describe() const {
+Row HdCloseRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdCloseRow);
     return row_of(RowKind::Action, spec_.label, spec_.tier);
 }
 
-Transition HdCloseRow::select() {
+Transition HdCloseRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdCloseRow);
     return Transition::close_all();
 }
 
-Row HdValueRow::describe() const {
+Row HdValueRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdValueRow);
     Row r = row_of(RowKind::Value, spec_.label);
     r.value = spec_.value;
     return r;
 }
 
-Transition HdValueRow::select() {
+Transition HdValueRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdValueRow);
     return Transition{};
 }
 
-Row HdSeparatorRow::describe() const {
+Row HdSeparatorRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdSeparatorRow);
     return row_of(RowKind::Separator, {});
 }
 
-Transition HdSeparatorRow::select() {
+Transition HdSeparatorRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdSeparatorRow);
     return Transition{};
 }
@@ -99,14 +95,14 @@ bool HdAskRow::shown() const {
     return spec_.confirm.has_value();
 }
 
-Row HdAskRow::describe() const {
+Row HdAskRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdAskRow);
     Row r = row_of(RowKind::Action, spec_.label, spec_.tier);
     r.value = spec_.value;
     return r;
 }
 
-Transition HdAskRow::select() {
+Transition HdAskRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdAskRow);
     if (!spec_.confirm)
         return Transition{};
@@ -134,49 +130,19 @@ std::optional<RowKey> HdGatedRow::key() const {
     return row_.key();
 }
 
-Row HdGatedRow::describe() const {
+app::hd::PageDescription::Row HdGatedRow::describe(const RowCx& cx) const {
     TASTY_SEAT_BODY(HdGatedRow);
-    return row_.describe();
+    return row_.describe(cx);
 }
 
-Transition HdGatedRow::select() {
+Transition HdGatedRow::select(const RowCx& cx) {
     TASTY_SEAT_BODY(HdGatedRow);
-    return row_.select();
+    return row_.select(cx);
 }
 
-Transition HdGatedRow::step(CycleDir dir) {
+Transition HdGatedRow::step(CycleDir dir, const RowCx& cx) {
     TASTY_SEAT_BODY(HdGatedRow);
-    return row_.step(dir);
-}
-
-std::optional<RowKey> HdOptionRow::key() const {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return RowKey::ordinal(item_.item);
-}
-
-OptionItem::Look HdOptionRow::look_() const {
-    return OptionItem::Look{.flat = false, .value = host_.field(item_.bits)};
-}
-
-Row HdOptionRow::describe() const {
-    TASTY_SEAT_BODY(HdOptionRow);
-
-    const std::optional<Row> described = item_.describe(look_());
-    if (!described)
-        return Row{};
-    Row r = *described;
-    (void)r.label.assign(hd_label(r.label.view()));
-    return r;
-}
-
-Transition HdOptionRow::select() {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return item_.select(host_);
-}
-
-Transition HdOptionRow::step(CycleDir dir) {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return item_.step(dir, host_.field(item_.bits), host_);
+    return row_.step(dir, cx);
 }
 
 std::optional<RowKey> HdSaveRow::key() const {
@@ -184,7 +150,7 @@ std::optional<RowKey> HdSaveRow::key() const {
     return RowKey::save();
 }
 
-Row HdSaveRow::describe() const {
+Row HdSaveRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdSaveRow);
     Row r{};
     r.kind = RowKind::Action;
@@ -194,7 +160,7 @@ Row HdSaveRow::describe() const {
     return r;
 }
 
-Transition HdSaveRow::select() {
+Transition HdSaveRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdSaveRow);
     host_.save_config();
     return Transition{};

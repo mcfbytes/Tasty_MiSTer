@@ -8,6 +8,8 @@
 #include "infra/affine.h"
 #include "infra/json_name.h"
 #include "infra/json_out.h"
+#include "infra/narrow_duration.h"
+#include "os/clock.h"
 
 namespace mister::reactor {
 
@@ -17,16 +19,12 @@ using ::mister::infra::affine::operator*;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
-using MonoInstant = std::chrono::steady_clock::time_point;
+using MonoInstant = os::MonoInstant;
 
-using RoundSpan = std::chrono::duration<std::uint32_t, std::nano>;
+using RoundSpan = infra::Nanos32;
 
 [[nodiscard]] constexpr RoundSpan round_span(std::chrono::nanoseconds d) noexcept {
-    if (d <= std::chrono::nanoseconds::zero())
-        return RoundSpan::zero();
-    if (d >= RoundSpan::max())
-        return RoundSpan::max();
-    return std::chrono::duration_cast<RoundSpan>(d);
+    return infra::saturated<RoundSpan>(d);
 }
 
 struct LeadUpSlot {

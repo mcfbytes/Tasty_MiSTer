@@ -3,8 +3,9 @@
 
 #include "cores/boot_ladder.h"
 #include "cores/ladder_pc.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 

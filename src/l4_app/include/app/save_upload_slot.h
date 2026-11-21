@@ -9,9 +9,11 @@
 
 #include "app/config_rel.h"
 #include "app/relay_stamp.h"
+#include "cores/nvram_save.h"
 #include "hal/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/save_act.h"
 
@@ -30,10 +32,22 @@ struct SaveUploadSlot {
 
         struct Start {
             static constexpr Kind kKind = Kind::Start;
+
             std::uint32_t size = 0;
             proto::WideIoIndex index{};
             hal::Width width = hal::Width::Byte;
             std::uint8_t pad_{};
+
+            [[nodiscard]] static constexpr Start of(
+                const cores::mra::NvramSave& image,
+                hal::Width width
+            ) noexcept {
+                return Start{
+                    .size = image.size.file_word<std::uint32_t>(),
+                    .index = image.index,
+                    .width = width
+                };
+            }
         };
 
         static_assert(sizeof(Start) == 8, "the save loan's Start stays one 8-byte slot");

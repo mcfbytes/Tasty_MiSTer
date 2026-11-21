@@ -6,27 +6,26 @@
 #include <limits>
 #include <span>
 
+#include "infra/affine.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
+#include "infra/span_cut.h"
 
 namespace mister::cores {
 
+struct MailboxLen;
+
 struct MailboxOffset {
     std::uint32_t v = 0;
-
-    [[nodiscard]] constexpr std::span<std::byte> rest_of(std::span<std::byte> page) const noexcept {
-        return page.subspan(v);
-    }
+    using affine_count = MailboxLen;
 };
 
 struct MailboxLen {
     std::uint32_t v = 0;
+    using affine_count = MailboxLen;
 
     [[nodiscard]] static constexpr bool fits(std::size_t n) noexcept {
         return n <= std::numeric_limits<std::uint32_t>::max();
-    }
-
-    [[nodiscard]] constexpr std::span<std::byte> head_of(std::span<std::byte> page) const noexcept {
-        return page.first(v);
     }
 };
 
@@ -42,12 +41,13 @@ struct MailboxSpan {
     MailboxLen len{};
 
     [[nodiscard]] constexpr bool fits(MailboxLen page) const noexcept {
-        return len.v <= page.v && off.v <= page.v - len.v;
+        return infra::affine::fits(off, len, page);
     }
 
     [[nodiscard]] constexpr std::span<std::byte> of(std::span<std::byte> page) const noexcept {
-        return fits(mailbox_len(page.size())) ? len.head_of(off.rest_of(page))
-                                              : std::span<std::byte>{};
+        return fits(mailbox_len(page.size()))
+            ? infra::affine::first(infra::affine::from(page, off), len)
+            : std::span<std::byte>{};
     }
 };
 

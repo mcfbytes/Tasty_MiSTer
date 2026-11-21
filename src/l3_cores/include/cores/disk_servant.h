@@ -8,7 +8,8 @@
 
 #include "cores/mount_state.h"
 #include "infra/opt_ref.h"
-#include "infra/wake_flag.h"
+#include "infra/prelude.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/disk_act.h"
 #include "proto/types.h"
 
@@ -40,10 +41,5 @@ protected:
     IDiskServant(const IDiskServant&) = default;
     IDiskServant& operator=(const IDiskServant&) = default;
 };
-
-[[nodiscard]] std::unique_ptr<IDiskServant> make_disk_servant(
-    const svc::Vfs& vfs,
-    infra::OptRef<xthread::WakeFlag> activity
-);
 
 }

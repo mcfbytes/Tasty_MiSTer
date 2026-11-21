@@ -6,6 +6,7 @@
 #include "app/negotiated_core.h"
 #include "app/owner_ladder.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/dir_entry.h"
 #include "svc/vfs.h"
 
@@ -48,7 +49,7 @@ Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFileBy
         ? negotiated_.conf_str()->file_slots().load(r.digit)
         : proto::FileSlotHit{};
     if (!hit.entry)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.slot().detail()});
+        return std::unexpected(r.digit.slot().refusal(Errc::slot_range, ERR_SITE()));
 
     if (hit.how == proto::FileSlotMatch::RowZero)
         owner_tally_.mgl_row0.add();
@@ -60,7 +61,7 @@ ContentPick::Out ContentPick::load_file(
     UiRequest::Kind asked,
     const R& req,
     CorrelationTag tag,
-    const cores::RamImageRecipe& ram_image
+    const cores::tas::RamImageRecipe& ram_image
 ) {
     TASTY_SEAT_BODY(ContentPick);
     if (req.path.empty())
@@ -93,10 +94,10 @@ BeltOrders ContentPick::plan_addons_(
     const proto::ConfStrFileRow& row,
     std::string_view pick,
     const PickedLoad& load,
-    const cores::RamImageRecipe& image
+    const cores::tas::RamImageRecipe& image
 ) {
     AddonSend addons = AddonSend::plan(row.addon, pick, load.content.slot);
-    if (image.size() != 0 && !addons.take_image(cores::expand(image))) {
+    if (image.size() != 0 && !addons.take_image(cores::tas::expand(image))) {
         ++owner_tally_.ram_images_declined;
         owner_events_.push(
             Event::RamImageDeclined{.why = Errc::negotiation},
@@ -338,7 +339,7 @@ std::optional<std::unique_ptr<svc::IFile>> ContentPick::derive_(
 ) {
     TASTY_SEAT_BODY(ContentPick);
     const auto row = negotiated_.load_row();
-    if (!row || row->make_loader == nullptr)
+    if (!row || !row->has_loader())
         return std::nullopt;
     auto loader = row->make_loader(loader_context_());
     const cores::LoadAsk
@@ -474,7 +475,7 @@ ContentPick::Armed ContentPick::arm_loader(
     const cores::MakeLoader make = cores::loader_for(row, req.load_addr);
     if (make == nullptr)
         return {};
-    const bool own = row && row->make_loader != nullptr;
+    const bool own = row && row->has_loader();
 
     if (own && belt_.any_live(kLoaderBusy))
         return Armed{.taken = true, .busy = true};
@@ -546,12 +547,14 @@ std::optional<ContentPick::Armed> ContentPick::arm_window_row_(
         size.v,
         row.extent.file_word<std::size_t>()
     );
-    auto w = LoadWindow<seat_owner::Main>::open(
-        window_map_,
-        aperture_,
-        os::PhysAddr{row.addr},
-        extent
-    );
+    const auto at = cores::row_address(
+                        row,
+                        negotiated_.loaded_profile().windows,
+                        aperture_.region.phys
+    )
+                        .and_then([this](hal::FabricAddr a) { return aperture_.physical_of(a); });
+    auto w = at ? LoadWindow<seat_owner::Main>::open(window_map_, aperture_, *at, extent)
+                : Ex<LoadWindow<seat_owner::Main>>{std::unexpected(at.error())};
     std::optional<LoadWindow<seat_owner::Main>> mirror{};
     if (w && row.mirror != 0) {
         auto m = LoadWindow<seat_owner::Main>::open(
@@ -624,13 +627,13 @@ template ContentPick::Out ContentPick::load_file(
     UiRequest::Kind,
     const UiRequest::LoadFile&,
     CorrelationTag,
-    const cores::RamImageRecipe&
+    const cores::tas::RamImageRecipe&
 );
 template ContentPick::Out ContentPick::load_file(
     UiRequest::Kind,
     const UiRequest::LoadFileByDigit&,
     CorrelationTag,
-    const cores::RamImageRecipe&
+    const cores::tas::RamImageRecipe&
 );
 
 bool ContentPick::streams_files_() const {

@@ -6,6 +6,7 @@
 
 #include "cores/cheat_unit.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::cores {
 

@@ -11,13 +11,13 @@
 #include "app/video_wire.h"
 #include "infra/message_sum.h"
 #include "proto/link_event.h"
-#include "proto/spi_block_decoder.h"
-#include "proto/spi_conf_str_decoder.h"
-#include "proto/spi_identify_decoder.h"
-#include "proto/spi_osd_mask_decoder.h"
-#include "proto/spi_ps2_decoder.h"
-#include "proto/spi_sampler.h"
-#include "proto/user_io/poll_reader.h"
+#include "proto/link/spi_block_decoder.h"
+#include "proto/link/spi_conf_str_decoder.h"
+#include "proto/link/spi_identify_decoder.h"
+#include "proto/link/spi_osd_mask_decoder.h"
+#include "proto/link/spi_ps2_decoder.h"
+#include "proto/link/spi_sampler.h"
+#include "proto/link/poll_reader.h"
 
 namespace mister::app {
 
@@ -30,13 +30,13 @@ struct Unproduced {
 using LinkEventProducers = std::tuple<
     LinkSession,
     VideoWire,
-    proto::SpiIdentifyDecoder,
-    proto::SpiConfStrDecoder,
-    proto::SpiSampler,
-    proto::SpiBlockDecoder,
-    proto::SpiPs2Decoder,
-    proto::SpiOsdMaskDecoder,
-    proto::user_io::PollReader>;
+    proto::link::SpiIdentifyDecoder,
+    proto::link::SpiConfStrDecoder,
+    proto::link::SpiSampler,
+    proto::link::SpiBlockDecoder,
+    proto::link::SpiPs2Decoder,
+    proto::link::SpiOsdMaskDecoder,
+    proto::link::PollReader>;
 
 namespace detail {
 template <class T>

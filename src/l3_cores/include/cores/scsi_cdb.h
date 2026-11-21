@@ -8,6 +8,7 @@
 #include <span>
 
 #include "infra/endian.h"
+#include "infra/run.h"
 #include "proto/types.h"
 
 namespace mister::cores {
@@ -94,8 +95,7 @@ struct Cdb {
 
     ScsiOpcode opcode = ScsiOpcode::TestReady;
     std::uint8_t lun = 0;
-    proto::Lba lba{};
-    proto::BlockCount transfer{};
+    infra::affine::Run<proto::Lba> run{};
     AllocBytes alloc{};
 
     [[nodiscard]] constexpr bool lun0() const noexcept { return lun == 0; }
@@ -118,20 +118,20 @@ struct Cdb {
         if (*op == ScsiOpcode::Read10 || *op == ScsiOpcode::Write10) {
             if (raw.size() < kLongBytes)
                 return std::nullopt;
-            out.lba = proto::Lba{
+            out.run.start = proto::Lba{
                 infra::load_be<std::uint32_t>(raw.subspan<kLongLbaAt, kLbaBytes>())
             };
-            out.transfer = proto::BlockCount{
+            out.run.len = proto::BlockCount{
                 infra::load_be<std::uint16_t>(raw.subspan<kLongLengthAt, kLongLengthBytes>())
             };
             return out;
         }
-        out.lba = proto::Lba{
+        out.run.start = proto::Lba{
             infra::load_be<std::uint32_t>(raw.subspan<0, kLbaBytes>()) & kShortLbaMask
         };
         const std::uint8_t n = std::to_integer<std::uint8_t>(raw[kShortLengthAt]);
         if (*op == ScsiOpcode::Read6 || *op == ScsiOpcode::Write6) {
-            out.transfer = proto::BlockCount{n == 0 ? kShortZeroLength : n};
+            out.run.len = proto::BlockCount{n == 0 ? kShortZeroLength : n};
         } else if (
             *op == ScsiOpcode::Inquiry
             || *op == ScsiOpcode::ModeSense
@@ -144,6 +144,8 @@ struct Cdb {
 
     friend constexpr bool operator==(Cdb, Cdb) = default;
 };
+
+static_assert(sizeof(Cdb) == 16, "the decoded command keeps its wire-carrier size");
 
 static_assert(sizeof(ScsiOpcode) == 1 && sizeof(ScsiStatus) == 1 && sizeof(SenseCode) == 1);
 static_assert(sizeof(DmaOp) == 2);

@@ -6,12 +6,13 @@
 
 #include "diag_sampler.h"
 #include "infra/error.h"
-#include "infra/park_fds.h"
+#include "infra/xthread/park_fds.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
-#include "infra/seat_main.h"
-#include "infra/seat_park.h"
-#include "infra/wake_flag.h"
+#include "infra/prelude.h"
+#include "infra/xthread/seat_main.h"
+#include "infra/xthread/seat_park.h"
+#include "infra/xthread/wake_flag.h"
 #include "hal/thread_map.h"
 
 namespace mister::fw {

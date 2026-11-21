@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "proto/types.h"
+
+#include "app/capture/avi_frame_count.h"
+#include "app/picture_pixels.h"
+#include "app/picture_row.h"
+#include "app/capture/rec_options.h"
+
+namespace mister::app::capture::avi {
+
+struct Fields {
+    PicturePixels width{};
+    PictureRows rows{};
+    RecCodec codec = RecCodec::Cscd;
+    std::uint32_t rate = 0;
+    std::uint32_t scale = 0;
+    std::uint32_t frames = 0;
+    std::uint32_t max_chunk = 0;
+    std::uint64_t movi_bytes = 0;
+    std::uint64_t index_bytes = 0;
+};
+
+inline constexpr std::size_t kHeaderBytes = 4096;
+
+inline constexpr std::size_t kMoviFourcc = kHeaderBytes - 4;
+inline constexpr proto::FileOffset kMoviFourccAt = proto::kFileStart + proto::FileSize{kMoviFourcc};
+inline constexpr std::size_t kChunkHead = 8;
+inline constexpr std::size_t kIndexEntry = 16;
+inline constexpr std::uint32_t kKeyFlag = 0x10;
+inline constexpr std::uint32_t kHasIndex = 0x10;
+
+using Header = std::array<std::byte, kHeaderBytes>;
+[[nodiscard]] Header header(const Fields& f) noexcept;
+
+void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept;
+
+[[nodiscard]] constexpr std::size_t chunk_bytes(std::size_t payload) noexcept {
+    return kChunkHead + payload + (payload & 1u);
+}
+
+void index_head(AviFrameCount entries, std::span<std::byte, kChunkHead> out) noexcept;
+void index_entry(
+    bool key,
+    proto::FileSize from_movi,
+    std::uint32_t payload,
+    std::span<std::byte, kIndexEntry> out
+) noexcept;
+
+}

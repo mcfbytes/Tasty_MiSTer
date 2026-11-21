@@ -8,6 +8,7 @@
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/session_params.h"
 #include "proto/types.h"

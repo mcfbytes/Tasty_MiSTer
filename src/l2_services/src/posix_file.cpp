@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "posix_file.h"
 
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -11,11 +10,12 @@
 #include <string>
 #include <utility>
 
+#include "infra/prelude.h"
+#include "os/positioned_io.h"
+#include "os/sync.h"
 #include "svc/durable_write.h"
 
 namespace mister::svc::detail {
-
-static_assert(sizeof(::off_t) == sizeof(std::int64_t), "_FILE_OFFSET_BITS=64: warnings.cmake");
 
 PosixFile::PosixFile(
     UniqueFd fd,
@@ -36,50 +36,13 @@ PosixFile::~PosixFile() {
         ::unlink(path_.c_str());
 }
 
-Ex<std::size_t> PosixFile::read_at(proto::FileOffset at, std::span<std::byte> dst) {
-    std::size_t done = 0;
-    while (done < dst.size()) {
-        const ::ssize_t n = ::pread(
-            fd_.get(),
-            dst.data() + done,
-            dst.size() - done,
-            (at + proto::FileSize{done}).seek_offset()
-        );
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
-        }
+Ex<infra::ByteCount> PosixFile::read_at(proto::FileOffset at, std::span<std::byte> dst) {
 
-        if (n == 0)
-            break;
-        done += static_cast<std::size_t>(n);
-    }
-    return done;
+    return os::pread_at(fd_, dst, at.kernel_offset());
 }
 
-Ex<std::size_t> PosixFile::write_at(proto::FileOffset at, std::span<const std::byte> src) {
-    std::size_t done = 0;
-    while (done < src.size()) {
-        const ::ssize_t n = ::pwrite(
-            fd_.get(),
-            src.data() + done,
-            src.size() - done,
-            (at + proto::FileSize{done}).seek_offset()
-        );
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
-        }
-        if (n == 0) {
-            return std::unexpected(
-                Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(done)}
-            );
-        }
-        done += static_cast<std::size_t>(n);
-    }
-    return done;
+Ex<infra::ByteCount> PosixFile::write_at(proto::FileOffset at, std::span<const std::byte> src) {
+    return os::pwrite_at(fd_, src, at.kernel_offset());
 }
 
 Ex<FileSize> PosixFile::size() const {
@@ -95,21 +58,11 @@ Ex<FileSize> PosixFile::size() const {
 Ex<void> PosixFile::flush() {
 
     DurableWrite::note_file_sync();
-    if (::fsync(fd_.get()) != 0) {
-        const int e = errno;
-
-        if (e != EINVAL && e != EROFS)
-            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), e));
-    }
-    return {};
+    return os::sync(fd_, os::SyncKind::All);
 }
 
 Ex<void> PosixFile::advise(Access a, proto::FileOffset at, FileSize len) {
-    const int advice = (a == Access::Sequential) ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED;
-    const int rc = ::posix_fadvise(fd_.get(), at.seek_offset(), len.file_word<::off_t>(), advice);
-    if (rc != 0)
-        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), rc));
-    return {};
+    return os::advise(fd_, at.kernel_offset(), len.kernel_length(), a);
 }
 
 }

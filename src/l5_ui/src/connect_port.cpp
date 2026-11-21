@@ -5,7 +5,7 @@
 
 namespace mister::ui {
 
-bool ConnectPort::send(const svc::ConnectRequest& request) noexcept {
+bool ConnectPort::send(const svc::connect::ConnectRequest& request) noexcept {
     if (!sender_) {
         refusals_.note_unwired();
         return false;
@@ -48,15 +48,15 @@ bool ConnectPort::pump(ConnectDemand wanted) noexcept {
 
     if (!accepted_.same_wifi(wanted)
         && sender_.send(
-            infra::make<svc::ConnectRequest>(
-                svc::ConnectRequest::WifiPage{.open = wanted.wifi_open()}
+            infra::make<svc::connect::ConnectRequest>(
+                svc::connect::ConnectRequest::WifiPage{.open = wanted.wifi_open()}
             )
         )) {
         accepted_ = accepted_.adopting_wifi(wanted);
     }
     if (!accepted_.same_bluetooth(wanted)
         && sender_.send(
-            infra::make<svc::ConnectRequest>(svc::ConnectRequest::BtPage{
+            infra::make<svc::connect::ConnectRequest>(svc::connect::ConnectRequest::BtPage{
                 .mode = wanted.bt_mode(),
                 .auto_first = wanted.pair_start() == PairStart::AutoFirst
             })

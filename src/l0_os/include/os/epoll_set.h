@@ -9,6 +9,7 @@
 
 #include "infra/error.h"
 #include "infra/park_timeout.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 

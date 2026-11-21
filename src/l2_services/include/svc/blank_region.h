@@ -7,6 +7,7 @@
 #include <span>
 
 #include "infra/byte_view.h"
+#include "infra/span_cut.h"
 #include "proto/types.h"
 
 namespace mister::svc {
@@ -36,10 +37,13 @@ struct BlankRegion {
             return;
         const proto::FileOffset from = std::max(at, base);
         const proto::FileOffset to = std::min(run_end, end);
-        const std::span<const std::byte> run = (to - from).first_of((from - at).skip_in(bytes));
+        const std::span<const std::byte> run = infra::affine::first(
+            infra::affine::from(bytes, from - at),
+            to - from
+        );
         std::ranges::copy(
             infra::byte_cast<const std::uint8_t>(run),
-            (from - base).skip_in(out).begin()
+            infra::affine::from(out, from - base).begin()
         );
     }
 };

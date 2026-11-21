@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

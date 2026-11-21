@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 

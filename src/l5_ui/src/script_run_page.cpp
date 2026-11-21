@@ -5,7 +5,7 @@
 #include <span>
 #include <string>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_row.h"
@@ -40,7 +40,10 @@ bool ScriptRunPage::walk(PageWalk& out) const {
 
     const RowSpan<const std::string> lines{runner_.lines()};
     const RowCount line_count = lines.size();
-    const RowCount hd_count = std::min(line_count, RowCount::of(app::PageDescription::kMaxRows));
+    const RowCount hd_count = std::min(
+        line_count,
+        RowCount::truncating(app::hd::PageDescription::kMaxRows)
+    );
     const RowIndex hd_first = row_after(line_count - hd_count);
     out.page.first = hd_first;
     out.page.total = line_count;
@@ -51,13 +54,13 @@ bool ScriptRunPage::walk(PageWalk& out) const {
     legend += word;
     (void)out.page.footer.assign(legend);
 
-    const RowCount first = saturating_sub(line_count, kOutputRows);
+    const RowCount first = infra::affine::saturating_sub(line_count, kOutputRows);
 
     for (const RowIndex i : rows(hd_count)) {
         const RowIndex idx = hd_first + i.before();
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
-        r.hd.kind = app::PageDescription::RowKind::Text;
+        r.hd.kind = app::hd::PageDescription::RowKind::Text;
         (void)r.hd.label.assign(lines[idx]);
         const RowCount vr = idx - row_after(first);
         if (vr >= kOutputRows)
@@ -87,7 +90,7 @@ bool ScriptRunPage::walk(PageWalk& out) const {
 
 Transition ScriptRunPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ScriptRunPage);
-    if (!ev.buttons.has_any({UiEvent::Select | UiEvent::Menu | UiEvent::Back})) {
+    if (!ev.buttons.intersects({UiEvent::Select | UiEvent::Menu | UiEvent::Back})) {
         return Transition{};
     }
     if (runner_.finished())

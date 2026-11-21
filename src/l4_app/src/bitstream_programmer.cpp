@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/bitstream_programmer.h"
+#include "infra/span_cut.h"
 
 #include "infra/seat.h"
 
@@ -10,6 +11,7 @@
 #include "hal/bridge_sequencer.h"
 #include "infra/endian.h"
 #include "hal/fpga_programmer.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -79,7 +81,7 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
 
     for (proto::FileSize pos{}; pos < win->length;) {
         const auto left = std::min(win->length - pos, proto::FileSize{chunk_bytes_});
-        const std::span<std::byte> chunk = left.first_of(std::span<std::byte>(buf_));
+        const std::span<std::byte> chunk = infra::affine::first(std::span<std::byte>(buf_), left);
         if (auto r = stream_read(*src->f, win->base + pos, chunk); !r) {
             return std::unexpected(r.error());
         }

@@ -4,6 +4,7 @@
 #include "infra/error.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

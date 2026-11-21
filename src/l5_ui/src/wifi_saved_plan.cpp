@@ -7,7 +7,7 @@
 
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
-#include "svc/connect_request.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/slot_range.h"
@@ -15,24 +15,29 @@
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 constexpr std::array<std::string_view, 1> kBody{"It will not reconnect by itself."};
-constexpr RowIndex kOnNo = RowIndex::of(1);
-constexpr RowIndex kYes = RowIndex::of(0);
+constexpr RowIndex kOnNo = RowIndex::truncating(1);
+constexpr RowIndex kYes = RowIndex::truncating(0);
 constexpr std::string_view kHidden = "(hidden)";
-constexpr SlotRange kSaved = SlotRange::table(RowCount::of(svc::WifiSavedView::kRows));
+constexpr SlotRange kSaved = SlotRange::table(
+    RowCount::truncating(svc::connect::WifiSavedView::kRows)
+);
 
-infra::OptRef<const svc::WifiSavedViewRow> saved_at(const ConnectViews& views, SlotId slot) {
+infra::OptRef<const svc::connect::WifiSavedViewRow> saved_at(
+    const ConnectViews& views,
+    SlotId slot
+) {
     const std::optional<std::size_t> at = kSaved.subscript_of(slot);
     if (!views.saved || !at)
         return std::nullopt;
     const auto& row = views.saved->rows[*at];
     if (!row)
         return {};
-    return infra::OptRef<const svc::WifiSavedViewRow>{*row};
+    return infra::OptRef<const svc::connect::WifiSavedViewRow>{*row};
 }
 
 }
@@ -66,19 +71,19 @@ bool WifiSavedPlan::slot_shown(SlotId slot) const {
     return saved_at(views(), slot).has_value();
 }
 
-app::PageDescription::Row WifiSavedPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row WifiSavedPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(WifiSavedPlan);
-    infra::OptRef<const svc::WifiSavedViewRow> row = saved_at(views(), slot);
+    infra::OptRef<const svc::connect::WifiSavedViewRow> row = saved_at(views(), slot);
     if (!row)
         return connect_row(RowKind::Action, kHidden);
-    const os::Ssid::Display shown = row->ssid.display();
+    const os::connect::Ssid::Display shown = row->ssid.display();
     const std::string_view mark = row->current ? "connected" : (row->disabled ? "disabled" : "");
     return connect_row(RowKind::Value, shown.view().empty() ? kHidden : shown.view(), mark);
 }
 
 Transition WifiSavedPlan::slot_select(SlotId slot) {
     TASTY_SEAT_BODY(WifiSavedPlan);
-    infra::OptRef<const svc::WifiSavedViewRow> row = saved_at(views(), slot);
+    infra::OptRef<const svc::connect::WifiSavedViewRow> row = saved_at(views(), slot);
     if (!row)
         return Transition{};
     asked_ = row->ssid;

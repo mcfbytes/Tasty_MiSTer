@@ -8,6 +8,7 @@
 #include "app/link_rx_channel.h"
 #include "app/save_extent_cell.h"
 #include "cores/save_extent.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -31,12 +32,12 @@ public:
 
     [[nodiscard]] bool owed() const noexcept { return static_cast<bool>(gen_); }
 
-    [[nodiscard]] proto::ActKey generation() const noexcept { return gen_; }
+    [[nodiscard]] proto::ActKey act() const noexcept { return gen_; }
 
-    void arm(proto::ActKey generation, const Level& on_strand) noexcept {
-        if (gen_ && gen_ != generation)
+    void arm(proto::ActKey act, const Level& on_strand) noexcept {
+        if (gen_ && gen_ != act)
             strand();
-        gen_ = generation;
+        gen_ = act;
         strand_body_ = on_strand;
     }
 
@@ -53,9 +54,9 @@ public:
     }
 
 private:
-    void publish_(proto::ActKey generation, Verdict v, Level body) noexcept {
+    void publish_(proto::ActKey act, Verdict v, Level body) noexcept {
         set_verdict(body, v);
-        body.generation = generation;
+        body.act = act;
         cell_.publish(body);
         rx_.request_wake();
     }

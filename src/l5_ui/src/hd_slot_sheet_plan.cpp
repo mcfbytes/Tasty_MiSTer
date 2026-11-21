@@ -8,12 +8,16 @@
 #include "ui/option_item.h"
 #include "ui/page_context.h"
 #include "ui/place_facts.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 namespace {
 
-app::PageDescription::Row row_of(std::string_view label, app::PageDescription::RowKind kind) {
-    app::PageDescription::Row r{};
+app::hd::PageDescription::Row row_of(
+    std::string_view label,
+    app::hd::PageDescription::RowKind kind
+) {
+    app::hd::PageDescription::Row r{};
     r.kind = kind;
     (void)r.label.assign(label);
     return r;
@@ -83,7 +87,7 @@ std::string_view HdSlotSheetPlan::title() const {
     return title_;
 }
 
-std::span<const std::reference_wrapper<IHdRow>> HdSlotSheetPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> HdSlotSheetPlan::rows() const {
     TASTY_SEAT_BODY(HdSlotSheetPlan);
     return refs_;
 }
@@ -98,9 +102,9 @@ void HdSlotSheetPlan::rewalk(const proto::ItemTable& table, const BuildEnv& env)
     walk_(table, env);
 }
 
-svc::Tally HdSlotSheetPlan::refusals() const noexcept {
+infra::Tally HdSlotSheetPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(HdSlotSheetPlan);
-    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
+    return refusals_.sum(picks_ ? picks_->refusals() : infra::Tally{});
 }
 
 std::uint32_t HdSlotSheetPlan::commands_published() const noexcept {
@@ -113,12 +117,12 @@ bool HdSlotSheetPlan::ChooseRow::shown() const {
     return plan_.has_slot_() && plan_.ctx_.launches.browser.has_value();
 }
 
-app::PageDescription::Row HdSlotSheetPlan::ChooseRow::describe() const {
+app::hd::PageDescription::Row HdSlotSheetPlan::ChooseRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(ChooseRow);
-    return row_of("Choose file", app::PageDescription::RowKind::Submenu);
+    return row_of("Choose file", app::hd::PageDescription::RowKind::Submenu);
 }
 
-Transition HdSlotSheetPlan::ChooseRow::select() {
+Transition HdSlotSheetPlan::ChooseRow::select(const RowCx&) {
     TASTY_SEAT_BODY(ChooseRow);
     if (!shown())
         return Transition{};
@@ -130,12 +134,12 @@ bool HdSlotSheetPlan::RecentFilesRow::shown() const {
     return plan_.has_slot_() && plan_.ctx_.recents.has_value() && plan_.has_recent_;
 }
 
-app::PageDescription::Row HdSlotSheetPlan::RecentFilesRow::describe() const {
+app::hd::PageDescription::Row HdSlotSheetPlan::RecentFilesRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(RecentFilesRow);
-    return row_of("Recent files", app::PageDescription::RowKind::Submenu);
+    return row_of("Recent files", app::hd::PageDescription::RowKind::Submenu);
 }
 
-Transition HdSlotSheetPlan::RecentFilesRow::select() {
+Transition HdSlotSheetPlan::RecentFilesRow::select(const RowCx&) {
     TASTY_SEAT_BODY(RecentFilesRow);
     if (!shown())
         return Transition{};
@@ -147,12 +151,12 @@ bool HdSlotSheetPlan::EjectRow::shown() const {
     return plan_.has_slot_() && plan_.ctx_.ui_requests.has_value() && plan_.ejectable_();
 }
 
-app::PageDescription::Row HdSlotSheetPlan::EjectRow::describe() const {
+app::hd::PageDescription::Row HdSlotSheetPlan::EjectRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(EjectRow);
-    return row_of("Eject", app::PageDescription::RowKind::Action);
+    return row_of("Eject", app::hd::PageDescription::RowKind::Action);
 }
 
-Transition HdSlotSheetPlan::EjectRow::select() {
+Transition HdSlotSheetPlan::EjectRow::select(const RowCx&) {
     TASTY_SEAT_BODY(EjectRow);
     if (!shown())
         return Transition{};

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/payload_pieces.h"
+#include "infra/prelude.h"
+#include "infra/span_cut.h"
 
 #include <algorithm>
 #include <expected>
@@ -49,7 +51,7 @@ Ex<PayloadPieces> PayloadPieces::held_window(
     const proto::FileSize size = proto::FileSize{bytes.size()};
 
     if (frame.piece == proto::FioWordCount{}
-        || frame.piece > proto::FioWordCount{proto::tightest_load_budget_words()}) {
+        || frame.piece > proto::FioWordCount{proto::link::tightest_load_budget_words()}) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
@@ -82,19 +84,18 @@ proto::LinkOp PayloadPieces::piece_op_(proto::FileId id, proto::LinkOp::StagePha
 Ex<void> PayloadPieces::stage_(std::size_t n) {
     std::vector<std::uint8_t> buf(n);
     if (file_ == nullptr) {
-        std::copy_n(sent_.skip_in(std::span<const std::uint8_t>(bytes_)).begin(), n, buf.begin());
+        std::copy_n(
+            infra::affine::from(std::span<const std::uint8_t>(bytes_), sent_).begin(),
+            n,
+            buf.begin()
+        );
     } else {
-        std::size_t got = 0;
-        while (got < n) {
-            auto r = file_->read_at(
-                sent_ + proto::FileSize{got},
-                std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(got))
+        if (auto r = file_->read_exact_at(
+                sent_,
+                std::as_writable_bytes(std::span<std::uint8_t>(buf))
             );
-            if (!r)
-                return std::unexpected(r.error());
-            if (*r == 0)
-                return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
-            got += *r;
+            !r) {
+            return std::unexpected(r.error());
         }
     }
     staged_ = std::move(buf);

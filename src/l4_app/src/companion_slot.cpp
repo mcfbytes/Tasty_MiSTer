@@ -5,6 +5,7 @@
 
 #include "cores/registry.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -20,7 +21,9 @@ void CompanionSlot::make() {
     if (!binds_ || companion_ == nullptr)
         return;
     attached_ = binds_->push(
-        infra::make<CompanionBind>(CompanionBind::Attach{.servant = companion_->servant()})
+        infra::make<pcm::CompanionBind>(
+            pcm::CompanionBind::Attach{.servant = companion_->servant()}
+        )
     );
     if (!attached_)
         ++tally_.companion_attach_refusals;
@@ -32,7 +35,9 @@ void CompanionSlot::withdraw() noexcept {
         return;
     if (attached_
         && !binds_->push(
-            infra::make<CompanionBind>(CompanionBind::Attach{.servant = cores::ServantId::None})
+            infra::make<pcm::CompanionBind>(
+                pcm::CompanionBind::Attach{.servant = cores::ServantId::None}
+            )
         ))
         ++tally_.companion_attach_refusals;
     attached_ = false;
@@ -55,7 +60,7 @@ Ex<CompanionWalk> CompanionSlot::plan(std::string_view path) {
         gen_,
         plan->load ? companion_->loader() : nullptr,
         negotiated_.loaded_profile().windows,
-        attached_ ? binds_ : infra::OptRef<CompanionHost::Binds>{}
+        attached_ ? binds_ : infra::OptRef<pcm::CompanionHost::Binds>{}
     );
 }
 

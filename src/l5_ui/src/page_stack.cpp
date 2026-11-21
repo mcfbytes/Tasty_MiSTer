@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/page_stack.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -30,8 +31,8 @@ void PageStack::clear() noexcept {
     pages_.clear();
 }
 
-svc::Tally PageStack::page_refusals() const noexcept {
-    svc::Tally n = retired_refusals_;
+infra::Tally PageStack::page_refusals() const noexcept {
+    infra::Tally n = retired_refusals_;
     for (const std::unique_ptr<Page>& p : pages_)
         n.add(p->refusals());
     return n;

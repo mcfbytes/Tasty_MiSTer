@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
-#include "svc/scaling_words.h"
+#include "infra/prelude.h"
+#include "svc/video/scaling_words.h"
 
 namespace mister::app {
 
@@ -25,6 +26,8 @@ void PreludeComposer::arm(bool front_end) noexcept {
     held_ = {};
     flight_ = {};
     release_ = Release::None;
+    mode_gen_ = proto::StageGen{};
+    mode_edge_ = ModeEdge::None;
     mode_in_block_done_ = shadow_done_ = tail_done_ = false;
     deadline_.reset();
     bare_ = false;
@@ -51,14 +54,14 @@ void PreludeComposer::begin(const Inputs& in) noexcept {
     fbuf_owed_ = true;
 }
 
-void PreludeComposer::take_filters(std::unique_ptr<svc::FilterSet> set) noexcept {
+void PreludeComposer::take_filters(std::unique_ptr<svc::video::FilterSet> set) noexcept {
     if (step_ == PreludeStep::Idle || step_ == PreludeStep::Done)
         return;
     set_ = std::move(set);
     filter_owed_ = set_ != nullptr;
 }
 
-Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const std::uint16_t> w) {
+Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const hal::SpiWord> w) {
     TASTY_SEAT_BODY(PreludeComposer);
     const Publish words{w};
     if (!words.fits_block()) {
@@ -74,9 +77,17 @@ Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const std::uint16_t
         StagedFrame::Mode m{};
         m.m.opcode = op;
         m.m.count = words.count();
-        const std::span<const std::uint16_t> from = words.words();
-        std::memcpy(m.m.w.data(), from.data(), from.size() * sizeof(std::uint16_t));
-        return stage_(infra::make<StagedFrame>(m), StagedFrame::Kind::Mode, RepliesOwed{});
+        const std::span<const hal::SpiWord> from = words.words();
+        std::memcpy(m.m.w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
+        const bool burst = op == proto::UioOp::SetVideo;
+        auto r = stage_(
+            infra::make<StagedFrame>(m),
+            StagedFrame::Kind::Mode,
+            burst ? RepliesOwed{1} : RepliesOwed{}
+        );
+        if (r && burst)
+            note_mode_staged_();
+        return r;
     }
 
     hold_(op, words);
@@ -110,6 +121,7 @@ void PreludeComposer::on_reply(const proto::LinkEvent::FrameReply& r) noexcept {
                 case proto::LinkEvent::ReplyWindow::FltNum:
                 case proto::LinkEvent::ReplyWindow::ShadowCap:
                 case proto::LinkEvent::ReplyWindow::AfilterProbe:
+                case proto::LinkEvent::ReplyWindow::ModeEmitted:
                 case proto::LinkEvent::ReplyWindow::kCount:
                     break;
             }
@@ -133,6 +145,13 @@ void PreludeComposer::on_reply(const proto::LinkEvent::FrameReply& r) noexcept {
             break;
         case StagedFrame::Kind::Mode:
         case StagedFrame::Kind::ModeInBlock:
+
+            if (r.window == proto::LinkEvent::ReplyWindow::ModeEmitted
+                && r.fails == kFailsNone
+                && r.gen == mode_gen_) {
+                mode_edge_ = ModeEdge::Emitted;
+            }
+            break;
         case StagedFrame::Kind::CoeffChunk:
         case StagedFrame::Kind::ScalingPair:
         case StagedFrame::Kind::AudVol:
@@ -150,18 +169,18 @@ void PreludeComposer::on_fltnum_(const proto::LinkEvent::FrameReply& r) noexcept
         stats_.flt_flags = r.word;
         const svc::FltFlags flt = FilterReply::of(r.word).flags();
 
-        svc::VideoSample s{};
+        svc::video::VideoSample s{};
         s.flt_flags = flt;
-        vert_ = svc::video_timing::select_vfilter(s, set_->enabled());
+        vert_ = svc::video::video_timing::select_vfilter(s, set_->enabled());
         fmt_ = flt.format();
-        const svc::FilterBank& h = set_->bank(svc::VFilter::Horz);
-        const svc::FilterBank& b = set_->bank(vert_);
-        plan_ = svc::plan_filter_banks(
+        const svc::video::FilterBank& h = set_->bank(svc::video::VFilter::Horz);
+        const svc::video::FilterBank& b = set_->bank(vert_);
+        plan_ = svc::video::plan_filter_banks(
             h,
             b,
             fmt_,
-            !svc::same_digest(h, sent_h_),
-            !svc::same_digest(b, sent_v_)
+            !svc::video::same_digest(h, sent_h_),
+            !svc::video::same_digest(b, sent_v_)
         );
         if (plan_.count == 0) {
 
@@ -178,8 +197,8 @@ void PreludeComposer::on_fltnum_(const proto::LinkEvent::FrameReply& r) noexcept
     }
 
     ++stats_.coeff_skips;
-    sent_h_ = svc::FilterBank{};
-    sent_v_ = svc::FilterBank{};
+    sent_h_ = svc::video::FilterBank{};
+    sent_v_ = svc::video::FilterBank{};
     begin_release_();
 }
 
@@ -198,18 +217,19 @@ void PreludeComposer::service_stream_() noexcept {
         ++stats_.chunks;
         bare_ = false;
         if (!bare_no_digests_) {
-            sent_h_ = set_->bank(svc::VFilter::Horz);
+            sent_h_ = set_->bank(svc::video::VFilter::Horz);
             sent_v_ = set_->bank(vert_);
         }
         bare_no_digests_ = false;
         begin_release_();
         return;
     }
-    const std::size_t total = svc::filter_bank_word_count(fmt_);
+    const std::size_t total = svc::video::filter_bank_word_count(fmt_);
     while (w_.wire.may_stage()) {
         const svc::FilterSendPlan::Seg& seg = plan_.seg(seg_);
-        const svc::FilterBank& b = svc::is_vert(seg.bank) ? set_->bank(vert_)
-                                                          : set_->bank(svc::VFilter::Horz);
+        const svc::video::FilterBank& b = svc::is_vert(seg.bank)
+            ? set_->bank(vert_)
+            : set_->bank(svc::video::VFilter::Horz);
         const auto& ph = svc::is_adaptive(seg.bank) ? b.adaptive : b.phases;
 
         const std::size_t at = cursor_.wire_offset(svc::FilterAddressGrid{});
@@ -217,8 +237,8 @@ void PreludeComposer::service_stream_() noexcept {
         StagedFrame::CoeffChunk c{};
         c.count = words.frame_words();
         words.fill(c.w, cursor_, [&](svc::FilterBankWordIndex word) {
-            return svc::filter_bank_word(
-                std::span<const svc::FilterPhase>(ph),
+            return svc::video::filter_bank_word(
+                std::span<const svc::video::FilterPhase>(ph),
                 fmt_,
                 seg.bank,
                 word
@@ -237,7 +257,7 @@ void PreludeComposer::service_stream_() noexcept {
         if (plan_.covers(seg_))
             continue;
 
-        sent_h_ = set_->bank(svc::VFilter::Horz);
+        sent_h_ = set_->bank(svc::video::VFilter::Horz);
         sent_v_ = set_->bank(vert_);
         begin_release_();
         return;
@@ -251,7 +271,7 @@ void PreludeComposer::service_wheel_() noexcept {
     const auto core = w_.wire.bound_core();
     const auto latch = w_.wire.geo_latch();
 
-    if (!core || !latch || CoreEdgeSeq{latch->core_seq} != core->core_seq)
+    if (!core || !latch || latch->core_seq != core->core_seq)
         return;
 
     if (!wheel_active_ && latch->filter_seq != last_filter_seq_) {
@@ -264,19 +284,19 @@ void PreludeComposer::service_wheel_() noexcept {
         if (set_ == nullptr) {
 
             fmt_ = svc::FltFlags{}.format();
-            vert_ = svc::VFilter::Horz;
+            vert_ = svc::video::VFilter::Horz;
             bare_ = true;
         } else {
             fmt_ = latch->sample.flt_flags.format();
-            vert_ = svc::video_timing::select_vfilter(latch->sample, set_->enabled());
-            const svc::FilterBank& h = set_->bank(svc::VFilter::Horz);
-            const svc::FilterBank& b = set_->bank(vert_);
-            plan_ = svc::plan_filter_banks(
+            vert_ = svc::video::video_timing::select_vfilter(latch->sample, set_->enabled());
+            const svc::video::FilterBank& h = set_->bank(svc::video::VFilter::Horz);
+            const svc::video::FilterBank& b = set_->bank(vert_);
+            plan_ = svc::video::plan_filter_banks(
                 h,
                 b,
                 fmt_,
-                !svc::same_digest(h, sent_h_),
-                !svc::same_digest(b, sent_v_)
+                !svc::video::same_digest(h, sent_h_),
+                !svc::video::same_digest(b, sent_v_)
             );
             bare_ = !plan_.covers(seg_);
         }
@@ -292,18 +312,19 @@ void PreludeComposer::service_wheel_() noexcept {
             wheel_active_ = false;
             break;
         }
-        const std::size_t total = svc::filter_bank_word_count(fmt_);
+        const std::size_t total = svc::video::filter_bank_word_count(fmt_);
         const svc::FilterSendPlan::Seg& seg = plan_.seg(seg_);
-        const svc::FilterBank& b = svc::is_vert(seg.bank) ? set_->bank(vert_)
-                                                          : set_->bank(svc::VFilter::Horz);
+        const svc::video::FilterBank& b = svc::is_vert(seg.bank)
+            ? set_->bank(vert_)
+            : set_->bank(svc::video::VFilter::Horz);
         const auto& ph = svc::is_adaptive(seg.bank) ? b.adaptive : b.phases;
         const std::size_t at = cursor_.wire_offset(svc::FilterAddressGrid{});
         const ChunkWords words{std::min(total - at, kCoeffChunkWords)};
         StagedFrame::CoeffChunk c{};
         c.count = words.frame_words();
         words.fill(c.w, cursor_, [&](svc::FilterBankWordIndex word) {
-            return svc::filter_bank_word(
-                std::span<const svc::FilterPhase>(ph),
+            return svc::video::filter_bank_word(
+                std::span<const svc::video::FilterPhase>(ph),
                 fmt_,
                 seg.bank,
                 word
@@ -321,7 +342,7 @@ void PreludeComposer::service_wheel_() noexcept {
         if (plan_.covers(seg_))
             continue;
 
-        sent_h_ = set_->bank(svc::VFilter::Horz);
+        sent_h_ = set_->bank(svc::video::VFilter::Horz);
         sent_v_ = set_->bank(vert_);
         wheel_active_ = false;
     }
@@ -338,7 +359,10 @@ void PreludeComposer::service_wheel_() noexcept {
         const auto at = w_.wire.geo_latch();
         if (!at)
             return;
-        const svc::ScalingWords words = svc::scaling_words(at->sample, w_.wire.published_policy());
+        const svc::video::ScalingWords words = svc::video::scaling_words(
+            at->sample,
+            w_.wire.published_policy()
+        );
         const StagedFrame::ScalingPair p{.words = words};
         if (!stage_(infra::make<StagedFrame>(p), StagedFrame::Kind::ScalingPair, RepliesOwed{}))
             return;
@@ -379,18 +403,18 @@ void PreludeComposer::service() noexcept {
         if (stage_(infra::make<StagedFrame>(m), StagedFrame::Kind::FilterMode, RepliesOwed{1})) {
             filter_owed_ = false;
             step_ = PreludeStep::AwaitFltNum;
-            deadline_ = now() + kReplyDeadline;
+            deadline_ = os::Deadline::at_point(now() + kReplyDeadline);
             ++stats_.steps;
         }
     }
 
-    if (step_ == PreludeStep::AwaitFltNum && deadline_ && now() >= *deadline_) {
+    if (step_ == PreludeStep::AwaitFltNum && deadline_ && deadline_->expired_at(now())) {
 
         ++stats_.barrier_timeouts;
         deadline_.reset();
         if (set_ != nullptr) {
             fmt_ = svc::FltFlags{}.format();
-            vert_ = svc::VFilter::Horz;
+            vert_ = svc::video::VFilter::Horz;
             bare_ = true;
             bare_no_digests_ = true;
             step_ = PreludeStep::Streaming;
@@ -407,7 +431,7 @@ void PreludeComposer::service() noexcept {
 
     service_wheel_();
 
-    if (step_ == PreludeStep::AwaitTail && deadline_ && now() >= *deadline_) {
+    if (step_ == PreludeStep::AwaitTail && deadline_ && deadline_->expired_at(now())) {
 
         ++stats_.barrier_timeouts;
         deadline_.reset();
@@ -435,14 +459,15 @@ void PreludeComposer::release_step_() noexcept {
                 StagedFrame::ModeInBlock m{};
                 m.m.opcode = h->op;
                 m.m.count = h->n;
-                const std::span<const std::uint16_t> words = h->words();
-                std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(std::uint16_t));
+                const std::span<const hal::SpiWord> words = h->words();
+                std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::SpiWord));
                 if (!stage_(
                         infra::make<StagedFrame>(m),
                         StagedFrame::Kind::ModeInBlock,
-                        RepliesOwed{}
+                        RepliesOwed{1}
                     ))
                     return;
+                note_mode_staged_();
                 h->live = false;
                 h->n = FrameWordCount{};
             }
@@ -470,7 +495,7 @@ void PreludeComposer::release_step_() noexcept {
                 return;
             tail_done_ = true;
             step_ = PreludeStep::AwaitTail;
-            deadline_ = now() + kReplyDeadline;
+            deadline_ = os::Deadline::at_point(now() + kReplyDeadline);
             ++stats_.steps;
         }
         release_ = Release::None;
@@ -485,10 +510,17 @@ void PreludeComposer::release_step_() noexcept {
             StagedFrame::Mode m{};
             m.m.opcode = h.op;
             m.m.count = h.n;
-            const std::span<const std::uint16_t> words = h.words();
-            std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(std::uint16_t));
-            if (!stage_(infra::make<StagedFrame>(m), StagedFrame::Kind::Mode, RepliesOwed{}))
+            const std::span<const hal::SpiWord> words = h.words();
+            std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::SpiWord));
+            const bool burst = h.op == proto::UioOp::SetVideo;
+            if (!stage_(
+                    infra::make<StagedFrame>(m),
+                    StagedFrame::Kind::Mode,
+                    burst ? RepliesOwed{1} : RepliesOwed{}
+                ))
                 return;
+            if (burst)
+                note_mode_staged_();
             h.live = false;
             h.n = FrameWordCount{};
         }
@@ -521,6 +553,8 @@ void PreludeComposer::abandon() noexcept {
     held_ = {};
     flight_ = {};
     release_ = Release::None;
+    mode_gen_ = proto::StageGen{};
+    mode_edge_ = ModeEdge::None;
     deadline_.reset();
     bare_ = false;
     bare_no_digests_ = false;
@@ -557,11 +591,16 @@ const PreludeComposer::Held* PreludeComposer::find_held_(proto::UioOp op) const 
     return nullptr;
 }
 
+void PreludeComposer::note_mode_staged_() noexcept {
+    mode_gen_ = w_.wire.staged_generation();
+    mode_edge_ = ModeEdge::None;
+}
+
 void PreludeComposer::hold_(proto::UioOp op, Publish words) noexcept {
-    const std::span<const std::uint16_t> from = words.words();
+    const std::span<const hal::SpiWord> from = words.words();
     if (Held* h = find_held_(op)) {
         h->n = words.count();
-        std::memcpy(h->w.data(), from.data(), from.size() * sizeof(std::uint16_t));
+        std::memcpy(h->w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
         return;
     }
     for (Held& h : held_) {
@@ -570,7 +609,7 @@ void PreludeComposer::hold_(proto::UioOp op, Publish words) noexcept {
         h.live = true;
         h.op = op;
         h.n = words.count();
-        std::memcpy(h.w.data(), from.data(), from.size() * sizeof(std::uint16_t));
+        std::memcpy(h.w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
         ++stats_.parked;
         return;
     }

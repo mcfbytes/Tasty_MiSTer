@@ -6,6 +6,7 @@
 #include "infra/seat.h"
 #include "round_trace_record.h"
 #include "rtstats_format.h"
+#include "os/file_create.h"
 #include "os/vm_status.h"
 
 #include <sys/stat.h>
@@ -17,18 +18,21 @@
 #include <limits>
 #include <optional>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "app/event.h"
 #include "app/log_clock.h"
-#include "infra/log_rec_dispatch.h"
+#include "app/log_rec_dispatch.h"
+#include "infra/file_mode.h"
 #include "infra/message_sum.h"
 #include "infra/path_parts.h"
-#include "app/frame_source.h"
-#include "app/input_pipeline.h"
+#include "app/capture/frame_source.h"
+#include "app/input/input_pipeline.h"
 #include "app/screenshot_queue.h"
-#include "svc/chd_prefetch.h"
-#include "svc/input_service_counts.h"
+#include "infra/prelude.h"
+#include "svc/disc/chd_prefetch.h"
+#include "svc/input/input_service_counts.h"
 
 namespace mister::fw {
 
@@ -38,11 +42,24 @@ namespace {
 
 using Ring = xthread::RtStats::Ring;
 
-template <std::same_as<std::uint8_t>... Bytes>
+template <class B>
+concept LogByte = std::same_as<B, std::uint8_t>
+    || (std::is_enum_v<B> && std::same_as<std::underlying_type_t<B>, std::uint8_t>);
+
+template <LogByte B>
+[[nodiscard]] constexpr std::uint8_t log_byte(B b) noexcept {
+    if constexpr (std::is_enum_v<B>) {
+        return std::to_underlying(b);
+    } else {
+        return b;
+    }
+}
+
+template <LogByte... Bytes>
 [[nodiscard]] constexpr std::uint32_t pack_bytes(Bytes... bytes) noexcept {
     constexpr unsigned kByteBits = std::numeric_limits<std::uint8_t>::digits;
     std::uint32_t word = 0;
-    ((word = (word << kByteBits) | bytes), ...);
+    ((word = (word << kByteBits) | log_byte(bytes)), ...);
     return word;
 }
 
@@ -58,7 +75,9 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
             d.sector_lease,
             d.osd_lease,
             d.sys_lease,
-            d.io_pass
+            d.io_pass,
+            d.pad_route,
+            d.pad_lease
         },
         RndRecord{d.round_timing},
         TasRecord{sources.replay},
@@ -135,13 +154,13 @@ DiagSampler::DiagSampler(
                                         sources.device.main_log->consumer(),
                                         "T-DIAG: MAIN log lane consumer minted twice"
                                     )
-                                  : xthread::MainLogLane::Consumer{}
+                                  : app::MainLogLane::Consumer{}
       ),
       records_(make_records(sources)) {}
 
 std::uint64_t DiagSampler::rss_ceiling_now() const noexcept {
-    app::RecorderStatus cap{};
-    app::EncodeStatus enc{};
+    app::capture::RecorderStatus cap{};
+    app::capture::EncodeStatus enc{};
     const std::uint32_t cap_kib = rec_capture_.sample_into(cap) != 0 ? cap.arena_kib : 0;
     const std::uint32_t chunk_kib = rec_encode_.sample_into(enc) != 0 ? enc.video.arena_kib : 0;
     return rss_ceiling_bytes(cap_kib, chunk_kib);
@@ -309,7 +328,7 @@ void DiagSampler::drain_screenshots() noexcept {
                     const std::string_view base = infra::basename(name);
                     if (!shot_dir_.empty() && base != "." && base != "..") {
 
-                        (void)::mkdir(shot_dir_.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+                        (void)os::make_dir(shot_dir_.c_str(), infra::kInheritedDirMode);
                         path = shot_dir_ + "/";
                         if (base.empty()) {
                             char stamp[32];
@@ -341,8 +360,8 @@ void DiagSampler::drain_screenshots() noexcept {
 }
 
 void DiagSampler::line_(
-    LogRec::Kind k,
-    const LogRec::Head& h,
+    app::LogRec::Kind k,
+    const app::LogRec::Head& h,
     std::uint32_t a,
     std::uint32_t b
 ) noexcept {
@@ -356,7 +375,11 @@ void DiagSampler::line_(
     );
 }
 
-void DiagSampler::line_(LogRec::Kind k, const LogRec::Head& h, const LogWords& w) noexcept {
+void DiagSampler::line_(
+    app::LogRec::Kind k,
+    const app::LogRec::Head& h,
+    const LogWords& w
+) noexcept {
     diag_.appendf(
         "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%s,\"b\":%s}",
         static_cast<unsigned>(k),
@@ -368,47 +391,55 @@ void DiagSampler::line_(LogRec::Kind k, const LogRec::Head& h, const LogWords& w
 }
 
 void DiagSampler::line_(
-    LogRec::Kind k,
-    const LogRec::Head& h,
+    app::LogRec::Kind k,
+    const app::LogRec::Head& h,
     std::chrono::duration<std::uint32_t, std::nano> a,
     ServiceSlot slot
 ) noexcept {
     line_(k, h, a.count(), slot.wire());
 }
 
-void DiagSampler::render_log_rec(const LogRec& r) noexcept {
-    infra::dispatch<LogRecRoutes>(r, *this);
+void DiagSampler::line_(
+    app::LogRec::Kind k,
+    const app::LogRec::Head& h,
+    proto::SlotIndex slot
+) noexcept {
+    line_(k, h, {.a = infra::DecimalText{0u}, .b = slot.text()});
 }
 
-void DiagSampler::on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept {
+void DiagSampler::render_log_rec(const app::LogRec& r) noexcept {
+    infra::dispatch<app::LogRecRoutes>(r, *this);
+}
+
+void DiagSampler::on(const app::LogRec::DeadlineMiss& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.over, a.slot);
 }
 
-void DiagSampler::on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::SessionTransition& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.dwell.count(), pack_bytes(a.from, a.to));
 }
 
-void DiagSampler::on(const LogRec::StagingRung& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::StagingRung& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.rung.count(), a.rung_pc);
 }
 
-void DiagSampler::on(const LogRec::CoreLoad& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::CoreLoad& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.load.count(), 0);
 }
 
-void DiagSampler::on(const LogRec::CoreUnload& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::CoreUnload& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.detach.count(), 0);
 }
 
-void DiagSampler::on(const LogRec::Mount& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, 0, a.slot);
+void DiagSampler::on(const app::LogRec::Mount& a, const app::LogRec::Head& h) noexcept {
+    line_(a.kKind, h, a.slot);
 }
 
-void DiagSampler::on(const LogRec::Unmount& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, 0, a.slot);
+void DiagSampler::on(const app::LogRec::Unmount& a, const app::LogRec::Head& h) noexcept {
+    line_(a.kKind, h, a.slot);
 }
 
-void DiagSampler::on(const LogRec::Refusal& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::Refusal& a, const app::LogRec::Head& h) noexcept {
     diag_.appendf(
         "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%u,\"b\":%u}",
         static_cast<unsigned>(a.kKind),
@@ -419,11 +450,11 @@ void DiagSampler::on(const LogRec::Refusal& a, const LogRec::Head& h) noexcept {
     );
 }
 
-void DiagSampler::on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::RingLoss& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, a.losses, app::sat_u32(infra::ordinal(a.lost)));
 }
 
-void DiagSampler::on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::DoorbellBound& a, const app::LogRec::Head& h) noexcept {
     line_(
         a.kKind,
         h,
@@ -431,15 +462,15 @@ void DiagSampler::on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noex
     );
 }
 
-void DiagSampler::on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::DoorbellPolling& a, const app::LogRec::Head& h) noexcept {
     line_(a.kKind, h, errc_code(a.why), pack_bytes(a.klass, a.line));
 }
 
-void DiagSampler::on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.stimulus, pack_bytes(a.phase, a.under));
+void DiagSampler::on(const app::LogRec::PhaseTolerated& a, const app::LogRec::Head& h) noexcept {
+    line_(a.kKind, h, pack_bytes(a.stimulus), pack_bytes(a.phase, a.under));
 }
 
-void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept {
+void DiagSampler::on(const app::LogRec::ConfStrArrived& a, const app::LogRec::Head& h) noexcept {
     line_(
         a.kKind,
         h,
@@ -448,16 +479,16 @@ void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noe
     );
 }
 
-static_assert(LogRecSink<DiagSampler>);
+static_assert(app::LogRecSink<DiagSampler>);
 
-void DiagSampler::misrouted(const LogRec&) noexcept {
+void DiagSampler::misrouted(const app::LogRec&) noexcept {
     TASTY_SEAT_BODY(DiagSampler);
     ++log_misrouted_;
 }
 
 void DiagSampler::drain_log_lane() noexcept {
-    for (std::size_t n = 0; n < xthread::kLogLaneCap; ++n) {
-        const std::optional<LogRec> r = log_rx_.pop();
+    for (std::size_t n = 0; n < app::kLogLaneCap; ++n) {
+        const std::optional<app::LogRec> r = log_rx_.pop();
         if (!r)
             break;
         render_log_rec(*r);
@@ -467,8 +498,8 @@ void DiagSampler::drain_log_lane() noexcept {
         LogLaneId::Rt
     );
     if (lane_main_) {
-        for (std::size_t n = 0; n < xthread::kMainLogLaneCap; ++n) {
-            const std::optional<LogRec> r = main_rx_.pop();
+        for (std::size_t n = 0; n < app::kMainLogLaneCap; ++n) {
+            const std::optional<app::LogRec> r = main_rx_.pop();
             if (!r)
                 break;
             render_log_rec(*r);
@@ -581,13 +612,13 @@ void DiagSampler::voice_log_losses_(const LossMoves& moved, LogLaneId lane) noex
     for (std::size_t k = 0; k < moved.size(); ++k) {
         if (!moved[k])
             continue;
-        const auto lost = static_cast<LogRec::Kind>(k);
+        const auto lost = static_cast<app::LogRec::Kind>(k);
 
         render_log_rec(
-            infra::make<LogRec>(
-                LogRec::RingLoss{.losses = *moved[k], .lost = lost},
-                LogRec::Head{
-                    xthread::sev_of(LogRec::Kind::RingLoss),
+            infra::make<app::LogRec>(
+                app::LogRec::RingLoss{.losses = *moved[k], .lost = lost},
+                app::LogRec::Head{
+                    app::sev_of(app::LogRec::Kind::RingLoss),
                     {},
                     app::log_stamp(app::log_now())
                 }
@@ -613,7 +644,7 @@ DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
         c.deadline_misses = app::sat_u32(std::uint64_t{c.deadline_misses} + n);
     }
     if (prefetch_) {
-        const svc::PrefetchCounters p = prefetch_->counters();
+        const svc::disc::PrefetchCounters p = prefetch_->counters();
         c.prefetch_state = std::to_underlying(p.state);
         c.hits = p.hits;
         c.misses = p.misses;
@@ -703,8 +734,9 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         + ev_lost_edge;
     const app::CmdFifoStats fs = (fifo_stats_) ? fifo_stats_->sample().value : app::CmdFifoStats{};
     const CdInstruments cd = cd_instruments();
-    const app::IFrameSource::Counts shot = (frame_src_) ? frame_src_->counts()
-                                                        : app::IFrameSource::Counts{};
+    const app::capture::IFrameSource::Counts shot = (frame_src_)
+        ? frame_src_->counts()
+        : app::capture::IFrameSource::Counts{};
 
     const app::VideoPumpStats vs = video_stats_.sample().value;
     const app::VideoGeometryRecord gr = video_geo_.sample().value;
@@ -743,7 +775,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
     static_assert(
         DiagSampler::kRtstatsWorstCase <= DiagSampler::kDiagLineCeiling,
         "the rtstats record's worst case must fit the xthread::DiagLog "
-        "ceiling — raise kMaxLine in infra/diag_log.h or narrow a "
+        "ceiling — raise kMaxLine in infra/xthread/diag_log.h or narrow a "
         "field, never let the sink swap the record for a "
         "{\"t\":\"trunc\"} marker"
     );
@@ -764,11 +796,11 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
     static_assert(reactor::kRoundLifecycleAll.mask() == 7u);
 
     const bool have_input = input_.has_value();
-    const app::InputBuild::Counts build_counts = (have_input && input_build_)
+    const app::input::InputBuild::Counts build_counts = (have_input && input_build_)
         ? input_build_->counts()
-        : app::InputBuild::Counts{};
-    const app::InputStats ips = app::collect_input_stats(
-        have_input ? *input_ : app::InputSample{},
+        : app::input::InputBuild::Counts{};
+    const app::input::InputStats ips = app::input::collect_input_stats(
+        have_input ? *input_ : app::input::InputSample{},
         build_counts
     );
 
@@ -784,8 +816,10 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         | (g.osd_visible ? kOsd : 0u)
         | (g.keys_lost ? kLost : 0u);
     static_assert(svc::kMaxPlayers == 6);
-    const svc::InputServiceCounts& isc = ips.service;
-    const auto [hash0, hash1, hash2, hash3, hash4, hash5] = svc::printed_hashes(isc.slot_hash);
+    const svc::input::InputServiceCounts& isc = ips.service;
+    const auto [hash0, hash1, hash2, hash3, hash4, hash5] = svc::input::printed_hashes(
+        isc.slot_hash
+    );
     const app::MglPumpStats ms = (mgl_stats_) ? mgl_stats_->sample().value : app::MglPumpStats{};
     const std::uint32_t mgl_row0 = mgl_row0_.get();
 
@@ -844,7 +878,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         gs.resends,
         gs.errors,
         gs.late,
-        gs.generation,
+        static_cast<unsigned>(gs.generation.v),
         gs.torn,
         ps.arms,
         ps.completions,
@@ -1024,7 +1058,7 @@ void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& d
         dc.cd_egress_abandons,
 
         up.depth,
-        up.top_id,
+        up.top_id.wire(),
         up.vis_publishes,
         up.cell_refusals,
         up.page_refusals.text().c_str(),

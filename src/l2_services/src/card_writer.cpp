@@ -5,6 +5,7 @@
 #include <string>
 
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
@@ -40,7 +41,7 @@ Ex<void> CardWriter::replace_file(std::string_view rel, std::span<const std::byt
     if (!f)
         return std::unexpected(f.error());
 
-    Ex<void> done = write_all(**f, proto::kFileStart, bytes);
+    Ex<void> done = (*f)->write_all_at(proto::kFileStart, bytes);
     if (done)
         done = (*f)->flush();
 

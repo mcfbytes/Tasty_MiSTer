@@ -21,14 +21,14 @@ struct OptionsKeys {
 
     [[nodiscard]] static OptionsKeys of(const UiEvent& ev) noexcept {
         OptionsKeys k;
-        k.menu = ev.buttons.has_any({UiEvent::Menu});
-        k.select = ev.buttons.has_any({UiEvent::Select});
-        k.plus = ev.buttons.has_any({UiEvent::Plus});
-        k.minus = ev.buttons.has_any({UiEvent::Minus});
-        k.back = ev.buttons.has_any({UiEvent::Back});
-        k.left = ev.buttons.has_any({UiEvent::Left});
-        k.right = ev.buttons.has_any({UiEvent::Right});
-        k.recent = ev.buttons.has_any({UiEvent::Recent});
+        k.menu = ev.buttons.intersects({UiEvent::Menu});
+        k.select = ev.buttons.intersects({UiEvent::Select});
+        k.plus = ev.buttons.intersects({UiEvent::Plus});
+        k.minus = ev.buttons.intersects({UiEvent::Minus});
+        k.back = ev.buttons.intersects({UiEvent::Back});
+        k.left = ev.buttons.intersects({UiEvent::Left});
+        k.right = ev.buttons.intersects({UiEvent::Right});
+        k.recent = ev.buttons.intersects({UiEvent::Recent});
         return k;
     }
 

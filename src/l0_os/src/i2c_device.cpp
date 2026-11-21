@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 
+#include "infra/prelude.h"
 #include "os/path_buf.h"
 
 namespace mister::os {

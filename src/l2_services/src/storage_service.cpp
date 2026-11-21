@@ -2,10 +2,11 @@
 #include "svc/storage_service.h"
 
 #include <algorithm>
-#include <cstring>
 #include <optional>
 #include <utility>
 
+#include "infra/byte_view.h"
+#include "infra/prelude.h"
 #include "proto/save_slot_rule.h"
 #include "proto/storage_completion_dispatch.h"
 #include "proto/storage_request_dispatch.h"
@@ -159,7 +160,7 @@ void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexce
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<std::uint8_t> whole = w.arena->bytes;
-        auto n = b.read_at(a.block_size.position_of(a.base), whole);
+        auto n = b.read_at(a.block_size.position_of(a.base), infra::byte_cast<std::byte>(whole));
         const ISaveFilesOnIo::Save& save = io_.slots[h.slot].save();
         const proto::SaveSlotRule rule = proto::SaveSlotRule::at_mount(
             save.extent.has_value(),
@@ -176,10 +177,9 @@ void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexce
             );
         } else if (n) {
 
-            const std::size_t got = n->size();
-            if (got < whole.size())
-                std::memset(whole.data() + got, 0, whole.size() - got);
-            w.arena->window = got > 0
+            const infra::ByteCount got = *n;
+            got.zero_past_in(whole);
+            w.arena->window = !got.empty()
                 ? proto::ResidentWindow::image(a.base, a.block_size, proto::ResidentBytes::of(got))
                 : proto::ResidentWindow::substitute();
         } else {
@@ -202,14 +202,13 @@ void StorageService::on(const Req::ReadAhead& a, const Req::Head& h, Work& w) no
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<std::uint8_t> whole = w.arena->bytes;
-        auto n = b.read_at(a.block_size.position_of(a.base), whole);
+        auto n = b.read_at(a.block_size.position_of(a.base), infra::byte_cast<std::byte>(whole));
         if (!n) {
             o = from(n.error());
         } else {
-            const std::size_t got = n->size();
-            if (got < whole.size())
-                std::memset(whole.data() + got, 0, whole.size() - got);
-            if (got > 0)
+            const infra::ByteCount got = *n;
+            got.zero_past_in(whole);
+            if (!got.empty())
                 w.arena->window = proto::ResidentWindow::image(
                     a.base,
                     a.block_size,
@@ -232,10 +231,10 @@ void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexce
         b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.arena->bytes;
         const std::span<const std::uint8_t> want = clamped_extent(whole, a.bytes);
-        auto n = b.write_at(a.offset, want);
+        auto n = b.write_at(a.offset, infra::byte_cast<const std::byte>(want));
         if (!n) {
             o = from(n.error());
-        } else if (n->size() != want.size()) {
+        } else if (*n != infra::ByteCount{want.size()}) {
 
             o = from(proto::FileSize::of(*n).refusal(Errc::short_write, ERR_SITE()));
         } else {
@@ -257,7 +256,7 @@ void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexc
         b.note_tag(h.tag);
         const std::span<std::uint8_t> whole = w.arena->bytes;
         const std::span<std::uint8_t> ask = clamped_extent(whole, a.bytes);
-        auto e = b.create(ask);
+        auto e = b.create(infra::byte_cast<const std::byte>(ask));
         if (e) {
             c.size = *e;
             c.bytes = static_cast<std::uint32_t>(ask.size());

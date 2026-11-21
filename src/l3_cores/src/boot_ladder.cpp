@@ -11,6 +11,8 @@
 
 #include "cores/file_tx.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
+#include "svc/card_dirs.h"
 #include "svc/file.h"
 
 namespace mister::cores {
@@ -139,7 +141,7 @@ Ex<bool> BootLadder::step_start_row_() {
 bool BootLadder::finish_acts_() {
     if (cheats_ordered_)
         return true;
-    const CheatLookup& cl = profile_.cheats;
+    const CheatLookup& cl = profile_.host.cheats;
     const bool owed = report_.disc_mounted
         && !image_.empty()
         && cl.reset_on_mount
@@ -158,8 +160,8 @@ bool BootLadder::finish_acts_() {
     return true;
 }
 
-std::chrono::nanoseconds BootLadder::now_ns() const {
-    return clock_.now().time_since_epoch();
+os::RawMonotonicClock::time_point BootLadder::now() const {
+    return clock_.now();
 }
 
 std::optional<std::string> BootLadder::resolve_row(const BootAsset& row) const {
@@ -260,8 +262,7 @@ bool BootLadder::group_gates(BootGroup group) const {
 }
 
 Ex<std::string> BootLadder::save_root_() {
-    std::string root = "saves/";
-    root.append(profile_.name);
+    std::string root = svc::card_rel({svc::kSavesDir, profile_.name});
     if (auto r = card_.ensure_dir(root); !r)
         return std::unexpected(r.error());
     return root;
@@ -361,20 +362,22 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
             return MountState::Pending;
         }
         mount_gen_ = g;
-        mount_due_ns_ = now_ns() + kDiscMountBoundNs;
+        mount_due_ = os::Deadline::at_point(now() + kDiscMountBoundNs);
         return MountState::Pending;
     }
     const MountStatus s = host_.mount_status();
-    if (s.generation == mount_gen_ && s.state != MountState::Pending) {
+    if (s.act == mount_gen_ && s.state != MountState::Pending) {
         mount_answer_ = s;
         mount_gen_ = {};
-        mount_due_ns_ = {};
+        mount_due_ = os::Deadline::immediate();
+        if (s.state == MountState::Done && !s.plan.game_id.empty() && !path.empty())
+            host_.game_identified(path, s.plan.game_id);
         return s.state;
     }
 
-    if (now_ns() >= mount_due_ns_) {
+    if (mount_due_.expired_at(now())) {
         mount_gen_ = {};
-        mount_due_ns_ = {};
+        mount_due_ = os::Deadline::immediate();
         return MountState::Failed;
     }
     return MountState::Pending;
@@ -398,17 +401,14 @@ bool BootLadder::prepare_save(std::string_view path) {
         return false;
     }
     const SaveExtent e = host_.save_extent();
-    if (e.generation != save_gen_)
+    if (e.act != save_gen_)
         return false;
-    switch (e.answer) {
-        case SaveAnswer::Pending:
-            return false;
-        case SaveAnswer::Declined:
+    if (!e.answer)
+        return false;
+    if (e.answer == SaveVerdict::Declined) {
 
-            save_gen_ = {};
-            return false;
-        case SaveAnswer::Known:
-            break;
+        save_gen_ = {};
+        return false;
     }
     save_size_ = e.size_bytes;
     save_exists_ = e.exists;
@@ -475,7 +475,7 @@ bool BootLadder::hold_reset_() {
     if (!order_status_bit0(true))
         return false;
     bit0_asserted_ = true;
-    reset_hold_ns_ = now_ns();
+    reset_hold_ = now();
     return true;
 }
 
@@ -489,7 +489,7 @@ bool BootLadder::release_reset_() {
 bool BootLadder::pulse_reset_(std::chrono::microseconds pulse) {
     if (!bit0_asserted_)
         return true;
-    if (now_ns() - reset_hold_ns_ < pulse)
+    if (now() - reset_hold_ < pulse)
         return false;
     return release_reset_();
 }

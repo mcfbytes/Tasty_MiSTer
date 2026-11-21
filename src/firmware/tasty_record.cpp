@@ -11,6 +11,9 @@
 
 #include "infra/ascii.h"
 #include "infra/error.h"
+#include "infra/file_mode.h"
+#include "infra/prelude.h"
+#include "os/file_create.h"
 #include "tasty_cli_refusal.h"
 
 namespace mister::fw {
@@ -80,9 +83,8 @@ bool ends_with_avi(std::string_view s) noexcept {
             if (cur.size() > 1 || (!cur.empty() && cur[0] != '/'))
                 cur += '/';
             cur += part;
-            if (::mkdir(cur.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0
-                && errno != EEXIST)
-                return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+            if (const auto made = os::make_dir(cur.c_str(), infra::kStandardDirMode); !made)
+                return std::unexpected(made.error().refusal(Errc::os, ERR_SITE()));
         }
         if (slash == std::string::npos)
             break;

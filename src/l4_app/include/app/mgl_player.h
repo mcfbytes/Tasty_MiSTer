@@ -22,6 +22,7 @@
 #include "infra/message_sum.h"
 #include "infra/path_text.h"
 #include "os/clock.h"
+#include "infra/prelude.h"
 #include "os/deadline.h"
 #include "proto/types.h"
 #include "infra/seat.h"

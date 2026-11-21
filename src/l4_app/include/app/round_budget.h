@@ -9,14 +9,15 @@
 
 #include "app/core_frame_counter.h"
 #include "app/disk_relay.h"
-#include "app/mailbox_relay.h"
-#include "app/replay_gate.h"
+#include "app/pcm/mailbox_relay.h"
+#include "app/replay/replay_gate.h"
 #include "app/save_upload_relay.h"
-#include "app/scanout_relay.h"
+#include "app/launcher/scanout_relay.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -39,29 +40,26 @@ struct RoundActExclusion {
 };
 
 inline constexpr auto kRoundActs = std::to_array<RoundActRow>({
-    {RoundAct::Disk,
-     RoundActSpend::Fixed,
-     proto::FioWordCount{DiskRelay::kMaxRoundWords},
-     proto::FioWordCount{DiskRelay::kMaxRoundWords}},
+    {RoundAct::Disk, RoundActSpend::Fixed, DiskRelay::kMaxRoundWords, DiskRelay::kMaxRoundWords},
     {RoundAct::Mailbox,
      RoundActSpend::Fixed,
-     MailboxRelay::kMaxRoundWords,
-     MailboxRelay::kMaxRoundWords},
+     pcm::MailboxRelay::kMaxRoundWords,
+     pcm::MailboxRelay::kMaxRoundWords},
     {RoundAct::Replay,
      RoundActSpend::Fixed,
-     proto::FioWordCount{ReplayGate::kMaxRoundWords},
-     proto::FioWordCount{ReplayGate::kMaxRoundWords}},
+     replay::ReplayGate::kMaxRoundWords,
+     replay::ReplayGate::kMaxRoundWords},
     {RoundAct::Frames,
      RoundActSpend::Fixed,
-     proto::FioWordCount{CoreFrameCounter::kMaxRoundWords},
-     proto::FioWordCount{CoreFrameCounter::kMaxRoundWords}},
+     CoreFrameCounter::kMaxRoundWords,
+     CoreFrameCounter::kMaxRoundWords},
     {RoundAct::Scanout,
      RoundActSpend::Fixed,
-     proto::FioWordCount{ScanoutRelay::kMaxRoundWords},
-     proto::FioWordCount{ScanoutRelay::kMaxRoundWords}},
+     launcher::ScanoutRelay::kMaxRoundWords,
+     launcher::ScanoutRelay::kMaxRoundWords},
     {RoundAct::Saves,
      RoundActSpend::Gated,
-     proto::FioWordCount{SaveUploadRelay::kMaxRoundWords},
+     SaveUploadRelay::kMaxRoundWords,
      SaveUploadRelay::kCutWords},
 });
 
@@ -78,8 +76,6 @@ inline constexpr auto kRoundActExclusions = std::to_array<RoundActExclusion>({
 }
 
 namespace detail {
-
-inline constexpr proto::FioWordCount kSumCap{proto::SpiFioQueue::kUnbudgeted};
 
 [[nodiscard]] consteval bool round_acts_have_one_row_each() noexcept {
     for (std::size_t i = 0; i < kRoundActs.size(); ++i) {
@@ -110,12 +106,12 @@ template <std::size_t Mask>
 
 template <std::size_t Mask>
 [[nodiscard]] consteval proto::FioWordCount subset_words() noexcept {
-    proto::FioWordCount left = kSumCap;
+    proto::FioWordCount sum{};
     for (std::size_t i = 0; i < kRoundActs.size(); ++i) {
         if ((Mask & (std::size_t{1} << i)) != 0)
-            left = left.saturating_sub(kRoundActs[i].fixed);
+            sum += kRoundActs[i].fixed;
     }
-    return kSumCap.saturating_sub(left);
+    return sum;
 }
 
 template <std::size_t Mask>
@@ -140,7 +136,7 @@ template <std::size_t... Masks>
     for (const RoundActRow& row : kRoundActs) {
         if (row.spend != RoundActSpend::Gated)
             continue;
-        if (row.max > proto::FioWordCount{proto::tightest_round_budget_words()})
+        if (row.max > proto::link::tightest_round_budget_words())
             return false;
     }
     return true;
@@ -152,7 +148,7 @@ static_assert(
     "kRoundActs: a row for every act"
 );
 static_assert(
-    worst_round_words() <= proto::FioWordCount{proto::tightest_round_budget_words()},
+    worst_round_words() <= proto::link::tightest_round_budget_words(),
     "the heaviest allowed round fits the tightest board row's round budget"
 );
 static_assert(
@@ -173,7 +169,8 @@ public:
                     "FIO act debited out of RoundAct order"
                 );
             }
-            if (row.spend == RoundActSpend::Gated && wrote.saturating_sub(row.fixed) > left_) {
+            if (row.spend == RoundActSpend::Gated
+                && infra::affine::saturating_sub(wrote, row.fixed) > left_) {
                 fatal(
                     Error{Errc::contract, ERR_SITE(), 0},
                     "a gated act wrote past the budget it was offered"
@@ -182,7 +179,7 @@ public:
         }
         last_act_ = act;
         debited_ = true;
-        left_ = left_.saturating_sub(wrote);
+        left_ = infra::affine::saturating_sub(left_, wrote);
     }
 
     [[nodiscard]] constexpr proto::FioWordCount remaining() const noexcept { return left_; }

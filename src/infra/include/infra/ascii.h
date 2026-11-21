@@ -3,62 +3,14 @@
 
 #include <compare>
 #include <cstddef>
-#include <cstdint>
 #include <optional>
-#include <ranges>
 #include <string_view>
 
+#include "infra/byte_count.h"
+#include "infra/byte_offset.h"
+#include "infra/index_range.h"
+
 namespace mister::infra {
-
-struct ByteCount {
-    std::size_t v = 0;
-
-    [[nodiscard]] static constexpr ByteCount of(std::uint64_t bytes) noexcept {
-        return ByteCount{static_cast<std::size_t>(bytes)};
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
-
-    struct Indices {
-        std::size_t v = 0;
-
-        [[nodiscard]] constexpr auto begin() const noexcept {
-            return std::views::iota(std::size_t{0}, v).begin();
-        }
-
-        [[nodiscard]] constexpr auto end() const noexcept {
-            return std::views::iota(std::size_t{0}, v).end();
-        }
-    };
-
-    [[nodiscard]] constexpr Indices indices() const noexcept { return Indices{v}; }
-
-    friend constexpr bool operator==(ByteCount, ByteCount) = default;
-    friend constexpr auto operator<=>(ByteCount, ByteCount) = default;
-};
-
-struct TextOffset {
-    std::size_t v = 0;
-
-    [[nodiscard]] constexpr TextOffset advanced(ByteCount count) const noexcept {
-        return TextOffset{v + count.v};
-    }
-
-    [[nodiscard]] constexpr std::string_view prefix_of(std::string_view path) const noexcept {
-        return path.substr(0, v);
-    }
-
-    [[nodiscard]] constexpr std::string_view suffix_after(std::string_view path) const noexcept {
-        return path.substr(v);
-    }
-
-    [[nodiscard]] constexpr bool inside(std::string_view path) const noexcept {
-        return v < path.size();
-    }
-
-    friend constexpr bool operator==(TextOffset, TextOffset) = default;
-    friend constexpr auto operator<=>(TextOffset, TextOffset) = default;
-};
 
 [[nodiscard]] constexpr char ascii_lower(char c) noexcept {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
@@ -92,17 +44,17 @@ struct TextOffset {
     return s.size() >= p.size() && ieq(s.substr(s.size() - p.size()), p);
 }
 
-[[nodiscard]] constexpr std::optional<TextOffset> ifind(
+[[nodiscard]] constexpr std::optional<ByteOffset> ifind(
     std::string_view hay,
     std::string_view needle
 ) noexcept {
     if (needle.empty())
-        return TextOffset{0};
+        return ByteOffset{0};
     if (hay.size() < needle.size())
         return std::nullopt;
     for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
         if (ieq(hay.substr(i, needle.size()), needle))
-            return TextOffset{i};
+            return ByteOffset{i};
     }
     return std::nullopt;
 }
@@ -116,9 +68,9 @@ struct TextOffset {
     std::string_view b,
     ByteCount count
 ) noexcept {
-    for (const std::size_t i : count.indices()) {
-        const int ca = i < a.size() ? static_cast<unsigned char>(ascii_lower(a[i])) : 0;
-        const int cb = i < b.size() ? static_cast<unsigned char>(ascii_lower(b[i])) : 0;
+    for (const ByteOffset i : affine::indices<ByteOffset>(count)) {
+        const int ca = i.inside(a) ? static_cast<unsigned char>(ascii_lower(i.element_at(a))) : 0;
+        const int cb = i.inside(b) ? static_cast<unsigned char>(ascii_lower(i.element_at(b))) : 0;
         if (ca != cb)
             return ca < cb ? std::strong_ordering::less : std::strong_ordering::greater;
         if (ca == 0)

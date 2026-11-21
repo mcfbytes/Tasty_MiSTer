@@ -2,18 +2,18 @@
 #pragma once
 
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
-class HdSeparatorRow final : public IHdRow {
+class HdSeparatorRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
     HdSeparatorRow() noexcept = default;
 
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
+    Transition select(const RowCx&) override;
 };
 
 }

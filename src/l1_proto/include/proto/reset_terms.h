@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "proto/conf_switches.h"
 #include "proto/status_bit.h"
 #include "proto/status_word.h"
 
@@ -12,12 +13,12 @@ namespace mister::proto {
 struct ResetTerms {
     StatusWord held{};
     StatusWord raised{};
-    std::uint16_t buttons = 0;
+    ConfSwitches buttons{};
 
     [[nodiscard]] static constexpr ResetTerms framework() noexcept {
         ResetTerms t{};
         t.held = t.held.with(kResetBit, true);
-        t.buttons = 1u << 1;
+        t.buttons.set(ConfSwitches::Bit::UserButton);
         return t;
     }
 
@@ -33,19 +34,16 @@ struct ResetTerms {
     ) const noexcept {
         for (unsigned i = 0; i < StatusWord::kWords; ++i) {
             const hal::SpiWord was = sent.words[i], now = next.words[i];
-            if (was.with(now).any_of(held.words[i]))
+            if (was.with(now).intersects(held.words[i]))
                 return true;
-            if (now.without(was).any_of(raised.words[i]))
+            if (now.without(was).intersects(raised.words[i]))
                 return true;
         }
         return false;
     }
 
-    [[nodiscard]] constexpr bool buttons_trip(
-        std::uint16_t sent,
-        std::uint16_t next
-    ) const noexcept {
-        return ((static_cast<unsigned>(sent) | next) & buttons) != 0u;
+    [[nodiscard]] constexpr bool buttons_trip(ConfSwitches sent, ConfSwitches next) const noexcept {
+        return sent.intersects(buttons) || next.intersects(buttons);
     }
 };
 

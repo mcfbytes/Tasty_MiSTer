@@ -10,6 +10,7 @@
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/link_event.h"
 #include "proto/link_router.h"

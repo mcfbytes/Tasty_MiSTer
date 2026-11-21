@@ -14,9 +14,9 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/uio_handle.h"
-#include "proto/sector_block_decl.h"
+#include "proto/link/sector_block_decl.h"
 #include "proto/types.h"
-#include "svc/sector_program.h"
+#include "svc/disc/sector_program.h"
 
 namespace mister::app {
 
@@ -24,18 +24,17 @@ struct LwSector {
     TASTY_SEAT_EXEMPT(component);
     using Grant = SectorGrant;
 
-    static constexpr bool kHasEnable = true;
-
     struct Card {
-        proto::SectorBlockDecl::Card decl{};
+        proto::link::SectorBlockDecl::Card decl{};
         std::optional<hal::ApertureRegion> image{};
     };
 
     hal::RegisterWindow<hal::SectorBlock> regs;
     os::UioHandle line{};
-    proto::SectorBlockDecl block{};
-    infra::OptRef<const svc::ISectorProgram> program{};
-    std::array<Card, proto::SectorBlockDecl::kCards> cards{};
+    proto::link::SectorBlockDecl block{};
+    infra::OptRef<const svc::disc::ISectorProgram> program{};
+
+    std::array<Card, proto::link::SectorBlockDecl::kCards> cards{};
     LwGrantStamp stamp{};
 
     [[nodiscard]] proto::BlockSlotMask card_slots() const noexcept {
@@ -52,28 +51,22 @@ struct LwSector {
 
     [[nodiscard]] Grant lend() const noexcept {
         Grant g{
-            .block = regs.lend(),
-            .line = line.borrow(),
-            .program = program,
-            .gen = stamp.gen(),
-            .frame_words = block.frame_words
+            {.block = regs.lend(),
+             .gen = stamp.gen(),
+             .body = {.line = line.borrow(), .program = program, .frame_words = block.frame_words}}
         };
-        for (std::size_t c = 0; c < g.cards.size(); ++c) {
+        for (std::size_t c = 0; c < g.body.cards.size(); ++c) {
             const Card& card = cards[c];
             if (!card.image)
                 continue;
-            g.cards[c] = SectorCard{
+            g.body.cards[c] = SectorCard{
+                .index = card.decl.index,
                 .slot = card.decl.slot,
                 .frame_words = card.decl.frame_words,
                 .image = card.image
             };
         }
         return g;
-    }
-
-    void disable() noexcept {
-        regs.write(hal::SectorBlock::Reg::Ctrl, 0);
-        (void)regs.read(hal::SectorBlock::Reg::Ctrl);
     }
 };
 

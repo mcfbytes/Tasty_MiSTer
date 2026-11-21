@@ -10,7 +10,9 @@
 #include "app/link_tx_channel.h"
 #include "app/ui_request_ring.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "proto/conf_str.h"
 #include "ui/build_env.h"
 #include "ui/classic_options_view.h"
@@ -111,9 +113,9 @@ public:
         return view_->empty();
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CoreOptionsPage);
-        return refusals_.sum(view_->refusals()).sum(picks_ ? picks_->refusals() : svc::Tally{});
+        return refusals_.sum(view_->refusals()).sum(picks_ ? picks_->refusals() : infra::Tally{});
     }
 
     std::uint32_t commands_published() const noexcept {
@@ -156,7 +158,7 @@ private:
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
 
     std::optional<SlotPickHost> picks_;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     std::unique_ptr<IOptionsView> view_;

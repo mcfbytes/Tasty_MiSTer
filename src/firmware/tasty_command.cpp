@@ -8,9 +8,10 @@
 #include <string_view>
 #include <utility>
 
-#include "app/rec_options.h"
+#include "app/capture/rec_options.h"
 #include "hal/board_profile.h"
 #include "hal/thread_map.h"
+#include "infra/prelude.h"
 #include "process_standup.h"
 #include "replay_mode.h"
 #include "svc/vfs.h"
@@ -65,7 +66,7 @@ tasty::Exit rec_start_client(const TastyArgs& a, const TastyRuntime& rt) {
         return tasty::Exit::Code::Refused;
     char buf[1400];
     const char* mode = a.hashes_only ? "hash" : "avi";
-    const auto opt = app::format_rec_options(a.rec);
+    const auto opt = app::capture::format_rec_options(a.rec);
     if (opt.empty())
         return tasty::Exit::Code::Refused;
     const auto line = std::format_to_n(
@@ -215,7 +216,8 @@ class RecStartCommand final : public TastyCommand {
 public:
     [[nodiscard]] std::optional<TastyRefusal> refuse(const TastyArgs& a) const noexcept override {
 
-        if (a.rec.from_frame >= app::MoviePosition{} || a.rec.to_frame >= app::MoviePosition{}) {
+        if (a.rec.from_frame.value_or(app::kNoMovieFrame) >= app::MoviePosition{}
+            || a.rec.to_frame.value_or(app::kNoMovieFrame) >= app::MoviePosition{}) {
             return TastyRefusal::SliceOnRecStart;
         }
         return refuse_save_outside_play(a);

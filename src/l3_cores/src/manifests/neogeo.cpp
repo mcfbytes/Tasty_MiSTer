@@ -4,34 +4,34 @@
 #include <string_view>
 
 #include "cores/manifests/megacd.h"
-#include "cores/neogeo_alias_source.h"
-#include "cores/neogeo_core.h"
-#include "cores/neogeo_loader.h"
-#include "cores/neogeocd_ladder.h"
+#include "cores/neogeo/neogeo_alias_source.h"
+#include "cores/neogeo/neogeo_core.h"
+#include "cores/neogeo/neogeo_loader.h"
+#include "cores/neogeo/neogeocd_ladder.h"
 
 namespace mister::cores::manifests {
 
 using namespace std::chrono_literals;
 
 std::unique_ptr<IRomsetAliasSource> make_neogeo_alias_source() {
-    return std::make_unique<NeoGeoAliasSource>();
+    return std::make_unique<neogeo::NeoGeoAliasSource>();
 }
 
 std::unique_ptr<ILoader> make_neogeo_loader(const LoaderContext& ctx) {
-    return std::make_unique<NeoGeoLoader>(ctx.vfs, ctx.profile);
+    return std::make_unique<neogeo::NeoGeoLoader>(ctx.vfs, ctx.profile);
 }
 
 std::unique_ptr<Core> make_neogeo(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<NeoGeoCore>(p, kNeoGeoCdProfile, g.services);
+    return std::make_unique<neogeo::NeoGeoCore>(p, kNeoGeoCdProfile, g.services);
 }
 
 std::unique_ptr<BootLadder> make_neogeo_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<NeoGeoCdLadder>(p, ctx);
+    return std::make_unique<neogeo::NeoGeoCdLadder>(p, ctx);
 }
 
 static_assert(
-    NeoGeoLoader::kMemWindow.in(kNeoGeo.windows).has_value()
-        && std::string_view{NeoGeoLoader::kMemWindow.in(kNeoGeo.windows)->region.name}
+    neogeo::NeoGeoLoader::kMemWindow.in(kNeoGeo.windows).has_value()
+        && std::string_view{neogeo::NeoGeoLoader::kMemWindow.in(kNeoGeo.windows)->region.name}
             == "neogeo-mem",
     "neogeo_loader.cpp:240 and :300: the C-ROM pairs and the P-ROM land at 0x38000000"
 );
@@ -75,13 +75,13 @@ static_assert(
     "the shared index: an F pick walks the romset, an S mount is the disc"
 );
 static_assert(
-    kNeoGeo.cue_browse_dir == std::string_view{"NeoGeo-CD"},
+    kNeoGeo.host.cue_browse_dir == std::string_view{"NeoGeo-CD"},
     "menu.cpp:463 + neogeocd.h:14: a CUE row browses NEOCD_DIR"
 );
 
 static_assert(
-    std::holds_alternative<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row)
-        && std::holds_alternative<CdProfile::SegaCddFacts>(kMegaCdProfile.row),
+    std::holds_alternative<cd::CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row)
+        && std::holds_alternative<cd::CdProfile::SegaCddFacts>(kMegaCdProfile.row),
     "neogeocd.cpp:13 drives megacd.h's cdd, the SAME machine"
 );
 static_assert(
@@ -92,19 +92,19 @@ static_assert(
     "downloads CD data on index 2 and CD-DA on 4"
 );
 static_assert(
-    std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).crc_start == 5,
+    std::get<cd::CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).crc_start == 5,
     "neogeocd.cpp:23 CRC_START 5"
 );
 static_assert(
-    !std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).status_carries_is_data,
+    !std::get<cd::CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).status_carries_is_data,
     "neogeocd.cpp:42: word 2 bit 8 stays 0"
 );
 static_assert(
-    !std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).ready_probe_skips_mode1,
+    !std::get<cd::CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).ready_probe_skips_mode1,
     "neogeocd.cpp:160-169: every sector type asks the core first"
 );
 static_assert(
-    std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).stream_on_data_track,
+    std::get<cd::CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).stream_on_data_track,
     "neogeocd.cpp:92: the data track streams"
 );
 static_assert(
@@ -114,8 +114,8 @@ static_assert(
 
 static_assert(kNeoGeoServices.size() == 2, "ARCHITECTURE.md 3.4.1: Neo Geo has two census rows");
 static_assert(
-    kNeoGeoServices[0].impl == &kCdCommandEdge<kNeoGeo>
-        && kNeoGeoServices[1].impl == &kCdServiceTick<kNeoGeo>,
+    kNeoGeoServices[0].impl == &cd::kCdCommandEdge<kNeoGeo>
+        && kNeoGeoServices[1].impl == &cd::kCdServiceTick<kNeoGeo>,
     "the SHARED CD obligations keyed to this profile"
 );
 static_assert(
@@ -152,7 +152,7 @@ static_assert(
     "support/neogeo synthesises no blank save: the generic 0xFF answer"
 );
 static_assert(
-    !kNeoGeo.cheats.reset_on_mount,
+    !kNeoGeo.host.cheats.reset_on_mount,
     "neogeocd.cpp:12 includes cheats.h and calls nothing from it"
 );
 static_assert(

@@ -5,6 +5,7 @@
 #include "hal/fabric_region.h"
 #include "hal/fpga_memory.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
 #include "os/types.h"

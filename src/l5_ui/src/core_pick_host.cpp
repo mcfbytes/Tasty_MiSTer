@@ -4,7 +4,7 @@
 #include "app/cmd_verb_sink.h"
 #include "app/xml_kind.h"
 #include "app/path_text.h"
-#include "app/recents_store.h"
+#include "app/recents/recents_store.h"
 #include "ui/browser_entry.h"
 
 namespace mister::ui {
@@ -39,9 +39,10 @@ Transition CorePickHost::on_picked(const BrowserEntry& e, std::string_view path)
         refusals_.add();
         return Transition::close_all();
     }
-    const app::RecentsStore::ListId cores_list = app::RecentsStore::ListId::cores();
+    const app::recents::RecentsStore::ListId
+        cores_list = app::recents::RecentsStore::ListId::cores();
     if (b_.recents
-        && !b_.recents->update(app::RecentsStore::kNoCore, cores_list, path, e.altname)) {
+        && !b_.recents->update(app::recents::RecentsStore::kNoCore, cores_list, path, e.altname)) {
         refusals_.add();
     }
 

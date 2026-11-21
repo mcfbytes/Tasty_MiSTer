@@ -13,9 +13,11 @@
 #include <span>
 #include <string_view>
 
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "os/path_buf.h"
 #include "os/ui_vt_console.h"
+#include "os/write_all.h"
 
 namespace mister::os {
 
@@ -36,15 +38,6 @@ UniqueFd open_vt(VtNumber vt) noexcept {
     if (!vt.tty_path(std::span<char>(path)))
         return {};
     return open_rw(path);
-}
-
-void write_all(int fd, std::string_view s) noexcept {
-    while (!s.empty()) {
-        const ssize_t n = ::write(fd, s.data(), s.size());
-        if (n <= 0)
-            return;
-        s.remove_prefix(static_cast<std::size_t>(n));
-    }
 }
 
 std::optional<VtNumber> active_op() noexcept {
@@ -71,7 +64,7 @@ void blank_op(VtNumber vt) noexcept {
     if (!fd.valid())
         return;
     constexpr std::string_view kBlank = "\033[0m\033[?25l\033[37m\033[40m\033[2J\033[H";
-    write_all(fd.get(), kBlank);
+    write_all_best_effort(fd, kBlank);
 }
 
 void restore_text_op(VtNumber vt) noexcept {
@@ -90,7 +83,7 @@ void restore_text_op(VtNumber vt) noexcept {
         (void)::tcsetattr(fd.get(), TCSANOW, &t);
     }
     constexpr std::string_view kShow = "\033[0m\033[2J\033[H\033[?25h";
-    write_all(fd.get(), kShow);
+    write_all_best_effort(fd, kShow);
 }
 
 std::optional<bool> text_mode_op(VtNumber vt) noexcept {
@@ -108,7 +101,7 @@ void graphics_op(VtNumber vt) noexcept {
     if (!fd.valid())
         return;
     constexpr std::string_view kHide = "\033[0m\033[?25l";
-    write_all(fd.get(), kHide);
+    write_all_best_effort(fd, kHide);
     (void)::ioctl(fd.get(), KDSETMODE, KD_GRAPHICS);
 }
 
@@ -123,7 +116,10 @@ void cursor_op(VtNumber vt, bool shown) noexcept {
     const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
-    write_all(fd.get(), shown ? std::string_view{"\033[?25h"} : std::string_view{"\033[?25l"});
+    write_all_best_effort(
+        fd,
+        shown ? std::string_view{"\033[?25h"} : std::string_view{"\033[?25l"}
+    );
 }
 
 }

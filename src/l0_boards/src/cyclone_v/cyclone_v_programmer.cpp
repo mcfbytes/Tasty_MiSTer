@@ -16,6 +16,7 @@
 
 #include "infra/byte_view.h"
 #include "infra/endian.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "os/map_length.h"
 
@@ -45,23 +46,31 @@ constexpr std::uint32_t detail_of(LoadStage stage, std::uint32_t observed) noexc
     return static_cast<std::uint32_t>(stage) | (observed << kDetailObservedShift);
 }
 
-constexpr std::uint32_t observed_of(FpgaMgrMode mode, std::uint32_t ext) noexcept {
-    return (to_bits(mode) & FpgaMgr::kStatModeMask) | ((ext & kExtPortaMask) << kObservedExtShift);
+using FieldValue = hal::RegField<std::uint32_t>::Value;
+
+constexpr hal::RegField<std::uint32_t> kExtPortaField{0, kExtPortaMask};
+constexpr hal::RegField<std::uint32_t> kObservedExtField{kObservedExtShift, kExtPortaMask};
+
+constexpr std::uint32_t observed_of(FpgaMgrMode mode, hal::RegWord ext) noexcept {
+    return kObservedExtField.set(
+        FpgaMgr::kStatModeField.set(0u, {to_bits(mode)}),
+        kExtPortaField.get(ext)
+    );
 }
 
-constexpr FpgaMgrMode mode_of(std::uint32_t stat) noexcept {
-    switch (stat & FpgaMgr::kStatModeMask) {
-        case to_bits(FpgaMgrMode::Off):
-            return FpgaMgrMode::Off;
-        case to_bits(FpgaMgrMode::Reset):
-            return FpgaMgrMode::Reset;
-        case to_bits(FpgaMgrMode::Cfg):
-            return FpgaMgrMode::Cfg;
-        case to_bits(FpgaMgrMode::Init):
-            return FpgaMgrMode::Init;
-        case to_bits(FpgaMgrMode::User):
-            return FpgaMgrMode::User;
-    }
+constexpr std::array kReportedModes{
+    FpgaMgrMode::Off,
+    FpgaMgrMode::Reset,
+    FpgaMgrMode::Cfg,
+    FpgaMgrMode::Init,
+    FpgaMgrMode::User
+};
+
+constexpr FpgaMgrMode mode_of(hal::RegWord stat) noexcept {
+    const FieldValue code = FpgaMgr::kStatModeField.get(stat);
+    for (const FpgaMgrMode m : kReportedModes)
+        if (code == FieldValue{to_bits(m)})
+            return m;
     return FpgaMgrMode::Unknown;
 }
 
@@ -158,35 +167,35 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
 
 void Programmer::ctrl_update(FpgaCtrl clear, FpgaCtrl set) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
-    const FpgaCtrl next = FpgaCtrl{mgr_.regs.read(FpgaMgr::Reg::Ctrl)}.without(clear).with(set);
-    mgr_.regs.write(FpgaMgr::Reg::Ctrl, next.v);
+    const FpgaCtrl next = FpgaCtrl::of(mgr_.regs.read(FpgaMgr::Reg::Ctrl)).without(clear).with(set);
+    mgr_.regs.write(FpgaMgr::Reg::Ctrl, next.register_word());
 }
 
 void Programmer::set_cd_ratio(CdRatio ratio) {
-    ctrl_update(kCtrlCdRatioMask, cd_ratio_field(ratio));
+    ctrl_update(FpgaCtrl{kCtrlCdRatioField.word_mask()}, cd_ratio_field(ratio));
 }
 
 FpgaMgrMode Programmer::mode() const {
     return mode_of(mgr_.regs.read(FpgaMgr::Reg::Stat));
 }
 
-std::uint32_t Programmer::ext_nibble() {
-    return mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & kExtPortaMask;
+hal::RegWord Programmer::ext_porta() {
+    return mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta);
 }
 
 void Programmer::dclk_arm_(std::uint32_t count) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
 
-    if (mgr_.regs.read(FpgaMgr::Reg::DclkStat) != 0u) {
-        mgr_.regs.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
+    if (mgr_.regs.read(FpgaMgr::Reg::DclkStat).any()) {
+        mgr_.regs.write(FpgaMgr::Reg::DclkStat, hal::RegWord{FpgaMgr::kDclkStatDone});
     }
-    mgr_.regs.write(FpgaMgr::Reg::DclkCnt, count);
+    mgr_.regs.write(FpgaMgr::Reg::DclkCnt, hal::RegWord{count});
 }
 
 bool Programmer::dclk_done_() {
-    if (mgr_.regs.read(FpgaMgr::Reg::DclkStat) == 0u)
+    if (!mgr_.regs.read(FpgaMgr::Reg::DclkStat).any())
         return false;
-    mgr_.regs.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
+    mgr_.regs.write(FpgaMgr::Reg::DclkStat, hal::RegWord{FpgaMgr::kDclkStatDone});
     return true;
 }
 
@@ -229,10 +238,8 @@ Ex<bool> Programmer::program_begin() {
     tail_seen_ = false;
     step_ = StepPc::Idle;
 
-    const std::uint32_t msel = (mgr_.regs.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatMselMask)
-        >> FpgaMgr::kStatMselLsb;
-
-    const bool wide = (msel & FpgaMgr::kMselWideMask) != 0u;
+    const FieldValue msel = FpgaMgr::kStatMselField.get(mgr_.regs.read(FpgaMgr::Reg::Stat));
+    const bool wide = FpgaMgr::kMselWideField.test(msel);
     ctrl_update(wide ? kCtrlNone : kCtrlCfgWdth, wide ? kCtrlCfgWdth : kCtrlNone);
     if (const auto ratio = cd_ratio_of(msel))
         set_cd_ratio(*ratio);
@@ -262,7 +269,7 @@ void Programmer::program_write(std::span<const std::byte> image) {
                 static_cast<FpgaMgrData::Reg>(
                     static_cast<std::uint32_t>(k * sizeof(std::uint32_t))
                 ),
-                w
+                hal::RegWord{w}
             );
         }
     }
@@ -271,12 +278,12 @@ void Programmer::program_write(std::span<const std::byte> image) {
             std::span<const std::byte, sizeof(std::uint32_t)>(src, sizeof(std::uint32_t))
         );
         src += sizeof w;
-        data_.regs.write(FpgaMgrData::Reg::Data, w);
+        data_.regs.write(FpgaMgrData::Reg::Data, hal::RegWord{w});
     }
     if (tail != 0) {
         std::uint32_t w = 0;
         std::memcpy(&w, src, tail);
-        data_.regs.write(FpgaMgrData::Reg::Data, w);
+        data_.regs.write(FpgaMgrData::Reg::Data, hal::RegWord{w});
     }
 }
 
@@ -285,22 +292,22 @@ Ex<void> Programmer::poll_config_done() {
     if (data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 1});
     }
-    constexpr std::uint32_t kMask = FpgaMgr::kMonNs | FpgaMgr::kMonCd;
+    constexpr hal::RegWord kMask{FpgaMgr::kMonNs | FpgaMgr::kMonCd};
 
-    std::uint32_t reg = 0;
+    hal::RegWord reg{};
     std::uint32_t i = 0;
     {
         hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
         for (; i < FpgaMgr::kTimeoutCount; ++i) {
             reg = mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta);
-            if ((reg & kMask) == 0u)
+            if (!reg.intersects(kMask))
                 break;
-            if ((reg & kMask) != 0u)
+            if (reg.intersects(kMask))
                 break;
         }
     }
 
-    if ((reg & kMask) == 0u) {
+    if (!reg.intersects(kMask)) {
         return std::unexpected(
             Error{
                 Errc::core_load,
@@ -345,7 +352,7 @@ Ex<bool> Programmer::program_step() {
                 {
 
                     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
-                    mgr_.regs.write(FpgaMgr::Reg::GpioPortaEoi, FpgaMgr::kEoiAll);
+                    mgr_.regs.write(FpgaMgr::Reg::GpioPortaEoi, hal::RegWord{FpgaMgr::kEoiAll});
                 }
                 ctrl_update(kCtrlNone, kCtrlAxiCfgEn);
                 data_txn_.emplace(data_.regs);
@@ -392,9 +399,9 @@ std::uint32_t Programmer::pending_stage() noexcept {
         case StepPc::CfgWait:
             return detail_of(LoadStage::CfgPhase, to_bits(mode()));
         case StepPc::DclkEnterWait:
-            return detail_of(LoadStage::DclkEnter, observed_of(mode(), ext_nibble()));
+            return detail_of(LoadStage::DclkEnter, observed_of(mode(), ext_porta()));
         case StepPc::InitWait:
-            return detail_of(LoadStage::InitPhase, observed_of(mode(), ext_nibble()));
+            return detail_of(LoadStage::InitPhase, observed_of(mode(), ext_porta()));
         case StepPc::DclkExitWait:
             return detail_of(LoadStage::DclkExit, 0);
         case StepPc::UserWait:
@@ -461,11 +468,11 @@ Ex<bool> Programmer::program_end() {
 
 bool Programmer::programmed() const {
     TASTY_SEAT_BODY(Programmer);
-    if ((mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
+    if (!mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta).intersects(hal::RegWord{FpgaMgr::kMonId})) {
         return false;
     }
 
-    if ((mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
+    if (!mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta).intersects(hal::RegWord{FpgaMgr::kMonId})) {
         return false;
     }
     return mode() == FpgaMgrMode::User;

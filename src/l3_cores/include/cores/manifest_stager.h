@@ -8,6 +8,7 @@
 #include "cores/manifest_act.h"
 #include "cores/manifest_counts.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 
 namespace mister::cores {

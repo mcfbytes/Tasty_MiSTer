@@ -5,39 +5,40 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <type_traits>
 
+#include "app/block_grant.h"
 #include "hal/aperture_region.h"
-#include "hal/reg_lend.h"
+#include "hal/sector_block.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "os/uio_line_ref.h"
-#include "proto/build_generation.h"
 #include "proto/types.h"
-#include "svc/sector_program.h"
+#include "svc/disc/sector_program.h"
 
 namespace mister::app {
 
 struct SectorCard {
+    hal::SectorBlock::Slot index{};
     proto::SlotIndex slot{};
     std::uint16_t frame_words = 0;
     std::optional<hal::ApertureRegion> image{};
 };
 
-struct SectorGrant {
+struct SectorGrantBody {
     static constexpr std::size_t kCards = 2;
-    hal::reg::Lend block{};
     os::UioLineRef line{};
-    infra::OptRef<const svc::ISectorProgram> program{};
-    proto::BuildGeneration gen{};
+    infra::OptRef<const svc::disc::ISectorProgram> program{};
     std::uint16_t frame_words = 0;
     std::array<SectorCard, kCards> cards{};
 
-    [[nodiscard]] bool live() const noexcept { return block.lent() && program.has_value(); }
+    [[nodiscard]] bool live() const noexcept { return program.has_value(); }
 };
 
-static_assert(std::is_trivially_copyable_v<SectorGrant>);
+struct SectorGrant : BlockGrant<SectorGrantBody> {};
+
+static_assert(BlockGrantRecord<SectorGrant>);
 using SectorGrantCell = xthread::Telemetry<SectorGrant, SeatTag::Main>;
 
 }

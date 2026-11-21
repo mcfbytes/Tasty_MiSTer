@@ -5,6 +5,7 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 
 namespace mister::cores {

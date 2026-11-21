@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_wire.h"
+#include "infra/span_cut.h"
 
 #include "app/link_op_dispatch.h"
 
@@ -7,9 +8,10 @@
 
 #include "app/staged_frame_dispatch.h"
 #include "hal/spi_sample.h"
+#include "infra/prelude.h"
 #include "svc/audio_service.h"
 #include "svc/but_sw_wire.h"
-#include "svc/probe_ops.h"
+#include "svc/video/probe_ops.h"
 
 namespace mister::app {
 
@@ -40,7 +42,7 @@ Ex<void> VideoWire::stage(const StagedFrame& f, proto::BindGeneration core) {
     const proto::StageGen gen = gen_.next();
     const proto::StageSlot slot = gen.slot_in(kTableSlots);
 
-    table_[slot.table_index()].write(gen.stamp(), f);
+    table_[slot.index()].write(gen.stamp(), f);
 
     const proto::LinkOp::StagedFrame op{.slot = slot, .bind_gen = core, .gen = gen};
     if (!link_tx_.push(op)) {
@@ -99,7 +101,7 @@ bool VideoWire::prelude_settled(os::RawMonotonicClock::time_point now) noexcept 
 Delivered VideoWire::on(
     const proto::LinkOp::StagedFrame& op,
     const LinkOpCtx& ctx,
-    proto::Link& link
+    proto::link::Link& link
 ) noexcept {
 
     if (op.bind_gen != bound_) {
@@ -113,7 +115,7 @@ Delivered VideoWire::on(
     }
 
     StagedFrame local{};
-    if (!op.gen.is_set() || table_[slot.table_index()].try_read(local) != op.gen.stamp()) {
+    if (!op.gen.is_set() || table_[slot.index()].try_read(local) != op.gen.stamp()) {
         stale_.add();
         return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
@@ -128,14 +130,18 @@ Delivered VideoWire::on(
 Delivered VideoWire::run_frame_(
     const StagedFrame& f,
     const proto::LinkOp::StagedFrame& op,
-    proto::Link& link,
+    proto::link::Link& link,
     infra::OptRef<proto::IResetFence> fence
 ) noexcept {
     FrameArms arms{.link = link, .fence = fence, .replies = replies_, .self = *this, .op = op};
     return infra::dispatch<StagedFrameRoutes>(f, arms);
 }
 
-Delivered VideoWire::misrouted(const proto::LinkOp&, const LinkOpCtx&, proto::Link&) noexcept {
+Delivered VideoWire::misrouted(
+    const proto::LinkOp&,
+    const LinkOpCtx&,
+    proto::link::Link&
+) noexcept {
     return Delivered{ILinkEncoder::Outcome::Dropped, false};
 }
 
@@ -151,13 +157,31 @@ void VideoWire::FrameArms::answer_(
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::Mode& m) noexcept {
-    const auto r = svc::emit_video_words(link.frame(), m.m.opcode, m.m.count.prefix_of(m.m.w));
+    const auto r = svc::video::emit_video_words(
+        link.frame(),
+        m.m.opcode,
+        infra::affine::first(std::span<const hal::SpiWord>(m.m.w), m.m.count)
+    );
+
+    const bool burst = m.m.opcode == proto::UioOp::SetVideo;
     if (!r) {
 
         self.partial_.add();
+        if (burst)
+            answer_(
+                proto::LinkEvent::ReplyWindow::ModeEmitted,
+                proto::WindowFails{}.with(FrameWindow::ModeEmitted),
+                proto::ReplyWord{}
+            );
         return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
     self.emitted_.add();
+    if (burst)
+        answer_(
+            proto::LinkEvent::ReplyWindow::ModeEmitted,
+            proto::WindowFails{},
+            proto::ReplyWord::of(proto::word(m.m.opcode))
+        );
 
     if (auto arm = self.emit_but_sw_(link, self.tail_but_sw_, fence); !arm)
         self.arm_fail_.add();
@@ -165,25 +189,43 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::Mode& m) noexcept {
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::ModeInBlock& m) noexcept {
-    const auto r = svc::emit_video_words(link.frame(), m.m.opcode, m.m.count.prefix_of(m.m.w));
+    const auto r = svc::video::emit_video_words(
+        link.frame(),
+        m.m.opcode,
+        infra::affine::first(std::span<const hal::SpiWord>(m.m.w), m.m.count)
+    );
+
+    const bool burst = m.m.opcode == proto::UioOp::SetVideo;
     if (!r) {
 
         self.partial_.add();
+        if (burst)
+            answer_(
+                proto::LinkEvent::ReplyWindow::ModeEmitted,
+                proto::WindowFails{}.with(FrameWindow::ModeEmitted),
+                proto::ReplyWord{}
+            );
         return Delivered{ILinkEncoder::Outcome::Encoded, true};
     }
     self.emitted_.add();
+    if (burst)
+        answer_(
+            proto::LinkEvent::ReplyWindow::ModeEmitted,
+            proto::WindowFails{},
+            proto::ReplyWord::of(proto::word(m.m.opcode))
+        );
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
 
     {
-        const auto fb = svc::emit_fbuf(link.frame(), 0x0000);
+        const auto fb = svc::video::emit_fbuf(link.frame(), hal::SpiWord{});
         proto::ReplyWord word{};
         proto::WindowFails fails{};
         if (fb) {
-            word = proto::ReplyWord{*fb};
+            word = proto::ReplyWord::of(*fb);
         } else {
             fails = fails.with(FbufWindow::Fbuf);
             self.partial_.add();
@@ -196,7 +238,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
         proto::ReplyWord word{};
         proto::WindowFails fails{};
         if (hi) {
-            word = proto::ReplyWord{*hi};
+            word = proto::ReplyWord::of(*hi);
         } else {
             fails = fails.with(FbufWindow::HdmiProbe);
             self.partial_.add();
@@ -208,7 +250,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
         proto::ReplyWord word{};
         proto::WindowFails fails{};
         if (gm) {
-            word = proto::ReplyWord{*gm};
+            word = proto::ReplyWord::of(*gm);
         } else {
             fails = fails.with(FbufWindow::GammaProbe);
             self.partial_.add();
@@ -216,13 +258,13 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
         answer_(proto::LinkEvent::ReplyWindow::GammaCap, fails, word);
     }
 
-    if (auto ar = svc::emit_ar_custom(link.frame(), f.ar_custom); !ar)
+    if (auto ar = svc::video::emit_ar_custom(link.frame(), f.ar_custom); !ar)
         self.partial_.add();
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::FilterMode& m) noexcept {
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
     const auto f = ops.emit_filter_mode(m.mode);
     if (!f) {
         self.partial_.add();
@@ -233,22 +275,26 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FilterMode& m) noexcept {
         );
         return Delivered{ILinkEncoder::Outcome::Encoded, true};
     }
-    const svc::FltFlags flt{*f};
+    const svc::FltFlags flt = svc::FltFlags::of(*f);
 
     if (flt.present())
         self.geo_gate_.last_flt_flags = flt;
-    answer_(proto::LinkEvent::ReplyWindow::FltNum, proto::WindowFails{}, proto::ReplyWord{*f});
+    answer_(proto::LinkEvent::ReplyWindow::FltNum, proto::WindowFails{}, proto::ReplyWord::of(*f));
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::CoeffChunk& c) noexcept {
-    if (auto r = svc::emit_filter_coeff_chunk(link.frame(), c.count.prefix_of(c.w)); !r)
+    if (auto r = svc::video::emit_filter_coeff_chunk(
+            link.frame(),
+            infra::affine::first(std::span<const hal::SpiWord>(c.w), c.count)
+        );
+        !r)
         self.partial_.add();
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::ShadowMask& s) noexcept {
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
     const auto r = ops.emit_shadow_mask(s.flag);
     if (!r) {
         self.partial_.add();
@@ -259,16 +305,20 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::ShadowMask& s) noexcept {
         );
         return Delivered{ILinkEncoder::Outcome::Encoded, true};
     }
-    answer_(proto::LinkEvent::ReplyWindow::ShadowCap, proto::WindowFails{}, proto::ReplyWord{*r});
+    answer_(
+        proto::LinkEvent::ReplyWindow::ShadowCap,
+        proto::WindowFails{},
+        proto::ReplyWord::of(*r)
+    );
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::AudioTail& t) noexcept {
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
     proto::WindowFails fails{};
     proto::ReplyWord r{};
     if (const auto p = ops.emit_afilter_probe(); p) {
-        r = proto::ReplyWord{*p};
+        r = proto::ReplyWord::of(*p);
     } else {
         fails = fails.with(TailWindow::Probe);
     }
@@ -283,7 +333,11 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::AudioTail& t) noexcept {
                 pushed = svc::emit_afilter_volume(link.frame(), lead);
                 break;
             case AfilterPushForm::Stream:
-                pushed = svc::emit_afilter_stream(link.frame(), lead, t.count.prefix_of(t.words));
+                pushed = svc::emit_afilter_stream(
+                    link.frame(),
+                    lead,
+                    infra::affine::first(std::span<const hal::SpiWord>(t.words), t.count)
+                );
                 break;
         }
         if (!pushed)
@@ -309,11 +363,11 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::AudVol& a) noexcept {
 
 Delivered VideoWire::FrameArms::on(const StagedFrame::AfilterPush& a) noexcept {
 
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
     proto::WindowFails fails{};
     proto::ReplyWord r{};
     if (const auto p = ops.emit_afilter_probe(); p) {
-        r = proto::ReplyWord{*p};
+        r = proto::ReplyWord::of(*p);
     } else {
         fails = fails.with(TailWindow::Probe);
     }
@@ -328,7 +382,11 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::AfilterPush& a) noexcept {
                 pushed = svc::emit_afilter_volume(link.frame(), lead);
                 break;
             case AfilterPushForm::Stream:
-                pushed = svc::emit_afilter_stream(link.frame(), lead, a.count.prefix_of(a.words));
+                pushed = svc::emit_afilter_stream(
+                    link.frame(),
+                    lead,
+                    infra::affine::first(std::span<const hal::SpiWord>(a.words), a.count)
+                );
                 break;
         }
         if (!pushed)
@@ -360,14 +418,14 @@ VideoWire::Stats VideoWire::stats() const noexcept {
 }
 
 void VideoWire::on_rt_round(
-    proto::Link& link,
+    proto::link::Link& link,
     std::int64_t now_ns,
     infra::OptRef<proto::IResetFence> fence
 ) {
 
     const os::RawMonotonicClock::time_point now{std::chrono::nanoseconds{now_ns}};
     (void)fence;
-    svc::ProbeOps ops{link};
+    svc::video::ProbeOps ops{link};
     geo_rounds_.add();
 
     take_ui_cells();
@@ -420,9 +478,9 @@ void VideoWire::on_rt_round(
     );
 }
 
-void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
+void VideoWire::reset_geometry(CoreEdgeSeq core_seq) noexcept {
     geo_core_seq_ = core_seq;
-    geo_gate_ = svc::GeometryGate{};
+    geo_gate_ = svc::video::GeometryGate{};
 
     geo_force_next_ = true;
 
@@ -431,7 +489,7 @@ void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
     geo_cell_.invalidate();
 }
 
-Ex<svc::VideoSample> VideoWire::sample() {
+Ex<svc::video::VideoSample> VideoWire::sample() {
     geo_reads_.add();
     if (const auto s = geo_cell_.sample()) {
         sampled_seq_ = s.value.core_seq;
@@ -455,24 +513,18 @@ VideoWire::GeoStats VideoWire::geo_stats() const noexcept {
 }
 
 bool VideoWire::update_but_sw(
-    proto::Link& link,
+    proto::link::Link& link,
     hal::ButtonMask buttons,
     bool osd_visible,
     infra::OptRef<proto::IResetFence> fence
 ) noexcept {
-    auto map = static_cast<std::uint16_t>(tail_but_sw_ & ~(kButton1 | kButton2));
-    if (buttons.has(hal::SpiSample::kMenuButton))
-        map |= kButton1;
-    if (buttons.has(hal::SpiSample::kUserButton))
-        map |= kButton2;
-
-    const std::uint16_t composed = map;
+    const proto::ConfSwitches composed = tail_but_sw_.with_buttons(buttons);
     if (but_sw_seen_ && composed == but_sw_shadow_)
         return false;
 
-    std::uint16_t wire = composed;
+    proto::ConfSwitches wire = composed;
     if (osd_visible)
-        wire = static_cast<std::uint16_t>(wire & ~kButton2);
+        wire = wire.without(proto::ConfSwitches::Bit::UserButton);
     tail_but_sw_ = wire;
     ++but_sw_writes_;
     if (auto r = emit_but_sw_(link, wire, fence); !r) {
@@ -485,8 +537,8 @@ bool VideoWire::update_but_sw(
 }
 
 Ex<void> VideoWire::emit_but_sw_(
-    proto::Link& link,
-    std::uint16_t word,
+    proto::link::Link& link,
+    proto::ConfSwitches word,
     infra::OptRef<proto::IResetFence> fence
 ) noexcept {
     if (fence)
@@ -497,7 +549,7 @@ Ex<void> VideoWire::emit_but_sw_(
     return r;
 }
 
-bool VideoWire::plan_filter_send(const svc::VideoSample&, bool resend) {
+bool VideoWire::plan_filter_send(const svc::video::VideoSample&, bool resend) {
 
     filter_seq_ = filter_seq_.next();
     if (resend)
@@ -512,7 +564,7 @@ std::optional<VideoGeoLatch> VideoWire::geo_latch() const noexcept {
     return s.value;
 }
 
-svc::ScalingPolicy VideoWire::published_policy() const noexcept {
+svc::video::ScalingPolicy VideoWire::published_policy() const noexcept {
 
     return policy_cell_.sample().value;
 }

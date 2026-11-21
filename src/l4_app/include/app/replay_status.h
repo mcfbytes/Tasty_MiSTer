@@ -9,8 +9,10 @@
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/tally.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 
@@ -49,8 +51,8 @@ struct ReplayStatus {
     ReplayRef ref = ReplayRef::None;
     EpochFail epoch_fail = EpochFail::None;
     std::uint8_t pad_[2]{};
-    MoviePosition movie_frame = kNoMovieFrame;
-    MoviePosition applied_frame = kNoMovieFrame;
+    infra::Niche<MoviePosition> movie_frame{};
+    infra::Niche<MoviePosition> applied_frame{};
     std::uint32_t writes = 0;
     std::uint32_t on_time = 0;
     std::uint32_t late = 0;
@@ -61,8 +63,8 @@ struct ReplayStatus {
     std::uint32_t pad_drops = 0;
     std::uint32_t stale = 0;
     std::uint32_t link_errors = 0;
-    MoviePosition first_late_frame = kNoMovieFrame;
-    MoviePosition first_underrun_frame = kNoMovieFrame;
+    infra::Niche<MoviePosition> first_late_frame{};
+    infra::Niche<MoviePosition> first_underrun_frame{};
     StatusMicros apply_min_us{};
     StatusMicros apply_max_us{};
     StatusMicros epoch_delay_us{};
@@ -72,14 +74,16 @@ struct ReplayStatus {
     std::uint32_t lost = 0;
     std::uint32_t delayed = 0;
     StatusMicros gap_max_us{};
-    MoviePosition gap_frame = kNoMovieFrame;
+    infra::Niche<MoviePosition> gap_frame{};
     StatusMicros late_gap_us{};
     StatusMicros late_into_us{};
     StatusMicros late_edge_us{};
     std::uint32_t late_depth = 0;
     std::int32_t depth_min = -1;
-    MoviePosition depth_min_frame = kNoMovieFrame;
+    infra::Niche<MoviePosition> depth_min_frame{};
     std::uint32_t pad_held = 0;
+    StatusMicros relay_lag_max_us{};
+    infra::Tally relay_superseded{};
 };
 
 inline constexpr std::array<const char*, static_cast<std::size_t>(ReplayEnd::kCount)>
@@ -106,14 +110,14 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
     o.field("lvl", s.level);
     o.str("end", replay_end_name(s.end), infra::json_longest(kReplayEndNames));
     o.field("ref", s.ref);
-    o.field("frame", s.movie_frame);
-    o.field("applied", s.applied_frame);
+    o.field("frame", s.movie_frame.value_or(kNoMovieFrame));
+    o.field("applied", s.applied_frame.value_or(kNoMovieFrame));
     o.field("writes", s.writes);
     o.field("on_time", s.on_time);
     o.field("late", s.late);
-    o.field("first_late", s.first_late_frame);
+    o.field("first_late", s.first_late_frame.value_or(kNoMovieFrame));
     o.field("underruns", s.underruns);
-    o.field("first_underrun", s.first_underrun_frame);
+    o.field("first_underrun", s.first_underrun_frame.value_or(kNoMovieFrame));
     o.field("pre_epoch", s.pre_epoch);
     o.field("skipped", s.skipped_edges);
     o.field("held", s.held_rounds);
@@ -129,14 +133,16 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
     o.field("lost", s.lost);
     o.field("delayed", s.delayed);
     o.field("gap_max_us", s.gap_max_us.count());
-    o.field("gap_frame", s.gap_frame);
+    o.field("gap_frame", s.gap_frame.value_or(kNoMovieFrame));
     o.field("late_gap_us", s.late_gap_us.count());
     o.field("late_into_us", s.late_into_us.count());
     o.field("late_edge_us", s.late_edge_us.count());
     o.field("late_depth", s.late_depth);
     o.field("depth_min", s.depth_min);
-    o.field("depth_min_frame", s.depth_min_frame);
+    o.field("depth_min_frame", s.depth_min_frame.value_or(kNoMovieFrame));
     o.field("pad_held", s.pad_held);
+    o.field("relay_max_us", s.relay_lag_max_us.count());
+    o.field("relay_sup", s.relay_superseded);
 }
 
 using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;

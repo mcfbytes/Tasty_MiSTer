@@ -8,15 +8,16 @@
 #include <vector>
 
 #include "app/config_rel.h"
-#include "cores/save_image.h"
+#include "cores/nvram_save.h"
 #include "cores/save_servant.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/save_act.h"
-#include "svc/card_writer.h"
+#include "proto/types.h"
 
 namespace mister::svc {
-class Vfs;
+class SaveStageKeeper;
 }
 
 namespace mister::app {
@@ -25,12 +26,12 @@ class FlatSaveServant final : public cores::ISaveServant {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static constexpr std::size_t kImageCap = 1024u * 1024u;
+    static constexpr proto::FileSize kImageCap{1024u * 1024u};
 
-    explicit FlatSaveServant(const svc::Vfs& vfs);
+    explicit FlatSaveServant(svc::SaveStageKeeper& keeper);
 
     [[nodiscard]] proto::SaveAct start(
-        const cores::SaveImage& image,
+        const cores::mra::NvramSave& image,
         std::string_view rel,
         hal::Width word
     ) noexcept override;
@@ -42,7 +43,7 @@ private:
     enum class Phase : std::uint8_t { Idle, Opening, Reading, Closing };
     [[nodiscard]] proto::SaveAct next_read_() noexcept;
 
-    svc::CardWriter card_;
+    svc::SaveStageKeeper& keeper_;
     std::vector<std::byte> image_;
     FixedStr<kConfigRelCap, StrFit::Reject> rel_{};
     proto::WideIoIndex index_{};

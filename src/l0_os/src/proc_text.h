@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/small_file.h"
 
 namespace mister::os::detail {

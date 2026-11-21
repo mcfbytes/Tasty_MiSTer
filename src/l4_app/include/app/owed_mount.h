@@ -10,6 +10,7 @@
 #include "app/path_text.h"
 #include "cores/mount_status.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/deadline.h"
 #include "proto/types.h"
@@ -32,7 +33,7 @@ public:
 
     [[nodiscard]] bool owed() const noexcept { return owed_.owed(); }
 
-    [[nodiscard]] proto::ActKey generation() const noexcept { return owed_.generation(); }
+    [[nodiscard]] proto::ActKey act() const noexcept { return owed_.act(); }
 
     [[nodiscard]] std::string_view path() const noexcept { return path_.view(); }
 
@@ -45,13 +46,13 @@ public:
     [[nodiscard]] std::optional<os::Deadline> quiesce() const noexcept { return quiesce_; }
 
     void arm(
-        proto::ActKey generation,
+        proto::ActKey act,
         const cores::MountStatus& on_strand,
         proto::SlotIndex slot,
         std::string_view path,
         std::optional<os::Deadline> quiesce
     ) noexcept {
-        owed_.arm(generation, on_strand);
+        owed_.arm(act, on_strand);
         slot_ = slot;
         (void)path_.assign(path);
         quiesce_ = quiesce;

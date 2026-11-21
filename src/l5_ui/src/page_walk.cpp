@@ -4,14 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "app/hd_window.h"
+#include "app/hd/hd_window.h"
 #include "ui/page_row.h"
 
 namespace mister::ui {
 
-app::HdWindow PageWalk::window(RowIndex selected, RowCount total) noexcept {
-    const app::HdWindow win = app::hd_window(selected, total, page.first);
-    page.first = win.first;
+app::hd::HdWindow PageWalk::window(RowIndex selected, RowCount total) noexcept {
+    const app::hd::HdWindow win = app::hd::hd_window(selected, total, page.first);
+    page.first = win.start;
     page.total = total;
     return win;
 }
@@ -22,12 +22,12 @@ RowCount PageWalk::copy_hd_rows() noexcept {
         const PageRow& r = rows[i];
         if (!r.has_hd || r.legend)
             continue;
-        if (static_cast<std::size_t>(n) >= app::PageDescription::kMaxRows)
+        if (static_cast<std::size_t>(n) >= app::hd::PageDescription::kMaxRows)
             break;
         page.rows[n] = r.hd;
         ++n;
     }
-    const RowCount copied = RowCount::of(n);
+    const RowCount copied = RowCount::truncating(n);
     page.row_count = copied;
     return copied;
 }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "svc/slot_path.h"
 

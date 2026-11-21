@@ -6,6 +6,8 @@
 #include <type_traits>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
+#include "infra/tally.h"
 #include "os/raw_monotonic_clock.h"
 #include "proto/save_stage_types.h"
 #include "proto/stage_key.h"
@@ -21,11 +23,11 @@ struct SaveStageRow {
     StageRevision rev{};
     StageRevision saved{};
     os::RawMonotonicClock::time_point last_write{};
-    StageTally commits{};
-    StageTally skipped_identical{};
-    StageTally faults{};
+    infra::Tally commits{};
+    infra::Tally skipped_identical{};
+    infra::Tally faults{};
     std::optional<Error> last_fault{};
-    StageTally declines{};
+    infra::Tally declines{};
 };
 
 static_assert(std::is_trivially_copyable_v<SaveStageRow>);

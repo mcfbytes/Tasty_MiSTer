@@ -8,15 +8,18 @@
 
 #include "app/remembered_path.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
 class Vfs;
 }
 
-namespace mister::app {
-
+namespace mister::app::recents {
 class UiWriteLane;
+}
+
+namespace mister::app {
 
 class NameConfig {
     TASTY_SEAT_RESIDENT(Ui);
@@ -25,7 +28,7 @@ public:
     static constexpr std::size_t kPathBlob = kRememberedBlob;
     static constexpr std::size_t kCidLen = 32;
 
-    NameConfig(const svc::Vfs& vfs, UiWriteLane& writes, std::string cid_path)
+    NameConfig(const svc::Vfs& vfs, app::recents::UiWriteLane& writes, std::string cid_path)
         : vfs_(&vfs),
           writes_(&writes),
           cid_path_(static_cast<std::string&&>(cid_path)) {}
@@ -46,7 +49,7 @@ public:
 
 private:
     const svc::Vfs* vfs_;
-    UiWriteLane* writes_;
+    app::recents::UiWriteLane* writes_;
     std::string cid_path_;
 };
 

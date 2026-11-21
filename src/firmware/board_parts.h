@@ -9,13 +9,14 @@
 #include "infra/opt_ref.h"
 #include "hal/fpga_programmer.h"
 #include "hal/link_port.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 struct BoardProfile;
 class BoardWindows;
 }
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 struct RtStats;
 }
 

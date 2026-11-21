@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include "infra/seat.h"
+#include "os/deadline.h"
 #include "os/raw_monotonic_clock.h"
 
 namespace mister::app {
@@ -31,7 +32,7 @@ public:
     std::uint32_t wakes() const noexcept { return wakes_; }
 
 private:
-    os::RawMonotonicClock::time_point deadline_{};
+    os::Deadline deadline_{os::Deadline::immediate()};
     std::uint32_t last_activity_ = 0;
     std::uint32_t blanks_ = 0;
     std::uint32_t wakes_ = 0;

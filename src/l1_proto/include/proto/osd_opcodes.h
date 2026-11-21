@@ -20,8 +20,8 @@ enum class OsdOp : std::uint16_t {
     return hal::SpiWord{static_cast<std::uint16_t>(op)};
 }
 
-[[nodiscard]] constexpr std::uint16_t osd_word(OsdOp op, std::uint16_t payload) noexcept {
-    return static_cast<std::uint16_t>(static_cast<std::uint16_t>(op) | payload);
+[[nodiscard]] constexpr hal::SpiWord osd_word(OsdOp op, hal::SpiWord payload) noexcept {
+    return word(op).with(payload);
 }
 
 static_assert(word(OsdOp::Write) == hal::SpiWord{0x20});

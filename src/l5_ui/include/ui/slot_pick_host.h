@@ -8,12 +8,12 @@
 #include <string>
 #include <string_view>
 
-#include "app/recents_store.h"
+#include "app/recents/recents_store.h"
 #include "app/remembered_path.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/types.h"
-#include "svc/types.h"
+#include "infra/tally.h"
 #include "ui/browser_host.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
@@ -60,14 +60,14 @@ public:
     struct Borrows {
         infra::OptRef<app::UiRequestRing> asks;
         infra::OptRef<BrowserLaunch> browser;
-        infra::OptRef<app::RecentsStore> recents;
+        infra::OptRef<app::recents::RecentsStore> recents;
         infra::OptRef<app::NameConfig> names;
         infra::OptRef<app::InfoSink> info;
         infra::OptRef<const svc::Vfs> files;
     };
 
     struct RecentsRef {
-        app::RecentsStore::ListId id{};
+        app::recents::RecentsStore::ListId id{};
         std::string core;
     };
 
@@ -86,7 +86,7 @@ public:
     [[nodiscard]] std::optional<RecentsRef> recents_ref(const OptionItem& it) const;
     [[nodiscard]] bool has_recents(const OptionItem& it) const;
 
-    svc::Tally refusals() const noexcept { return refusals_; }
+    infra::Tally refusals() const noexcept { return refusals_; }
 
     std::uint32_t commands_published() const noexcept { return published_; }
 
@@ -117,7 +117,7 @@ private:
     proto::ItemOrdinal pending_item_{};
     proto::BindGeneration pending_gen_{};
     bool pending_store_ = false;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

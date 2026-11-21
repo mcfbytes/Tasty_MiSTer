@@ -9,7 +9,7 @@
 
 #include "infra/seat.h"
 
-namespace mister {
+namespace mister::infra {
 
 enum class StrFit : std::uint8_t {
     Clip,

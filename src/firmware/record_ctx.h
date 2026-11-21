@@ -7,8 +7,9 @@
 #include "app/diag_counters.h"
 #include "infra/json_out.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::fw {
 

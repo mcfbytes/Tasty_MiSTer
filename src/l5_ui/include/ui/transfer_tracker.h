@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "ui/progress_page.h"
 

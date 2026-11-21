@@ -3,9 +3,14 @@
 
 #include <chrono>
 
+#include "os/clock.h"
 #include "os/raw_monotonic_clock.h"
 
 namespace mister::os {
+
+void sleep_for(std::chrono::nanoseconds d) noexcept;
+
+void sleep_until(MonoInstant at) noexcept;
 
 class IDelay {
 public:

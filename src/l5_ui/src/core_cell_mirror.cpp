@@ -9,23 +9,14 @@
 
 namespace mister::ui {
 
-namespace {
-
-template <class Cell, class Reader>
-bool unread(const Cell& c, const Reader& r) noexcept {
-    const std::uint32_t g = c.generation();
-    return g != 0 && g != r.seen();
-}
-}
-
 bool CoreCellMirror::pending() const noexcept {
-    const bool cheats = unread(tx_digest_cell_, tx_digest_reader_)
-        || unread(cheat_catalog_cell_, cheat_catalog_reader_);
-    return unread(status_cell_, status_reader_)
-        || unread(dip_labels_cell_, dip_labels_reader_)
-        || unread(dip_choices_cell_, dip_choices_reader_)
-        || unread(option_cell_, option_reader_)
-        || unread(config_slot_cell_, config_slot_reader_)
+    const bool cheats = tx_digest_reader_.unread(tx_digest_cell_)
+        || cheat_catalog_reader_.unread(cheat_catalog_cell_);
+    return status_reader_.unread(status_cell_)
+        || dip_labels_reader_.unread(dip_labels_cell_)
+        || dip_choices_reader_.unread(dip_choices_cell_)
+        || option_reader_.unread(option_cell_)
+        || config_slot_reader_.unread(config_slot_cell_)
         || cheats;
 }
 
@@ -135,7 +126,7 @@ bool CoreCellMirror::sync_cheats_(Changed& out) {
             (void)read_conf_(out);
         if (tx_digest_scratch_.gen == conf_gen_) {
             const std::optional<app::SessionIdentity> id = identity_.copy();
-            const cores::CheatLookup look = id && id->cheats ? *id->cheats : cores::CheatLookup{};
+            const cores::CheatLookup look = id ? id->policy().cheats : cores::CheatLookup{};
             if (cheats_.open(tx_digest_scratch_, id ? id->core.view() : std::string_view{}, look)) {
                 ++cheat_opens_;
             } else {

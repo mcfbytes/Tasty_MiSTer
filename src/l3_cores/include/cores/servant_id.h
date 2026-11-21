@@ -25,6 +25,4 @@ inline constexpr ServantId ServantId::Msu1{1};
 using ServantSet = infra::
     IndexedArray<std::unique_ptr<IMailboxServant>, ServantId::kCount, ServantId>;
 
-[[nodiscard]] ServantSet make_servants(const svc::Vfs& vfs);
-
 }

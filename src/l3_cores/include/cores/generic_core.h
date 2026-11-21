@@ -8,7 +8,8 @@
 #include "cores/generic_profile.h"
 #include "cores/stream_load.h"
 #include "cores/stream_load_host.h"
-#include "proto/download_session.h"
+#include "infra/prelude.h"
+#include "proto/link/download_session.h"
 #include "infra/seat.h"
 
 namespace mister::cores {

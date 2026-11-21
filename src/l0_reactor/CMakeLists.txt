@@ -16,6 +16,8 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/cause_set.h
   reactor/core_state.h
   reactor/core_token.h
+  reactor/deadline_miss.h
+  reactor/deadline_miss_sink.h
   reactor/executive.h
   reactor/frame_clock.h
   reactor/frame_record.h

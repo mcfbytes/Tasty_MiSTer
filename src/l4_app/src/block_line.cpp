@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 template <class Owner>

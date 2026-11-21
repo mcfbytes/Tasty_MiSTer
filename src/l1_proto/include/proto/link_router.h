@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/link_event.h"
 #include "proto/types.h"
 

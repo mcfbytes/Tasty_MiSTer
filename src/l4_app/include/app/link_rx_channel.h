@@ -7,11 +7,12 @@
 #include <span>
 
 #include "app/link_bytes.h"
-#include "infra/inbox.h"
+#include "infra/xthread/inbox.h"
 #include "infra/message_sum.h"
-#include "infra/polled.h"
+#include "infra/xthread/polled.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/link_event.h"
 
 namespace mister::app {

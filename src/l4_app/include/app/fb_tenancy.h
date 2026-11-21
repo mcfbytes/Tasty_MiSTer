@@ -8,7 +8,9 @@
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/serial.h"
 
 namespace mister::app {
 
@@ -43,10 +45,11 @@ enum class FbShow : std::uint8_t { Full, View };
 
 struct FbGen {
     std::uint32_t v = 0;
+    using serial_rule = infra::serial::ThroughZero<std::uint32_t>;
 
     [[nodiscard]] static constexpr FbGen first() noexcept { return FbGen{1}; }
 
-    [[nodiscard]] constexpr FbGen next() const noexcept { return FbGen{v + 1}; }
+    [[nodiscard]] constexpr FbGen next() const noexcept { return infra::serial::next(*this); }
 
     friend constexpr bool operator==(FbGen, FbGen) = default;
 };

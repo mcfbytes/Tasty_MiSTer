@@ -7,10 +7,15 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
+#include "infra/path_parts.h"
 #include "infra/persist.h"
+#include "infra/prelude.h"
+#include "os/sync.h"
 #include "vfs_detail.h"
 
 namespace mister::svc {
@@ -66,17 +71,17 @@ void DurableWrite::sync_parent_dir(std::string_view path) const noexcept {
 }
 
 void DurableWrite::sync_dir_of_(const std::string& path) const noexcept {
-    std::string dir = path;
-    const std::size_t slash = dir.rfind('/');
-    dir = (slash == std::string::npos) ? std::string(".")
-        : (slash == 0)                 ? std::string("/")
-                                       : dir.substr(0, slash);
-    if (const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC); dfd >= 0) {
-        const bool ok = ::fsync(dfd) == 0 || errno == EINVAL || errno == EROFS;
-        (void)::close(dfd);
-        if (ok)
-            detail::g_dura_dir_syncs.fetch_add(1, std::memory_order_relaxed);
-    }
+
+    const std::optional<std::string_view> parent = infra::dirname(path);
+    const std::string dir = !parent ? std::string(".")
+        : parent->empty()           ? std::string("/")
+                                    : std::string(*parent);
+    const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd < 0)
+        return;
+    const UniqueFd handle{dfd};
+    if (os::sync(handle, os::SyncKind::All))
+        detail::g_dura_dir_syncs.fetch_add(1, std::memory_order_relaxed);
 }
 
 }

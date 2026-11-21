@@ -3,19 +3,20 @@
 
 #include "hal/disk_lamp.h"
 
-#include "app/input_emit.h"
+#include "app/input/input_emit.h"
 #include "app/osd_wire.h"
 #include "app/delivered.h"
 #include "app/link_session.h"
 #include "app/link_op_facts.h"
 #include "app/core_frame_counter.h"
 #include "app/disk_relay.h"
-#include "app/replay_gate.h"
+#include "app/replay/replay_gate.h"
 #include "app/round_budget.h"
 #include "app/save_upload_relay.h"
-#include "app/scanout_relay.h"
+#include "app/launcher/scanout_relay.h"
 #include "infra/message_sum.h"
-#include "proto/spi_fio_queue.h"
+#include "infra/prelude.h"
+#include "proto/link/spi_fio_queue.h"
 #include "reactor/executive.h"
 #include "reactor/round_timer.h"
 
@@ -97,7 +98,7 @@ bool RtMain::drain_fio_(RoundBudget& budget) noexcept {
         return false;
 
     budget.debit(RoundAct::Saves, session_->saves().take_round_words());
-    proto::SpiFioQueue& q = session_->binder().fio_queue();
+    proto::link::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
         q.abandon();
         return false;
@@ -129,6 +130,9 @@ void RtMain::round(bool tick) {
         session_->reap_storage();
 
     replay_step_();
+
+    if (input_)
+        input_->relay(replay_ && replay_->armed());
 
     frames_step_();
 
@@ -193,6 +197,9 @@ void RtMain::drain_(
 
         if (pads && replay_ && replay_->suppresses(*op))
             continue;
+
+        if (pads && session_->drops_live_pad(*op))
+            continue;
         const std::uint32_t resets = session_->tally().resets_pulsed;
         const Delivered d = session_->deliver(*op, inbox, windows_closed);
 
@@ -217,7 +224,7 @@ void RtMain::scanout_step_() noexcept {
     if (!scanout_)
         return;
 
-    using Wire = ScanoutRelay::Wire;
+    using Wire = launcher::ScanoutRelay::Wire;
     if (!scanout_->collect()) {
         scanout_->step(Wire::Held);
         return;
@@ -250,7 +257,7 @@ void RtMain::replay_step_() noexcept {
         late,
         static_cast<std::uint32_t>(replay_ring_.size())
     );
-    for (unsigned n = 0; n < ReplayGate::kReplayBudget && replay_->wants_record(); ++n) {
+    for (unsigned n = 0; n < replay::ReplayGate::kReplayBudget && replay_->wants_record(); ++n) {
         const auto m = replay_ring_.pop();
         if (!m)
             break;
@@ -264,8 +271,8 @@ void RtMain::frames_step_() noexcept {
         return;
     MoviePosition movie = kNoMovieFrame;
     if (replay_ && replay_->armed())
-        movie = replay_->status().movie_frame;
-    frames_->settle(replay_ready_(), core_edge_seq_().v, movie);
+        movie = replay_->status().movie_frame.value_or(kNoMovieFrame);
+    frames_->settle(replay_ready_(), core_edge_seq_(), movie);
 }
 
 Ex<void> RtMain::pump_boot() {
@@ -291,7 +298,7 @@ Ex<void> RtMain::pump_boot() {
 
         s.disks().pump_on_caller();
         s.settle_boot_slot_mount();
-        s.binder().service_on_caller(s.clock().now().time_since_epoch().count());
+        s.binder().service_on_caller();
         if (s.session_starting()) {
             return std::unexpected(
                 Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(s.state())}

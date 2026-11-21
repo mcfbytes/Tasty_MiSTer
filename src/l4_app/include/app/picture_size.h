@@ -38,7 +38,7 @@ struct PictureSize {
     [[nodiscard]] constexpr bool empty() const noexcept { return width.empty() || rows.empty(); }
 
     [[nodiscard]] constexpr PictureSize halved() const noexcept {
-        return PictureSize{width.halved(), rows.halved()};
+        return PictureSize{width / PicturePixels::kHalfDivisor, rows / PictureRows::kHalfDivisor};
     }
 
     [[nodiscard]] constexpr PictureSize halved_if(bool half) const noexcept {

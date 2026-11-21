@@ -8,25 +8,21 @@
 #include "hal/sys_block.h"
 #include "infra/seat.h"
 #include "os/uio_handle.h"
-#include "proto/sys_block_decl.h"
+#include "proto/link/sys_block_decl.h"
 
 namespace mister::app {
 
 struct LwSys {
     TASTY_SEAT_EXEMPT(component);
     using Grant = SysGrant;
-
-    static constexpr bool kHasEnable = false;
     hal::RegisterWindow<hal::SysBlock> regs;
     os::UioHandle line{};
-    proto::SysBlockDecl block{};
+    proto::link::SysBlockDecl block{};
     LwGrantStamp stamp{};
 
     [[nodiscard]] Grant lend() const noexcept {
-        return Grant{.block = regs.lend(), .line = line.borrow(), .gen = stamp.gen()};
+        return Grant{{.block = regs.lend(), .gen = stamp.gen(), .body = {.line = line.borrow()}}};
     }
-
-    void disable() noexcept {}
 };
 
 }

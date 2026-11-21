@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "reactor/cause_decode.h"
 #include "reactor/cause_set.h"
@@ -18,8 +19,7 @@ inline constexpr std::uint32_t kBlk = 1u << 16;
 inline constexpr std::uint32_t kFifo = 1u << 17;
 inline constexpr std::uint32_t kRing = 1u << 18;
 inline constexpr std::uint32_t kTick = 1u << 19;
-inline constexpr std::uint32_t kSys = 1u << 20;
-inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick | kSys;
+inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick;
 
 inline constexpr std::uint32_t kReserved = ~(kPayload | kClasses);
 }
@@ -39,8 +39,6 @@ constexpr CauseDecode decode_cause_checked(std::uint32_t word) noexcept {
         return CauseDecode::of(Cause::Blk);
     if (classes == cause_word::kRing)
         return CauseDecode::of(Cause::Ring);
-    if (classes == cause_word::kSys)
-        return CauseDecode::of(Cause::Sys);
     return CauseDecode::of(Cause::CoreTick);
 }
 

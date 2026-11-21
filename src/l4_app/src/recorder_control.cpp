@@ -11,7 +11,7 @@
 
 #include "app/identity_latch.h"
 #include "app/session_identity.h"
-#include "infra/diag_log.h"
+#include "infra/xthread/diag_log.h"
 
 namespace mister::app {
 
@@ -24,13 +24,13 @@ bool is_dir(const std::string& p) noexcept {
 
 }
 
-RecPath RecorderControl::resolve(
+capture::RecPath RecorderControl::resolve(
     std::string_view arg,
     std::string_view root,
     std::string_view name,
     std::time_t now
 ) noexcept {
-    RecPath out{};
+    capture::RecPath out{};
     if (arg.empty() || root.empty())
         return out;
     const std::string a(arg);
@@ -43,18 +43,18 @@ RecPath RecorderControl::resolve(
         char stamp[32];
         (void)std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &tm);
         file = std::string(name.empty() ? "rec" : name) + "_" + stamp;
-        file += RecordingName::kSidecarSuffix;
+        file += capture::RecordingName::kSidecarSuffix;
     } else {
         const auto slash = a.rfind('/');
         dir = slash == std::string::npos ? std::string(".") : a.substr(0, slash + 1);
         file = a.substr(slash == std::string::npos ? 0 : slash + 1);
 
-        if (file.size() > RecordingName::kAviSuffix.size()
-            && file.ends_with(RecordingName::kAviSuffix)) {
-            file.resize(file.size() - RecordingName::kAviSuffix.size());
+        if (file.size() > capture::RecordingName::kAviSuffix.size()
+            && file.ends_with(capture::RecordingName::kAviSuffix)) {
+            file.resize(file.size() - capture::RecordingName::kAviSuffix.size());
         }
-        if (!RecordingName::names_sidecar(file))
-            file += RecordingName::kSidecarSuffix;
+        if (!capture::RecordingName::names_sidecar(file))
+            file += capture::RecordingName::kSidecarSuffix;
     }
     char real[PATH_MAX];
     if (::realpath(dir.c_str(), real) == nullptr)
@@ -67,17 +67,19 @@ RecPath RecorderControl::resolve(
     if (r.size() <= want.size() || r.compare(0, want.size(), want) != 0)
         return out;
 
-    const std::optional<RecordingName> rec = RecordingName::from_sidecar(r + file);
+    const std::optional<capture::RecordingName> rec = capture::RecordingName::from_sidecar(
+        r + file
+    );
     if (!rec || !rec->fits())
         return out;
     return rec->sidecar();
 }
 
 bool RecorderControl::publish_(
-    RecOp op,
+    capture::RecOp op,
     std::string_view path,
-    RecMode mode,
-    RecOptions opt
+    capture::RecMode mode,
+    capture::RecOptions opt
 ) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
     if (!requests_)
@@ -98,7 +100,7 @@ bool RecorderControl::publish_(
     loan->op = op;
     loan->mode = mode;
     loan->opt = opt;
-    loan->verdict = RecVerdict::None;
+    loan->verdict = capture::RecVerdict::None;
     (void)loan->path.assign(path);
     requests_.send(std::move(loan));
     return true;
@@ -119,12 +121,12 @@ bool RecorderControl::can_record(std::string_view path) const {
 }
 
 bool RecorderControl::request_(
-    RecOp op,
+    capture::RecOp op,
     std::string_view path,
-    RecMode mode,
-    RecOptions opt
+    capture::RecMode mode,
+    capture::RecOptions opt
 ) noexcept {
-    const RecPath p = resolve(path, w_.root, name_(), std::time(nullptr));
+    const capture::RecPath p = resolve(path, w_.root, name_(), std::time(nullptr));
     if (p.empty()) {
         if (w_.diag)
             w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"path\"}");
@@ -134,32 +136,40 @@ bool RecorderControl::request_(
     return true;
 }
 
-bool RecorderControl::take_start(std::string_view path, RecMode mode, RecOptions opt) noexcept {
+bool RecorderControl::take_start(
+    std::string_view path,
+    capture::RecMode mode,
+    capture::RecOptions opt
+) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    return request_(RecOp::Start, path, mode, opt);
+    return request_(capture::RecOp::Start, path, mode, opt);
 }
 
-bool RecorderControl::take_arm(std::string_view path, RecMode mode, RecOptions opt) noexcept {
+bool RecorderControl::take_arm(
+    std::string_view path,
+    capture::RecMode mode,
+    capture::RecOptions opt
+) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    return request_(RecOp::Arm, path, mode, opt);
+    return request_(capture::RecOp::Arm, path, mode, opt);
 }
 
 bool RecorderControl::take_stop() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    (void)publish_(RecOp::Stop, {}, RecMode::Hash, {});
+    (void)publish_(capture::RecOp::Stop, {}, capture::RecMode::Hash, {});
     return true;
 }
 
 bool RecorderControl::take_disarm() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    (void)publish_(RecOp::Disarm, {}, RecMode::Hash, {});
+    (void)publish_(capture::RecOp::Disarm, {}, capture::RecMode::Hash, {});
     return true;
 }
 
 void RecorderControl::reap_() noexcept {
     if (!requests_)
         return;
-    RecorderStatus s{};
+    capture::RecorderStatus s{};
     if (w_.status)
         (void)w_.status->sample_into(s);
     for (;;) {
@@ -167,7 +177,7 @@ void RecorderControl::reap_() noexcept {
         if (!loan)
             return;
         last_verdict_ = loan->verdict;
-        if (!w_.diag || loan->verdict == RecVerdict::None)
+        if (!w_.diag || loan->verdict == capture::RecVerdict::None)
             continue;
         const char* remedy = rec_verdict_remedy(loan->verdict);
         w_.diag->appendf(
@@ -184,17 +194,17 @@ void RecorderControl::reap_() noexcept {
     }
 }
 
-void RecorderControl::tick() noexcept {
+void RecorderControl::serve() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
     reap_();
     if (!w_.status || !w_.diag)
         return;
-    RecorderStatus s{};
+    capture::RecorderStatus s{};
     if (!status_seen_.take_if_changed(*w_.status, s))
         return;
-    if (s.end != RecVerdict::None && s.gen != logged_end_) {
+    if (s.end != capture::RecVerdict::None && s.gen != logged_end_) {
         logged_end_ = s.gen;
-        RecWriteStatus ws{};
+        capture::RecWriteStatus ws{};
         if (w_.writer)
             (void)w_.writer->sample_into(ws);
         w_.diag->appendf(

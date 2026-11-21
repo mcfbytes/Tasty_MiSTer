@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+
+namespace mister::app {
+
+enum class SessionState : std::uint8_t {
+    Boot,
+    Running,
+    Failed,
+    kCount,
+};
+
+}

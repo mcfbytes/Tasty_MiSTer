@@ -8,6 +8,9 @@
 #include "infra/ascii.h"
 #include "infra/fixed_str.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "infra/xthread/telemetry.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -63,5 +66,7 @@ struct GameId {
         return out;
     }
 };
+
+using GameIdCell = xthread::Telemetry<GameId, SeatTag::Unbound>;
 
 }

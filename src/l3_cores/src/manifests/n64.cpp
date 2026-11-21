@@ -3,21 +3,22 @@
 
 #include <string_view>
 
-#include "cores/n64_core.h"
-#include "cores/n64_loader.h"
-#include "cores/n64_ram_save_order.h"
-#include "cores/n64_save_store.h"
+#include "cores/n64/n64_core.h"
+#include "cores/n64/n64_loader.h"
+#include "cores/n64dd/n64_ram_save_order.h"
+#include "cores/n64/n64_save_store.h"
+#include "infra/prelude.h"
 
 namespace mister::cores::manifests {
 
 using namespace std::chrono_literals;
 
 std::unique_ptr<Core> make_n64(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<N64Core>(p, g.services);
+    return std::make_unique<n64::N64Core>(p, g.services);
 }
 
 std::unique_ptr<ILoader> make_n64_loader(const LoaderContext& ctx) {
-    return std::make_unique<N64Loader>(
+    return std::make_unique<n64::N64Loader>(
         ctx.vfs,
         ctx.profile.name,
         ctx.turbo,
@@ -72,7 +73,7 @@ static_assert(
     "ONE declared window, the RDRAM view, and nothing feeds it audio"
 );
 static_assert(
-    kN64.analog_reshape.has_value() && kN64.analog_reshape.operator->() == &n64::kJoyEmu,
+    kN64.host.analog_reshape.has_value() && kN64.host.analog_reshape.operator->() == &n64::kJoyEmu,
     "the octagon is manifest data; L2 reaches it through this row alone"
 );
 static_assert(kN64Slots.size() == 4, "the shipping CONF_STR publishes four F items");

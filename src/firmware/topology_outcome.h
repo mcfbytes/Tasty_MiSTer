@@ -3,6 +3,7 @@
 
 #include "hal/thread_map.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "rt_setup.h"
 
 namespace mister::fw {

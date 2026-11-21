@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::fw {
 

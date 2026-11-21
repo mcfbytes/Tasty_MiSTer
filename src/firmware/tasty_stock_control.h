@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/process_name.h"
 

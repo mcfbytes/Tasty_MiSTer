@@ -15,15 +15,19 @@
 #include "app/bay_counts.h"
 #include "app/bay_releases.h"
 #include "app/types.h"
-#include "app/block_poll_route.h"
 #include "app/built_core.h"
 #include "app/core_terms.h"
 #include "app/lw_block_lend.h"
+#include "app/lw_host_enable.h"
+#include "app/lw_lend_set.h"
 #include "app/lw_osd.h"
+#include "app/lw_pad.h"
 #include "app/lw_sector.h"
 #include "app/lw_sys.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
+#include "app/pad_grant.h"
+#include "app/pad_route.h"
 #include "app/park_receipt.h"
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
@@ -33,21 +37,24 @@
 #include "cores/core_window_grant.h"
 #include "hal/doorbell_policy.h"
 #include "hal/doorbell_source.h"
+#include "hal/lw_presence.h"
 #include "hal/lw_sys_window.h"
 #include "hal/sys_directory.h"
 #include "hal/uio_doorbell_source.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/axi_lw_decl.h"
 #include "proto/build_generation.h"
 #include "proto/irq_binding.h"
-#include "proto/lane_block_decl.h"
+#include "proto/link/lane_block_decl.h"
 #include "proto/link_op.h"
-#include "proto/sys_directory_image.h"
-#include "svc/sector_program.h"
+#include "proto/link/sys_directory_image.h"
+#include "proto/session_terms.h"
+#include "svc/disc/sector_program.h"
 
 namespace mister::cores {
 struct CoreProfile;
@@ -66,9 +73,12 @@ public:
         std::span<const proto::IrqBinding> irqs{};
         std::span<const proto::AxiLwDecl> lw{};
 
+        hal::LwPresence lw_presence{};
+
         bool fabric = false;
         FabricGeneration fabric_gen{};
         proto::BlockSlotMask mount_slots{};
+        proto::SessionTerms terms{};
     };
 
     struct SectorCells {
@@ -90,6 +100,19 @@ public:
         infra::OptRef<xthread::WakeFlag> wake{};
     };
 
+    struct PadCells {
+        PadGrantCell& grant;
+        const PadLeaseCell& lease;
+        infra::OptRef<xthread::WakeFlag> wake{};
+    };
+
+    using SectorLend = LwBlockLend<LwSector, SectorCells>;
+    using OsdLend = LwBlockLend<LwOsd, OsdCells>;
+    using SysLend = LwBlockLend<LwSys, SysCells>;
+    using PadLend = LwBlockLend<LwPad, PadCells>;
+
+    using LwLends = LwLendSet<SectorLend, OsdLend, SysLend, PadLend>;
+
     struct Wiring {
         CoreBay& bay;
         const BayReleasesCell& releases;
@@ -97,6 +120,7 @@ public:
         std::optional<SectorCells> sectors{};
         std::optional<OsdCells> osds{};
         std::optional<SysCells> sys{};
+        std::optional<PadCells> pads{};
     };
 
     [[nodiscard]] static CoreBuilder on_board(Wiring wiring) noexcept;
@@ -111,6 +135,7 @@ public:
         bool manifest = false;
         std::span<const proto::IrqBinding> irqs{};
         std::span<const proto::AxiLwDecl> lw{};
+        hal::LwPresence lw_presence{};
         FabricGeneration fabric_gen{};
     };
 
@@ -151,27 +176,30 @@ public:
 
     struct Directory {
         hal::LwSysWindow win;
-        proto::SysDirectoryImage image;
+        proto::link::SysDirectoryImage image;
     };
 
     [[nodiscard]] static Ex<Directory> read_directory(
         hal::PhysRegion lw_window,
         std::span<std::uint32_t> lw_image,
-        const proto::AxiLwDecl& decl
+        const proto::AxiLwDecl& decl,
+        hal::LwPresence lw
     ) noexcept;
 
-    [[nodiscard]] static Ex<LwPads> grant_pads(
+    [[nodiscard]] static Ex<LwPad> grant_pads(
         const Directory& dir,
         const proto::AxiLwDecl& decl
     ) noexcept;
 
-    [[nodiscard]] const std::optional<proto::LaneBlockDecl>& lane() const noexcept { return lane_; }
+    [[nodiscard]] const std::optional<proto::link::LaneBlockDecl>& lane() const noexcept {
+        return lane_;
+    }
 
     [[nodiscard]] std::uint32_t directory_reads() const noexcept { return directory_reads_; }
 
     [[nodiscard]] static bool card_admitted(
         const cores::CoreProfile& profile,
-        const proto::SectorBlockDecl::Card& card,
+        const proto::link::SectorBlockDecl::Card& card,
         proto::SlotIndex block_slot
     ) noexcept;
     void count_lease_hold(bool long_hold) noexcept;
@@ -184,19 +212,11 @@ public:
     [[nodiscard]] static Ex<LwSector> grant_sector(
         const Directory& dir,
         const proto::AxiLwDecl& decl,
-        std::span<const proto::IrqBinding> irqs,
-        const svc::ISectorProgram& program,
+        const svc::disc::ISectorProgram& program,
         hal::IDoorbellSource& src,
-        const hal::DoorbellPolicy& policy
+        const hal::DoorbellPolicy& policy,
+        std::span<const proto::IrqBinding> taken = {}
     ) noexcept;
-
-    [[nodiscard]] static BlockPollRoute block_poll_route(
-        proto::BlockSlotMask declared,
-        proto::BlockSlotMask lw_slots
-    ) noexcept {
-        return !lw_slots.empty() && declared.minus(lw_slots).empty() ? BlockPollRoute::Retired
-                                                                     : BlockPollRoute::Link;
-    }
 
     [[nodiscard]] static proto::BlockSlotMask profile_slot_mask(
         const cores::CoreProfile& profile
@@ -204,11 +224,9 @@ public:
 
     [[nodiscard]] static bool fabric_route(std::string_view name, bool manifest) noexcept;
 
-    [[nodiscard]] LwBlockLend<LwSector, SectorCells>& sector() noexcept { return sector_; }
+    [[nodiscard]] SectorLend& sector() noexcept { return lends_.get<SectorLend>(); }
 
-    [[nodiscard]] const LwBlockLend<LwSector, SectorCells>& sector() const noexcept {
-        return sector_;
-    }
+    [[nodiscard]] const SectorLend& sector() const noexcept { return lends_.get<SectorLend>(); }
 
     [[nodiscard]] proto::BuildGeneration generation() const noexcept { return gen_; }
 
@@ -219,21 +237,34 @@ public:
         const proto::AxiLwDecl& decl
     ) noexcept;
 
-    [[nodiscard]] LwBlockLend<LwOsd, OsdCells>& osd() noexcept { return osd_; }
+    [[nodiscard]] OsdLend& osd() noexcept { return lends_.get<OsdLend>(); }
 
-    [[nodiscard]] const LwBlockLend<LwOsd, OsdCells>& osd() const noexcept { return osd_; }
+    [[nodiscard]] const OsdLend& osd() const noexcept { return lends_.get<OsdLend>(); }
 
     [[nodiscard]] static Ex<LwSys> grant_sys(
         const Directory& dir,
         const proto::AxiLwDecl& decl,
         hal::IDoorbellSource& src,
         const hal::DoorbellPolicy& policy,
-        std::span<const proto::IrqBinding> taken = {}
+        std::span<const proto::IrqBinding> taken = {},
+        std::optional<os::UioLine> held = {}
     ) noexcept;
 
-    [[nodiscard]] LwBlockLend<LwSys, SysCells>& sys() noexcept { return sys_; }
+    [[nodiscard]] SysLend& sys() noexcept { return lends_.get<SysLend>(); }
 
-    [[nodiscard]] const LwBlockLend<LwSys, SysCells>& sys() const noexcept { return sys_; }
+    [[nodiscard]] const SysLend& sys() const noexcept { return lends_.get<SysLend>(); }
+
+    [[nodiscard]] PadLend& pad() noexcept { return lends_.get<PadLend>(); }
+
+    [[nodiscard]] const PadLend& pad() const noexcept { return lends_.get<PadLend>(); }
+
+    [[nodiscard]] LwLends& lends() noexcept { return lends_; }
+
+    [[nodiscard]] const LwLends& lends() const noexcept { return lends_; }
+
+    [[nodiscard]] LwHostEnable& lw_enable() noexcept { return enable_; }
+
+    [[nodiscard]] const LwHostEnable& lw_enable() const noexcept { return enable_; }
 
     [[nodiscard]] std::uint32_t leased() const noexcept;
 
@@ -249,35 +280,49 @@ private:
     void drop_windows(const ParkReceipt& receipt) noexcept;
     void free_(proto::CoreBaySlot slot) noexcept;
     void publish_counts_() noexcept;
-    [[nodiscard]] Ex<Directory> directory_(const proto::AxiLwDecl& decl) noexcept;
+    [[nodiscard]] Ex<Directory> directory_(
+        const proto::AxiLwDecl& decl,
+        hal::LwPresence lw_presence
+    ) noexcept;
 
     struct DirHit {
         Directory dir;
         proto::AxiLwDecl decl;
+        std::span<const proto::AxiLwDecl> rest;
     };
 
     [[nodiscard]] std::optional<DirHit> next_directory_(
-        std::span<const proto::AxiLwDecl>& rest
+        std::span<const proto::AxiLwDecl> rest,
+        hal::LwPresence lw_presence
     ) noexcept;
-    [[nodiscard]] std::optional<proto::LaneBlockDecl> find_lane_(
-        std::span<const proto::AxiLwDecl> lw
+    [[nodiscard]] std::optional<proto::link::LaneBlockDecl> find_lane_(
+        std::span<const proto::AxiLwDecl> lw,
+        hal::LwPresence lw_presence
     ) noexcept;
 
-    [[nodiscard]] std::optional<LwPads> grant_pads_(std::span<const proto::AxiLwDecl> lw) noexcept;
+    void grant_pad_(
+        std::span<const proto::AxiLwDecl> lw,
+        const cores::CoreProfile& profile,
+        const proto::SessionTerms& terms,
+        FabricGeneration fabric_gen,
+        proto::BuildGeneration gen,
+        hal::LwPresence lw_presence
+    ) noexcept;
 
     void grant_sector_(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
         const cores::CoreProfile& profile,
-        FabricGeneration fabric_gen
+        FabricGeneration fabric_gen,
+        hal::LwPresence lw_presence
     ) noexcept;
 
-    [[nodiscard]] std::array<LwSector::Card, proto::SectorBlockDecl::kCards> grant_cards_(
-        const proto::SectorBlockDecl& block,
+    [[nodiscard]] std::array<LwSector::Card, proto::link::SectorBlockDecl::kCards> grant_cards_(
+        const proto::link::SectorBlockDecl& block,
         const cores::CoreProfile& profile
     ) noexcept;
     [[nodiscard]] Ex<hal::ApertureRegion> card_region_(
-        const proto::SectorBlockDecl::Card& card
+        const proto::link::SectorBlockDecl::Card& card
     ) const noexcept;
 
     void drop_unbuilt_sector_() noexcept;
@@ -286,14 +331,20 @@ private:
         std::span<const proto::AxiLwDecl> lw,
         const cores::CoreProfile& profile,
         FabricGeneration fabric_gen,
-        proto::BuildGeneration gen
+        proto::BuildGeneration gen,
+        hal::LwPresence lw_presence
     ) noexcept;
     void grant_sys_(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
         FabricGeneration fabric_gen,
-        proto::BuildGeneration gen
+        proto::BuildGeneration gen,
+        hal::LwPresence lw_presence
     ) noexcept;
+
+    void attach_enable_header_(const Directory& dir) noexcept;
+
+    void derive_enable_served_() noexcept;
 
     static constexpr std::size_t kNodeNameCap = 48;
 
@@ -312,9 +363,8 @@ private:
     proto::BuildGeneration gen_{};
     bool claimed_ = false;
 
-    LwBlockLend<LwSector, SectorCells> sector_;
-    LwBlockLend<LwOsd, OsdCells> osd_;
-    LwBlockLend<LwSys, SysCells> sys_;
+    LwLends lends_;
+
     std::uint32_t directory_reads_ = 0;
 
     struct DirReads {
@@ -328,10 +378,13 @@ private:
     };
 
     DirReads dir_reads_{};
-    std::optional<proto::LaneBlockDecl> lane_{};
+    std::optional<proto::link::LaneBlockDecl> lane_{};
 
     BayCounts counts_{};
     BayCountsCell counts_cell_{};
+
+    std::optional<hal::RegisterWindow<hal::SysDirectory>> enable_header_{};
+    LwHostEnable enable_;
 };
 
 }

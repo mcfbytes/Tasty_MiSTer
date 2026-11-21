@@ -4,10 +4,11 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "hal/types.h"
-#include "infra/grant_gen.h"
+#include "hal/sector_block.h"
+#include "infra/cell_gen.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/build_generation.h"
 #include "proto/types.h"
 
@@ -19,17 +20,12 @@ struct SectorRoute {
     std::uint32_t resends = 0;
     std::uint32_t corrupted = 0;
     std::uint32_t begin_lost = 0;
-    std::uint32_t drops = 0;
+    hal::SectorBlock::Drops drops{};
     std::uint32_t spurious = 0;
     std::uint32_t revoked = 0;
     std::uint32_t read_ahead = 0;
     std::uint32_t lat_max_us = 0;
     std::uint32_t bind_refusals = 0;
-
-    hal::EventCount8 fab_rejected{};
-    hal::EventCount8 fab_skipped{};
-    hal::EventCount8 fab_aborted{};
-    hal::EventCount8 fab_reset_fills{};
 
     proto::BlockSlotMask cards_on_lw{};
     std::uint32_t card_reads = 0;
@@ -46,6 +42,6 @@ struct SectorRoute {
 static_assert(std::is_trivially_copyable_v<SectorRoute>);
 using SectorRouteCell = xthread::Telemetry<SectorRoute, SeatTag::Io>;
 
-using SectorLeaseCell = xthread::Telemetry<xthread::GrantGen, SeatTag::Io>;
+using SectorLeaseCell = xthread::Telemetry<infra::CellGen, SeatTag::Io>;
 
 }

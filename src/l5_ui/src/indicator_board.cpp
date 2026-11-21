@@ -35,7 +35,7 @@ bool IndicatorBoard::lower(app::IndicatorId id) noexcept {
         refusals_.add();
         return false;
     }
-    if (!active_.has(id))
+    if (!active_.contains(id))
         return true;
     slots_[infra::ordinal(id)] = Slot{};
     active_ = active_.without(id);
@@ -44,12 +44,15 @@ bool IndicatorBoard::lower(app::IndicatorId id) noexcept {
     return true;
 }
 
-bool IndicatorBoard::round(std::chrono::nanoseconds now, app::IndicatorSet shown) noexcept {
+bool IndicatorBoard::round(
+    os::RawMonotonicClock::time_point now,
+    app::IndicatorSet shown
+) noexcept {
     TASTY_SEAT_BODY(IndicatorBoard);
     bool changed = dirty_;
     dirty_ = false;
     for (const IndicatorRow& row : rows_) {
-        if (!active_.has(row.id))
+        if (!active_.contains(row.id))
             continue;
         Slot& slot = slots_[infra::ordinal(row.id)];
         if (row.kind == IndicatorKind::Overlay) {
@@ -61,7 +64,7 @@ bool IndicatorBoard::round(std::chrono::nanoseconds now, app::IndicatorSet shown
             }
             continue;
         }
-        if (shown.has(row.id) && !slot.shown_at)
+        if (shown.contains(row.id) && !slot.shown_at)
             slot.shown_at = now;
         if (slot.shown_at)
             shown_ = shown_.with(row.id);
@@ -95,7 +98,7 @@ proto::OsdTarget IndicatorBoard::target() const noexcept {
     app::PerIndicator<proto::OsdTarget> targets{};
     std::size_t n = 0;
     for (const IndicatorRow& row : rows_) {
-        if (active_.has(row.id))
+        if (active_.contains(row.id))
             targets[n++] = row.targets;
     }
     return indicator_target(std::span<const proto::OsdTarget>{targets}.first(n));
@@ -104,7 +107,7 @@ proto::OsdTarget IndicatorBoard::target() const noexcept {
 app::InfoAnchor IndicatorBoard::anchor() const noexcept {
     TASTY_SEAT_BODY(IndicatorBoard);
     for (const IndicatorRow& row : rows_) {
-        if (active_.has(row.id))
+        if (active_.contains(row.id))
             return row.anchor;
     }
     return app::InfoAnchor::InfoOrigin;
@@ -114,7 +117,7 @@ void IndicatorBoard::compose_() noexcept {
     next_line_ = proto::OsdRow{};
     text_.clear();
     for (const IndicatorRow& row : rows_) {
-        if (!active_.has(row.id))
+        if (!active_.contains(row.id))
             continue;
         IndicatorCanvas& line = lines_[next_line_];
         line = row.kind == IndicatorKind::Toast ? IndicatorCanvas{row.text}.with_icon(row.icon)

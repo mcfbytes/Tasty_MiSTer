@@ -2,6 +2,7 @@
 #include "app/rbf_resolve.h"
 
 #include "infra/ascii.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 
 namespace mister::app {

@@ -11,16 +11,19 @@
 #include "cores/core_support.h"
 #include "cores/loader.h"
 #include "cores/loader_context.h"
-#include "cores/n64_analog.h"
-#include "cores/n64_core.h"
+#include "cores/n64/n64_analog.h"
+#include "cores/n64/n64_core.h"
+#include "cores/n64/n64_load_map.h"
+#include "infra/prelude.h"
 
 namespace mister::cores::manifests {
 
 extern const CoreProfile kN64;
 
-inline constexpr std::uint32_t kRomLoadAddr = 0x3200'0000;
-inline constexpr std::uint32_t kDdDiskLoadAddr = 0x3600'0000;
-inline constexpr std::uint32_t kDdIplLoadAddr = 0x30C0'0000;
+using n64::kRomLoadAddr;
+using n64::kDdDiskLoadAddr;
+using n64::kDdIplLoadAddr;
+using n64::kN64Windows;
 
 inline constexpr auto kN64StartAssets = std::to_array<BootAsset>({
     {.name = "boot0.rom", .where = kCoreHomeDir, .subdir = "N64", .dest = WideIoIndex{0x00}},
@@ -30,14 +33,12 @@ inline constexpr auto kN64StartAssets = std::to_array<BootAsset>({
 });
 
 inline constexpr auto kN64Slots = std::to_array<FileSlot>({
-    {.index = N64Core::kRomIndex, .extensions = "N64z64n64v64", .label = "Load"},
-    {.index = N64Core::kDdDiskIndex, .extensions = "NDDndd", .label = "Load 64DD Disk"},
-    {.index = N64Core::kDdIplIndex, .extensions = "N64z64n64v64binrom", .label = "Load 64DD IPL"},
-    {.index = N64Core::kGbIndex, .extensions = "GBCGB ", .label = "Load GB-Transfer"},
-});
-
-inline constexpr auto kN64Windows = std::to_array<CoreWindowDecl>({
-    {.region = {0x1000'0000u, 0x0080'0000u, "n64-rdram"}, .feeds_pcm = false},
+    {.index = n64::N64Core::kRomIndex, .extensions = "N64z64n64v64", .label = "Load"},
+    {.index = n64::N64Core::kDdDiskIndex, .extensions = "NDDndd", .label = "Load 64DD Disk"},
+    {.index = n64::N64Core::kDdIplIndex,
+     .extensions = "N64z64n64v64binrom",
+     .label = "Load 64DD IPL"},
+    {.index = n64::N64Core::kGbIndex, .extensions = "GBCGB ", .label = "Load GB-Transfer"},
 });
 
 inline constexpr auto kN64Services = std::to_array<LinkDecoderDecl>({
@@ -62,13 +63,15 @@ inline constexpr CoreProfile kN64{
     .signatures = {},
     .saves_by_channel = true,
 
-    .analog_reshape = infra::OptRef<const svc::IAnalogReshape>{n64::kJoyEmu},
-
     .windows = kN64Windows,
 
     .reset = {.toggle_reacts = true},
 
-    .host = {.pause = PauseOnOsd::Always},
+    .host = {
+        .pause = PauseOnOsd::Always,
+
+        .analog_reshape = infra::OptRef<const svc::input::IAnalogReshape>{n64::kJoyEmu}
+    },
 };
 
 std::unique_ptr<Core> make_n64(const CoreProfile& p, const CoreGrant& g);

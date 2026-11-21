@@ -4,6 +4,7 @@
 #include "hal/fpga_memory.h"
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 #include <cstdint>
 #include <cstring>
@@ -12,12 +13,13 @@ namespace mister::hal {
 
 Ex<ScalerBuffers> ScalerBuffers::map(
     const FpgaAperture& aperture,
+    const ApertureNodeDecl& node,
     const ApertureRegion& scaler_out
 ) {
     const auto span = span_of(aperture, scaler_out);
     if (!span)
         return std::unexpected(span.error());
-    auto m = FpgaMemory::map_aperture(*span, os::MmioRegion::Access::ReadOnly);
+    auto m = FpgaMemory::map_aperture(node, *span, os::MmioRegion::Access::ReadOnly);
     if (!m)
         return std::unexpected(m.error());
     return ScalerBuffers{std::move(*m)};

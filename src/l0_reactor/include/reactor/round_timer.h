@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "reactor/round_lifecycle.h"
 #include "reactor/round_recorder.h"

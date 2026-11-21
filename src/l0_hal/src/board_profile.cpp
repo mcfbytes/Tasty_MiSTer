@@ -5,6 +5,7 @@
 #include <span>
 
 #include "hal/boards_table.h"
+#include "infra/prelude.h"
 #include "os/small_file.h"
 
 namespace mister::hal {

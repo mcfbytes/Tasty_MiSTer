@@ -6,14 +6,14 @@
 namespace mister::ui {
 
 void SdramLatch::on_mask(
-    HdMask m,
+    proto::OsdMask m,
     bool front_end,
     infra::OptRef<app::UiRequestRing> asks
 ) noexcept {
     TASTY_SEAT_BODY(SdramLatch);
 
-    if (front_end && !cfg_.has_value() && m.osd_word().has(proto::kSdramPresent)) {
-        cfg_ = m.osd_word();
+    if (front_end && !cfg_.has_value() && m.intersects(proto::kSdramPresent)) {
+        cfg_ = m;
     }
 
     if (front_end && cfg_.has_value() && !reported_) {

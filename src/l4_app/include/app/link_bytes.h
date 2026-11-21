@@ -7,9 +7,11 @@
 #include <cstring>
 #include <span>
 
-#include "app/ring_slab.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
+#include "infra/xthread/ring_slab.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -82,7 +84,7 @@ public:
     }
 
 private:
-    RingSlab<Body, kPool, Producer, Consumer> slab_;
+    xthread::RingSlab<Body, proto::SlotIndex, kPool, Producer, Consumer> slab_;
 };
 
 }

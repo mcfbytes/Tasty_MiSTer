@@ -3,6 +3,8 @@
 
 #include <utility>
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 CoreWindow::CoreWindow(hal::FpgaMemory window) noexcept : window_(std::move(window)) {}

@@ -10,8 +10,9 @@
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "proto/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "infra/opt_ref.h"
 
 namespace mister::app {

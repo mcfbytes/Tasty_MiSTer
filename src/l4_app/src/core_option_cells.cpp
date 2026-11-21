@@ -2,6 +2,8 @@
 #include "app/core_option_cells.h"
 
 #include "app/interned_file.h"
+#include "infra/indexed_array.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
@@ -39,7 +41,7 @@ void CoreOptionCells::answer_save_ask_(
                 return answer_no_bytes_(host, kind, proto::SaveStatus::Refused, tag);
             if (!sw->dips_dirty())
                 return answer_no_bytes_(host, kind, proto::SaveStatus::Nothing, tag);
-            rel = config_rel("config/dips/", sw->dip_file_name());
+            rel = config_rel("dips/", sw->dip_file_name());
             dips = sw->dip_bytes();
             payload = std::as_bytes(std::span<const std::uint8_t>(dips));
             break;
@@ -193,11 +195,11 @@ void CoreOptionCells::publish_dip_labels(
     if (sw) {
         const std::size_t cap = std::size(dip_labels_scratch_.rows);
         const std::size_t n = sw->dip_count() < cap ? sw->dip_count() : cap;
-        dip_labels_scratch_.count = proto::DipRowCount::of(n);
+        dip_labels_scratch_.count = proto::DipRowCount::truncating(n);
         for (std::size_t i = 0; i < n; ++i) {
-            const auto at = proto::DipRowIndex::of(i);
+            const auto at = proto::DipRowIndex::truncating(i);
             const cores::DipRowView rv = sw->dip_row(at);
-            DipLabels::Row& row = at.pick(dip_labels_scratch_.rows);
+            DipLabels::Row& row = infra::at_index(dip_labels_scratch_.rows, at);
             (void)row.name.assign(rv.name);
             row.choices = rv.choices.capped_to(row.ids);
             row.choices.each([&](proto::DipChoice m) {
@@ -219,9 +221,9 @@ void CoreOptionCells::publish_dip_choices(infra::OptRef<cores::Core> core) noexc
         const std::size_t cap = std::size(dip_choices_scratch_.current);
         const std::size_t n = sw->dip_count() < cap ? sw->dip_count() : cap;
         for (std::size_t i = 0; i < n; ++i) {
-            const auto at = proto::DipRowIndex::of(i);
+            const auto at = proto::DipRowIndex::truncating(i);
             const cores::DipRowView rv = sw->dip_row(at);
-            at.pick(dip_choices_scratch_.current) = rv.current.within(rv.choices)
+            infra::at_index(dip_choices_scratch_.current, at) = rv.current.within(rv.choices)
                 ? rv.current
                 : proto::DipChoice{};
         }

@@ -13,11 +13,14 @@
 #include "app/name_config.h"
 #include "app/path_text.h"
 #include "app/types.h"
-#include "infra/diag_log.h"
+#include "infra/xthread/coworker.h"
+#include "infra/xthread/diag_log.h"
+#include "infra/byte_count.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "os/clock.h"
 #include "svc/vfs.h"
 
@@ -66,7 +69,7 @@ struct MglPumpStats {
 
 using MglPumpCell = xthread::Telemetry<MglPumpStats, SeatTag::Ui>;
 
-class MglPump {
+class MglPump : public xthread::ICoworker {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -89,7 +92,7 @@ public:
 
     [[nodiscard]] bool take_parsed(const Mgl& doc) noexcept;
 
-    void tick();
+    void serve() noexcept override;
 
     void on_core_loaded(CorrelationTag tag, bool mgl_capable);
     void on_session_over(CorrelationTag tag);
@@ -183,7 +186,7 @@ private:
     FixedStr<kPathMax, StrFit::Clip> want_{};
     FixedStr<kPathMax, StrFit::Clip> rbf_{};
 
-    std::uint32_t doc_len_ = 0;
+    infra::ByteCount doc_len_{};
     char doc_[kMglDocMax]{};
 
     std::optional<Mgl> latched_doc_{};

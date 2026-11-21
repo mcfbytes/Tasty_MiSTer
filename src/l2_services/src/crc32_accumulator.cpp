@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/crc32_accumulator.h"
 
+#include "infra/prelude.h"
+
 namespace mister::svc {
 
 template <class Owner>

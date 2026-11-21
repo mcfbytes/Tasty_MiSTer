@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/indexed_array.h"
+#include "infra/prelude.h"
 #include "ps2_scancodes.h"
 
 namespace mister::proto {

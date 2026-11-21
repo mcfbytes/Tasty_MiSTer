@@ -6,7 +6,7 @@
 #include <optional>
 #include <string_view>
 
-#include "app/rec_control.h"
+#include "app/capture/rec_control.h"
 #include "app/types.h"
 #include "proto/types.h"
 #include "proto/types.h"
@@ -65,14 +65,14 @@ struct CmdVerb {
 
     struct RecStart {
         std::string_view path;
-        RecMode mode = RecMode::Avi;
-        RecOptions opt{};
+        capture::RecMode mode = capture::RecMode::Avi;
+        capture::RecOptions opt{};
     };
 
     struct RecArm {
         std::string_view path;
-        RecMode mode = RecMode::Avi;
-        RecOptions opt{};
+        capture::RecMode mode = capture::RecMode::Avi;
+        capture::RecOptions opt{};
     };
 
     struct RecStop {};

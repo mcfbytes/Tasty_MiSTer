@@ -7,6 +7,7 @@
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
+#include "infra/prelude.h"
 #include "os/kernel_tid.h"
 #include "os/types.h"
 

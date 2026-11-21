@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <utility>
 
-#include "infra/claim_set.h"
+#include "infra/xthread/claim_set.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "hal/block_view.h"
 #include "hal/gpi_block.h"
@@ -16,7 +17,7 @@ namespace mister::hal {
 
 enum class MailboxId : std::uint8_t { SpiMaster };
 inline constexpr std::size_t kMailboxCount = 1;
-using MailboxClaims = infra::ClaimSet<MailboxId, kMailboxCount>;
+using MailboxClaims = xthread::ClaimSet<MailboxId, kMailboxCount>;
 
 struct MailboxRegs {
     BlockView<GpoBlock> gpo;

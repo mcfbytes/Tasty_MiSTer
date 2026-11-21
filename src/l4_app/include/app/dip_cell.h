@@ -5,6 +5,7 @@
 
 #include "app/dip_choices.h"
 #include "app/dip_labels.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
@@ -18,11 +19,11 @@ public:
     DipChoices choices{};
 
     [[nodiscard]] constexpr const DipLabels::Row& row(proto::DipRowIndex at) const noexcept {
-        return at.pick(labels.rows);
+        return infra::at_index(labels.rows, at);
     }
 
     [[nodiscard]] constexpr proto::DipChoice current(proto::DipRowIndex at) const noexcept {
-        return at.pick(choices.current);
+        return infra::at_index(choices.current, at);
     }
 };
 

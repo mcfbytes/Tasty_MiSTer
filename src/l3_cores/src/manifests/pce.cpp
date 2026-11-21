@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/pcecd_ladder.h"
+#include "cores/cd/pcecd_ladder.h"
 #include "cores/manifests/pce.h"
 
 #include "cores/manifests/megacd.h"
@@ -29,7 +29,7 @@ static_assert(
 static_assert(kPceCdIoIndices.data == kMegaCdIoIndices.data, "req: the data index is the shared 2");
 
 static_assert(
-    std::holds_alternative<CdProfile::PceScsiFacts>(kPceCdProfile.row),
+    std::holds_alternative<cd::CdProfile::PceScsiFacts>(kPceCdProfile.row),
     "req: PCE-CD speaks SCSI sub-opcodes over UIO_CD_GET"
 );
 
@@ -53,19 +53,19 @@ static_assert(
     "caller must BE the service row's own period"
 );
 
-static_assert(kPceCdTicks.speeds == CdSpeedCount{}, "PCE-CD engages no speed-indexed override");
+static_assert(kPceCdTicks.speeds == cd::CdSpeedCount{}, "PCE-CD engages no speed-indexed override");
 
 static_assert(
-    kPceCdCuePolicy.type_detect == svc::CuePolicy::TypeDetect::PerTrack,
+    kPceCdCuePolicy.type_detect == svc::disc::CuePolicy::TypeDetect::PerTrack,
     "pcecdd.cpp:154-183: every track's type line is read"
 );
 static_assert(
-    kPceCdCuePolicy.offset_op == svc::CuePolicy::OffsetOp::Assign,
+    kPceCdCuePolicy.offset_op == svc::disc::CuePolicy::OffsetOp::Assign,
     "pcecdd.cpp:216,227: offset ASSIGNED against the track's real "
     "sector size (MegaCD accumulates a hardcoded 2352)"
 );
 static_assert(
-    kPceCdCuePolicy.sub_naming == svc::CuePolicy::SubNaming::ImageFilename,
+    kPceCdCuePolicy.sub_naming == svc::disc::CuePolicy::SubNaming::ImageFilename,
     "pcecdd.cpp:283-295: <image>.sub, outside the Toc — a "
     "user-visible on-disk contract MegaCD disagrees with"
 );
@@ -73,17 +73,17 @@ static_assert(kPceCdCuePolicy.wav_header_skip, "pcecdd.cpp:129: the .wav sniff s
 static_assert(!kPceCdCuePolicy.sniff_sega_disc_system, "req is MegaCD-only; PCE-CD never sniffs");
 
 static_assert(
-    std::get<CdProfile::PceScsiFacts>(kPceCdProfile.row).seek_fast_paths.size() == 2,
+    std::get<cd::CdProfile::PceScsiFacts>(kPceCdProfile.row).seek_fast_paths.size() == 2,
     "req: exactly the two per-title fast paths"
 );
 static_assert(
     kPceCdSeekFastPaths[0].count == SectorCount{120}
-        && kPceCdSeekFastPaths[0].latency_ticks == PollTicks{},
+        && kPceCdSeekFastPaths[0].latency_ticks == cd::PollTicks{},
     "pcecdd.cpp:657-661: HuVideo cnt==120 -> latency 0"
 );
 static_assert(
     kPceCdSeekFastPaths[1].count == SectorCount{252}
-        && kPceCdSeekFastPaths[1].latency_ticks == PollTicks{5},
+        && kPceCdSeekFastPaths[1].latency_ticks == cd::PollTicks{5},
     "pcecdd.cpp:663-667: Sherlock Holmes cnt==252 -> latency 5"
 );
 
@@ -133,8 +133,8 @@ static_assert(
 );
 
 static_assert(
-    kPceCdServices[0].impl == &kCdCommandEdge<kPceCd>
-        && kPceCdServices[1].impl == &kCdServiceTick<kPceCd>,
+    kPceCdServices[0].impl == &cd::kCdCommandEdge<kPceCd>
+        && kPceCdServices[1].impl == &cd::kCdServiceTick<kPceCd>,
     "the two rows are the SHARED CD obligations keyed to this "
     "profile, never a per-manifest ILinkDecoder copy"
 );
@@ -146,11 +146,11 @@ static_assert(
 );
 
 std::unique_ptr<Core> make_pcecd(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<CdCore>(p, kPceCdProfile, g.services);
+    return std::make_unique<cd::CdCore>(p, kPceCdProfile, g.services);
 }
 
 std::unique_ptr<BootLadder> make_pcecd_ladder(const CoreProfile& p, const LadderContext& ctx) {
-    return std::make_unique<PceCdLadder>(p, ctx);
+    return std::make_unique<cd::PceCdLadder>(p, ctx);
 }
 
 static_assert(start_mount_of(kPceCdSlots, IoIndex{0}) == StartMount::AsPick);

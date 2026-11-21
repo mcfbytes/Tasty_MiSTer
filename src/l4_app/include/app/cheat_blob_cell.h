@@ -8,8 +8,9 @@
 
 #include "cores/cheat_geometry.h"
 #include "cores/cheat_unit.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 
 namespace mister::app {
 

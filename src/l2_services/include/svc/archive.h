@@ -11,6 +11,7 @@
 #include <string>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/file.h"
 #include "svc/types.h"

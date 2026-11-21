@@ -4,8 +4,8 @@
 #include <cstddef>
 
 #include "infra/seat.h"
-#include "os/ssid.h"
-#include "os/wifi_security.h"
+#include "os/connect/ssid.h"
+#include "os/connect/wifi_security.h"
 #include "ui/connect_slot_plan.h"
 
 namespace mister::ui {
@@ -22,13 +22,13 @@ public:
     ConnectDemand connect_demand() const override;
 
     bool slot_shown(SlotId slot) const override;
-    app::PageDescription::Row slot_describe(SlotId slot) const override;
+    app::hd::PageDescription::Row slot_describe(SlotId slot) const override;
     Transition slot_select(SlotId slot) override;
     Transition slot_entered(SlotId slot, const TextEntryResult& result) override;
 
 private:
-    os::Ssid asked_ssid_{};
-    os::WifiSecurity asked_security_ = os::WifiSecurity::Psk;
+    os::connect::Ssid asked_ssid_{};
+    os::connect::WifiSecurity asked_security_ = os::connect::WifiSecurity::Psk;
 };
 
 }

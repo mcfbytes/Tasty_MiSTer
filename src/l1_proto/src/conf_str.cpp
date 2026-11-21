@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/conf_str.h"
+#include "infra/prelude.h"
 #include "conf_str_detail.h"
 
 #include <optional>

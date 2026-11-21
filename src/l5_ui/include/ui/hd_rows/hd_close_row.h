@@ -3,26 +3,26 @@
 
 #include <string_view>
 
-#include "app/page_description.h"
-#include "app/tier_set.h"
+#include "app/hd/page_description.h"
+#include "app/hd/tier_set.h"
 #include "infra/seat.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 
 namespace mister::ui {
 
-class HdCloseRow final : public IHdRow {
+class HdCloseRow final : public IRow {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
     struct Spec {
         std::string_view label;
-        app::RowTier tier = app::RowTier::Place;
+        app::hd::RowTier tier = app::hd::RowTier::Place;
     };
 
     explicit HdCloseRow(const Spec& spec) noexcept : spec_(spec) {}
 
-    app::PageDescription::Row describe() const override;
-    Transition select() override;
+    app::hd::PageDescription::Row describe(const RowCx&) const override;
+    Transition select(const RowCx&) override;
 
 private:
     Spec spec_;

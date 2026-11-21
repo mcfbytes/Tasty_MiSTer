@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <span>
 
+#include "infra/prelude.h"
 #include "os/small_file.h"
 
 namespace mister::os {

@@ -42,7 +42,7 @@ struct SaveSlotRule {
         BlockSize block_size,
         BlockCount blocks
     ) const noexcept {
-        const std::uint32_t sz = block_size.request_bytes(blocks);
+        const std::uint32_t sz = block_size.window_bytes(blocks);
         if (deferred_create) {
             if (lba != Lba{})
                 return Plan{};

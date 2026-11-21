@@ -14,16 +14,17 @@
 #include "app/ini_cell.h"
 #include "app/info_decoder.h"
 #include "app/core_input_binding.h"
-#include "app/joymap_ends.h"
-#include "app/key_focus.h"
+#include "app/input/joymap_ends.h"
+#include "app/input/key_focus.h"
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
-#include "app/raw_key_edge.h"
+#include "app/input/raw_key_edge.h"
 #include "app/save_director_status.h"
 #include "app/ui_page_record.h"
 #include "app/ui_pass_work.h"
 #include "app/ui_round_port.h"
 #include "os/clock.h"
+#include "infra/prelude.h"
 #include "proto/link_event.h"
 #include "ui/autosave_clock.h"
 #include "ui/browser_launch.h"
@@ -40,12 +41,19 @@
 #include "ui/script_launch.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 
 namespace mister::app {
-class HdOsdScreen;
-class UiWriteLane;
 class VideoPump;
 class HpsFramebuffer;
+}
+
+namespace mister::app::hd {
+class HdOsdScreen;
+}
+
+namespace mister::app::recents {
+class UiWriteLane;
 }
 
 namespace mister::ui {
@@ -68,9 +76,9 @@ public:
 
         const app::IniCell& ini;
 
-        infra::OptRef<app::HdOsdScreen> hd{};
+        infra::OptRef<app::hd::HdOsdScreen> hd{};
 
-        infra::OptRef<app::UiWriteLane> writes{};
+        infra::OptRef<app::recents::UiWriteLane> writes{};
 
         infra::OptRef<const app::VideoPump> video{};
         infra::OptRef<const app::HpsFramebuffer> fb{};
@@ -82,9 +90,9 @@ public:
     };
 
     struct InputEnds {
-        app::KeyFocusCell& key_focus;
+        app::input::KeyFocusCell& key_focus;
         const app::CoreInputBinding& binding;
-        infra::OptRef<const app::JoyMapEnds> joymap{};
+        infra::OptRef<const app::input::JoyMapEnds> joymap{};
     };
 
     UiRound(
@@ -161,7 +169,7 @@ public:
     bool on(const proto::LinkEvent::OsdMask& m) noexcept;
     bool on(const proto::LinkEvent::PolledWord& w);
 
-    void on(const app::RawKeyEdge& edge) noexcept override;
+    void on(const app::input::RawKeyEdge& edge) noexcept override;
     bool misrouted(const proto::LinkEvent& m) noexcept;
 
     std::uint32_t link_event_misrouted() const noexcept { return link_event_misrouted_; }
@@ -226,9 +234,9 @@ private:
     void publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show);
     void publish_page_record();
 
-    [[nodiscard]] bool host_board_(std::chrono::nanoseconds now);
+    [[nodiscard]] bool host_board_(os::RawMonotonicClock::time_point now);
 
-    void tick_autosave_(std::chrono::nanoseconds now);
+    void tick_autosave_(os::RawMonotonicClock::time_point now);
 
     [[nodiscard]] std::optional<app::InfoPlane> info_plane_() const noexcept;
 
@@ -248,7 +256,7 @@ private:
 
         bool press_edge(
             bool level,
-            std::chrono::nanoseconds now,
+            os::RawMonotonicClock::time_point now,
             std::chrono::milliseconds hold
         ) noexcept {
             if (!level || last_)
@@ -258,7 +266,7 @@ private:
             return true;
         }
 
-        bool long_ready(bool level, std::chrono::nanoseconds now) noexcept {
+        bool long_ready(bool level, os::RawMonotonicClock::time_point now) noexcept {
             if (!level || consumed_ || now < long_at_)
                 return false;
             consumed_ = true;
@@ -267,7 +275,7 @@ private:
 
         [[nodiscard]] std::optional<std::chrono::nanoseconds> release_hold(
             bool level,
-            std::chrono::nanoseconds now
+            os::RawMonotonicClock::time_point now
         ) const noexcept {
             if (level || !last_)
                 return std::nullopt;
@@ -285,9 +293,9 @@ private:
     private:
         bool last_ = false;
         bool consumed_ = false;
-        std::chrono::nanoseconds long_at_{};
+        os::RawMonotonicClock::time_point long_at_{};
 
-        std::chrono::nanoseconds pressed_at_{};
+        os::RawMonotonicClock::time_point pressed_at_{};
     };
 
     ButtonMachine osd_btn_{};
@@ -301,7 +309,7 @@ private:
     std::uint32_t button_classic_opens_ = 0;
     std::uint32_t button_injects_ = 0;
 
-    svc::Tally button_actions_{};
+    infra::Tally button_actions_{};
     std::uint32_t bt_route_refusals_ = 0;
     std::uint32_t user_resets_asked_ = 0;
     std::uint32_t user_reset_refusals_ = 0;
@@ -316,10 +324,10 @@ private:
     ConfirmLaunch confirm_launch_{};
     TextEntryLaunch entry_launch_{};
     PageContext& ctx_;
-    app::KeyFocusCell& key_focus_;
+    app::input::KeyFocusCell& key_focus_;
     const app::CoreInputBinding& binding_;
 
-    infra::OptRef<app::HdOsdScreen> hd_{};
+    infra::OptRef<app::hd::HdOsdScreen> hd_{};
 
     infra::OptRef<const app::VideoPump> video_{};
     infra::OptRef<const app::HpsFramebuffer> fb_{};
@@ -335,18 +343,18 @@ private:
     IHostSampler& sampler_;
     IOsdVisibleFile& osd_file_;
     app::InfoDecoder info_;
-    infra::OptRef<app::UiWriteLane> writes_;
+    infra::OptRef<app::recents::UiWriteLane> writes_;
 
     const app::IdleKnobsCell& idle_;
     const app::IniCell& ini_;
 
     std::string ini_label_{};
-    std::uint32_t ini_label_gen_ = 0;
+    infra::CellGen ini_label_gen_{};
     std::uint32_t samples_ = 0;
     proto::LinkOp::OsdShow last_show_ = proto::LinkOp::OsdShow::Off;
     proto::OsdTarget last_target_ = proto::OsdTarget::All;
 
-    app::KeyFocus last_focus_ = app::KeyFocus::Core;
+    app::input::KeyFocus last_focus_ = app::input::KeyFocus::Core;
     bool vis_unlatched_ = false;
     std::uint32_t ticks_ = 0;
     std::uint32_t pumps_ = 0;

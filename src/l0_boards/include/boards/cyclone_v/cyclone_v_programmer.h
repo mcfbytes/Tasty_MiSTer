@@ -18,7 +18,9 @@
 #include "os/mmio_region.h"
 #include "hal/phys_region.h"
 #include "hal/reg_access.h"
+#include "hal/reg_field.h"
 #include "hal/register_window.h"
+#include "infra/prelude.h"
 #include "hal/taken_window.h"
 #include "os/types.h"
 #include "infra/seat.h"
@@ -28,6 +30,12 @@ namespace mister::boards::cyclone_v {
 struct FpgaCtrl {
     std::uint32_t v = 0;
 
+    [[nodiscard]] static constexpr FpgaCtrl of(hal::RegWord w) noexcept {
+        return FpgaCtrl{w.bits()};
+    }
+
+    [[nodiscard]] constexpr hal::RegWord register_word() const noexcept { return hal::RegWord{v}; }
+
     [[nodiscard]] constexpr FpgaCtrl with(FpgaCtrl bits) const noexcept {
         return FpgaCtrl{v | bits.v};
     }
@@ -36,7 +44,7 @@ struct FpgaCtrl {
         return FpgaCtrl{v & ~bits.v};
     }
 
-    [[nodiscard]] constexpr bool has(FpgaCtrl bits) const noexcept {
+    [[nodiscard]] constexpr bool contains(FpgaCtrl bits) const noexcept {
         return (v & bits.v) == bits.v;
     }
 
@@ -49,8 +57,7 @@ inline constexpr FpgaCtrl kCtrlAxiCfgEn{0x100u};
 inline constexpr FpgaCtrl kCtrlNConfigPull{0x004u};
 inline constexpr FpgaCtrl kCtrlNce{0x002u};
 inline constexpr FpgaCtrl kCtrlEn{0x001u};
-inline constexpr std::uint32_t kCtrlCdRatioLsb = 6;
-inline constexpr FpgaCtrl kCtrlCdRatioMask{0x3u << kCtrlCdRatioLsb};
+inline constexpr hal::RegField<std::uint32_t> kCtrlCdRatioField{6, 0x3};
 
 enum class FpgaMgrMode : std::uint32_t {
     Off = 0x0,
@@ -72,7 +79,7 @@ enum class CdRatio : std::uint32_t { One = 0x0, Two = 0x1, Four = 0x2, Eight = 0
 }
 
 [[nodiscard]] constexpr FpgaCtrl cd_ratio_field(CdRatio ratio) noexcept {
-    return FpgaCtrl{to_bits(ratio) << kCtrlCdRatioLsb};
+    return FpgaCtrl{kCtrlCdRatioField.set(0u, {to_bits(ratio)})};
 }
 
 struct FpgaMgr {
@@ -89,12 +96,11 @@ struct FpgaMgr {
 
     static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
 
-    static constexpr std::uint32_t kStatModeMask = 0x7;
-    static constexpr std::uint32_t kStatMselMask = 0xF8;
-    static constexpr std::uint32_t kStatMselLsb = 3;
+    static constexpr hal::RegField<std::uint32_t> kStatModeField{0, 0x7};
+    static constexpr hal::RegField<std::uint32_t> kStatMselField{3, 0x1F};
 
-    static constexpr std::uint32_t kMselWideMask = 0x8;
-    static constexpr std::uint32_t kMselRungMask = 0x3;
+    static constexpr hal::RegField<std::uint32_t> kMselWideField{3, 0x1};
+    static constexpr hal::RegField<std::uint32_t> kMselRungField{0, 0x3};
 
     static constexpr std::uint32_t kMonCrc = 0x8;
     static constexpr std::uint32_t kMonId = 0x4;
@@ -118,12 +124,16 @@ inline constexpr std::array<std::array<CdRatio, 3>, 2> kCdRatioFor{{
     {CdRatio::One, CdRatio::Two, CdRatio::Four},
 }};
 
-[[nodiscard]] constexpr std::optional<CdRatio> cd_ratio_of(std::uint32_t msel) noexcept {
-    const auto width = (msel & FpgaMgr::kMselWideMask) != 0u ? BusWidth::Wide : BusWidth::Narrow;
-    const std::uint32_t rung = msel & FpgaMgr::kMselRungMask;
-    if (rung >= std::size(kCdRatioFor.front()))
-        return std::nullopt;
-    return kCdRatioFor[static_cast<std::size_t>(width)][rung];
+[[nodiscard]] constexpr std::optional<CdRatio> cd_ratio_of(
+    hal::RegField<std::uint32_t>::Value msel
+) noexcept {
+    const auto width = FpgaMgr::kMselWideField.test(msel) ? BusWidth::Wide : BusWidth::Narrow;
+    const auto& ladder = kCdRatioFor[static_cast<std::size_t>(width)];
+    const auto rung = FpgaMgr::kMselRungField.get(msel);
+    for (std::uint32_t r = 0; r < std::size(ladder); ++r)
+        if (rung == hal::RegField<std::uint32_t>::Value{r})
+            return ladder[r];
+    return std::nullopt;
 }
 
 struct FpgaMgrData {
@@ -202,7 +212,7 @@ private:
     void ctrl_update(FpgaCtrl clear, FpgaCtrl set);
     FpgaMgrMode mode() const;
 
-    std::uint32_t ext_nibble();
+    hal::RegWord ext_porta();
 
     std::optional<os::MmioRegion> mgr_pages_;
     std::optional<os::MmioRegion> data_pages_;

@@ -8,6 +8,8 @@
 
 #include <zlib.h>
 
+#include "infra/prelude.h"
+
 namespace mister::svc {
 
 namespace {

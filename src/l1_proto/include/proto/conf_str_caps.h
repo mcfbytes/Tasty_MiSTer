@@ -11,10 +11,12 @@
 #include "infra/error.h"
 #include "proto/axi_ddr_decl.h"
 #include "proto/axi_kind.h"
+#include "infra/prelude.h"
 #include "proto/axi_lw_decl.h"
 #include "proto/axi_unkinded_decl.h"
 #include "proto/capability.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "os/types.h"
@@ -47,6 +49,8 @@ public:
 
     std::uint32_t axi_unknown_kind_count() const noexcept { return axi_unknown_kinds_; }
 
+    infra::Tally irq_unknown_class_count() const noexcept { return irq_unknown_classes_; }
+
     const std::optional<SaveStateDecl>& savestate() const noexcept { return ss_; }
 
     std::optional<os::UioLine> irq_line_for(IrqClass klass) const;
@@ -58,6 +62,7 @@ private:
     std::vector<AxiDdrDecl> axi_ddr_;
     std::vector<AxiUnkindedDecl> axi_unkinded_;
     std::uint32_t axi_unknown_kinds_ = 0;
+    infra::Tally irq_unknown_classes_{};
     std::optional<SaveStateDecl> ss_;
 };
 

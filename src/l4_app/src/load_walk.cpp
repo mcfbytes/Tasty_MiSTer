@@ -8,6 +8,7 @@
 #include "app/load_window.h"
 #include "infra/endian.h"
 #include "cores/transfer_row.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -166,9 +167,8 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
     cores::TransferRow quiet = r;
     quiet.notify = {};
 
-    const proto::ActKey act = r.bracket == cores::RowBracket::AroundWithLength
-        ? h.owner.next_generation()
-        : proto::ActKey{};
+    const proto::ActKey act = r.bracket == cores::RowBracket::AroundWithLength ? h.owner.next_act()
+                                                                               : proto::ActKey{};
     auto l = LoadLadder::start(
         LoadLadder::Job{
             .loader = std::move(loader_),
@@ -213,17 +213,17 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
     auto file = h.vfs.open(r.source, svc::OpenMode::ReadWhole);
     if (!file)
         return skip_(r);
-    std::vector<std::uint8_t> raw(r.file_len.file_word<std::size_t>());
-    std::size_t got = 0;
-    while (got < raw.size()) {
-        auto n = (*file)->read_at(
-            r.file_offset + proto::FileSize{got},
-            std::as_writable_bytes(std::span(raw).subspan(got))
-        );
-        if (!n || *n == 0)
+    std::vector<std::uint8_t> raw = r.file_len.zeroed<std::vector<std::uint8_t>>();
+    std::span<std::byte> left = std::as_writable_bytes(std::span(raw));
+    proto::FileOffset at = r.file_offset;
+    while (!left.empty()) {
+        auto n = (*file)->read_at(at, left);
+        if (!n || n->empty())
             break;
-        got += *n;
+        at += proto::FileSize::of(*n);
+        left = n->past_in(left);
     }
+    const std::size_t got = raw.size() - left.size();
     raw.resize(std::max<std::size_t>(got, r.extent.file_word<std::size_t>()), std::uint8_t{0});
     cores::WireChunk window = kStockFileTxChunk;
     if (r.byte_words) {
@@ -256,7 +256,7 @@ LoadWalk::Pass LoadWalk::pieces_step_(Host& h) {
     pieces_.reset();
     if (!pass)
         return fail_(h);
-    echo_wait_.arm(act, h.now_ns, echo_bytes_, kEcho);
+    echo_wait_.arm(act, h.now, echo_bytes_, kEcho);
     pc_ = Pc::Echo;
     return Pass::Stepped;
 }
@@ -288,7 +288,7 @@ LoadWalk::Pass LoadWalk::send_(
         )) {
         return Pass::Waiting;
     }
-    echo_wait_.arm(act, h.now_ns, notify.copy_bytes(), kEcho);
+    echo_wait_.arm(act, h.now, notify.copy_bytes(), kEcho);
     landed_ = false;
     pc_ = Pc::Echo;
     return Pass::Stepped;
@@ -304,7 +304,7 @@ LoadWalk::Pass LoadWalk::skip_(const cores::TransferRow& r) {
 }
 
 LoadWalk::Pass LoadWalk::echo_(Host& h) {
-    switch (echo_wait_.poll(h.rung.level, h.now_ns)) {
+    switch (echo_wait_.poll(h.rung.level, h.now)) {
         case EchoWait::Answer::Waiting:
             return Pass::Waiting;
         case EchoWait::Answer::Answered:
@@ -324,12 +324,12 @@ LoadWalk::Pass LoadWalk::save_(Host& h) {
         pc_ = Pc::Release;
         return Pass::Stepped;
     }
-    if (save_due_ns_ == std::chrono::nanoseconds{})
-        save_due_ns_ = h.now_ns + kSaveBoundNs;
+    if (!save_due_)
+        save_due_ = os::Deadline::at_point(h.now + kSaveBoundNs);
     auto id = h.owner.intern_path(plan_.frame.save, proto::FileSize{});
     if (!id)
         return Pass::Waiting;
-    const proto::ActKey g = h.owner.next_generation();
+    const proto::ActKey g = h.owner.next_act();
     if (!h.rung.inbox.push(
             proto::LinkOp::AttachSave{.slot = proto::SlotIndex{0}, .path = *id, .act = g}
         )) {
@@ -342,7 +342,7 @@ LoadWalk::Pass LoadWalk::save_(Host& h) {
 
 LoadWalk::Pass LoadWalk::save_wait_(Host& h) {
     const cores::SaveExtent e = h.owner.save_extent();
-    if (e.generation == save_gen_ && e.answer == cores::SaveAnswer::Known) {
+    if (e.act == save_gen_ && e.answer == cores::SaveVerdict::Known) {
         auto id = h.owner.intern_path(plan_.frame.save, e.size_bytes);
         if (!id)
             return Pass::Waiting;
@@ -358,11 +358,11 @@ LoadWalk::Pass LoadWalk::save_wait_(Host& h) {
         pc_ = Pc::Release;
         return Pass::Stepped;
     }
-    if (h.now_ns >= save_due_ns_) {
+    if (!save_due_ || save_due_->expired_at(h.now)) {
         pc_ = Pc::Release;
         return Pass::Stepped;
     }
-    if (e.generation == save_gen_ && e.answer == cores::SaveAnswer::Declined) {
+    if (e.act == save_gen_ && e.answer == cores::SaveVerdict::Declined) {
         pc_ = Pc::Save;
         return Pass::Stepped;
     }
@@ -398,7 +398,7 @@ Rung::Pass LoadWalk::step(const RungEdges& edges, cores::ILadderHost& owner) {
         .map = edges.window_map,
         .aperture = edges.aperture,
         .vfs = edges.vfs,
-        .now_ns = edges.clock.now().time_since_epoch()
+        .now = edges.clock.now()
     };
     switch (step(h)) {
         case Pass::Stepped:

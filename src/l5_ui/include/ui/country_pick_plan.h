@@ -19,7 +19,7 @@ public:
     ConnectDemand connect_demand() const override;
 
     bool slot_shown(SlotId slot) const override;
-    app::PageDescription::Row slot_describe(SlotId slot) const override;
+    app::hd::PageDescription::Row slot_describe(SlotId slot) const override;
     Transition slot_select(SlotId slot) override;
 };
 

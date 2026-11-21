@@ -11,24 +11,26 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
+#include "infra/prelude.h"
 #include "hal/hdmi_int.h"
 #include "hal/video_out_decl.h"
 #include "os/clock.h"
 #include "os/nanosleep_delay.h"
 #include "os/types.h"
-#include "svc/adv7513_breaker.h"
-#include "svc/adv7513_bus.h"
-#include "svc/adv7513_init_options.h"
-#include "svc/adv7513_io.h"
-#include "svc/adv7513_linux_adapter.h"
-#include "svc/adv7513_probe_report.h"
-#include "svc/adv7513_sub_map.h"
-#include "svc/dv1_spd.h"
-#include "svc/i2c_adapter.h"
-#include "svc/modeline.h"
+#include "svc/video/adv7513_breaker.h"
+#include "svc/video/adv7513_bus.h"
+#include "svc/video/adv7513_init_options.h"
+#include "svc/video/adv7513_io.h"
+#include "svc/video/adv7513_linux_adapter.h"
+#include "svc/video/adv7513_probe_report.h"
+#include "svc/video/adv7513_sub_map.h"
+#include "svc/video/dv1_spd.h"
+#include "svc/video/i2c_adapter.h"
+#include "svc/video/modeline.h"
 #include "svc/types.h"
 
-namespace mister::svc {
+namespace mister::svc::video {
 class HdmiLink;
 struct VideoSample;
 }
@@ -40,7 +42,7 @@ class Adv7513Seat final : public hal::IHdmiInterrupt {
 
 public:
     struct Host {
-        svc::HdmiLink& hdmi;
+        svc::video::HdmiLink& hdmi;
         PreludeComposer::Answers answers;
         VideoPumpStats& stats;
         std::optional<Error>& last_error;
@@ -50,7 +52,7 @@ public:
 
     struct Spd {
         std::string_view name;
-        svc::SpdForm form = svc::SpdForm::None;
+        svc::video::SpdForm form = svc::video::SpdForm::None;
         proto::RotationDir dir{};
         bool menu_present = false;
     };
@@ -61,14 +63,14 @@ public:
     Adv7513Seat(
         const os::IClock& clock,
         const hal::VideoOutDecl& board,
-        infra::OptRef<svc::adv7513::II2cAdapter> i2c,
+        infra::OptRef<svc::video::adv7513::II2cAdapter> i2c,
         const hal::IHdmiInterrupt& hdmi_int
     ) noexcept;
 
     Adv7513Seat(const Adv7513Seat&) = delete;
     Adv7513Seat& operator=(const Adv7513Seat&) = delete;
 
-    [[nodiscard]] svc::adv7513::Io io() noexcept;
+    [[nodiscard]] svc::video::adv7513::Io io() noexcept;
 
     bool hdmi_int_asserted() const override;
 
@@ -76,27 +78,30 @@ public:
 
     [[nodiscard]] Edge configure(
         Host h,
-        const svc::adv7513::InitOptions& init,
+        const svc::video::adv7513::InitOptions& init,
         const Spd& spd,
-        const svc::VideoSample& sample
+        const svc::video::VideoSample& sample
     );
 
     [[nodiscard]] Edge recover(Host h);
 
-    [[nodiscard]] Edge hotplug(Host h, const svc::adv7513::InitOptions& init);
+    [[nodiscard]] Edge hotplug(Host h, const svc::video::adv7513::InitOptions& init);
 
-    void update_spd(Host h, const Spd& spd, const svc::VideoSample& sample);
+    void update_spd(Host h, const Spd& spd, const svc::video::VideoSample& sample);
 
-    [[nodiscard]] std::optional<VideoI2cOutcome> program_mode(Host h, const svc::Modeline& m);
+    [[nodiscard]] std::optional<VideoI2cOutcome> program_mode(
+        Host h,
+        const svc::video::Modeline& m
+    );
 
     struct BusReport {
-        svc::Tally writes{};
-        svc::Tally errors{};
+        infra::Tally writes{};
+        infra::Tally errors{};
         std::optional<os::I2cReg> fail_reg{};
         std::optional<os::I2cReg> spd_fail_reg{};
-        std::optional<svc::adv7513::I2cBreaker::Failure> first{};
+        std::optional<svc::video::adv7513::I2cBreaker::Failure> first{};
         svc::OsErrno last_errno{};
-        svc::Tally trips{};
+        infra::Tally trips{};
         bool breaker_open = false;
     };
 
@@ -104,14 +109,14 @@ public:
 
     static void apply(const BusReport& r, VideoPumpStats& stats) noexcept;
 
-    const svc::adv7513::ProbeReport& probe() const noexcept { return probe_; }
+    const svc::video::adv7513::ProbeReport& probe() const noexcept { return probe_; }
 
     bool attached() const noexcept { return adv_.has_value(); }
 
-    [[nodiscard]] infra::OptRef<svc::adv7513::Adv7513Bus> bus() noexcept {
+    [[nodiscard]] infra::OptRef<svc::video::adv7513::Adv7513Bus> bus() noexcept {
         if (!adv_)
             return {};
-        return infra::OptRef<svc::adv7513::Adv7513Bus>{*adv_};
+        return infra::OptRef<svc::video::adv7513::Adv7513Bus>{*adv_};
     }
 
     bool init_ok() const noexcept { return init_ok_; }
@@ -121,34 +126,34 @@ private:
     void schedule_reprobe() noexcept;
     void observe_bus() noexcept;
     [[nodiscard]] BusReport fold_bus() const noexcept;
-    void send_spd(Host h, const Spd& spd, const svc::VideoSample& sample);
+    void send_spd(Host h, const Spd& spd, const svc::video::VideoSample& sample);
 
     const os::IClock& clock_;
     hal::VideoOutDecl board_;
     const hal::IHdmiInterrupt& hdmi_int_;
 
-    svc::adv7513::LinuxAdapter i2c_backend_{};
-    svc::adv7513::II2cAdapter& adapter_;
+    svc::video::adv7513::LinuxAdapter i2c_backend_{};
+    svc::video::adv7513::II2cAdapter& adapter_;
 
-    svc::adv7513::I2cBreaker breaker_;
+    svc::video::adv7513::I2cBreaker breaker_;
 
-    svc::adv7513::SubMap main_map_;
-    svc::adv7513::SubMap edid_map_;
-    svc::adv7513::SubMap cec_map_;
+    svc::video::adv7513::SubMap main_map_;
+    svc::video::adv7513::SubMap edid_map_;
+    svc::video::adv7513::SubMap cec_map_;
     os::NanosleepDelay delay_{};
 
-    std::optional<svc::adv7513::Adv7513Bus> adv_{};
-    svc::adv7513::ProbeReport probe_{};
+    std::optional<svc::video::adv7513::Adv7513Bus> adv_{};
+    svc::video::adv7513::ProbeReport probe_{};
 
     bool probed_ = false;
-    std::int64_t next_probe_ns_ = 0;
+    os::RawMonotonicClock::time_point next_probe_{};
     std::chrono::milliseconds probe_backoff_ms_ = kReprobeFirstMs;
-    std::int64_t attached_ns_ = 0;
+    os::RawMonotonicClock::time_point attached_{};
 
     BusReport bus_{};
 
-    svc::Tally writes_base_{};
-    svc::Tally errors_base_{};
+    infra::Tally writes_base_{};
+    infra::Tally errors_base_{};
     bool init_pending_ = false;
     bool init_ok_ = false;
 
@@ -156,7 +161,7 @@ private:
     PreludeCompletions prelude_done_seen_{};
     svc::Generation hpd_gen_seen_{};
     svc::Generation audio_gen_seen_{};
-    std::int64_t next_hpd_ns_ = 0;
+    os::RawMonotonicClock::time_point next_hpd_{};
 };
 
 }

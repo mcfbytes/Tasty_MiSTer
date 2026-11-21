@@ -12,7 +12,7 @@ namespace mister::cores {
 
 struct MountStatus {
     TASTY_SEAT_EXEMPT(const_shared);
-    proto::ActKey generation{};
+    proto::ActKey act{};
     MountState state = MountState::Pending;
     StagePlan plan{};
 };

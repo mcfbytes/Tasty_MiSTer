@@ -8,14 +8,15 @@
 #include "app/link_tx_channel.h"
 #include "app/mgl_pump.h"
 #include "app/recorder_control.h"
-#include "app/replay_feeder.h"
+#include "app/replay/replay_feeder.h"
 #include "app/screenshot_pump.h"
 #include "app/ui_request.h"
 #include "app/ui_request_ring.h"
 #include "app/video_pump.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
-#include "infra/rt_stats.h"
+#include "infra/prelude.h"
+#include "infra/xthread/rt_stats.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -31,7 +32,7 @@ public:
         VideoPump& video;
         infra::OptRef<HpsFramebuffer> fb{};
         ScreenshotPump& shots;
-        ReplayFeeder& replay;
+        mister::app::replay::ReplayFeeder& replay;
         RecorderControl& rec;
         UiRequestRing& ui_requests;
         xthread::RtStats& stats;
@@ -116,7 +117,9 @@ public:
 
     bool on(const CmdVerb::TasPlay& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return replay_.take_play(ReplayFeeder::Play{v.movie, v.rom, v.phase, v.lead});
+        return replay_.take_play(
+            mister::app::replay::ReplayFeeder::Play{v.movie, v.rom, v.phase, v.lead}
+        );
     }
 
     bool on(const CmdVerb::TasStop&) noexcept override {
@@ -151,7 +154,7 @@ private:
     VideoPump& video_;
     infra::OptRef<HpsFramebuffer> fb_{};
     ScreenshotPump& shots_;
-    ReplayFeeder& replay_;
+    mister::app::replay::ReplayFeeder& replay_;
     RecorderControl& rec_;
     UiRequestRing& ui_requests_;
     xthread::RtStats& stats_;

@@ -100,7 +100,7 @@ const cores::CoreProfile& NegotiatedCore::loaded_profile() const {
 bool NegotiatedCore::owns_loader() const {
     TASTY_SEAT_BODY(NegotiatedCore);
     const auto row = load_row();
-    return row && row->make_loader != nullptr;
+    return row && row->has_loader();
 }
 
 void NegotiatedCore::intern_manifest_(std::string_view rel) {

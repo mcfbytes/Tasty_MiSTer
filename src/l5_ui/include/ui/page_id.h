@@ -2,7 +2,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
+#include "app/page_label.h"
 #include "proto/types.h"
 #include "ui/types.h"
 
@@ -80,6 +82,12 @@ enum class PageId : std::uint8_t {
         RowKey::Ordinal{static_cast<std::uint16_t>(static_cast<unsigned>(page) << kPageShift)}
     );
 }
+
+[[nodiscard]] constexpr app::PageLabel label_of(PageId page) noexcept {
+    return app::PageLabel{std::to_underlying(page)};
+}
+
+static_assert(label_of(PageId::None) == app::PageLabel{}, "the closed OSD is the default label");
 
 static_assert(
     static_cast<unsigned>(PageId::kCount) == 51,

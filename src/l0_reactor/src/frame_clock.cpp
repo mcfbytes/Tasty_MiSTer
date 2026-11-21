@@ -5,26 +5,18 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <ctime>
+#include <chrono>
 #include <utility>
 
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
+#include "os/delay.h"
 
 namespace mister::reactor {
 
 namespace {
 
-constexpr long kBackOffNs = 4'000'000;
-
-void back_off() {
-    timespec ts{};
-    ts.tv_sec = 0;
-    ts.tv_nsec = kBackOffNs;
-    int rc = 0;
-    do {
-        rc = ::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts);
-    } while (rc == EINTR);
-}
+constexpr std::chrono::milliseconds kBackOff{4};
 
 }
 
@@ -48,7 +40,7 @@ void FrameClock::wait_vsync() noexcept {
         case os::Framebuffer::Wait::Interrupted:
             return;
         case os::Framebuffer::Wait::Failed:
-            back_off();
+            os::sleep_for(kBackOff);
             return;
     }
     const os::RawMonotonicClock::time_point edge = clock_.now();

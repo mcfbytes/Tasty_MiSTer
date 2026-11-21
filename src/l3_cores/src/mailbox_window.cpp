@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/mailbox_window.h"
 
+#include "infra/prelude.h"
+
 namespace mister::cores {
 
 Ex<std::span<std::byte>> MailboxWindow::at(MailboxSpan span) const {

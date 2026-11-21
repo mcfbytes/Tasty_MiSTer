@@ -9,6 +9,7 @@
 #include "app/session_identity.h"
 #include "infra/ascii.h"
 #include "infra/indexed_array.h"
+#include "infra/tally.h"
 #include "proto/types.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
@@ -29,7 +30,7 @@ static_assert(
     && infra::at_index(kYesNo, RecentLaunch::row_of(RecentLaunch::YesNo::No)) == "No"
 );
 
-std::optional<app::Mgl> document_of(const app::RecentGames::Record& r) {
+std::optional<app::Mgl> document_of(const app::recents::RecentGames::Record& r) {
     const std::optional<proto::FileSlotDigit> digit = proto::FileSlotDigit::from(r.row.index);
     if (!digit)
         return std::nullopt;
@@ -46,7 +47,7 @@ std::optional<app::Mgl> document_of(const app::RecentGames::Record& r) {
 
 RecentLaunch::RecentLaunch(const HdPlanInputs& in)
     : ctx_(in.ctx),
-      running_core_(app::recent_core_name(in.now_playing.core_image())),
+      running_core_(app::recents::recent_core_name(in.now_playing.core_image())),
       env_(HdPage0Walk::page0_of(in.env)),
       front_end_(in.front_end) {
     TASTY_SEAT_BODY(RecentLaunch);
@@ -69,20 +70,22 @@ RecentLaunch::RecentLaunch(const HdPlanInputs& in)
     );
 }
 
-bool RecentLaunch::asks_first(const app::RecentGames::Record& r) const {
+bool RecentLaunch::asks_first(const app::recents::RecentGames::Record& r) const {
     TASTY_SEAT_BODY(RecentLaunch);
     if (front_end_)
         return false;
     return !(slot_for_(r) && picks_);
 }
 
-infra::OptRef<const OptionItem> RecentLaunch::slot_for_(const app::RecentGames::Record& r) const {
+infra::OptRef<const OptionItem> RecentLaunch::slot_for_(
+    const app::recents::RecentGames::Record& r
+) const {
     if (!infra::ieq(r.core, running_core_))
         return {};
     return page0_.slot_row(r.row);
 }
 
-Transition RecentLaunch::launch(const app::RecentGames::Record& r) {
+Transition RecentLaunch::launch(const app::recents::RecentGames::Record& r) {
     TASTY_SEAT_BODY(RecentLaunch);
 
     if (const infra::OptRef<const OptionItem> slot = slot_for_(r); slot && picks_) {
@@ -119,9 +122,9 @@ Transition RecentLaunch::ask(
     return ctx_.launches.confirm->open(PageId::Confirm, spec);
 }
 
-svc::Tally RecentLaunch::refusals() const noexcept {
+infra::Tally RecentLaunch::refusals() const noexcept {
     TASTY_SEAT_BODY(RecentLaunch);
-    return refusals_.sum(picks_ ? picks_->refusals() : svc::Tally{});
+    return refusals_.sum(picks_ ? picks_->refusals() : infra::Tally{});
 }
 
 std::uint32_t RecentLaunch::commands_published() const noexcept {

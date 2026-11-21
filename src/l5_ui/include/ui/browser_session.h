@@ -8,11 +8,14 @@
 #include <string_view>
 #include <vector>
 
-#include "app/recents_store.h"
+#include "app/recents/recents_store.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/path_text.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "os/deadline.h"
+#include "infra/tally.h"
 #include "ui/browser_entry.h"
 #include "ui/list_view.h"
 #include "svc/types.h"
@@ -57,7 +60,7 @@ public:
 
         bool cd_descend = false;
 
-        std::optional<app::RecentsStore::ListId> recents{};
+        std::optional<app::recents::RecentsStore::ListId> recents{};
         std::string recents_core;
         bool recents_first = false;
 
@@ -79,7 +82,7 @@ public:
     [[nodiscard]] Ex<void> rescan();
     [[nodiscard]] Ex<void> change_dir(std::string_view name);
 
-    void type_ahead(char c, std::chrono::nanoseconds now);
+    void type_ahead(char c, os::RawMonotonicClock::time_point now);
 
     void note_navigation() noexcept { filter_deadline_.reset(); }
 
@@ -113,7 +116,7 @@ public:
 
     std::uint32_t scans() const noexcept { return scans_; }
 
-    svc::Tally refusals() const noexcept { return refusals_; }
+    infra::Tally refusals() const noexcept { return refusals_; }
 
 private:
     [[nodiscard]] Ex<void> scan_list(std::string_view type_filter);
@@ -142,9 +145,9 @@ private:
     std::string home_;
     bool recents_mode_ = false;
 
-    std::optional<std::chrono::nanoseconds> filter_deadline_{};
+    std::optional<os::Deadline> filter_deadline_{};
     std::uint32_t scans_ = 0;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     ListView<BrowserEntry> view_{{}};
 };
 

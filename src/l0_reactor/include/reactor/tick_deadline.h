@@ -2,11 +2,12 @@
 #pragma once
 
 #include <chrono>
-#include <cstdint>
 #include <ctime>
 #include <optional>
 
+#include "infra/period_grid.h"
 #include "infra/seat.h"
+#include "os/timespec.h"
 #include "reactor/tick.h"
 #include "reactor/types.h"
 
@@ -18,14 +19,7 @@ class TickDeadline {
 public:
     static constexpr std::chrono::nanoseconds kPeriod{kTickNs};
 
-    struct Periods {
-        std::uint64_t v;
-        using affine_count = Periods;
-
-        [[nodiscard]] constexpr std::uint64_t missed() const noexcept { return v - 1; }
-
-        [[nodiscard]] constexpr std::uint64_t ticks() const noexcept { return v; }
-    };
+    using Periods = infra::PeriodGrid<MonoInstant>::Periods;
 
     struct Due {
         MonoInstant latest;
@@ -40,52 +34,34 @@ public:
     [[nodiscard]] std::optional<timespec> timeout(MonoInstant now) const noexcept;
 
 private:
-    TickDeadline(MonoInstant first, bool held) noexcept : next_(first), held_(held) {}
+    explicit TickDeadline(std::optional<MonoInstant> next) noexcept : grid_(kPeriod), next_(next) {}
 
-    static constexpr std::int64_t kNanosPerSecond = 1'000'000'000;
-
-    MonoInstant next_;
-    bool held_;
+    infra::PeriodGrid<MonoInstant> grid_;
+    std::optional<MonoInstant> next_;
 };
 
 inline TickDeadline TickDeadline::after(MonoInstant now) noexcept {
-    return TickDeadline{now + kPeriod, false};
+    return TickDeadline{now + kPeriod};
 }
 
 inline TickDeadline TickDeadline::held() noexcept {
-    return TickDeadline{MonoInstant{}, true};
+    return TickDeadline{std::nullopt};
 }
 
 inline std::optional<TickDeadline::Due> TickDeadline::take_due(MonoInstant now) noexcept {
-    if (held_ || now < next_)
+    if (!next_)
         return std::nullopt;
-
-    if (now < next_ + kPeriod) {
-        const Due due{next_, Periods{1}};
-        next_ += kPeriod;
-        return due;
-    }
-
-    const std::int64_t late = std::chrono::duration_cast<std::chrono::nanoseconds>(now - next_)
-                                  .count();
-    const auto n = 1u + static_cast<std::uint64_t>(late / kPeriod.count());
-    const MonoInstant latest = next_
-        + std::chrono::nanoseconds{static_cast<std::int64_t>(n - 1u) * kPeriod.count()};
-    next_ = latest + kPeriod;
-    return Due{latest, Periods{n}};
+    const auto step = grid_.advance({.next = *next_, .now = now});
+    if (!step)
+        return std::nullopt;
+    next_ = step->next;
+    return Due{step->latest, step->periods};
 }
 
 inline std::optional<timespec> TickDeadline::timeout(MonoInstant now) const noexcept {
-    if (held_)
+    if (!next_)
         return std::nullopt;
-    std::int64_t rel = std::chrono::duration_cast<std::chrono::nanoseconds>(next_ - now).count();
-    if (rel < 0)
-        rel = 0;
-
-    timespec ts{};
-    ts.tv_sec = static_cast<time_t>(rel / kNanosPerSecond);
-    ts.tv_nsec = static_cast<long>(rel % kNanosPerSecond);
-    return ts;
+    return os::to_timespec(grid_.remaining({.next = *next_, .now = now}));
 }
 
 }

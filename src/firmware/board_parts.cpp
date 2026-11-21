@@ -3,21 +3,19 @@
 
 #include "hal/disk_lamp.h"
 
+#include <cstdio>
 #include <utility>
 
 #include "infra/seat.h"
 #include "hal/board_profile.h"
 #include "hal/board_windows.h"
 #include "hal/spi_bus.h"
-#include "boards/agilex_5/agilex5_bridges.h"
-#include "boards/agilex_5/agilex5_programmer.h"
 #include "boards/cyclone_v/cyclone_v_bridges.h"
 #include "boards/cyclone_v/cyclone_v_programmer.h"
+#include "boards/refusing_bridges.h"
 #include "boards/refusing_link_port.h"
-#include "boards/spi_sbc/spi_sbc_bridges.h"
-#include "boards/spi_sbc/spi_sbc_programmer.h"
-#include "boards/zynq_7000/zynq7000_bridges.h"
-#include "boards/zynq_7000/zynq7000_programmer.h"
+#include "infra/prelude.h"
+#include "boards/refusing_programmer.h"
 
 namespace mister::fw {
 
@@ -65,10 +63,18 @@ std::expected<BoardParts, BoardParts::Refusal> BoardParts::make(
             auto mailbox = windows.take_mailbox();
             if (!mailbox)
                 return std::unexpected(Refusal{"SpiBus::open", mailbox.error()});
-            auto bus = hal::SpiBus::open(std::move(*mailbox), &stats);
+
+            auto bus = hal::SpiBus::open(std::move(*mailbox), hal::LookPolicy::TakeOver, &stats);
             if (!bus)
                 return std::unexpected(Refusal{"SpiBus::open", bus.error()});
-            auto link = std::make_unique<hal::SpiBus>(std::move(*bus));
+            if (bus->look == hal::LinkLook::LwHostEnabled) {
+                std::fprintf(
+                    stderr,
+                    "mister: the LW host enable was held at startup: taking it over, "
+                    "the identification clears it\n"
+                );
+            }
+            auto link = std::make_unique<hal::SpiBus>(std::move(bus->bus));
             auto prog = boards::cyclone_v::Programmer::open(windows);
             if (!prog)
                 return refuse_after_link(
@@ -95,22 +101,22 @@ std::expected<BoardParts, BoardParts::Refusal> BoardParts::make(
         case hal::BoardId::De25Nano:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
-                std::make_unique<boards::agilex_5::Programmer>(),
-                std::make_unique<boards::agilex_5::Bridges>(),
+                std::make_unique<boards::RefusingProgrammer>(),
+                std::make_unique<boards::RefusingBridges>(),
                 nullptr
             );
         case hal::BoardId::Zynq7000:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
-                std::make_unique<boards::zynq_7000::Programmer>(),
-                std::make_unique<boards::zynq_7000::Bridges>(),
+                std::make_unique<boards::RefusingProgrammer>(),
+                std::make_unique<boards::RefusingBridges>(),
                 nullptr
             );
         case hal::BoardId::SpiSbc:
             return BoardParts(
                 std::make_unique<boards::RefusingLinkPort>(),
-                std::make_unique<boards::spi_sbc::Programmer>(),
-                std::make_unique<boards::spi_sbc::Bridges>(),
+                std::make_unique<boards::RefusingProgrammer>(),
+                std::make_unique<boards::RefusingBridges>(),
                 nullptr
             );
     }

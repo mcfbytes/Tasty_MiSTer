@@ -5,9 +5,10 @@
 #include <type_traits>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
-#include "proto/core_session.h"
+#include "infra/xthread/telemetry.h"
+#include "proto/link/core_session.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -15,7 +16,7 @@ namespace mister::app {
 struct ConfStrText {
     TASTY_SEAT_EXEMPT(const_shared);
 
-    FixedStr<proto::CoreSession::kConfStrCap + 1, StrFit::Clip> text{};
+    FixedStr<proto::link::CoreSession::kConfStrCap + 1, StrFit::Clip> text{};
 
     proto::BindGeneration gen{};
 
@@ -25,7 +26,7 @@ struct ConfStrText {
 };
 
 static_assert(
-    decltype(ConfStrText::text)::kCapacity == proto::CoreSession::kConfStrCap,
+    decltype(ConfStrText::text)::kCapacity == proto::link::CoreSession::kConfStrCap,
     "the cell and the acquisition bound are the same number, joined "
     "here so they cannot drift"
 );

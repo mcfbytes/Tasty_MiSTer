@@ -8,6 +8,7 @@
 
 #include "hal/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
@@ -20,6 +21,8 @@ inline constexpr std::size_t kDiskActBytes = 512;
 struct DiskAct {
 
     enum class Kind : std::uint8_t { None, Out, In, Signal };
+
+    static constexpr std::uint32_t kWordBytes = hal::word_bytes(hal::Width::Word);
 
     [[nodiscard]] static constexpr DiskAct none() noexcept { return DiskAct{}; }
 
@@ -44,7 +47,7 @@ struct DiskAct {
     [[nodiscard]] static constexpr DiskAct signal(
         hal::SpiWord opcode,
         bool last,
-        std::optional<std::uint16_t> word
+        std::optional<hal::SpiWord> word
     ) noexcept {
         DiskAct act;
         act.kind_ = Kind::Signal;
@@ -65,7 +68,11 @@ struct DiskAct {
 
     [[nodiscard]] constexpr std::uint16_t len() const noexcept { return len_; }
 
-    [[nodiscard]] constexpr std::optional<std::uint16_t> word() const noexcept {
+    [[nodiscard]] constexpr FioWordCount words() const noexcept {
+        return FioWordCount{1u + len_ / kWordBytes + (has_word_ ? 1u : 0u)};
+    }
+
+    [[nodiscard]] constexpr std::optional<hal::SpiWord> word() const noexcept {
         if (!has_word_)
             return std::nullopt;
         return word_;
@@ -95,7 +102,7 @@ private:
     DiskUnit unit_ = kNoUnit_;
     hal::SpiWord opcode_{};
     std::uint16_t len_ = 0;
-    std::uint16_t word_ = 0;
+    hal::SpiWord word_{};
 };
 
 static_assert(std::is_trivially_copyable_v<DiskAct>);

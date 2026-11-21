@@ -11,13 +11,15 @@
 #include "hal/gpo_block.h"
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
+#include "hal/lw_presence.h"
 #include "hal/mailbox.h"
 #include "hal/spi_output.h"
 #include "hal/spi_output_observer.h"
 #include "hal/spi_sample.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 struct RtStats;
 }
 
@@ -37,17 +39,29 @@ inline constexpr SpiOutput kCoreEnable{1u << 31};
 inline constexpr SpiOutput kCsMask{kFpgaEnable.with(kOsdEnable).with(kIoEnable)};
 }
 
+enum class LinkLook : std::uint8_t { IdView, NoLwHost, LwHostEnabled };
+
+[[nodiscard]] LinkLook look(SpiOutput gpo_register, GpiWord gpi) noexcept;
+
+enum class LookPolicy : std::uint8_t { TakeOver, StopOnHost };
+
+struct SpiBusOpen;
+
 class SpiBus final : public ILinkPort {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    [[nodiscard]] static Ex<SpiBus> open(Mailbox mailbox, xthread::RtStats* stats = nullptr);
+    [[nodiscard]] static Ex<SpiBusOpen> open(
+        Mailbox mailbox,
+        LookPolicy policy,
+        xthread::RtStats* stats = nullptr
+    );
 
     ~SpiBus() override = default;
     SpiBus(SpiBus&&) noexcept = default;
     SpiBus& operator=(SpiBus&&) noexcept = default;
 
-    [[nodiscard]] Ex<CoreIdentity> identify() override;
+    [[nodiscard]] Ex<CoreTypeByte> identify() override;
     CoreCapabilities latch_capabilities() override;
     void set_core_reset(bool asserted) override;
     void clear_gpo() override;
@@ -104,13 +118,16 @@ private:
 
     SpiBus() = default;
 
-    static SpiBus attach_registers(
+    [[nodiscard]] static Ex<SpiBusOpen> attach_registers(
         BlockView<GpoBlock> gpo,
         BlockView<GpiBlock> gpi,
         ISpiOutputObserver* obs,
         const LinkTimingValues& timing,
+        LookPolicy policy,
         xthread::RtStats* stats = nullptr
     ) noexcept;
+
+    [[nodiscard]] LinkLook look_at_open_() noexcept;
 
     void store_gpo(SpiOutput v) noexcept;
     void commit_gpo(SpiOutput v) noexcept;
@@ -143,6 +160,11 @@ private:
 
     unsigned ack_soft_spins_ = 0;
     std::chrono::nanoseconds ack_timeout_ns_{};
+};
+
+struct SpiBusOpen {
+    SpiBus bus;
+    LinkLook look = LinkLook::IdView;
 };
 
 }

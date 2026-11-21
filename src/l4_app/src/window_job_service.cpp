@@ -3,6 +3,8 @@
 
 #include <span>
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 WindowJobService::Chan::Loan WindowJobService::acquire_() noexcept {

@@ -4,7 +4,7 @@
 #include <cstddef>
 
 #include "infra/seat.h"
-#include "os/ssid.h"
+#include "os/connect/ssid.h"
 #include "ui/connect_slot_plan.h"
 
 namespace mister::ui {
@@ -21,12 +21,12 @@ public:
     ConnectDemand connect_demand() const override;
 
     bool slot_shown(SlotId slot) const override;
-    app::PageDescription::Row slot_describe(SlotId slot) const override;
+    app::hd::PageDescription::Row slot_describe(SlotId slot) const override;
     Transition slot_select(SlotId slot) override;
     Transition slot_confirmed(SlotId slot, RowIndex choice) override;
 
 private:
-    os::Ssid asked_{};
+    os::connect::Ssid asked_{};
 };
 
 }

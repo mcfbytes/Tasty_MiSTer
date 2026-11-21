@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "svc/vfs.h"
 #include "ui/browse_source.h"

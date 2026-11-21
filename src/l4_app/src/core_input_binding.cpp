@@ -2,6 +2,11 @@
 #include "app/core_input_binding.h"
 
 namespace mister::app {
+namespace {
+
+constexpr cores::HostPolicy kDetachedFrontEnd{.front_end = true};
+
+}
 
 void CoreInputBinding::on_core_loaded(const CoreInputFacts& f) noexcept {
 
@@ -16,7 +21,9 @@ void CoreInputBinding::on_core_loaded(const CoreInputFacts& f) noexcept {
 
 void CoreInputBinding::on_core_detached() noexcept {
 
-    last_.reshape = {};
+    last_.host = last_.policy().front_end
+        ? infra::OptRef<const cores::HostPolicy>{kDetachedFrontEnd}
+        : infra::OptRef<const cores::HostPolicy>{};
     e_.facts.publish(last_);
     e_.joy_edge_reset.request();
     core_edges_ = core_edges_.next();

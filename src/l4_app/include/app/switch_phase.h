@@ -11,8 +11,10 @@
 #include <utility>
 #include <variant>
 
+#include "infra/enum_set.h"
 #include "infra/error.h"
-#include "infra/pause_gen.h"
+#include "infra/xthread/pause_gen.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/deadline.h"
 #include "proto/types.h"
@@ -227,27 +229,18 @@ static_assert(kStimulusNames.size() == kStimuli);
 
 enum class Origin : std::uint8_t { Design, Tree, Tolerance, Refusal };
 
-struct PhaseSet {
-    std::uint16_t bits = 0;
-
-    [[nodiscard]] constexpr bool has(PhaseKind k) const noexcept {
-        return (bits & (1u << static_cast<unsigned>(k))) != 0;
-    }
-};
-
+using PhaseSet = infra::EnumSet<PhaseKind, std::uint16_t>;
 static_assert(kPhases <= 16, "one bit per phase");
+static_assert(sizeof(PhaseSet) == 2);
 
 [[nodiscard]] consteval PhaseSet of(std::initializer_list<PhaseKind> ks) {
-    PhaseSet s{};
-    for (const PhaseKind k : ks)
-        s.bits = static_cast<std::uint16_t>(s.bits | (1u << static_cast<unsigned>(k)));
-    return s;
+    return PhaseSet::of(ks);
 }
 
-inline constexpr PhaseSet kAnyPhase{static_cast<std::uint16_t>((1u << kPhases) - 1u)};
+inline constexpr PhaseSet kAnyPhase = PhaseSet::all();
 
 [[nodiscard]] consteval PhaseSet all_but(PhaseSet s) {
-    return PhaseSet{static_cast<std::uint16_t>(kAnyPhase.bits & ~s.bits)};
+    return s.complement();
 }
 
 struct Row {
@@ -450,14 +443,14 @@ template <std::size_t N>
 [[nodiscard]] consteval bool covers_each_pair_once(const std::array<Row, N>& rows) {
     std::array<std::array<unsigned, kStimuli>, kPhases> seen{};
     for (const Row& r : rows) {
-        if (r.from.bits == 0 || r.on >= Stimulus::kCount)
+        if (r.from.is_empty() || r.on >= Stimulus::kCount)
             return false;
         if (r.origin == Origin::Refusal && r.to.has_value())
             return false;
         if (r.to && *r.to >= PhaseKind::kCount)
             return false;
         for (std::size_t k = 0; k < kPhases; ++k) {
-            if (r.from.has(static_cast<PhaseKind>(k)))
+            if (r.from.contains(static_cast<PhaseKind>(k)))
                 ++seen[k][static_cast<std::size_t>(r.on)];
         }
     }
@@ -478,7 +471,7 @@ static_assert(
 
 [[nodiscard]] constexpr std::size_t row_index(PhaseKind k, Stimulus s) noexcept {
     for (std::size_t i = 0; i < kTransitions.size(); ++i) {
-        if (kTransitions[i].on == s && kTransitions[i].from.has(k))
+        if (kTransitions[i].on == s && kTransitions[i].from.contains(k))
             return i;
     }
     return kTransitions.size();
@@ -578,20 +571,16 @@ static_assert(
     "gen_of reads the generation of every arm that carries one, and of no other"
 );
 
-inline constexpr PhaseSet kBounded{
-    .bits = static_cast<std::uint16_t>(
-        (1u << static_cast<unsigned>(PhaseKind::AwaitIdentity))
-        | (1u << static_cast<unsigned>(PhaseKind::AwaitConfStr))
-        | (1u << static_cast<unsigned>(PhaseKind::Building))
-    )
-};
+inline constexpr PhaseSet kBounded = PhaseSet::of(
+    {PhaseKind::AwaitIdentity, PhaseKind::AwaitConfStr, PhaseKind::Building}
+);
 template <class T>
 inline constexpr bool kHasBound = requires(T a) { a.bound; };
 static_assert(
     []<std::size_t... I>(std::index_sequence<I...>) {
         return (
             (kHasBound<std::variant_alternative_t<I, Arm>>
-             == kBounded.has(static_cast<PhaseKind>(I)))
+             == kBounded.contains(static_cast<PhaseKind>(I)))
             && ...
         );
     }(std::make_index_sequence<kPhases>{}),
@@ -682,7 +671,7 @@ struct Step {
     if (!r.to)
         return Step{.next = now, .row = i};
     Arm next = make(*r.to, f);
-    if (kBounded.has(kind(now)) && kBounded.has(kind(next)))
+    if (kBounded.contains(kind(now)) && kBounded.contains(kind(next)))
         next = with_bound(next, bound_of(now));
     return Step{.next = next, .row = i};
 }
@@ -848,8 +837,8 @@ struct SwitchPhase {
         PhaseKind under = PhaseKind::Idle;
         std::optional<proto::BindGeneration> gen{};
 
-        [[nodiscard]] constexpr xthread::PauseGen pause_gen() const noexcept {
-            return gen ? gen->pause_gen() : xthread::PauseGen::none();
+        [[nodiscard]] constexpr proto::BindGeneration log_gen() const noexcept {
+            return gen.value_or(proto::BindGeneration{});
         }
     };
 

@@ -7,7 +7,7 @@
 #include "app/cheat_store.h"
 #include "infra/ascii.h"
 #include "infra/indexed_array.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"
@@ -71,7 +71,7 @@ void CheatsPage::refresh_() {
     const std::size_t n = store_->count();
     rows_.reserve(n);
     for (std::size_t i = 0; i < n; ++i)
-        rows_.push_back(store_->row(RowIndex::of(i)));
+        rows_.push_back(store_->row(RowIndex::truncating(i)));
     view_.set_items(rows_);
     opens_seen_ = store_->opens();
 }
@@ -103,10 +103,10 @@ bool CheatsPage::walk(PageWalk& out) const {
     const RowIndex first = view_.viewport().first;
     const RowIndex sel = view_.viewport().selected;
     const RowSpan<const app::CheatRow> cheat_rows{std::span<const app::CheatRow>{rows_}};
-    const RowCount count = RowCount::of(rows_.size());
+    const RowCount count = RowCount::truncating(rows_.size());
     const RowIndex end = row_after(count);
-    const app::HdWindow win = out.window(sel, count);
-    const RowRange window = rows(win.first, win.count);
+    const app::hd::HdWindow win = out.window(sel, count);
+    const RowRange window = rows(win.start, win.len);
     const RowRange viewport = rows(first, height);
 
     const auto classic_at = [&](RowCount r) {
@@ -136,7 +136,7 @@ bool CheatsPage::walk(PageWalk& out) const {
         r.has_hd = true;
         (void)r.hd.label.assign(cheat_rows[at].name);
         (void)r.hd.value.assign(cheat_rows[at].enabled ? "On" : "Off");
-        r.hd.kind = app::PageDescription::RowKind::Value;
+        r.hd.kind = app::hd::PageDescription::RowKind::Value;
         r.hd.steps = false;
         r.hd.enabled = true;
         r.hd.selected = at == sel;
@@ -165,29 +165,29 @@ void CheatsPage::publish_apply_() {
 
 Transition CheatsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CheatsPage);
-    if (ev.buttons.has_any({UiEvent::Menu})) {
+    if (ev.buttons.intersects({UiEvent::Menu})) {
 
         return Transition::pop();
     }
     view_.set_height(osd_height());
 
-    if (ev.buttons.has_any({UiEvent::Left | UiEvent::Back})) {
+    if (ev.buttons.intersects({UiEvent::Left | UiEvent::Back})) {
         view_.prev_page();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Right})) {
+    if (ev.buttons.intersects({UiEvent::Right})) {
         view_.next_page();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Down})) {
+    if (ev.buttons.intersects({UiEvent::Down})) {
         view_.next();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Up})) {
+    if (ev.buttons.intersects({UiEvent::Up})) {
         view_.prev();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Select})) {
+    if (ev.buttons.intersects({UiEvent::Select})) {
         const RowIndex i = view_.viewport().selected;
         auto changed = store_->toggle(i);
         if (!changed) {

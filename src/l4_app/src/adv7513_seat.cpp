@@ -4,15 +4,17 @@
 #include <utility>
 
 #include "app/video_wire.h"
-#include "svc/hdmi_link.h"
-#include "svc/video_sample.h"
+#include "infra/prelude.h"
+#include "svc/video/hdmi_link.h"
+#include "svc/video/video_sample.h"
+#include "infra/tally.h"
 
 namespace mister::app {
 
 Adv7513Seat::Adv7513Seat(
     const os::IClock& clock,
     const hal::VideoOutDecl& board,
-    infra::OptRef<svc::adv7513::II2cAdapter> i2c,
+    infra::OptRef<svc::video::adv7513::II2cAdapter> i2c,
     const hal::IHdmiInterrupt& hdmi_int
 ) noexcept
     : clock_(clock),
@@ -20,20 +22,20 @@ Adv7513Seat::Adv7513Seat(
       hdmi_int_(hdmi_int),
       adapter_(i2c ? *i2c : i2c_backend_),
       breaker_(adapter_),
-      main_map_(breaker_, svc::adv7513::kMainAddr),
-      edid_map_(breaker_, svc::adv7513::kEdidAddr),
-      cec_map_(breaker_, svc::adv7513::kCecAddr) {}
+      main_map_(breaker_, svc::video::adv7513::kMainAddr),
+      edid_map_(breaker_, svc::video::adv7513::kEdidAddr),
+      cec_map_(breaker_, svc::video::adv7513::kCecAddr) {}
 
 bool Adv7513Seat::hdmi_int_asserted() const {
     TASTY_SEAT_BODY(Adv7513Seat);
     return hdmi_int_.hdmi_int_asserted();
 }
 
-svc::adv7513::Io Adv7513Seat::io() noexcept {
-    svc::adv7513::Io io{};
-    io.main = infra::OptRef<svc::adv7513::IRegMap>{main_map_};
-    io.edid = infra::OptRef<svc::adv7513::IRegMap>{edid_map_};
-    io.cec = infra::OptRef<svc::adv7513::IRegMap>{cec_map_};
+svc::video::adv7513::Io Adv7513Seat::io() noexcept {
+    svc::video::adv7513::Io io{};
+    io.main = infra::OptRef<svc::video::adv7513::IRegMap>{main_map_};
+    io.edid = infra::OptRef<svc::video::adv7513::IRegMap>{edid_map_};
+    io.cec = infra::OptRef<svc::video::adv7513::IRegMap>{cec_map_};
     io.hdmi = infra::OptRef<const hal::IHdmiInterrupt>{*this};
     io.delay = infra::OptRef<os::IDelay>{delay_};
     io.clock = infra::OptRef<const os::IClock>{clock_};
@@ -49,7 +51,7 @@ void Adv7513Seat::on_core_loaded(Host h) {
     audio_gen_seen_ = h.hdmi.audio_generation();
 }
 
-Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& init) {
+Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::video::adv7513::InitOptions& init) {
     if (!adv_)
         return Edge::None;
 
@@ -67,10 +69,10 @@ Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& 
     if (!h.hdmi.hdmi_capable())
         return Edge::None;
 
-    const std::int64_t now = clock_.now().time_since_epoch().count();
-    if (now < next_hpd_ns_)
+    const os::RawMonotonicClock::time_point now = clock_.now();
+    if (now < next_hpd_)
         return Edge::None;
-    next_hpd_ns_ = now + 100'000'000;
+    next_hpd_ = now + std::chrono::milliseconds{100};
     const std::uint32_t failed_before = breaker_.failures();
     if (auto r = h.hdmi.poll_hotplug(*adv_); !r)
         h.last_error = r.error();
@@ -93,9 +95,9 @@ Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& 
 
 Adv7513Seat::Edge Adv7513Seat::configure(
     Host h,
-    const svc::adv7513::InitOptions& init,
+    const svc::video::adv7513::InitOptions& init,
     const Spd& spd,
-    const svc::VideoSample& sample
+    const svc::video::VideoSample& sample
 ) {
     if (!probed_) {
         probed_ = true;
@@ -114,7 +116,7 @@ Adv7513Seat::Edge Adv7513Seat::configure(
     if (!want_init)
         return Edge::None;
 
-    svc::adv7513::InitOptions opts = init;
+    svc::video::adv7513::InitOptions opts = init;
     opts.has_hdmi_int = h.hdmi.hdmi_capable();
     const auto r = adv_->configure(opts);
     if (!r) {
@@ -132,12 +134,12 @@ Adv7513Seat::Edge Adv7513Seat::configure(
 
 bool Adv7513Seat::attach(Host h) {
     breaker_.reset();
-    auto o = svc::adv7513::Adv7513Bus::attach(breaker_, board_);
+    auto o = svc::video::adv7513::Adv7513Bus::attach(breaker_, board_);
     probe_ = std::move(o.report);
     h.stats.i2c_bus = probe_.bus.value_or(kI2cBusNeverAcked);
     if (!o.bus) {
         h.last_error = o.bus.error();
-        h.stats.i2c = probe_.presence == svc::adv7513::Presence::Ambiguous
+        h.stats.i2c = probe_.presence == svc::video::adv7513::Presence::Ambiguous
             ? VideoI2cOutcome::Ambiguous
             : VideoI2cOutcome::Absent;
 
@@ -147,12 +149,12 @@ bool Adv7513Seat::attach(Host h) {
     }
     adv_.emplace(std::move(*o.bus));
     h.stats.i2c = VideoI2cOutcome::Present;
-    attached_ns_ = clock_.now().time_since_epoch().count();
+    attached_ = clock_.now();
     return true;
 }
 
 void Adv7513Seat::schedule_reprobe() noexcept {
-    next_probe_ns_ = (clock_.now() + probe_backoff_ms_).time_since_epoch().count();
+    next_probe_ = clock_.now() + probe_backoff_ms_;
     probe_backoff_ms_ = probe_backoff_ms_ >= kReprobeMaxMs / 2 ? kReprobeMaxMs
                                                                : probe_backoff_ms_ * 2;
 }
@@ -170,13 +172,12 @@ Adv7513Seat::Edge Adv7513Seat::recover(Host h) {
         init_ok_ = false;
         h.stats.i2c = VideoI2cOutcome::Failed;
 
-        if (clock_.now().time_since_epoch() - std::chrono::nanoseconds{attached_ns_}
-            >= kReprobeMaxMs)
+        if (clock_.now() - attached_ >= kReprobeMaxMs)
             probe_backoff_ms_ = kReprobeFirstMs;
         schedule_reprobe();
         return Edge::Lost;
     }
-    if (clock_.now().time_since_epoch().count() < next_probe_ns_)
+    if (clock_.now() < next_probe_)
         return Edge::None;
     ++h.stats.i2c_reprobes;
     if (!attach(h))
@@ -192,8 +193,8 @@ void Adv7513Seat::observe_bus() noexcept {
 Adv7513Seat::BusReport Adv7513Seat::fold_bus() const noexcept {
     BusReport r = bus_;
     if (adv_) {
-        r.writes = writes_base_.sum(svc::Tally{adv_->writes()});
-        r.errors = errors_base_.sum(svc::Tally{adv_->errors()});
+        r.writes = writes_base_.sum(infra::Tally{adv_->writes()});
+        r.errors = errors_base_.sum(infra::Tally{adv_->errors()});
         if (!r.fail_reg)
             r.fail_reg = adv_->fail_reg();
         if (!r.spd_fail_reg)
@@ -206,7 +207,7 @@ Adv7513Seat::BusReport Adv7513Seat::report() const noexcept {
     BusReport r = fold_bus();
     r.first = breaker_.first();
     r.last_errno = breaker_.last_errno();
-    r.trips = svc::Tally{breaker_.trips()};
+    r.trips = infra::Tally{breaker_.trips()};
     r.breaker_open = breaker_.tripped();
     return r;
 }
@@ -226,14 +227,14 @@ void Adv7513Seat::apply(const BusReport& r, VideoPumpStats& stats) noexcept {
     stats.i2c_breaker_open = r.breaker_open;
 }
 
-void Adv7513Seat::update_spd(Host h, const Spd& spd, const svc::VideoSample& sample) {
+void Adv7513Seat::update_spd(Host h, const Spd& spd, const svc::video::VideoSample& sample) {
     send_spd(h, spd, sample);
 }
 
-void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::VideoSample& sample) {
+void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::video::VideoSample& sample) {
     if (!adv_)
         return;
-    if (spd.form == svc::SpdForm::None)
+    if (spd.form == svc::video::SpdForm::None)
         return;
 
     Ex<void> r{};
@@ -241,10 +242,10 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::VideoSample& sampl
         r = adv_->spd_disable();
         if (r)
             ++h.stats.spd_disables;
-    } else if (spd.form == svc::SpdForm::Standard) {
+    } else if (spd.form == svc::video::SpdForm::Standard) {
         if (spd.name.empty())
             ++h.stats.spd_noname;
-        r = adv_->spd_config(svc::adv7513::build_standard_spd(spd.name));
+        r = adv_->spd_config(svc::video::adv7513::build_standard_spd(spd.name));
         if (r)
             ++h.stats.spd_sends;
     } else {
@@ -255,12 +256,12 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::VideoSample& sampl
         }
         if (spd.name.empty())
             ++h.stats.spd_noname;
-        const svc::Dv1Facts facts{
+        const svc::video::Dv1Facts facts{
             .sample = sample,
-            .menu = spd.form == svc::SpdForm::Dv1Menu && spd.menu_present,
+            .menu = spd.form == svc::video::SpdForm::Dv1Menu && spd.menu_present,
             .dir = spd.dir
         };
-        r = adv_->spd_config(svc::build_dv1_spd(facts, spd.name));
+        r = adv_->spd_config(svc::video::build_dv1_spd(facts, spd.name));
         if (r)
             ++h.stats.spd_dv1_sends;
     }
@@ -271,7 +272,7 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd, const svc::VideoSample& sampl
     }
 }
 
-std::optional<VideoI2cOutcome> Adv7513Seat::program_mode(Host h, const svc::Modeline& m) {
+std::optional<VideoI2cOutcome> Adv7513Seat::program_mode(Host h, const svc::video::Modeline& m) {
     if (!adv_)
         return std::nullopt;
     auto r = adv_->set_mode(m, false);

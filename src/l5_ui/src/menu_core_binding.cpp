@@ -20,7 +20,7 @@ void MenuCoreBinding::latch_home(const app::IdentityLatch& identity) noexcept {
     if (!browse_home_.assign(app::home_name(*id)))
         browse_home_.clear();
     file_stem_ = id->stem;
-    pause_rule_ = id->pause;
+    pause_rule_ = id->policy().pause;
 }
 
 std::string_view MenuCoreBinding::browse_home(std::string_view core_name) const noexcept {

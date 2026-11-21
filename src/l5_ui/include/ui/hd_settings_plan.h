@@ -8,10 +8,11 @@
 #include <string_view>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
-#include "ui/hd_row.h"
+#include "ui/row.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_push_row.h"
@@ -36,48 +37,48 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
     void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     RowCount pinned() const noexcept override;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
-    class HdEnterClassicRow final : public IHdRow {
+    class HdEnterClassicRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit HdEnterClassicRow(PageId classic) noexcept : classic_(classic) {}
 
         std::optional<RowKey> key() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         PageId classic_;
     };
 
-    class ScriptsRow final : public IHdRow {
+    class ScriptsRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit ScriptsRow(HdSettingsPlan& plan) noexcept : plan_(plan) {}
 
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdSettingsPlan& plan_;
     };
 
-    class AutosaveRow final : public IHdRow {
+    class AutosaveRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit AutosaveRow(HdSettingsPlan& plan) noexcept : plan_(plan) {}
 
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdSettingsPlan& plan_;
@@ -97,7 +98,7 @@ private:
 
     PageContext& ctx_;
     ScriptsEntry scripts_entry_;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     bool autosave_on_ = false;
     std::uint32_t published_ = 0;
     RebootAction reboot_action_{*this};
@@ -110,7 +111,7 @@ private:
     HdAskRow reboot_;
     HdSeparatorRow separator_;
     HdEnterClassicRow advanced_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

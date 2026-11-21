@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "infra/indexed_array.h"
+#include "infra/tally.h"
 #include "proto/autosave_policy.h"
 #include "proto/in_place_opens.h"
 #include "proto/save_stage_row.h"
@@ -15,17 +16,17 @@ struct SaveStageReport {
 
     struct Summary {
         InPlaceOpens in_place{};
-        StageTally in_place_unmatched{};
-        StageTally unstaged_adopts{};
-        StageTally orders_stale{};
-        StageTally loads_rushed{};
-        StageTally demotions{};
-        StageTally in_place_fallbacks{};
-        StageTally backups_skipped{};
+        infra::Tally in_place_unmatched{};
+        infra::Tally unstaged_adopts{};
+        infra::Tally orders_stale{};
+        infra::Tally loads_rushed{};
+        infra::Tally demotions{};
+        infra::Tally in_place_fallbacks{};
+        infra::Tally backups_skipped{};
         CommitAllSeq commit_all_served{};
 
         [[nodiscard]] constexpr bool none_in_place() const noexcept {
-            return in_place.none() && in_place_unmatched == StageTally{};
+            return in_place.none() && in_place_unmatched == infra::Tally{};
         }
     };
 

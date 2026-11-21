@@ -109,7 +109,7 @@ struct StatusWord {
 
 private:
     [[nodiscard]] constexpr bool bit_at(StatusBit bit) const noexcept {
-        return words[bit.word()].any_of(bit.lane_mask());
+        return words[bit.word()].intersects(bit.lane_mask());
     }
 };
 

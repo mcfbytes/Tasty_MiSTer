@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace mister {
+namespace mister::infra {
 
 [[noreturn]] void fatal(Error e, const char* what) {
     std::fprintf(

@@ -3,8 +3,9 @@
 
 #include "app/core_input_facts.h"
 #include "app/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 
 namespace mister::app {
 

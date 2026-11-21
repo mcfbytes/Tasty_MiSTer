@@ -7,12 +7,22 @@
 #include <optional>
 #include <span>
 
+#include "infra/affine.h"
+
 namespace mister::os {
+
+using ::mister::infra::affine::operator+;
+using ::mister::infra::affine::operator-;
+using ::mister::infra::affine::operator*;
+using ::mister::infra::affine::operator/;
+using ::mister::infra::affine::operator+=;
+using ::mister::infra::affine::operator-=;
 
 class MmioRegion;
 
 struct MapLength {
     std::size_t v = 0;
+    using affine_count = MapLength;
 
     [[nodiscard]] constexpr std::size_t bytes() const noexcept { return v; }
 
@@ -27,9 +37,7 @@ struct MapLength {
     [[nodiscard]] std::span<std::byte> plain_bytes(void* base) const noexcept;
 
     [[nodiscard]] constexpr std::optional<MapLength> less(MapLength head) const noexcept {
-        if (head.v > v)
-            return std::nullopt;
-        return MapLength{v - head.v};
+        return infra::affine::checked_sub(*this, head);
     }
 
     [[nodiscard]] std::byte* into(std::byte* base) const noexcept { return base + v; }

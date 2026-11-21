@@ -4,9 +4,10 @@
 #include <array>
 #include <type_traits>
 
-#include "cores/switch_table.h"
+#include "cores/mra/switch_table.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/types.h"
 
 namespace mister::app {

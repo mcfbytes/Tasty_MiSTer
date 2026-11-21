@@ -3,24 +3,26 @@
 
 #include <compare>
 #include <cstddef>
-#include <span>
+#include <string_view>
 
-namespace mister::xthread {
+#include "infra/affine.h"
+#include "infra/byte_count.h"
+
+namespace mister::infra {
 
 struct ByteOffset {
     std::size_t v = 0;
+    using affine_count = ByteCount;
+    using affine_index = ByteOffset;
 
     [[nodiscard]] constexpr std::size_t bytes() const noexcept { return v; }
 
-    [[nodiscard]] constexpr ByteOffset operator+(ByteOffset by) const noexcept {
-        return ByteOffset{v + by.v};
+    [[nodiscard]] constexpr char element_at(std::string_view text) const noexcept {
+        return text[v];
     }
 
-    template <std::size_t Width>
-    [[nodiscard]] constexpr std::span<std::byte, Width> slice_of(
-        std::span<std::byte> table
-    ) const noexcept {
-        return table.subspan(v).template first<Width>();
+    [[nodiscard]] constexpr bool inside(std::string_view path) const noexcept {
+        return v < path.size();
     }
 
     friend constexpr bool operator==(ByteOffset, ByteOffset) = default;

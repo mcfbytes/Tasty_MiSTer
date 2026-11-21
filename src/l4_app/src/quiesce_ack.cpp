@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/quiesce_ack.h"
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 void QuiesceAck::poll(SwitchPark& sp) noexcept {

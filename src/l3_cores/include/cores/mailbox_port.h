@@ -3,7 +3,7 @@
 
 #include "proto/mailbox_frame_decl.h"
 
-namespace mister::proto {
+namespace mister::proto::link {
 class Link;
 class SpiFioQueue;
 }
@@ -15,8 +15,8 @@ public:
     virtual ~IMailboxPort() = default;
 
     virtual void service_rt(
-        proto::Link& link,
-        proto::SpiFioQueue& queue,
+        proto::link::Link& link,
+        proto::link::SpiFioQueue& queue,
         const proto::MailboxFrameDecl& frame
     ) noexcept = 0;
 

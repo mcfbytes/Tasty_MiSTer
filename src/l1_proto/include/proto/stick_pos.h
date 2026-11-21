@@ -3,6 +3,9 @@
 
 #include <cstdint>
 
+#include "proto/joy_bits.h"
+#include "proto/types.h"
+
 namespace mister::proto {
 
 struct StickPos {
@@ -20,6 +23,19 @@ struct StickPos {
             static_cast<std::uint8_t>(word),
             static_cast<std::uint8_t>(word >> kHighByteShift)
         };
+    }
+
+    [[nodiscard]] static constexpr StickPos of_directions(JoyMask map) noexcept {
+        constexpr std::uint8_t kNegative = 0x80;
+        constexpr std::uint8_t kPositive = 0x7F;
+        constexpr std::uint8_t kCentre = 0;
+        const std::uint8_t x = map.any(JoyMask{kJoyLeft}) ? kNegative
+            : map.any(JoyMask{kJoyRight})                 ? kPositive
+                                                          : kCentre;
+        const std::uint8_t y = map.any(JoyMask{kJoyUp}) ? kNegative
+            : map.any(JoyMask{kJoyDown})                ? kPositive
+                                                        : kCentre;
+        return StickPos{x, y};
     }
 
     friend constexpr bool operator==(StickPos, StickPos) = default;

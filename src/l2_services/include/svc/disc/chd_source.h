@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <span>
+
+#include "infra/error.h"
+#include "infra/prelude.h"
+#include "svc/disc/chd_geometry.h"
+#include "svc/types.h"
+
+namespace mister::svc {
+class IFile;
+}
+
+namespace mister::svc::disc {
+
+struct ChdMetaRow;
+
+class IChdSource {
+public:
+    using Geometry = ChdGeometry;
+
+    virtual ~IChdSource() = default;
+
+    virtual Geometry geometry() const noexcept = 0;
+
+    virtual std::optional<ChdMetaRow> track_metadata(TrackIndex index) = 0;
+
+    [[nodiscard]] virtual Ex<void> read_hunk(HunkIndex hunk, std::span<std::byte> dst) = 0;
+
+protected:
+    IChdSource() = default;
+    IChdSource(const IChdSource&) = default;
+    IChdSource& operator=(const IChdSource&) = default;
+};
+
+[[nodiscard]] Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file);
+
+}

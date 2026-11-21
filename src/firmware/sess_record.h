@@ -23,7 +23,7 @@ struct SessRecord {
         return View{
             .link = dc.link.diag_byte(),
             .core_shutdowns = dc.core_shutdowns,
-            .recover_polls = sess.recover_polls.sample().value,
+            .recover_polls = sess.recover_polls.get(),
             .stage_status_change = dc.stage_status_change,
             .status_reply_refusals = dc.status_reply_refusals,
             .last_error_code = dc.last_error_code,

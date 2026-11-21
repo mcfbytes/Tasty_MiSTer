@@ -4,16 +4,14 @@
 #include <chrono>
 #include <limits>
 
+#include "infra/prelude.h"
+#include "infra/saturating.h"
+
 namespace mister::reactor {
 
 namespace {
 
 constexpr std::uint32_t kU32Max = std::numeric_limits<std::uint32_t>::max();
-
-constexpr std::uint32_t sat_add(std::uint32_t a, std::uint64_t b) noexcept {
-    const std::uint64_t s = static_cast<std::uint64_t>(a) + b;
-    return s > kU32Max ? kU32Max : static_cast<std::uint32_t>(s);
-}
 
 constexpr std::uint64_t non_negative(std::int64_t v) noexcept {
     return v < 0 ? 0u : static_cast<std::uint64_t>(v);
@@ -38,7 +36,7 @@ void RoundTimer::wake(std::int64_t latency_ns, std::uint64_t missed_ticks) noexc
         return;
     const std::uint64_t lat = non_negative(latency_ns);
     record_(acc_.wake, lat, {});
-    acc_.tick_overruns = sat_add(acc_.tick_overruns, missed_ticks);
+    acc_.tick_overruns = infra::sat_add(acc_.tick_overruns, missed_ticks);
     if (lat > acc_.all_wake_max_ns)
         acc_.all_wake_max_ns = lat;
     recorder_.wake(round_span(std::chrono::nanoseconds{latency_ns}));
@@ -73,21 +71,21 @@ std::int64_t RoundTimer::end(std::int64_t t_end_ns) noexcept {
     const std::uint64_t dur = non_negative(t - round_start_ns_);
     RoundTiming::Blame blame = longest_blame_;
     blame.lifecycle_marks = lifecycle_;
-    if (!lifecycle_.empty()) {
+    if (!lifecycle_.is_empty()) {
         record_(acc_.lifecycle, dur, blame);
-        acc_.all_life_rounds = sat_add(acc_.all_life_rounds, 1);
+        acc_.all_life_rounds = infra::sat_inc(acc_.all_life_rounds);
         if (dur > acc_.all_life_max_ns) {
             acc_.all_life_max_ns = dur;
             acc_.all_life_blame = blame;
         }
     } else {
         std::uint32_t& h = acc_.all_steady_hist[record_(acc_.steady, dur, blame)];
-        h = sat_add(h, 1);
+        h = infra::sat_inc(h);
         if (acc_.all_steady_rounds != kU32Max)
             acc_.all_steady_sum_ns += dur;
-        acc_.all_steady_rounds = sat_add(acc_.all_steady_rounds, 1);
+        acc_.all_steady_rounds = infra::sat_inc(acc_.all_steady_rounds);
         if (dur > kOverNs)
-            acc_.all_steady_over_1ms = sat_add(acc_.all_steady_over_1ms, 1);
+            acc_.all_steady_over_1ms = infra::sat_inc(acc_.all_steady_over_1ms);
         if (dur > acc_.all_steady_max_ns) {
             acc_.all_steady_max_ns = dur;
             acc_.all_steady_blame = blame;
@@ -117,22 +115,22 @@ std::size_t RoundTimer::record_(
 ) noexcept {
     if (d.n == 0 || ns < d.min_ns)
         d.min_ns = ns;
-    d.n = sat_add(d.n, 1);
+    d.n = infra::sat_inc(d.n);
     d.sum_ns += ns;
     if (ns > d.max_ns) {
         d.max_ns = ns;
         d.max_blame = blame;
     }
     if (ns > kOverNs)
-        d.over_1ms = sat_add(d.over_1ms, 1);
+        d.over_1ms = infra::sat_inc(d.over_1ms);
     const std::size_t b = round_bucket(ns);
-    d.hist[b] = sat_add(d.hist[b], 1);
+    d.hist[b] = infra::sat_inc(d.hist[b]);
     return b;
 }
 
 void RoundTimer::close_epoch_(std::int64_t now_ns) noexcept {
     acc_.epoch_ns = non_negative(now_ns - epoch_start_ns_);
-    acc_.epoch = sat_add(acc_.epoch, 1);
+    acc_.epoch = infra::sat_inc(acc_.epoch);
     cell_.publish(acc_);
     acc_.steady = RoundTiming::Dist{};
     acc_.lifecycle = RoundTiming::Dist{};

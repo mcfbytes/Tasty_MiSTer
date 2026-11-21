@@ -6,7 +6,7 @@
 #include "infra/seat.h"
 #include "infra/service_slot.h"
 
-namespace mister {
+namespace mister::infra {
 
 class ServiceSet {
 

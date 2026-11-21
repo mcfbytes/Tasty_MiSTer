@@ -11,7 +11,8 @@
 #include <vector>
 
 #include "infra/seat.h"
-#include "svc/connect_request.h"
+#include "infra/tally.h"
+#include "svc/connect/connect_request.h"
 #include "ui/confirm_host.h"
 #include "ui/connect_views.h"
 #include "ui/hd_plan.h"
@@ -36,15 +37,15 @@ public:
     ConnectSlotPlan(const ConnectSlotPlan&) = delete;
     ConnectSlotPlan& operator=(const ConnectSlotPlan&) = delete;
 
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    svc::Tally refusals() const noexcept override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
+    infra::Tally refusals() const noexcept override;
 
 protected:
     ConnectSlotPlan(const HdPlanInputs& in, RowCount slots);
 
     [[nodiscard]] const ConnectViews& views() const noexcept;
 
-    bool send(const svc::ConnectRequest& request);
+    bool send(const svc::connect::ConnectRequest& request);
 
     Transition ask(
         SlotId slot,
@@ -65,10 +66,10 @@ private:
     Transition on_entered(const TextEntryResult& result) override;
 
     std::deque<HdSlotRow> slots_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
     ConnectViews none_{};
     SlotId asked_ = SlotId::at(RowIndex{});
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 };
 
 }

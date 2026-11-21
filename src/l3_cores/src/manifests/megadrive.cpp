@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/manifests/megadrive.h"
 
-#include "cores/megadrive_core.h"
+#include "cores/megadrive/megadrive_core.h"
 
 namespace mister::cores::manifests {
 
@@ -11,7 +11,7 @@ static_assert(
 );
 
 std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<MegaDriveCore>(p, g.services);
+    return std::make_unique<megadrive::MegaDriveCore>(p, g.services);
 }
 
 }

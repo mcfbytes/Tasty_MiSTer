@@ -11,14 +11,14 @@
 #include <optional>
 #include <string_view>
 
-#include "cores/cd_census_rows.h"
-#include "cores/cd_core.h"
-#include "cores/cd_io_indices.h"
-#include "cores/cd_profile.h"
-#include "cores/cd_quirk_row.h"
-#include "cores/cd_tick_periods.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_core.h"
+#include "cores/cd/cd_io_indices.h"
+#include "cores/cd/cd_profile.h"
+#include "cores/cd/cd_quirk_row.h"
+#include "cores/cd/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "cores/saturn_cue.h"
+#include "cores/cd/saturn_cue.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
@@ -29,24 +29,24 @@ inline constexpr auto kSaturnServices = std::to_array<LinkDecoderDecl>({
     {
         "saturn.cmd_edge",
         reactor::Cause::Ring,
-        &kCdCommandEdge<kSaturn>,
+        &cd::kCdCommandEdge<kSaturn>,
         std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
     {
         "saturn.service_tick",
         reactor::Cause::Tick,
-        &kCdServiceTick<kSaturn>,
+        &cd::kCdServiceTick<kSaturn>,
         std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
 });
 
-inline constexpr CdTickPeriods kSaturnTicks{
+inline constexpr cd::CdTickPeriods kSaturnTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{13'333},
     .caller = std::chrono::microseconds{1'000},
-    .speeds = CdSpeedCount{3},
+    .speeds = cd::CdSpeedCount{3},
     .speed = {
         std::chrono::microseconds{16'667},
         std::chrono::microseconds{13'333},
@@ -55,28 +55,28 @@ inline constexpr CdTickPeriods kSaturnTicks{
     },
 };
 
-inline constexpr CdIoIndices kSaturnIoIndices{
+inline constexpr cd::CdIoIndices kSaturnIoIndices{
     .data = IoIndex{8},
     .cdda = std::nullopt,
     .subcode = std::nullopt,
     .info = IoIndex{0xC},
 };
 
-inline constexpr auto kSaturnQuirks = std::to_array<CdQuirkRow>({
-    {.offset = 0x20, .id = "T-8126H", .quirk = CdQuirk::TocStartsAtIndex1},
-    {.offset = 0x20, .id = "T-8120G", .quirk = CdQuirk::TocStartsAtIndex1},
-    {.offset = 0x20, .id = "T-8112H", .quirk = CdQuirk::TocStartsAtIndex1},
-    {.offset = 0x20, .id = "T-99901G", .quirk = CdQuirk::TocStartsAtIndex1},
-    {.offset = 0x20, .id = "T-8112G", .quirk = CdQuirk::TocStartsAtIndex1},
-    {.offset = 0x20, .id = "T-5008H", .quirk = CdQuirk::ReadSkipsSeek},
-    {.offset = 0x20, .id = "T-10609G", .quirk = CdQuirk::ReadSkipsSeek},
+inline constexpr auto kSaturnQuirks = std::to_array<cd::CdQuirkRow>({
+    {.offset = 0x20, .id = "T-8126H", .quirk = cd::CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8120G", .quirk = cd::CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8112H", .quirk = cd::CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-99901G", .quirk = cd::CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8112G", .quirk = cd::CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-5008H", .quirk = cd::CdQuirk::ReadSkipsSeek},
+    {.offset = 0x20, .id = "T-10609G", .quirk = cd::CdQuirk::ReadSkipsSeek},
 });
 
-inline constexpr CdProfile kSaturnProfile{
+inline constexpr cd::CdProfile kSaturnProfile{
     .io = kSaturnIoIndices,
-    .cue = saturn::kSaturnCuePolicy,
+    .cue = cd::saturn::kSaturnCuePolicy,
     .ticks = kSaturnTicks,
-    .row = CdProfile::SaturnFacts{.quirks = kSaturnQuirks},
+    .row = cd::CdProfile::SaturnFacts{.quirks = kSaturnQuirks},
 };
 
 inline constexpr auto kSaturnSlots = std::to_array<FileSlot>({
@@ -172,12 +172,13 @@ inline constexpr CoreProfile kSaturn{
     .signatures = {},
     .blank_save = kSaturnBlankSave,
     .staging = kSaturnStaging,
-    .image_rows_no_zip = true,
-
-    .cheats = {.reset_on_mount = false},
     .windows = kSaturnWindows,
 
     .reset = {.toggle_reacts = true, .button_reacts = true},
+    .host =
+        {.image_rows_no_zip = true,
+
+         .cheats = {.reset_on_mount = false}},
 
     .grants = {Grant::Lamp, Grant::Discs},
 };

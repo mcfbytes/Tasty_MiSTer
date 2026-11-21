@@ -7,6 +7,7 @@
 #include "cores/stream_load_end.h"
 #include "cores/types.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/session_params.h"
 
 namespace mister::cores {

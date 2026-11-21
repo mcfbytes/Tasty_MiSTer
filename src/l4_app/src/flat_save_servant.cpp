@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "svc/save_stage_keeper.h"
+
 namespace mister::app {
 
 namespace {
@@ -14,20 +16,22 @@ namespace {
 
 }
 
-FlatSaveServant::FlatSaveServant(const svc::Vfs& vfs) : card_(vfs), image_(kImageCap) {}
+FlatSaveServant::FlatSaveServant(svc::SaveStageKeeper& keeper)
+    : keeper_(keeper),
+      image_(kImageCap.zeroed<std::vector<std::byte>>()) {}
 
 proto::SaveAct FlatSaveServant::start(
-    const cores::SaveImage& image,
+    const cores::mra::NvramSave& image,
     std::string_view rel,
     hal::Width word
 ) noexcept {
     TASTY_SEAT_BODY(FlatSaveServant);
     phase_ = Phase::Idle;
-    if (image.size == 0 || image.size > kImageCap || !rel_.assign(rel) || rel_.empty()) {
+    if (image.size.empty() || image.size > kImageCap || !rel_.assign(rel) || rel_.empty()) {
         return done(false);
     }
     index_ = image.index;
-    size_ = image.size;
+    size_ = image.size.file_word<std::size_t>();
     at_ = 0;
     asked_ = 0;
 
@@ -52,7 +56,7 @@ proto::SaveAct FlatSaveServant::resume(
             return next_read_();
         case Phase::Closing: {
             phase_ = Phase::Idle;
-            const auto r = card_.replace_file(
+            const auto r = keeper_.commit_image(
                 rel_.view(),
                 std::span<const std::byte>(image_.data(), size_)
             );

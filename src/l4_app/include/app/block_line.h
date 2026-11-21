@@ -4,13 +4,16 @@
 #include <cstdint>
 #include <utility>
 
+#include "hal/reg_word.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "infra/opt_ref.h"
 #include "infra/seat_owner_io.h"
 #include "os/epoll_set.h"
 #include "os/uio_handle.h"
 #include "os/uio_line_ref.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -43,14 +46,15 @@ private:
     [[nodiscard]] bool rang() const noexcept;
 
     template <class Port, class Reg>
-    [[nodiscard]] std::uint32_t drain(bool rang, Port& port, Reg cause) noexcept {
+    [[nodiscard]] proto::CauseBits drain(bool rang, Port& port, Reg cause) noexcept {
         TASTY_SEAT_BODY(SeatOwner);
         if (rang)
             (void)line_.borrow().consume();
-        const std::uint32_t w = port.read(cause).bits();
+        const hal::RegWord w = port.read(cause);
+        port.write(cause, w);
         if (rang)
             (void)line_.borrow().rearm();
-        return w;
+        return proto::CauseBits::of(w);
     }
 
     os::UioHandle line_{};

@@ -8,10 +8,11 @@
 #include "app/negotiated_core.h"
 #include "app/owner_push.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 
-proto::ActKey LadderHostAdapter::next_generation() noexcept {
+proto::ActKey LadderHostAdapter::next_act() noexcept {
     TASTY_SEAT_BODY(LadderHostAdapter);
     return edges_.act_keys.next();
 }
@@ -132,13 +133,13 @@ bool LadderHostAdapter::order_savestates(std::string_view image, proto::ActKey g
         return false;
     const bool service = edges_.save_state_asks
         && edges_.save_state_facts
-        && edges_.save_state_facts->generation() != 0;
+        && edges_.save_state_facts->generation().held();
     SaveStateAttach::Ask ask{
         .decl = *conf->savestate(),
         .core_name = edges_.negotiated.core_name(),
         .load_hint = edges_.negotiated.made_with_manifest() ? cores::LoadHint::XmlManifest
                                                             : cores::LoadHint::None,
-        .generation = gen
+        .act = gen
     };
     if (!service || !ask.rom_path.assign(image) || !edges_.save_state_asks->push(ask)) {
         ++edges_.tally.savestate_refusals;
@@ -173,6 +174,18 @@ std::optional<proto::FieldValue> LadderHostAdapter::option_choice(cores::OptionT
     if (row == rows.end())
         return std::nullopt;
     return proto::FieldValue{row->current};
+}
+
+void LadderHostAdapter::game_identified(
+    std::string_view image,
+    const svc::disc::DiscIdText& serial
+) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    GameId id{};
+    (void)id.file.assign(infra::basename(image));
+    (void)id.serial.assign(serial.view());
+    id.enabled = edges_.config_cell.sample().value.log_file_entry != 0;
+    edges_.game_id_cell.publish(id);
 }
 
 }

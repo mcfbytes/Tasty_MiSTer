@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/mgl_pump.h"
+#include "infra/span_cut.h"
 
 #include "app/mgl_slot_remember.h"
 
@@ -11,6 +12,7 @@
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
 #include "infra/path_parts.h"
+#include "infra/prelude.h"
 #include "proto/conf_str.h"
 #include "svc/search_policy.h"
 #include "svc/xml_scan.h"
@@ -83,8 +85,9 @@ void MglPump::bind_homes() {
     if (id) {
 
         const std::string file_home = games_home(vfs_, home_name(*id));
-        const std::string image_home = !id->cue_dir.empty() ? games_home(vfs_, id->cue_dir)
-                                                            : file_home;
+        const std::string image_home = !id->policy().cue_browse_dir.empty()
+            ? games_home(vfs_, id->policy().cue_browse_dir)
+            : file_home;
         bound = player_.set_homes(file_home, image_home);
     }
     if (bound)
@@ -169,7 +172,7 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
     }
 
     if (!armed_doc_) {
-        player_.parse(std::string_view{doc_, doc_len_}, true);
+        player_.parse(infra::as_text(doc_len_.first_in(std::span<const char>(doc_))), true);
     } else {
 
         const Mgl& mgl = *armed_doc_;
@@ -283,7 +286,8 @@ void MglPump::check_invariant() const noexcept {
 #endif
 }
 
-void MglPump::tick() {
+void MglPump::serve() noexcept {
+    TASTY_SEAT_BODY(MglPump);
     const PublishOnExit publish_on_exit{this};
     check_invariant();
 
@@ -329,7 +333,7 @@ void MglPump::begin_read() {
 
     load_tag_ = kUncaused;
     retries_used_ = 0;
-    doc_len_ = 0;
+    doc_len_ = infra::ByteCount{};
     rbf_.clear();
     want_.clear();
 
@@ -359,15 +363,17 @@ void MglPump::begin_read() {
     }
     auto got = (*f)->read_at(
         proto::kFileStart,
-        sz->first_of(std::span<std::byte>(std::as_writable_bytes(std::span(doc_))))
+        infra::affine::first(std::span<std::byte>(std::as_writable_bytes(std::span(doc_))), *sz)
     );
-    if (!got || *got == 0) {
+    if (!got || got->empty()) {
         fail_read_(got ? Errc::io : got.error().code);
         return;
     }
-    doc_len_ = static_cast<std::uint32_t>(*got);
+    doc_len_ = *got;
 
-    (void)resolve_and_load(xml::rbf_text(std::string_view{doc_, doc_len_}));
+    (void)resolve_and_load(
+        xml::rbf_text(infra::as_text(doc_len_.first_in(std::span<const char>(doc_))))
+    );
 }
 
 bool MglPump::resolve_and_load(std::string_view want) {
@@ -378,7 +384,7 @@ bool MglPump::resolve_and_load(std::string_view want) {
         if (info_)
             info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
-        doc_len_ = 0;
+        doc_len_ = infra::ByteCount{};
         return false;
     }
     (void)want_.assign(want);
@@ -389,7 +395,7 @@ bool MglPump::resolve_and_load(std::string_view want) {
         if (info_)
             info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
-        doc_len_ = 0;
+        doc_len_ = infra::ByteCount{};
         return false;
     }
 
@@ -460,7 +466,7 @@ void MglPump::abandon(InfoId id, Errc code) {
     enter(State::Idle);
 
     load_tag_ = kUncaused;
-    doc_len_ = 0;
+    doc_len_ = infra::ByteCount{};
     armed_doc_.reset();
     last_error_ = code;
     if (id != InfoId::None) {

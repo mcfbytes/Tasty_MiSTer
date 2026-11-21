@@ -7,6 +7,7 @@
 #include "app/load_window_map.h"
 #include "app/window_tally.h"
 #include "hal/fpga_aperture.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
 #include "os/clock.h"

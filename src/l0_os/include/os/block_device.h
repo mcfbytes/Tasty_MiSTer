@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::os {

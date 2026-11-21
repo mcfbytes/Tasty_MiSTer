@@ -3,6 +3,7 @@
 
 #include "ui/connect_port.h"
 #include "ui/misc_page.h"
+#include "ui/osd_tree.h"
 #include "ui/select_ini_page.h"
 #include <linux/input-event-codes.h>
 
@@ -17,10 +18,10 @@
 #include <utility>
 
 #include "app/event.h"
-#include "app/hd_crumb.h"
+#include "app/hd/hd_crumb.h"
 #include "app/identity_latch.h"
-#include "app/page_description.h"
-#include "app/pause_badge.h"
+#include "app/hd/page_description.h"
+#include "app/hd/pause_badge.h"
 #include "app/ui_request_ring.h"
 #include "infra/ascii.h"
 #include "proto/standard_item.h"
@@ -138,7 +139,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, const PageArg& arg, PageCo
         case PageId::System: {
 
             SessionFacts session = ctx.session;
-            session.in_hd_tree = hd_tree();
+            session.tree = hd_tree() ? OsdTree::Hd : OsdTree::Classic;
             return make_system_page(ctx.sys, session);
         }
         case PageId::CoreOptions:
@@ -222,7 +223,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, const PageArg& arg, PageCo
             if (ctx.identity) {
                 const std::optional<app::SessionIdentity> cid = ctx.identity->copy();
                 if (cid) {
-                    spec.front_end = cid->front_end;
+                    spec.front_end = cid->policy().front_end;
                     spec.core = std::string(cid->core.view());
                     spec.j_names = std::string(cid->j_names.view());
                 }
@@ -384,7 +385,7 @@ std::unique_ptr<Page> MenuModel::make_core_settings_page_(proto::SubmenuNo page)
     spec.title = declared
         ? std::string(*declared)
         : (page == proto::kRootSubmenu ? std::string(items_.core_name()) : std::string{});
-    spec.mt32_available = hd_mask_.has(kMt32Present);
+    spec.mt32_available = hd_mask_.intersects(kMt32Present);
 
     const BuildEnv env = build_env(page);
     spec.custom_aspect_ratio[0] = env.custom_aspect_ratio[0];
@@ -414,10 +415,10 @@ HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, const PageArg& arg) {
     };
 }
 
-app::RecentGames::Played MenuModel::played_record_() const noexcept {
+app::recents::RecentGames::Played MenuModel::played_record_() const noexcept {
     const NowPlaying::Played& p = now_playing_.last();
 
-    return app::RecentGames::Played{
+    return app::recents::RecentGames::Played{
         .core_name = binding_.front_end() ? std::string_view{} : browse_home(),
         .core_image = p.core_image.view(),
         .path = p.path.view(),
@@ -433,7 +434,7 @@ void MenuModel::refresh_recent_(PageContext& ctx) {
         .refresh(*ctx.files, *ctx.recents, played_record_(), ctx.clock, played_records_(ctx));
 }
 
-std::span<const app::PlayedHistory::Record> MenuModel::played_records_(PageContext& ctx) {
+std::span<const app::recents::PlayedHistory::Record> MenuModel::played_records_(PageContext& ctx) {
     if (!ctx.played)
         return {};
     (void)ctx.played->load();
@@ -551,7 +552,7 @@ bool MenuModel::hd_tree() const noexcept {
     return hd_root_ && style_.hd() && stack_.depth() == 1 && stack_.top_id() == PageId::Progress;
 }
 
-bool MenuModel::describe_top(app::PageDescription& out) {
+bool MenuModel::describe_top(app::hd::PageDescription& out) {
     const auto top = stack_.top();
     if (!top)
         return false;
@@ -576,7 +577,7 @@ bool MenuModel::describe_top(app::PageDescription& out) {
         && !items_.core_name().empty()
         && infra::ieq(out.title.view(), items_.core_name()))
         (void)out.title.assign("Advanced");
-    out.crumb = app::hd_crumb(items_.core_name(), out.title.view());
+    out.crumb = app::hd::hd_crumb(items_.core_name(), out.title.view());
     if (now_playing_.game_loaded()) {
         (void)out.subtitle.assign(now_playing_.title());
     } else if (!binding_.front_end()) {
@@ -598,15 +599,15 @@ void MenuModel::on_request_done(
                               .on_done(asks ? asks->pending(tag) : std::nullopt, slots, unix_time);
     if (asks)
         asks->forget(tag);
-    const app::RecentGames::Played p = played_record_();
+    const app::recents::RecentGames::Played p = played_record_();
 
     if (recorded && ctx.played && p.row) {
         std::string image{p.core_image};
 
         if (image.empty() && ctx.files.has_value())
-            image = app::RecentGames::core_image_of(*ctx.files, p.core_name);
+            image = app::recents::RecentGames::core_image_of(*ctx.files, p.core_name);
         (void)ctx.played->record(
-            app::PlayedHistory::Record{
+            app::recents::PlayedHistory::Record{
                 .core_image = std::move(image),
                 .core_name = std::string{p.core_name},
                 .path = std::string{p.path},
@@ -756,15 +757,15 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
         | UiEvent::Right
         | UiEvent::Plus
         | UiEvent::Minus;
-    if (buttons.has_any({kRearm})) {
+    if (buttons.intersects({kRearm})) {
         ++help_rearms_;
         if (ctx.clock) {
-            deadlines_.rearm_help(ctx.clock->now().time_since_epoch());
+            deadlines_.rearm_help(ctx.clock->now());
         }
     }
 
     if (!menu_has_focus()) {
-        if (buttons.has_any({UiEvent::Menu})) {
+        if (buttons.intersects({UiEvent::Menu})) {
             if (osd_open()) {
 
                 stack_.clear();
@@ -804,9 +805,9 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
         bool moved = false;
         if (across) {
             moved = remap_.apply(axis, nav_);
-        } else if (buttons.has_any({UiEvent::Up})) {
+        } else if (buttons.intersects({UiEvent::Up})) {
             moved = nav_.move(Navigator::Direction::Up);
-        } else if (buttons.has_any({UiEvent::Down})) {
+        } else if (buttons.intersects({UiEvent::Down})) {
             moved = nav_.move(Navigator::Direction::Down);
         }
         if (moved) {
@@ -890,7 +891,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         }
     }
 
-    if (ctx.clock && deadlines_.fired(ctx.clock->now().time_since_epoch())) {
+    if (ctx.clock && deadlines_.fired(ctx.clock->now())) {
         deadlines_.consume_pop();
         if (!stack_.empty()) {
             stack_.pop();
@@ -939,7 +940,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     }
 
     if (binding_.front_end() && ctx.clock) {
-        if (deadlines_.take_status_tick(ctx.clock->now().time_since_epoch())) {
+        if (deadlines_.take_status_tick(ctx.clock->now())) {
 
             ctx.status.sdram_cfg = sdram_cfg();
             out.composite_status_bar(ctx.status);
@@ -970,7 +971,11 @@ void MenuModel::on_core_loaded(proto::CoreType type, bool front_end, PageContext
         open_root(ctx);
 }
 
-void MenuModel::on_hd_mask(HdMask m, bool front_end, infra::OptRef<app::UiRequestRing> asks) {
+void MenuModel::on_hd_mask(
+    proto::OsdMask m,
+    bool front_end,
+    infra::OptRef<app::UiRequestRing> asks
+) {
 
     sync_cells();
 
@@ -1068,8 +1073,8 @@ void MenuModel::latch_browse_home() noexcept {
     binding_.latch_home(identity_);
 }
 
-app::HdOsdStatus::Badge MenuModel::pause_badge() const noexcept {
-    return app::pause_badge(
+app::hd::HdOsdStatus::Badge MenuModel::pause_badge() const noexcept {
+    return app::hd::pause_badge(
         pause_probe_,
         binding_.pause_rule(),
         mirror_.status_words().status,
@@ -1092,7 +1097,7 @@ void MenuModel::stamp_session(PageContext& ctx) const noexcept {
     const std::string_view name = binding_.front_end() ? std::string_view{} : browse_home();
     (void)ctx.session.core_dir.assign(name);
 
-    ctx.session.in_hd_tree = hd_tree();
+    ctx.session.tree = hd_tree() ? OsdTree::Hd : OsdTree::Classic;
 }
 
 bool MenuModel::cells_pending() const noexcept {
@@ -1145,8 +1150,9 @@ void MenuModel::set_item_table(proto::ItemTable t) {
         baseline_.clear();
     items_ = std::move(t);
 
-    hd_mask_ = HdMask{};
+    hd_mask_ = proto::OsdMask{};
     pause_probe_ = proto::find_standard_item(items_, proto::StandardItem::PauseOnOsd);
+    verbs_ = declared_core_verbs(items_.core_name());
     drop_pages_();
     invalidate_surface();
 }
@@ -1159,7 +1165,7 @@ void MenuModel::set_status_words(StatusView s) noexcept {
 BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
     BuildEnv env;
 
-    env.hdmask = hd_mask_.osd_word();
+    env.hdmask = hd_mask_;
     env.page = page;
     env.flat = flat_;
 
@@ -1169,12 +1175,12 @@ BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
     {
         const std::optional<app::SessionIdentity> cid = identity_.copy();
         if (cid) {
-            if (!cid->cue_dir.empty())
-                env.cue_dir = cid->cue_dir;
+            if (!cid->policy().cue_browse_dir.empty())
+                env.cue_dir = cid->policy().cue_browse_dir;
 
             constexpr std::size_t kSlotsInAByte = std::numeric_limits<std::uint8_t>::max();
             env.slots = cid->slots.first(std::min(cid->slots.size(), kSlotsInAByte));
-            env.image_no_zip = cid->image_no_zip;
+            env.image_no_zip = cid->policy().image_rows_no_zip;
         }
     }
 

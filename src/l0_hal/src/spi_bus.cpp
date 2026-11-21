@@ -7,19 +7,27 @@
 #include <type_traits>
 #include <utility>
 
-#include "infra/rt_stats.h"
+#include "infra/xthread/rt_stats.h"
+#include "infra/prelude.h"
 #include "hal/mailbox.h"
+#include "os/raw_monotonic_clock.h"
 
 namespace mister::hal {
 
-namespace {
-
-std::chrono::nanoseconds now_ns() noexcept {
-    timespec ts{};
-    ::clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    return std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec};
+LinkLook look(SpiOutput gpo_register, GpiWord gpi) noexcept {
+    if (!gpo_register.contains(gpo::kCoreEnable))
+        return LinkLook::IdView;
+    const LwPresence lw = LwPresence::of(gpi);
+    if (!lw.in_user_mode() || !lw.present() || !lw.enabled())
+        return LinkLook::NoLwHost;
+    return LinkLook::LwHostEnabled;
 }
 
+LinkLook SpiBus::look_at_open_() noexcept {
+    const SpiOutput gpo_now{gpo_reg_.read(GpoBlock::Reg::Gpo)};
+
+    const GpiWord gpi_now = gpo_now.contains(gpo::kCoreEnable) ? read_gpi() : GpiWord{};
+    return hal::look(gpo_now, gpi_now);
 }
 
 void SpiBus::store_gpo(SpiOutput v) noexcept {
@@ -38,8 +46,9 @@ GpiWord SpiBus::read_gpi() const noexcept {
 }
 
 Ex<GpiWord> SpiBus::spin_ack(AckLevel want, Timeout on_timeout) noexcept {
+
     unsigned budget = ack_soft_spins_;
-    std::chrono::nanoseconds limit{};
+    os::RawMonotonicClock::time_point limit{};
     bool armed = false;
     for (;;) {
         GpiWord gpi = read_gpi();
@@ -53,7 +62,7 @@ Ex<GpiWord> SpiBus::spin_ack(AckLevel want, Timeout on_timeout) noexcept {
         if (--budget != 0u)
             continue;
         budget = ack_soft_spins_;
-        const std::chrono::nanoseconds now = now_ns();
+        const os::RawMonotonicClock::time_point now = os::RawMonotonicClock::now();
         if (!armed) {
             limit = now + ack_timeout_ns_;
             armed = true;
@@ -67,7 +76,7 @@ Ex<GpiWord> SpiBus::spin_ack(AckLevel want, Timeout on_timeout) noexcept {
     }
 }
 
-Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
+Ex<SpiBusOpen> SpiBus::open(Mailbox mailbox, LookPolicy policy, xthread::RtStats* stats) {
 
     if (!mailbox.held())
         return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
@@ -82,15 +91,21 @@ Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
 
     bus.mailbox_ = std::move(mailbox).consume();
 
+    const LinkLook look = bus.look_at_open_();
+    if (look == LinkLook::LwHostEnabled && policy == LookPolicy::StopOnHost) {
+        return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
+    }
+
     bus.commit_gpo(SpiOutput{});
-    return bus;
+    return SpiBusOpen{.bus = std::move(bus), .look = look};
 }
 
-SpiBus SpiBus::attach_registers(
+Ex<SpiBusOpen> SpiBus::attach_registers(
     BlockView<GpoBlock> gpo,
     BlockView<GpiBlock> gpi,
     ISpiOutputObserver* obs,
     const LinkTimingValues& timing,
+    LookPolicy policy,
     xthread::RtStats* stats
 ) noexcept {
     if (!gpo.bound() || !gpi.bound()) {
@@ -103,8 +118,13 @@ SpiBus SpiBus::attach_registers(
     bus.stats_ = infra::opt_ref_of(stats);
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
+
+    const LinkLook look = bus.look_at_open_();
+    if (look == LinkLook::LwHostEnabled && policy == LookPolicy::StopOnHost) {
+        return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
+    }
     bus.commit_gpo(SpiOutput{});
-    return bus;
+    return SpiBusOpen{.bus = std::move(bus), .look = look};
 }
 
 bool SpiBus::ready() const {
@@ -117,7 +137,7 @@ SpiSample SpiBus::sample() const noexcept {
     return decode_sample(read_gpi());
 }
 
-Ex<CoreIdentity> SpiBus::identify() {
+Ex<CoreTypeByte> SpiBus::identify() {
 
     const GpiWord pre = read_gpi();
     if (pre.test(kGpiNotReadyField)) {
@@ -133,12 +153,12 @@ Ex<CoreIdentity> SpiBus::identify() {
         return std::unexpected(sample.refusal(Errc::negotiation, ERR_SITE()));
     }
     const CoreTypeByte type{static_cast<std::uint8_t>(sample.field(kGpiTypeByteField))};
-    return CoreIdentity{type};
+    return type;
 }
 
 CoreCapabilities SpiBus::latch_capabilities() {
 
-    if (!gpo_.has(gpo::kCoreEnable)) {
+    if (!gpo_.contains(gpo::kCoreEnable)) {
         fatal(
             gpo_.refusal(Errc::negotiation, ERR_SITE()),
             "SpiBus::latch_capabilities() sampled with core-enable low"
@@ -153,7 +173,7 @@ CoreCapabilities SpiBus::latch_capabilities() {
     caps.button_osd = gpi.test(kGpiButtonOsdField);
     caps.button_user = gpi.test(kGpiButtonUserField);
     caps.free_caps = static_cast<std::uint8_t>(gpi.field(kGpiFreeCapsField));
-    caps.lw_directory = gpi.test(kGpiDirectoryField);
+    caps.lw = LwPresence::of(gpi);
 
     width_ = caps.width;
     io_version_ = caps.io_version;
@@ -339,7 +359,7 @@ Ex<void> SpiBus::block_read(std::span<std::uint8_t> data) {
         for (std::size_t i = 0; i < n; ++i) {
             store_gpo(gpo.with(gpo::kStrobe));
             store_gpo(gpo);
-            data[i] = read_gpi().data().low_byte();
+            read_gpi().data().store_low(data.subspan(i).first<1>());
         }
     }
 

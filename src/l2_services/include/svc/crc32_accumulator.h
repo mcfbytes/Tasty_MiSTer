@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/byte_view.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_diag.h"
 #include "infra/seat_owner_encode.h"

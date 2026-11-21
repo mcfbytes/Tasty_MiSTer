@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/core_init.h"
 
-#include "proto/core_session.h"
+#include "infra/prelude.h"
+#include "proto/link/core_session.h"
 
 namespace mister::app {
 

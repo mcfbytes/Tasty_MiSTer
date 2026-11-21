@@ -15,6 +15,7 @@
 #include "hal/boards_table.h"
 #include "hal/boot_handoff.h"
 #include "hal/fpga_memory.h"
+#include "infra/prelude.h"
 #include "hal/phys_region.h"
 #include "os/types.h"
 

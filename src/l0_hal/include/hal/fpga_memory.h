@@ -5,22 +5,21 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string_view>
 
 #include "infra/error.h"
 #include "os/framebuffer.h"
 #include "os/mmio_region.h"
+#include "hal/aperture_node_decl.h"
 #include "hal/aperture_region.h"
 #include "hal/fbdev_placement.h"
 #include "hal/hps_ddr_region.h"
 #include "hal/memory_model.h"
+#include "infra/prelude.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
-
-inline constexpr std::string_view kApertureUioName = "mister_ddr_aperture";
 
 struct ApertureNode {
     os::UioMinor minor{};
@@ -30,6 +29,7 @@ struct ApertureNode {
 
 [[nodiscard]] std::optional<ApertureNode> resolve_aperture(
     const char* sysfs_root,
+    const ApertureNodeDecl& node,
     const PhysRegion& r
 ) noexcept;
 
@@ -56,11 +56,13 @@ public:
     );
 
     [[nodiscard]] static Ex<FpgaMemory> map_aperture(
+        const ApertureNodeDecl& node,
         const ApertureRegion& r,
         os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
     );
 
     [[nodiscard]] static Ex<FpgaMemory> map_scanout(
+        const ApertureNodeDecl& node,
         const ApertureRegion& r,
         WriteCombine wc,
         const char* fb_node

@@ -18,15 +18,17 @@
 #include "hal/sector_block.h"
 #include "hal/window_port.h"
 #include "infra/indexed_array.h"
+#include "proto/block_geometry.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "os/epoll_set.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_io.h"
 #include "os/monotonic_clock.h"
 #include "proto/save_slot_rule.h"
-#include "svc/disc_geometry.h"
-#include "svc/disc_read_service.h"
-#include "svc/disc_read_slot.h"
+#include "svc/disc/disc_geometry.h"
+#include "svc/disc/disc_read_service.h"
+#include "svc/disc/disc_read_slot.h"
 #include "svc/io_coworker.h"
 #include "svc/save_files_on_io.h"
 #include "svc/types.h"
@@ -52,8 +54,8 @@ public:
         const SectorGrantCell& grant;
         SectorRouteCell& route;
         SectorLeaseCell& lease;
-        const svc::DiscReadService::GeomCell& geometry;
-        svc::DiscReadService& discs;
+        const svc::disc::DiscReadService::GeomCell& geometry;
+        svc::disc::DiscReadService& discs;
         infra::OptRef<const os::EpollSet> doorbells{};
         infra::OptRef<Port> port{};
 
@@ -73,11 +75,13 @@ public:
 
 private:
     struct Ahead {
-        svc::DiscReadSlot slot{};
+        svc::disc::DiscReadSlot slot{};
         bool live = false;
     };
 
     struct Card {
+
+        hal::SectorBlock::Slot index{};
 
         proto::SlotIndex slot{};
         proto::BlockSize bytes{};
@@ -93,7 +97,7 @@ private:
     };
 
     struct SaveState {
-        std::optional<svc::Generation> gen{};
+        std::optional<svc::SaveServeGen> gen{};
         proto::SaveSlotRule rule{};
     };
 
@@ -101,6 +105,7 @@ private:
 
     struct Request {
         infra::OptRef<const Card> card{};
+        hal::SectorBlock::Slot slot{};
         BlockDir dir = BlockDir::Read;
         proto::Lba lba{};
     };
@@ -121,23 +126,22 @@ private:
     [[nodiscard]] bool idle_bound_hook_() const noexcept override;
 
     void take_geometry_() noexcept;
-    void store_ctrl_(std::uint32_t v) noexcept;
-    void read_counts_() noexcept;
+    void store_ctrl_(hal::RegWord v) noexcept;
     [[nodiscard]] Port& port_() noexcept;
-    [[nodiscard]] bool cause_names_route_(std::uint32_t w) const noexcept;
     [[nodiscard]] std::optional<Request> read_request_() noexcept;
-    [[nodiscard]] std::uint32_t enables_() const noexcept;
+    [[nodiscard]] hal::SectorBlock::Enables enables_() const noexcept;
     void bind_cards_(const SectorGrant& g) noexcept;
     void fill_frame_(proto::Lba lba) noexcept;
 
     [[nodiscard]] bool store_frame_(
-        hal::SectorBlock::Reg begin,
+        hal::SectorBlock::Slot slot,
         proto::Lba lba,
         std::span<const std::byte> bytes
     ) noexcept;
     void peek_more_() noexcept;
     void serve_card_(
         const Card& c,
+        hal::SectorBlock::Slot slot,
         BlockDir dir,
         proto::Lba lba,
         os::RawMonotonicClock::time_point t0
@@ -150,14 +154,14 @@ private:
     void note_card_latency_(os::RawMonotonicClock::time_point t0) noexcept;
     void read_ahead_one_() noexcept;
     [[nodiscard]] bool take_ahead_(proto::Lba lba) noexcept;
-    void read_engine_(svc::DiscReadSlot& s, proto::Lba lba) noexcept;
+    void read_engine_(svc::disc::DiscReadSlot& s, proto::Lba lba) noexcept;
     [[nodiscard]] std::uint32_t frame_bytes_() const noexcept;
-    [[nodiscard]] svc::ISectorProgram::Source answer_(proto::Lba lba) const noexcept;
+    [[nodiscard]] svc::disc::ISectorProgram::Source answer_(proto::Lba lba) const noexcept;
     static void write_lba_(Port& port, hal::SectorBlock::Reg reg, proto::Lba lba) noexcept;
 
     Wiring w_;
-    svc::DiscReadService::GeomCell::Reader geom_rd_{};
-    std::optional<svc::DiscGeometry> disc_{std::in_place};
+    svc::disc::DiscReadService::GeomCell::Reader geom_rd_{};
+    std::optional<svc::disc::DiscGeometry> disc_{std::in_place};
     std::optional<hal::WindowPort<hal::SectorBlock, seat_owner::Io>> block_{};
     BlockLine<seat_owner::Io> line_{};
     bool recheck_ = false;
@@ -165,10 +169,10 @@ private:
     std::size_t ahead_done_ = kReadAhead;
     std::size_t ahead_next_ = 0;
     std::array<Ahead, kReadAhead> ahead_{};
-    svc::DiscReadSlot frame_{};
-    std::array<Card, SectorGrant::kCards> cards_{};
+    svc::disc::DiscReadSlot frame_{};
+    std::array<Card, SectorGrantBody::kCards> cards_{};
 
-    infra::IndexedArray<SaveState, hal::SectorBlock::kCardSlots, proto::SlotIndex> saves_{};
+    infra::IndexedArray<SaveState, proto::kBlockSlots, proto::SlotIndex> saves_{};
     std::array<std::byte, hal::SectorBlock::kMaxFrameWords * 4u> card_buf_{};
     os::MonotonicClock clock_{};
 };
@@ -182,6 +186,6 @@ namespace mister::hal {
 extern template class WindowPort<SectorBlock, seat_owner::Io>;
 }
 
-namespace mister::xthread {
+namespace mister::infra::xthread {
 extern template class GrantLease<app::SectorGrant, seat_owner::Io>;
 }

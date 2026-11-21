@@ -5,7 +5,8 @@
 #include <optional>
 
 #include "infra/error.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
+#include "infra/prelude.h"
 #include "hal/types.h"
 #include "reactor/frame_record.h"
 #include "infra/seat.h"

@@ -5,6 +5,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 #include "ui/browser_session.h"
 #include "ui/confirm_host.h"
@@ -35,7 +36,7 @@ public:
 
     void on_facts(const SessionFacts& session) noexcept { session_ = session; }
 
-    svc::Tally refusals() const noexcept {
+    infra::Tally refusals() const noexcept {
         TASTY_SEAT_BODY(ScriptsEntry);
         return refusals_.sum(script_pick_.refusals());
     }
@@ -57,7 +58,7 @@ private:
     Transition on_confirm(RowIndex choice) override;
 
     SessionFacts session_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     infra::OptRef<PageLaunches> launches_{};
     infra::OptRef<const IBrowseSource> storage_{};
     infra::OptRef<app::NameConfig> names_{};

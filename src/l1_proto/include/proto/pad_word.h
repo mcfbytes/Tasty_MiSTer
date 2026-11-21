@@ -21,10 +21,10 @@ struct PadWord {
 
     [[nodiscard]] constexpr StickPos stick() const noexcept { return StickPos::from_packed(v); }
 
-    template <class View>
-        requires requires(const View& w, typename View::Reg r) { w.write(r, 0u); }
-    void write_to(const View& view, typename View::Reg reg) const noexcept {
-        view.write(reg, v);
+    template <class Port>
+        requires requires(Port& p, typename Port::Reg r) { p.write(r, hal::RegWord{}); }
+    void write_to(Port& port, typename Port::Reg reg) const noexcept {
+        port.write(reg, hal::RegWord{v});
     }
 
     friend constexpr bool operator==(PadWord, PadWord) = default;

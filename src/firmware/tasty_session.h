@@ -9,23 +9,24 @@
 #include <string>
 #include <string_view>
 
-#include "app/owner_tick.h"
-#include "app/encode_status.h"
+#include "app/capture/encode_status.h"
 #include "app/output_size.h"
 #include "app/path_text.h"
 #include "app/play_refusal.h"
-#include "app/recorder_status.h"
-#include "app/replay_feeder.h"
+#include "app/capture/recorder_status.h"
+#include "app/replay/replay_feeder.h"
 #include "app/replay_status.h"
-#include "app/step_count.h"
-#include "cores/movie_codec.h"
-#include "cores/movie_system.h"
+#include "app/capture/step_count.h"
+#include "cores/tas/movie_codec.h"
+#include "cores/tas/movie_system.h"
 #include "hal/aperture_region.h"
+#include "infra/xthread/coworker.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "os/monotonic_clock.h"
 #include "replay_port.h"
 #include "run_exit.h"
@@ -53,7 +54,7 @@ class TastyStatusFile;
 
 using StatusText = FixedStr<768, StrFit::Reject>;
 
-class TastySession final : public app::IOwnerTick {
+class TastySession final : public xthread::ICoworker {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -106,8 +107,8 @@ public:
         app::LinkTxChannel<SeatTag::Ui>& link_tx;
         const app::IdentityLatch& identity;
         const app::ReplayStatusCell& play;
-        const app::RecorderStatusCell& recstat;
-        const app::EncodeStatusCell& encstat;
+        const app::capture::RecorderStatusCell& recstat;
+        const app::capture::EncodeStatusCell& encstat;
         xthread::WakeFlag& main_stop;
         const svc::Vfs& vfs;
         const std::atomic<int>& stop;
@@ -121,7 +122,7 @@ public:
     };
 
     TastySession(const Wiring& w, const TastyArgs& args, const Run& run) noexcept;
-    void tick() noexcept override;
+    void serve() noexcept override;
 
 private:
     enum class Stage : std::uint8_t {
@@ -150,7 +151,7 @@ private:
 
     void sample_rec_failure_() noexcept;
 
-    void note_rec_failure_(const app::RecorderStatus& rec) noexcept;
+    void note_rec_failure_(const app::capture::RecorderStatus& rec) noexcept;
     [[nodiscard]] bool ask_core_(const app::PathText& path) noexcept;
     [[nodiscard]] bool core_ready_() const noexcept;
 
@@ -166,7 +167,7 @@ private:
     void on_replay_end_(
         app::ReplayEnd end,
         app::EpochFail epoch_fail,
-        std::chrono::nanoseconds now
+        os::RawMonotonicClock::time_point now
     ) noexcept;
     void fail_(const char* why) noexcept;
 
@@ -188,8 +189,8 @@ private:
     os::MonotonicClock clock_{};
     TastySplash splash_{};
     Stage stage_ = Stage::HideOsd;
-    std::chrono::nanoseconds stage_ns_{};
-    std::chrono::nanoseconds last_status_ns_{};
+    os::RawMonotonicClock::time_point stage_at_{};
+    std::optional<os::RawMonotonicClock::time_point> last_status_at_{};
     app::PathText core_path_{};
     app::PathText menu_path_{};
 
@@ -205,12 +206,12 @@ private:
     bool resampled_ = false;
 
     std::optional<app::ControlGeneration> said_gen_{};
-    app::StepCount said_steps_{};
-    app::StepCount said_recovered_{};
+    app::capture::StepCount said_steps_{};
+    app::capture::StepCount said_recovered_{};
     unsigned hide_tries_ = 0;
-    std::uint32_t id_gen_ = 0;
+    infra::CellGen id_gen_{};
     std::uint32_t video_edges_ = 0;
-    cores::MovieSystem sys_{};
+    cores::tas::MovieSystem sys_{};
 };
 
 }

@@ -10,14 +10,14 @@
 #include <cstdint>
 #include <memory>
 
-#include "cores/cd_census_rows.h"
-#include "cores/cd_core.h"
-#include "cores/cd_io_indices.h"
-#include "cores/cd_profile.h"
-#include "cores/cd_tick_periods.h"
+#include "cores/cd/cd_census_rows.h"
+#include "cores/cd/cd_core.h"
+#include "cores/cd/cd_io_indices.h"
+#include "cores/cd/cd_profile.h"
+#include "cores/cd/cd_tick_periods.h"
 #include "cores/core_profile.h"
 #include "proto/types.h"
-#include "svc/cue_policy.h"
+#include "svc/disc/cue_policy.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
@@ -28,7 +28,7 @@ inline constexpr auto kMegaCdServices = std::to_array<LinkDecoderDecl>({
     {
         "megacd.cmd_edge",
         reactor::Cause::Ring,
-        &kCdCommandEdge<kMegaCd>,
+        &cd::kCdCommandEdge<kMegaCd>,
         reactor::kEveryRound,
 
         RoundClaim::Never,
@@ -36,42 +36,42 @@ inline constexpr auto kMegaCdServices = std::to_array<LinkDecoderDecl>({
     {
         "megacd.service_tick",
         reactor::Cause::Blk,
-        &kCdServiceTick<kMegaCd>,
+        &cd::kCdServiceTick<kMegaCd>,
         std::chrono::milliseconds{10},
         RoundClaim::Always,
     },
 });
 
-inline constexpr CdTickPeriods kMegaCdTicks{
+inline constexpr cd::CdTickPeriods kMegaCdTicks{
     .idle = std::chrono::microseconds{13'333},
     .stream = std::chrono::microseconds{10'000},
     .caller = std::chrono::microseconds{10'000},
-    .speeds = CdSpeedCount{},
+    .speeds = cd::CdSpeedCount{},
     .speed = {},
 };
 
-inline constexpr CdIoIndices kMegaCdIoIndices{
+inline constexpr cd::CdIoIndices kMegaCdIoIndices{
     .data = IoIndex{2},
     .cdda = IoIndex{4},
     .subcode = IoIndex{3},
     .info = std::nullopt,
 };
 
-inline constexpr svc::CuePolicy kMegaCdCuePolicy{
-    .type_detect = svc::CuePolicy::TypeDetect::Track0Only,
-    .offset_op = svc::CuePolicy::OffsetOp::Accumulate,
-    .sub_naming = svc::CuePolicy::SubNaming::LastTrackFilename,
+inline constexpr svc::disc::CuePolicy kMegaCdCuePolicy{
+    .type_detect = svc::disc::CuePolicy::TypeDetect::Track0Only,
+    .offset_op = svc::disc::CuePolicy::OffsetOp::Accumulate,
+    .sub_naming = svc::disc::CuePolicy::SubNaming::LastTrackFilename,
     .wav_header_skip = false,
     .sniff_sega_disc_system = true,
-    .subcode_shaping = svc::CuePolicy::SubcodeShaping::Interleave,
+    .subcode_shaping = svc::disc::CuePolicy::SubcodeShaping::Interleave,
 };
 
-inline constexpr CdProfile kMegaCdProfile{
+inline constexpr cd::CdProfile kMegaCdProfile{
     .io = kMegaCdIoIndices,
     .cue = kMegaCdCuePolicy,
     .ticks = kMegaCdTicks,
 
-    .row = CdProfile::SegaCddFacts{.crc_start = 0},
+    .row = cd::CdProfile::SegaCddFacts{.crc_start = 0},
 };
 
 inline constexpr auto kMegaCdSlots = std::to_array<FileSlot>({
@@ -209,11 +209,12 @@ inline constexpr CoreProfile kMegaCd{
     .signatures = kMegaCdSignatures,
     .blank_save = kMegaCdBlankSave,
     .staging = kMegaCdStaging,
-    .image_rows_no_zip = true,
-
-    .cheats = {.cd_asset_layout = true},
 
     .reset = {.button_reacts = true, .toggle_ejects = true, .remapped = proto::StatusBit{1}},
+    .host =
+        {.image_rows_no_zip = true,
+
+         .cheats = {.cd_asset_layout = true}},
 
     .grants = {Grant::Lamp, Grant::Discs},
 };

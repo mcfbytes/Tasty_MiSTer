@@ -6,6 +6,7 @@
 #include "app/link_event_dispatch.h"
 #include "app/link_rx_channel.h"
 #include "app/session_owner.h"
+#include "infra/prelude.h"
 #include "app/ui_request_dispatch.h"
 #include "infra/message_sum.h"
 

@@ -47,7 +47,7 @@ struct BlockCtl {
 
     proto::StorageRequest ask{};
     proto::StorageCompletion answer{};
-    Generation gen{};
+    SlotBindGen gen{};
 
     infra::OptRef<IStorageBackend> backend{};
 

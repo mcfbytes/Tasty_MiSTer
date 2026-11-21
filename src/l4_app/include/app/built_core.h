@@ -8,19 +8,19 @@
 #include <optional>
 #include <utility>
 
-#include "app/block_poll_route.h"
 #include "app/core_deleter.h"
 #include "app/core_window.h"
-#include "app/lw_pads.h"
 #include "app/osd_grant.h"
 #include "app/session_routes.h"
 #include "app/sys_grant.h"
 #include "cores/core_window_grant.h"
 #include "hal/fpga_memory.h"
+#include "infra/prelude.h"
+#include "proto/build_generation.h"
 #include "proto/types.h"
 #include "svc/storage_backend.h"
 #include "infra/seat.h"
-#include "infra/slot_pool.h"
+#include "infra/xthread/slot_pool.h"
 
 namespace mister::app {
 
@@ -45,7 +45,7 @@ struct BuiltCore {
     std::array<std::optional<CoreWindow>, cores::kMaxCoreWindows> windows{};
     std::optional<hal::FpgaMemory> fed_ring{};
     SessionRoutes routes{};
-    std::uint16_t gen = 0;
+    proto::BuildGeneration gen{};
 };
 
 using CoreBay = xthread::SlotPool<BuiltCore, kCoreBaySlots, SeatTag::Main>;

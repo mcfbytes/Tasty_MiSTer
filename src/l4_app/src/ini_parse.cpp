@@ -4,6 +4,7 @@
 #include "app/config_apply.h"
 #include "app/types.h"
 #include "infra/byte_view.h"
+#include "infra/prelude.h"
 #include "svc/config_parser.h"
 #include "svc/ini_catalog.h"
 #include "svc/vfs.h"
@@ -44,12 +45,13 @@ constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
         auto n = file.read_at(got, chunk);
         if (!n)
             return std::unexpected(n.error());
-        if (*n == 0)
+        if (n->empty())
             return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
-        const proto::FileSize answered{*n};
+        const proto::FileSize answered = proto::FileSize::of(*n);
         if (got + answered > proto::kFileStart + size)
             return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
-        out.insert(out.end(), chunk.data(), chunk.data() + *n);
+        const std::span<const std::byte> filled = n->first_in(std::span<const std::byte>(chunk));
+        out.insert(out.end(), filled.begin(), filled.end());
         got += answered;
     }
     if (got != proto::kFileStart + size)

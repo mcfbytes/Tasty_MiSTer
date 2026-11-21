@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Theme, MenuRow, HelpItem, RowGlyph, HelpGlyph } from "hd_common.slint";
+import { Theme, MenuRow, HelpItem, RowKind, RowIcon, HelpGlyphKind, RowKindFacts, RowGlyph, HelpGlyph } from "hd_common.slint";
 
 component PixelText inherits Text {
     color: Theme.text;
@@ -96,16 +96,16 @@ component Tri inherits Path {
 
 component PixelLine inherits Rectangle {
     in property <MenuRow> entry;
-    property <bool> sel: root.entry.selected && root.entry.kind <= 2;
-    property <color> ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == 4 ? Theme.text-label : Theme.text;
+    property <bool> sel: root.entry.selected && RowKindFacts.selectable(root.entry.kind);
+    property <color> ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == RowKind.text ? Theme.text-label : Theme.text;
     property <color> sub-ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : Theme.text-label;
     property <length> lead: 2 * Theme.pixel;
     property <length> lead-end: root.lead + 19 * Theme.pixel;
     property <length> mark-gap: Theme.font-body / 2;
-    property <length> label-x: root.lead-end + (root.entry.icon != 0 ? Theme.icon + floor(Theme.gap / 2 / 1px) * 1px : 0px);
+    property <length> label-x: root.lead-end + (root.entry.icon != RowIcon.none ? Theme.icon + floor(Theme.gap / 2 / 1px) * 1px : 0px);
     property <length> right: root.width - Theme.row-pad;
     property <bool> marks: root.sel && root.entry.steps;
-    property <bool> opens: root.entry.kind == 1 && !root.marks;
+    property <bool> opens: root.entry.kind == RowKind.submenu && !root.marks;
     property <length> tri-w: 4 * Theme.pixel;
     property <length> pitch: 2 * Theme.pixel;
     property <length> end: root.opens ? root.right - root.tri-w - 2 * Theme.pixel : root.right;
@@ -113,7 +113,7 @@ component PixelLine inherits Rectangle {
     property <length> value-w: root.entry.value == "" ? 0px : min(value.preferred-width, floor(root.width / 2 / 1px) * 1px);
     property <length> value-x: root.value-right - root.value-w;
     property <length> label-right: root.entry.value == "" ? root.end : root.value-x - (root.marks ? root.tri-w + root.mark-gap + 2 * Theme.pixel : 2 * Theme.pixel);
-    height: root.entry.kind == 3 ? Theme.sep-h : Theme.row-h;
+    height: root.entry.kind == RowKind.separator ? Theme.sep-h : Theme.row-h;
 
     if root.sel: Rectangle {
         x: 0;
@@ -126,7 +126,7 @@ component PixelLine inherits Rectangle {
         x: root.lead;
         y: floor((parent.height - 9 * Theme.pixel) / 2 / 1px) * 1px;
     }
-    if root.entry.kind == 3: Rectangle {
+    if root.entry.kind == RowKind.separator: Rectangle {
         x: 0;
         y: floor((parent.height - Theme.pixel) / 2 / 1px) * 1px;
         width: parent.width;
@@ -139,7 +139,7 @@ component PixelLine inherits Rectangle {
             background: Theme.border-mid;
         }
     }
-    if root.entry.kind == 5: Rectangle {
+    if root.entry.kind == RowKind.bar: Rectangle {
         x: root.label-x;
         y: floor((parent.height - 3 * Theme.pixel) / 2 / 1px) * 1px;
         width: root.right - root.label-x;
@@ -153,13 +153,13 @@ component PixelLine inherits Rectangle {
             background: Theme.accent;
         }
     }
-    if root.entry.kind != 3 && root.entry.kind != 5 && root.entry.icon != 0: RowGlyph {
+    if root.entry.kind != RowKind.separator && root.entry.kind != RowKind.bar && root.entry.icon != RowIcon.none: RowGlyph {
         x: root.lead-end;
         y: floor((parent.height - Theme.icon) / 2 / 1px) * 1px;
         ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : Theme.text;
         icon: root.entry.icon;
     }
-    if root.entry.kind != 3 && root.entry.kind != 5: PixelText {
+    if root.entry.kind != RowKind.separator && root.entry.kind != RowKind.bar: PixelText {
         x: root.label-x;
         y: 0;
         width: max(0px, root.label-right - root.label-x);
@@ -173,7 +173,7 @@ component PixelLine inherits Rectangle {
         y: 0;
         width: root.value-w;
         height: parent.height;
-        visible: root.entry.kind != 3 && root.entry.kind != 5 && root.entry.value != "";
+        visible: root.entry.kind != RowKind.separator && root.entry.kind != RowKind.bar && root.entry.value != "";
         text: root.entry.value;
         color: root.sub-ink;
         overflow: elide;
@@ -352,7 +352,7 @@ component PixelHelp inherits PixelWindow {
         spacing: Theme.gap * 2;
         for item in root.help: HorizontalLayout {
             spacing: floor(Theme.gap * 2 / 3 / 1px) * 1px;
-            if item.glyph != 0: HelpGlyph { glyph: item.glyph; ink: Theme.text; }
+            if item.glyph != HelpGlyphKind.none: HelpGlyph { glyph: item.glyph; ink: Theme.text; }
             PixelText {
                 text: item.label;
                 font-size: Theme.font-caption;

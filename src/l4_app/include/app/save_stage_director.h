@@ -8,6 +8,7 @@
 #include "infra/indexed_array.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "os/clock.h"
 #include "proto/autosave_policy.h"
 #include "proto/reset_edge.h"
@@ -47,10 +48,10 @@ public:
     enum class Cause : std::uint8_t { Confirmed, Direct, Deferred, Forced };
 
     struct Tally {
-        svc::Tally orders_refused{};
-        svc::Tally identical{};
-        svc::Tally report_refusals{};
-        svc::Tally windows_bounded{};
+        infra::Tally orders_refused{};
+        infra::Tally identical{};
+        infra::Tally report_refusals{};
+        infra::Tally windows_bounded{};
     };
 
     SaveStageDirector(const Ends& ends, const os::IClock& clock, SaveDirectorCell& status) noexcept
@@ -89,14 +90,14 @@ private:
     struct Ordered {
         proto::StageRevision rev{};
         Cause cause = Cause::Direct;
-        proto::StageTally commits{};
-        proto::StageTally faults{};
-        proto::StageTally declines{};
+        infra::Tally commits{};
+        infra::Tally faults{};
+        infra::Tally declines{};
     };
 
     struct StageWatch {
         proto::StageKey key{};
-        proto::StageTally commits_base{};
+        infra::Tally commits_base{};
         std::optional<proto::StageRevision> at_open{};
         std::optional<proto::StageRevision> held{};
         bool was_held = false;

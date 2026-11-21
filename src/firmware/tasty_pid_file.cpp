@@ -8,6 +8,7 @@
 
 #include "app/path_text.h"
 #include "infra/parse_int.h"
+#include "infra/prelude.h"
 #include "os/small_file.h"
 #include "tasty_say.h"
 

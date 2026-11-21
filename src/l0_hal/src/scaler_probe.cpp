@@ -82,8 +82,9 @@ ScalerProbe::BufMask ScalerProbe::moved(ScalerStride stride) const noexcept {
 
     const ProbeSide& side = side_of(stride);
     BufMask out{};
-    for (std::size_t i = 0; i < out.size(); ++i)
-        out[i] = side.buffers[i].moved;
+    for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i)
+        if (side.buffers[i].moved)
+            out = out.with(BufNo::of(i));
     return out;
 }
 
@@ -152,7 +153,7 @@ std::optional<ScalerProbe::Pick> holding_pick(
     const auto holding = [&](HeaderCtr c) {
         std::size_t at = kNoBuffer;
         for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-            if (!live[i] || ctr(i) != c)
+            if (!live.contains(BufNo::of(i)) || ctr(i) != c)
                 continue;
             if (at != kNoBuffer)
                 return kNoBuffer;
@@ -162,7 +163,9 @@ std::optional<ScalerProbe::Pick> holding_pick(
     };
     std::size_t done = kNoBuffer;
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-        if (!live[i] || holding(ctr(i)) != i || holding(ctr(i).plus(kOneFrame)) == kNoBuffer)
+        if (!live.contains(BufNo::of(i))
+            || holding(ctr(i)) != i
+            || holding(ctr(i).plus(kOneFrame)) == kNoBuffer)
             continue;
         if (done == kNoBuffer || ctr(i).lead_over(ctr(done)) == kOneFrame)
             done = i;
@@ -183,9 +186,9 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
     const std::array<ScalerHeader, ScalerBuffers::kBuffers>& h,
     const BufMask& live
 ) noexcept {
-    const bool all_live = std::all_of(live.begin(), live.end(), [](bool l) { return l; });
+    const bool all_live = live.contains(BufMask::all());
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i)
-        if (!all_live && live[i] && h[i].interlaced() && h[i].supported())
+        if (!all_live && live.contains(BufNo::of(i)) && h[i].interlaced() && h[i].supported())
             return std::nullopt;
     constexpr HeaderCtr::Lag kAheadMin{1};
     constexpr HeaderCtr::Lag kAheadMax{4};

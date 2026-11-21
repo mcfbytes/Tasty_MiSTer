@@ -8,6 +8,7 @@
 
 #include "app/save_stage_director.h"
 #include "hal/boot_handoff.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

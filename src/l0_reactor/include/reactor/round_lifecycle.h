@@ -3,64 +3,64 @@
 
 #include <cstdint>
 
+#include "infra/enum_set.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 
 namespace mister::reactor {
 
-enum class RoundLifecycle : std::uint8_t { Rung = 1, Bind = 2, Switch = 4 };
+enum class RoundLifecycle : std::uint8_t { Rung, Bind, Switch, kCount };
 
 class RoundLifecycleSet {
 
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    using Bits = infra::EnumSet<RoundLifecycle, std::uint8_t>;
+
     constexpr RoundLifecycleSet() noexcept = default;
 
-    constexpr explicit RoundLifecycleSet(RoundLifecycle why) noexcept : bits_(bit(why)) {}
+    constexpr explicit RoundLifecycleSet(RoundLifecycle why) noexcept { bits_.insert(why); }
 
     [[nodiscard]] constexpr RoundLifecycleSet with(RoundLifecycle why) const noexcept {
         RoundLifecycleSet s = *this;
-        s.bits_ = static_cast<std::uint8_t>(bits_ | bit(why));
+        s.bits_.insert(why);
         return s;
     }
 
-    [[nodiscard]] constexpr bool has(RoundLifecycle why) const noexcept {
-        return (bits_ & bit(why)) != 0u;
+    [[nodiscard]] constexpr bool contains(RoundLifecycle why) const noexcept {
+        return bits_.contains(why);
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return bits_ == 0u; }
+    [[nodiscard]] constexpr bool is_empty() const noexcept { return bits_.is_empty(); }
 
     [[nodiscard]] static constexpr RoundLifecycleSet all() noexcept {
-        return RoundLifecycleSet{}
-            .with(RoundLifecycle::Rung)
-            .with(RoundLifecycle::Bind)
-            .with(RoundLifecycle::Switch);
+        return RoundLifecycleSet{Bits::all()};
     }
 
-    [[nodiscard]] constexpr std::uint8_t mask() const noexcept { return bits_; }
+    [[nodiscard]] constexpr std::uint8_t mask() const noexcept { return bits_.bits(); }
 
     friend constexpr void json_field(
         infra::JsonOut& o,
         infra::JsonName key,
         RoundLifecycleSet s
     ) noexcept {
-        o.field(key, s.bits_);
+        o.field(key, s.mask());
     }
 
     friend constexpr void json_elem(infra::JsonOut& o, RoundLifecycleSet s) noexcept {
-        o.elem(s.bits_);
+        o.elem(s.mask());
     }
 
     friend constexpr bool operator==(RoundLifecycleSet, RoundLifecycleSet) = default;
 
 private:
-    static constexpr std::uint8_t bit(RoundLifecycle why) noexcept {
-        return static_cast<std::uint8_t>(why);
-    }
+    constexpr explicit RoundLifecycleSet(Bits bits) noexcept : bits_(bits) {}
 
-    std::uint8_t bits_ = 0;
+    Bits bits_{};
 };
+
+static_assert(sizeof(RoundLifecycleSet) == 1);
 
 inline constexpr RoundLifecycleSet kRoundLifecycleAll = RoundLifecycleSet::all();
 

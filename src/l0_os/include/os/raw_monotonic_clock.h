@@ -3,6 +3,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <ctime>
+
+#include "os/timespec.h"
 
 namespace mister::os {
 
@@ -15,7 +18,17 @@ public:
 
     static constexpr bool is_steady = true;
 
-    [[nodiscard]] static time_point now() noexcept;
+    [[nodiscard]] static time_point now() noexcept {
+        timespec ts{};
+        ::clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        return time_point{of_timespec(ts)};
+    }
 };
+
+[[nodiscard]] constexpr std::chrono::nanoseconds since_boot(
+    RawMonotonicClock::time_point at
+) noexcept {
+    return at.time_since_epoch();
+}
 
 }

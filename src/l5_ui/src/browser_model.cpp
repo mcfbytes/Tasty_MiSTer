@@ -8,6 +8,8 @@
 #include "app/romset_aliases.h"
 #include "infra/ascii.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
+#include "svc/card_dirs.h"
 #include "ui/browse_source.h"
 #include "ui/browser_entry.h"
 #include "ui/browser_host.h"
@@ -176,10 +178,10 @@ Ex<void> BrowserSession::exit_recents() {
     return scan_list({});
 }
 
-void BrowserSession::type_ahead(char c, std::chrono::nanoseconds now) {
+void BrowserSession::type_ahead(char c, os::RawMonotonicClock::time_point now) {
     if (recents_mode_)
         return;
-    if (!filter_deadline_ || now >= *filter_deadline_) {
+    if (!filter_deadline_ || filter_deadline_->expired_at(now)) {
         filter_.assign(1, c);
         (void)scan_list({});
         seek_letter(c);
@@ -187,7 +189,7 @@ void BrowserSession::type_ahead(char c, std::chrono::nanoseconds now) {
         filter_.push_back(c);
         (void)scan_list(filter_);
     }
-    filter_deadline_ = now + kFilterTimeout;
+    filter_deadline_ = os::Deadline::at_point(now + kFilterTimeout);
 }
 
 std::string BrowserSession::selected_full_path() const {
@@ -196,7 +198,7 @@ std::string BrowserSession::selected_full_path() const {
         return {};
 
     if (recents_mode_)
-        return app::RecentsStore::join(e->dir, e->name);
+        return app::recents::RecentsStore::join(e->dir, e->name);
     if (path_.empty())
         return e->name;
     std::string p = path_;
@@ -210,7 +212,7 @@ std::string BrowserSession::resolve_content_home() const {
         return req_.home_path;
     std::string dir = req_.games_dir;
     if (req_.policy.saves_home)
-        return "saves/" + dir;
+        return svc::card_rel({svc::kSavesDir, dir});
     const svc::SearchPolicy prefixed{svc::search::kPrefixed, true};
     if (auto p = src_->resolve(dir, prefixed))
         return *p;

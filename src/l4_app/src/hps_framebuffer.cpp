@@ -9,8 +9,9 @@
 #include <optional>
 #include <string>
 
+#include "infra/prelude.h"
 #include "os/types.h"
-#include "svc/video_service.h"
+#include "svc/video/video_service.h"
 
 namespace mister::app {
 namespace {
@@ -50,10 +51,10 @@ Ex<void> HpsFramebuffer::publish_(const FbView& picture, FbScanWindow window) no
     if (picture.red_blue_swap)
         sc |= kFmtRxB;
     const auto [hmin, hmax, vmin, vmax] = fb_scan_words(window);
-    const std::array<std::uint16_t, 10> words{
-        static_cast<std::uint16_t>(kFbEn | sc),
-        addr_lo,
-        addr_hi,
+    const std::array<hal::SpiWord, 10> words{
+        hal::SpiWord{static_cast<std::uint16_t>(kFbEn | sc)},
+        hal::SpiWord{addr_lo},
+        hal::SpiWord{addr_hi},
         picture.size.pixels().wire_word(),
         picture.size.lines().wire_word(),
         hmin,
@@ -139,7 +140,7 @@ Ex<void> HpsFramebuffer::drop(const FbLease& lease) noexcept {
         tenancy_.release(lease);
         return {};
     }
-    const std::array<std::uint16_t, 1> off{0};
+    const std::array<hal::SpiWord, 1> off{hal::SpiWord{}};
     const auto published = wire_.publish(proto::UioOp::SetFbuf, off);
     if (published)
         tenancy_.release(lease);

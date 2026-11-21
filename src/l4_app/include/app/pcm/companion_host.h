@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+
+#include "app/pcm/companion_bind.h"
+#include "cores/servant_id.h"
+#include "infra/xthread/counter.h"
+#include "infra/xthread/inbox.h"
+#include "infra/opt_ref.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "infra/xthread/wake_flag.h"
+#include "proto/types.h"
+
+namespace mister::app::pcm {
+
+class CompanionHost {
+    TASTY_SEAT_RESIDENT(Pcm);
+
+public:
+    static constexpr std::size_t kBindDepth = 4;
+    using Binds = xthread::Inbox<CompanionBind, kBindDepth>;
+
+    explicit CompanionHost(xthread::WakeFlag& servant_wake) noexcept : binds_(servant_wake) {}
+
+    CompanionHost(const CompanionHost&) = delete;
+    CompanionHost& operator=(const CompanionHost&) = delete;
+
+    void install(cores::ServantSet set) noexcept;
+
+    [[nodiscard]] Binds& binds() noexcept { return binds_; }
+
+    void serve() noexcept;
+
+    [[nodiscard]] infra::OptRef<cores::IMailboxServant> servant_for(
+        proto::CompanionBindGen gen
+    ) noexcept;
+
+    [[nodiscard]] bool awaits_bind(proto::CompanionBindGen gen) const noexcept;
+    void refill_one() noexcept;
+    [[nodiscard]] bool rest() const noexcept;
+
+    void release() noexcept;
+
+    void on(const CompanionBind::Attach& a) noexcept;
+    void on(const CompanionBind::Bind& b) noexcept;
+    void misrouted(const CompanionBind& m) noexcept;
+
+    [[nodiscard]] std::uint32_t attaches() const noexcept { return attaches_.get(); }
+
+    [[nodiscard]] std::uint32_t binds_applied() const noexcept { return applied_.get(); }
+
+    [[nodiscard]] std::uint32_t binds_unheld() const noexcept { return unheld_.get(); }
+
+private:
+    Binds binds_;
+    cores::ServantSet servants_{};
+    infra::OptRef<cores::IMailboxServant> held_{};
+    proto::CompanionBindGen bound_gen_{};
+    xthread::Counter attaches_, applied_, unheld_;
+};
+
+}

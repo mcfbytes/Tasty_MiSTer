@@ -9,17 +9,19 @@
 #include <string_view>
 #include <vector>
 
-#include "app/joymap_ends.h"
+#include "app/input/joymap_ends.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "svc/input_service.h"
-#include "svc/mapping_wizard.h"
+#include "infra/tally.h"
+#include "svc/input/input_service.h"
+#include "svc/input/mapping_wizard.h"
 #include "ui/page.h"
 #include "ui/joymap_blob.h"
 #include "svc/types.h"
 
-namespace mister::app {
+namespace mister::app::recents {
 class UiWriteLane;
 }
 
@@ -44,8 +46,9 @@ class JoyMapPage final : public Page {
 
 public:
     struct Spec {
-        infra::OptRef<const app::JoyMapEnds> ends{};
-        infra::OptRef<app::UiWriteLane> writes{};
+
+        infra::OptRef<const app::input::JoyMapEnds> ends{};
+        infra::OptRef<app::recents::UiWriteLane> writes{};
         bool front_end = false;
         std::string core;
         std::string j_names;
@@ -74,7 +77,7 @@ public:
         return f;
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(JoyMapPage);
         return refusals_;
     }
@@ -91,7 +94,7 @@ public:
 
     app::CaptureToken arm_token() const noexcept { return token_; }
 
-    svc::MappingWizard wizard() const noexcept { return wizard_; }
+    svc::input::MappingWizard wizard() const noexcept { return wizard_; }
 
 private:
     enum class RowRole : std::uint8_t { Line, Legend };
@@ -105,7 +108,7 @@ private:
     void rebegin();
     void disarm();
 
-    bool wizard_advance_into(svc::MappingWizard::Step want);
+    bool wizard_advance_into(svc::input::MappingWizard::Step want);
     void record(const JoyMapPrompt& p, svc::EvdevCode code);
     bool duplicate_in_segment(const JoyMapPrompt& p, svc::EvdevCode code) const;
     Transition finish(bool save);
@@ -120,11 +123,11 @@ private:
     bool done_ = false;
     bool saved_ = false;
 
-    std::optional<app::CaptureHit> lock_;
+    std::optional<app::input::CaptureHit> lock_;
 
-    svc::MappingWizard wizard_{};
-    app::CaptureHitCell::Reader hit_reader_{};
-    svc::Tally refusals_{};
+    svc::input::MappingWizard wizard_{};
+    app::input::CaptureHitCell::Reader hit_reader_{};
+    infra::Tally refusals_{};
 };
 
 }

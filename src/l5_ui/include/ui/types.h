@@ -12,7 +12,9 @@
 
 #include "app/types.h"
 #include "infra/affine.h"
+#include "infra/index_set.h"
 #include "infra/indexed_span.h"
+#include "infra/run.h"
 #include "proto/types.h"
 
 namespace mister::ui {
@@ -20,6 +22,7 @@ namespace mister::ui {
 using ::mister::infra::affine::operator+;
 using ::mister::infra::affine::operator-;
 using ::mister::infra::affine::operator*;
+using ::mister::infra::affine::operator/;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
@@ -31,7 +34,7 @@ struct StackDepth {
     std::size_t v = 0;
 
     template <std::integral I>
-    [[nodiscard]] static constexpr StackDepth of(I n) noexcept {
+    [[nodiscard]] static constexpr StackDepth truncating(I n) noexcept {
         return StackDepth{static_cast<std::size_t>(n)};
     }
 
@@ -56,7 +59,6 @@ using app::row_after;
 using app::row_index_of;
 using app::RowCount;
 using app::RowIndex;
-using app::saturating_sub;
 
 template <class T>
 using RowSpan = infra::IndexedSpan<T, RowIndex>;
@@ -80,19 +82,16 @@ public:
         RowIndex at_;
     };
 
-    constexpr RowRange(RowIndex first, RowCount count) noexcept : first_(first), count_(count) {}
+    constexpr RowRange(RowIndex first, RowCount count) noexcept : run_{first, count} {}
 
-    [[nodiscard]] constexpr Iter begin() const noexcept { return Iter{first_}; }
+    [[nodiscard]] constexpr Iter begin() const noexcept { return Iter{run_.start}; }
 
-    [[nodiscard]] constexpr Iter end() const noexcept { return Iter{first_ + count_}; }
+    [[nodiscard]] constexpr Iter end() const noexcept { return Iter{run_.end()}; }
 
-    [[nodiscard]] constexpr bool contains(RowIndex r) const noexcept {
-        return r >= first_ && r - first_ < count_;
-    }
+    [[nodiscard]] constexpr bool contains(RowIndex r) const noexcept { return run_.contains(r); }
 
 private:
-    RowIndex first_;
-    RowCount count_;
+    infra::affine::Run<RowIndex> run_{};
 };
 
 [[nodiscard]] constexpr RowRange rows(RowCount count) noexcept {
@@ -220,7 +219,9 @@ static_assert(
 struct MenuMask {
     std::uint64_t v = 0;
 
-    [[nodiscard]] constexpr bool has(RowIndex r) const noexcept;
+    static constexpr std::uint32_t kBits = 64;
+
+    [[nodiscard]] constexpr bool contains(RowIndex r) const noexcept;
 
     [[nodiscard]] static constexpr bool addresses(RowIndex r) noexcept;
 
@@ -230,9 +231,7 @@ struct MenuMask {
 
     [[nodiscard]] constexpr MenuMask without(RowIndex r) const noexcept;
 
-    [[nodiscard]] constexpr MenuMask without(MenuMask drop) const noexcept {
-        return MenuMask{v & ~drop.v};
-    }
+    [[nodiscard]] constexpr MenuMask without(MenuMask drop) const noexcept;
 
     [[nodiscard]] constexpr std::optional<RowIndex> lowest() const noexcept;
 
@@ -243,15 +242,19 @@ struct MenuMask {
     [[nodiscard]] constexpr std::optional<RowIndex> prev_before(RowIndex r) const noexcept;
 
     friend constexpr bool operator==(MenuMask, MenuMask) = default;
+
+private:
+    using Bits = infra::IndexSet<RowIndex, kBits, std::uint64_t>;
+
+    [[nodiscard]] constexpr Bits bits() const noexcept { return Bits{v}; }
 };
 
 [[nodiscard]] constexpr RowCount menu_mask_rows() noexcept {
-    constexpr std::uint32_t kBits = 64;
-    return RowCount{kBits};
+    return RowCount{MenuMask::kBits};
 }
 
 constexpr bool MenuMask::addresses(RowIndex r) noexcept {
-    return r.before() < menu_mask_rows();
+    return Bits::addresses(r);
 }
 
 [[nodiscard]] constexpr MenuMask dense_mask(RowCount n) noexcept {
@@ -261,36 +264,35 @@ constexpr bool MenuMask::addresses(RowIndex r) noexcept {
 }
 
 [[nodiscard]] constexpr MenuMask row_bit(RowIndex r) noexcept {
-    return MenuMask::addresses(r) ? MenuMask{std::uint64_t{1} << r.v} : MenuMask{};
+    return MenuMask{}.with(r);
 }
 
-constexpr bool MenuMask::has(RowIndex r) const noexcept {
-    return (v & row_bit(r).v) != 0;
+constexpr bool MenuMask::contains(RowIndex r) const noexcept {
+    return bits().contains(r);
 }
 
 constexpr MenuMask MenuMask::with(RowIndex r) const noexcept {
-    return MenuMask{v | row_bit(r).v};
+    return MenuMask{bits().with_or_unchanged(r).v};
 }
 
 constexpr MenuMask MenuMask::only(MenuMask subset) const noexcept {
-    return MenuMask{v & subset.v};
+    return MenuMask{bits().only(Bits{subset.v}).v};
 }
 
 constexpr MenuMask MenuMask::without(RowIndex r) const noexcept {
-    return MenuMask{v & ~row_bit(r).v};
+    return MenuMask{bits().without_or_unchanged(r).v};
+}
+
+constexpr MenuMask MenuMask::without(MenuMask drop) const noexcept {
+    return MenuMask{bits().without(Bits{drop.v}).v};
 }
 
 constexpr std::optional<RowIndex> MenuMask::lowest() const noexcept {
-    if (v == 0)
-        return std::nullopt;
-    return RowIndex{static_cast<std::uint32_t>(std::countr_zero(v))};
+    return bits().lowest();
 }
 
 constexpr std::optional<RowIndex> MenuMask::highest() const noexcept {
-    constexpr std::uint32_t kTop = menu_mask_rows().v - 1u;
-    if (v == 0)
-        return std::nullopt;
-    return RowIndex{kTop - static_cast<std::uint32_t>(std::countl_zero(v))};
+    return bits().highest();
 }
 
 constexpr std::optional<RowIndex> MenuMask::next_after(RowIndex r) const noexcept {
@@ -303,22 +305,10 @@ constexpr std::optional<RowIndex> MenuMask::prev_before(RowIndex r) const noexce
     return only(dense_mask(r.before())).highest();
 }
 
-struct HdMask {
-    std::uint32_t v = 0;
-
-    [[nodiscard]] constexpr proto::OsdMask osd_word() const noexcept {
-        return proto::OsdMask{static_cast<std::uint16_t>(v)};
-    }
-
-    [[nodiscard]] constexpr bool has(HdMask bits) const noexcept { return (v & bits.v) != 0u; }
-
-    friend constexpr bool operator==(HdMask, HdMask) = default;
-};
-
 struct UiButtonMask {
     std::uint16_t v = 0;
 
-    [[nodiscard]] constexpr bool has_any(UiButtonMask bits) const noexcept {
+    [[nodiscard]] constexpr bool intersects(UiButtonMask bits) const noexcept {
         return (v & bits.v) != 0;
     }
 
@@ -335,7 +325,7 @@ struct UiButtonMask {
 
 static_assert(last_row(RowCount{3}) == RowIndex{2});
 static_assert(rows(RowCount{3}).contains(RowIndex{2}) && !rows(RowCount{3}).contains(RowIndex{3}));
-static_assert(MenuMask{0b100u}.has(RowIndex{2}) && !MenuMask{0b100u}.has(RowIndex{64}));
+static_assert(MenuMask{0b100u}.contains(RowIndex{2}) && !MenuMask{0b100u}.contains(RowIndex{64}));
 static_assert(row_after(RowCount{3}) - RowIndex{} == RowCount{3});
 static_assert(dense_mask(RowCount{3}) == MenuMask{0b111u});
 static_assert(dense_mask(menu_mask_rows()) == MenuMask{~std::uint64_t{0}});
@@ -350,7 +340,7 @@ static_assert(MenuMask{0b1010u}.prev_before(RowIndex{40}) == RowIndex{3});
 static_assert(MenuMask{0b1111u}.only(MenuMask{0b0101u}) == MenuMask{0b0101u});
 static_assert(MenuMask{0b1111u}.without(RowIndex{1}) == MenuMask{0b1101u});
 static_assert(MenuMask{}.with(RowIndex{2}) == MenuMask{0b100u});
-static_assert(!MenuMask{}.has(RowIndex{2}) && MenuMask{0b100u}.has(RowIndex{2}));
+static_assert(!MenuMask{}.contains(RowIndex{2}) && MenuMask{0b100u}.contains(RowIndex{2}));
 static_assert(sizeof(MenuMask) == 8);
 static_assert(sizeof(CycleDir) == 1);
 

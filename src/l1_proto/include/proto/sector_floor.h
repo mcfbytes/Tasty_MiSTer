@@ -11,7 +11,7 @@ struct SectorFloor {
     std::uint32_t bytes = 0;
 
     [[nodiscard]] static constexpr SectorFloor at(BlockSize size) noexcept {
-        return SectorFloor{size.offset_of(BlockCount{1})};
+        return SectorFloor{size.block_bytes()};
     }
 
     [[nodiscard]] constexpr bool is_sector(std::uint32_t phase_bytes) const noexcept {

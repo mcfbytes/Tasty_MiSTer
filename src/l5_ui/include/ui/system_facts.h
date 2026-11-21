@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "os/kernel_rt.h"
 #include "proto/types.h"
 #include "ui/session_facts.h"

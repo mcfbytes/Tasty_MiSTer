@@ -7,6 +7,7 @@
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "proto/link_frame.h"
 #include "proto/ps2_frame.h"
 #include "proto/uio_opcodes.h"

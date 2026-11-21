@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 
 namespace mister::os {

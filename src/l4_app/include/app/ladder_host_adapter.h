@@ -11,6 +11,8 @@
 
 #include "app/act_keys.h"
 #include "app/file_tx_level.h"
+#include "app/game_id.h"
+#include "app/ini_parse.h"
 #include "app/link_tx_channel.h"
 #include "app/load_belt.h"
 #include "app/mount_status_cell.h"
@@ -22,6 +24,7 @@
 #include "app/save_state_facts.h"
 #include "cores/ladder_host.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/status_cell.h"
 
@@ -52,6 +55,8 @@ public:
         infra::OptRef<SaveStateAttach::AskInbox> save_state_asks;
         infra::OptRef<const SaveStateFactsCell> save_state_facts;
         const LoadBelt& belt;
+        const ConfigCell& config_cell;
+        GameIdCell& game_id_cell;
     };
 
     explicit LadderHostAdapter(const Edges& edges) noexcept : edges_(edges) {}
@@ -90,7 +95,7 @@ public:
     [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override;
     [[nodiscard]] hal::Width link_width() const noexcept override;
-    [[nodiscard]] proto::ActKey next_generation() noexcept override;
+    [[nodiscard]] proto::ActKey next_act() noexcept override;
     [[nodiscard]] cores::MountStatus mount_status() override;
     [[nodiscard]] bool order_walk(
         proto::IoIndex slot,
@@ -103,6 +108,8 @@ public:
     [[nodiscard]] cores::SaveExtent save_extent() override;
     [[nodiscard]] proto::StatusWord status_word() override;
     [[nodiscard]] std::optional<proto::FieldValue> option_choice(cores::OptionTag tag) override;
+
+    void game_identified(std::string_view image, const svc::disc::DiscIdText& serial) override;
 
 private:
     const Edges edges_;

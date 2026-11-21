@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/audio_pump.h"
+#include "infra/span_cut.h"
 
 #include <algorithm>
 #include <array>
@@ -10,26 +11,24 @@
 #include <vector>
 
 #include "app/stream_io.h"
-#include "app/ui_write_lane.h"
+#include "app/recents/ui_write_lane.h"
 #include "app/video_wire.h"
 #include "infra/byte_view.h"
 #include "infra/message_sum.h"
+#include "svc/card_dirs.h"
 #include "svc/read_bounded.h"
 
 namespace mister::app {
 
 namespace {
 
-constexpr std::string_view kConfigDir = "config/";
-
-constexpr std::string_view kVolumeRel = "config/Volume.dat";
-
 constexpr proto::FileSize kFilterCfgReadCap{1023};
 
 [[nodiscard]] std::string config_rel(std::string_view core, std::string_view suffix) {
     std::string rel;
-    rel.reserve(kConfigDir.size() + core.size() + suffix.size());
-    rel.append(kConfigDir);
+    rel.reserve(svc::kConfigDir.size() + 1 + core.size() + suffix.size());
+    rel.append(svc::kConfigDir);
+    rel.push_back('/');
     rel.append(core);
     rel.append(suffix);
     return rel;
@@ -43,8 +42,10 @@ std::vector<std::byte> AudioPump::read_config_(std::string_view rel, proto::File
         if (!armed)
             return {};
         if (!armed->empty()) {
-            const std::span<const std::byte> kept = cap.min(proto::FileSize::of(*armed))
-                                                        .first_of(*armed);
+            const std::span<const std::byte> kept = infra::affine::first(
+                *armed,
+                cap.min(proto::FileSize::of(*armed))
+            );
             return std::vector<std::byte>(kept.begin(), kept.end());
         }
     }
@@ -128,7 +129,10 @@ void AudioPump::load_for_core(
         name.assign(afilter_default);
     }
 
-    const std::vector<std::byte> volume = read_config_(kVolumeRel, proto::FileSize{1});
+    const std::vector<std::byte> volume = read_config_(
+        svc::card_rel({svc::kConfigDir, "Volume.dat"}),
+        proto::FileSize{1}
+    );
     if (!volume.empty())
         model_.load_volume(svc::VolumeByte{std::to_integer<std::uint8_t>(volume[0])});
     if (!front_end) {
@@ -205,7 +209,7 @@ void AudioPump::stage_filter_push_() noexcept {
     frame.push = push_;
     frame.lead.if_set = model_.lead_with_boost();
     frame.lead.if_clear = model_.lead_without_boost();
-    const std::span<const std::uint16_t> words = words_.words();
+    const std::span<const hal::SpiWord> words = words_.words();
     frame.count = words_.count;
     for (std::size_t i = 0; i < words.size(); ++i)
         frame.words[i] = words[i];
@@ -250,7 +254,7 @@ StagedFrame::AudioTail AudioPump::tail(bool front_end) const noexcept {
     t.lead.if_clear = model_.lead_without_boost();
     t.audvol.if_set = model_.audvol_with_filter();
     t.audvol.if_clear = model_.audvol_without_filter();
-    const std::span<const std::uint16_t> words = words_.words();
+    const std::span<const hal::SpiWord> words = words_.words();
     t.count = words_.count;
     for (std::size_t i = 0; i < words.size(); ++i)
         t.words[i] = words[i];
@@ -275,7 +279,7 @@ void AudioPump::tick(os::RawMonotonicClock::time_point now) noexcept {
     save_at_.reset();
 
     const std::array<std::byte, 1> vol{std::byte{model_.volume_byte()}};
-    write_(kVolumeRel, vol);
+    write_(svc::card_rel({svc::kConfigDir, "Volume.dat"}), vol);
     if (core_.empty())
         return;
     const std::array<std::byte, 1> corevol{std::byte{model_.core_volume_byte()}};

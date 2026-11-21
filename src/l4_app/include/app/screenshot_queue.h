@@ -9,9 +9,10 @@
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
-#include "infra/loan_channel.h"
-#include "infra/counter.h"
-#include "infra/polled.h"
+#include "infra/xthread/loan_channel.h"
+#include "infra/xthread/counter.h"
+#include "infra/prelude.h"
+#include "infra/xthread/polled.h"
 
 namespace mister::app {
 

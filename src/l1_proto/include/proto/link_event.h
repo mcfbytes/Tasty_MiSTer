@@ -9,8 +9,10 @@
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "hal/lw_presence.h"
+#include "infra/prelude.h"
 #include "hal/types.h"
-#include "infra/spsc_ring.h"
+#include "infra/xthread/spsc_ring.h"
 #include "proto/ps2_control_word.h"
 #include "proto/save_kind.h"
 #include "proto/types.h"
@@ -102,7 +104,7 @@ struct LinkEvent {
         hal::CoreTypeByte type_byte{};
         BindGeneration bind_gen{};
         hal::Width width = hal::Width::Byte;
-        std::uint8_t pad_{};
+        hal::LwPresence lw{};
     };
 
     struct IdentityMismatch {
@@ -144,6 +146,7 @@ struct LinkEvent {
         FltNum,
         ShadowCap,
         AfilterProbe,
+        ModeEmitted,
         kCount,
     };
 
@@ -193,6 +196,10 @@ static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 15);
 static_assert(
     sizeof(LinkEvent::FrameReply) == 12 && alignof(LinkEvent::FrameReply) == 4,
     "FrameReply: window@0 fails@1 word@2 bind_gen@4 pad_@6 gen@8, no hole"
+);
+static_assert(
+    sizeof(LinkEvent::IdentityMatched) == 6 && alignof(LinkEvent::IdentityMatched) == 2,
+    "IdentityMatched: dual@0 type@1 bind_gen@2 width@4 lw@5, one byte, no hole"
 );
 
 inline constexpr std::size_t kLinkRxCapacity = 64;

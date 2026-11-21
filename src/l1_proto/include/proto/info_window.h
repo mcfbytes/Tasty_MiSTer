@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "hal/types.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -24,7 +25,7 @@ struct InfoWindow {
         return width == OsdColCount{} || height == OsdRowCount{};
     }
 
-    [[nodiscard]] constexpr std::array<std::uint16_t, 4> wire_words() const noexcept {
+    [[nodiscard]] constexpr std::array<hal::SpiWord, 4> wire_words() const noexcept {
         return {x.wire_word(), y.wire_word(), width.wire_word(), height.wire_word()};
     }
 
@@ -50,10 +51,10 @@ struct InfoWindow {
     InfoWindow w{};
     w.x = kInfoOriginX;
     w.y = kInfoWindowY;
-    w.width = OsdColCount::of(max_width + 1u);
+    w.width = OsdColCount::saturating(max_width + 1u);
     if (w.width > kInfoMaxWidth)
         w.width = kInfoMaxWidth;
-    w.height = OsdRowCount::of(row + 2u);
+    w.height = OsdRowCount::saturating(row + 2u);
     if (w.height > kInfoMaxHeight)
         w.height = kInfoMaxHeight;
     return w;

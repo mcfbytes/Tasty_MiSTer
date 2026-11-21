@@ -7,8 +7,10 @@
 
 namespace mister::proto {
 
+namespace link {
 class SaveStateEngine;
 class SavePrimer;
+}
 struct SaveStateName;
 
 struct StateSlot {
@@ -19,8 +21,8 @@ struct StateSlot {
     [[nodiscard]] constexpr std::optional<StateSlot> next() const noexcept;
 
 private:
-    friend class SaveStateEngine;
-    friend class SavePrimer;
+    friend class link::SaveStateEngine;
+    friend class link::SavePrimer;
     friend struct SaveStateName;
 
     [[nodiscard]] constexpr std::uint32_t offset(std::uint32_t size) const noexcept {

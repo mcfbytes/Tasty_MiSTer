@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "app/hd_window.h"
-#include "app/page_description.h"
-#include "app/recents_store.h"
+#include "app/hd/hd_window.h"
+#include "app/hd/page_description.h"
+#include "app/recents/recents_store.h"
 #include "infra/opt_ref.h"
 #include "infra/utf8.h"
 #include "svc/vfs.h"
@@ -128,20 +128,20 @@ std::string hd_entry_label(const BrowserEntry& e, bool cores) {
 
 namespace {
 
-app::PageDescription::RowIcon icon_of(const BrowserEntry& e) noexcept {
+app::hd::PageDescription::RowIcon icon_of(const BrowserEntry& e) noexcept {
     switch (e.kind) {
         case EntryKind::Recent:
-            return app::PageDescription::RowIcon::Recent;
+            return app::hd::PageDescription::RowIcon::Recent;
         case EntryKind::UpDir:
-            return app::PageDescription::RowIcon::Up;
+            return app::hd::PageDescription::RowIcon::Up;
         case EntryKind::ZipDir:
-            return app::PageDescription::RowIcon::Archive;
+            return app::hd::PageDescription::RowIcon::Archive;
         case EntryKind::Dir:
-            return app::PageDescription::RowIcon::Folder;
+            return app::hd::PageDescription::RowIcon::Folder;
         case EntryKind::File:
-            return app::PageDescription::RowIcon::None;
+            return app::hd::PageDescription::RowIcon::None;
     }
-    return app::PageDescription::RowIcon::None;
+    return app::hd::PageDescription::RowIcon::None;
 }
 
 std::string hd_date_value(const std::string& datecode) {
@@ -220,8 +220,8 @@ bool BrowserPage::walk(PageWalk& out) const {
     const RowIndex first = session_.view().viewport().first;
     const RowIndex selected = session_.view().viewport().selected;
 
-    const app::HdWindow win = out.window(selected, count);
-    const RowRange hd_rows = rows(win.first, win.count);
+    const app::hd::HdWindow win = out.window(selected, count);
+    const RowRange hd_rows = rows(win.start, win.len);
 
     if (!session_.filter().empty())
         (void)out.page.footer.assign(session_.filter());
@@ -259,8 +259,8 @@ bool BrowserPage::walk(PageWalk& out) const {
         (void)r.hd.label.assign(
             infra::utf8_prefix(hd_entry_label(e, cores), decltype(r.hd.label)::kCapacity)
         );
-        r.hd.kind = e.is_dir() ? app::PageDescription::RowKind::Submenu
-                               : app::PageDescription::RowKind::Action;
+        r.hd.kind = e.is_dir() ? app::hd::PageDescription::RowKind::Submenu
+                               : app::hd::PageDescription::RowKind::Action;
         r.hd.icon = icon_of(e);
         r.hd.enabled = !e.stippled;
         r.hd.selected = at == selected;
@@ -296,11 +296,11 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return handle_recents(ev);
     const infra::OptRef<IBrowserHost> host = session_.request().host;
 
-    if (ev.buttons.has_any({UiEvent::Menu})) {
+    if (ev.buttons.intersects({UiEvent::Menu})) {
         return host ? host->on_cancel() : Transition::pop();
     }
 
-    if (ev.buttons.has_any({UiEvent::Back})) {
+    if (ev.buttons.intersects({UiEvent::Back})) {
         const BrowserPolicy& policy = session_.request().policy;
         if (session_.filter().empty() && (policy.eject_on_backspace || policy.clear_on_backspace)) {
             if (policy.eject_on_backspace && host)
@@ -321,7 +321,7 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if (ev.buttons.has_any({UiEvent::Recent}))
+    if (ev.buttons.intersects({UiEvent::Recent}))
         return open_recents_list();
 
     if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_HOME})) {
@@ -348,20 +348,20 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if (ev.buttons.has_any({UiEvent::Plus})) {
+    if (ev.buttons.intersects({UiEvent::Plus})) {
         session_.next_group();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Minus})) {
+    if (ev.buttons.intersects({UiEvent::Minus})) {
         session_.prev_group();
         return Transition{};
     }
 
-    if (ev.buttons.has_any({UiEvent::Select}))
+    if (ev.buttons.intersects({UiEvent::Select}))
         return select_current();
 
     if (const char c = browser_ascii_key(ev.raw); c != 0) {
-        session_.type_ahead(c, now_ns());
+        session_.type_ahead(c, now());
     }
     return Transition{};
 }
@@ -377,7 +377,7 @@ Transition BrowserPage::open_recents_list() {
         return Transition{};
     std::vector<BrowserEntry> mapped;
     mapped.reserve(rows.size());
-    for (app::RecentsStore::Entry& r : rows) {
+    for (app::recents::RecentsStore::Entry& r : rows) {
         BrowserEntry e;
         e.dir = static_cast<std::string&&>(r.dir);
         e.name = static_cast<std::string&&>(r.name);
@@ -393,14 +393,14 @@ Transition BrowserPage::open_recents_list() {
 Transition BrowserPage::handle_recents(const UiEvent& ev) {
     const infra::OptRef<IBrowserHost> host = session_.request().host;
 
-    if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Recent})) {
+    if (ev.buttons.intersects({UiEvent::Menu | UiEvent::Recent})) {
         if (session_.request().recents_first) {
             return host ? host->on_cancel() : Transition::pop();
         }
         (void)session_.exit_recents();
         return Transition{};
     }
-    if (ev.buttons.has_any({UiEvent::Back})) {
+    if (ev.buttons.intersects({UiEvent::Back})) {
         refusals_.add();
         return Transition{};
     }
@@ -410,7 +410,7 @@ Transition BrowserPage::handle_recents(const UiEvent& ev) {
     }
     if (navigate_(ev))
         return Transition{};
-    if (ev.buttons.has_any({UiEvent::Select})) {
+    if (ev.buttons.intersects({UiEvent::Select})) {
         const auto e = session_.view().selected();
 
         if (!e || e->stippled) {
@@ -428,21 +428,21 @@ bool BrowserPage::navigate_(const UiEvent& ev) {
         session_.view().end();
         return true;
     }
-    if (ev.buttons.has_any({UiEvent::Left})
+    if (ev.buttons.intersects({UiEvent::Left})
         || KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_PAGEUP})) {
         session_.view().prev_page();
         return true;
     }
-    if (ev.buttons.has_any({UiEvent::Right})
+    if (ev.buttons.intersects({UiEvent::Right})
         || KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_PAGEDOWN})) {
         session_.view().next_page();
         return true;
     }
-    if (ev.buttons.has_any({UiEvent::Down})) {
+    if (ev.buttons.intersects({UiEvent::Down})) {
         session_.view().next();
         return true;
     }
-    if (ev.buttons.has_any({UiEvent::Up})) {
+    if (ev.buttons.intersects({UiEvent::Up})) {
         session_.view().prev();
         return true;
     }

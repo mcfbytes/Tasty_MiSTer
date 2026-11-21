@@ -6,6 +6,7 @@
 #include <initializer_list>
 
 #include "app/rung_rows.h"
+#include "infra/enum_set.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -13,40 +14,33 @@ namespace mister::app {
 class RungMask {
 public:
     TASTY_SEAT_EXEMPT(component);
+    using Bits = infra::EnumSet<RungSlot, std::uint16_t>;
     static_assert(static_cast<std::size_t>(RungSlot::kCount) <= 16, "one bit per slot");
 
     constexpr RungMask() noexcept = default;
 
-    consteval RungMask(std::initializer_list<RungSlot> slots) {
-        for (const RungSlot s : slots) {
-            if (s >= RungSlot::kCount)
-                not_a_slot();
-            bits_ = static_cast<std::uint16_t>(bits_ | bit_(s));
-        }
+    consteval RungMask(std::initializer_list<RungSlot> slots) : bits_(Bits::of(slots)) {}
+
+    constexpr void insert(RungSlot s) noexcept { bits_.insert(s); }
+
+    [[nodiscard]] constexpr bool contains(RungSlot s) const noexcept { return bits_.contains(s); }
+
+    [[nodiscard]] constexpr bool any(RungMask m) const noexcept {
+        return !bits_.intersection(m.bits_).is_empty();
     }
 
-    constexpr void set(RungSlot s) noexcept { bits_ = static_cast<std::uint16_t>(bits_ | bit_(s)); }
-
-    [[nodiscard]] constexpr bool has(RungSlot s) const noexcept { return (bits_ & bit_(s)) != 0; }
-
-    [[nodiscard]] constexpr bool any(RungMask m) const noexcept { return (bits_ & m.bits_) != 0; }
-
-    [[nodiscard]] constexpr bool within(RungMask m) const noexcept {
-        return (bits_ & ~m.bits_) == 0;
+    [[nodiscard]] constexpr bool is_subset(RungMask m) const noexcept {
+        return bits_.is_subset(m.bits_);
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return bits_ == 0; }
+    [[nodiscard]] constexpr bool is_empty() const noexcept { return bits_.is_empty(); }
 
     friend constexpr bool operator==(RungMask, RungMask) noexcept = default;
 
 private:
-    static void not_a_slot() noexcept;
-
-    [[nodiscard]] static constexpr std::uint16_t bit_(RungSlot s) noexcept {
-        return static_cast<std::uint16_t>(1u << static_cast<unsigned>(s));
-    }
-
-    std::uint16_t bits_ = 0;
+    Bits bits_{};
 };
+
+static_assert(sizeof(RungMask) == 2);
 
 }

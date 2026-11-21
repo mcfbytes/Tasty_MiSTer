@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/stream_load_host.h"
 
+#include "infra/prelude.h"
+
 namespace mister::cores {
 
 Ex<proto::SessionParams> StreamLoadHost::stream_opening(const StreamAsk& ask) {

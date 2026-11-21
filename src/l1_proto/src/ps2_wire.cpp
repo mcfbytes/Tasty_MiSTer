@@ -6,12 +6,13 @@
 #include <span>
 
 #include "infra/endian.h"
+#include "infra/prelude.h"
 
 namespace mister::proto {
 
 namespace {
 
-constexpr std::uint16_t kReplyWordBase = 0xFF00u;
+constexpr hal::SpiWord kReplyWordBase{0xFF00u};
 
 constexpr std::size_t kPairBytes = 2;
 }
@@ -27,29 +28,29 @@ constexpr std::size_t kPairBytes = 2;
         return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), f.len});
     }
     std::size_t n = 0;
-    std::uint16_t words[kPs2FrameBytes];
+    hal::SpiWord words[kPs2FrameBytes];
     switch (facts.framing) {
         case Ps2Framing::LePairs:
             for (std::uint8_t i = 0; i + 1u < f.len;
                  i = static_cast<std::uint8_t>(i + kPairBytes)) {
-                words[n++] = infra::load_le<std::uint16_t>(
+                words[n++] = hal::SpiWord::load_le(
                     std::span<const std::uint8_t, kPairBytes>(f.bytes.data() + i, kPairBytes)
                 );
             }
             break;
         case Ps2Framing::ReplyBytes:
             for (std::uint8_t i = 0; i < f.len; ++i) {
-                words[n++] = static_cast<std::uint16_t>(kReplyWordBase | f.bytes[i]);
+                words[n++] = kReplyWordBase.with(hal::SpiWord{f.bytes[i]});
             }
             break;
         case Ps2Framing::Bytes:
             for (std::uint8_t i = 0; i < f.len; ++i)
-                words[n++] = f.bytes[i];
+                words[n++] = hal::SpiWord{f.bytes[i]};
             break;
         case Ps2Framing::kCount:
             return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), f.len});
     }
-    return send_frame(frame, facts.opcode, std::span<const std::uint16_t>(words, n));
+    return send_frame(frame, facts.opcode, std::span<const hal::SpiWord>(words, n));
 }
 
 }

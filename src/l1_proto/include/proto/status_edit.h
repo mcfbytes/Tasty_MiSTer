@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/bit_field.h"
 #include "proto/status_bit.h"
 #include "proto/status_word.h"

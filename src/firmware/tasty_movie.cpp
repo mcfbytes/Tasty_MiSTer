@@ -6,9 +6,9 @@
 #include <string>
 #include <string_view>
 
-#include "cores/movie_codec.h"
-#include "cores/movie_rom_match.h"
-#include "cores/movie_system.h"
+#include "cores/tas/movie_codec.h"
+#include "cores/tas/movie_rom_match.h"
+#include "cores/tas/movie_system.h"
 #include "svc/vfs.h"
 #include "tasty_sentences.h"
 
@@ -24,9 +24,9 @@ tasty::Exit tasty_check_movie(const svc::Vfs& vfs, TastyFiles files) {
         );
         return tasty::Exit::Code::Refused;
     }
-    const auto sys = cores::movie_system_for(vfs, files.movie);
+    const auto sys = cores::tas::movie_system_for(vfs, files.movie);
     if (!sys || !sys->codec) {
-        const std::string why = cores::movie_unplayable_reason(vfs, files.movie);
+        const std::string why = cores::tas::movie_unplayable_reason(vfs, files.movie);
         if (!why.empty()) {
             std::fprintf(stderr, "tasty: %s\n", why.c_str());
             return tasty::Exit::Code::Refused;
@@ -39,9 +39,11 @@ tasty::Exit tasty_check_movie(const svc::Vfs& vfs, TastyFiles files) {
         );
         return tasty::Exit::Code::Refused;
     }
-    auto facts = cores::read_movie_facts(vfs, sys->codec->format(), files.movie);
+    auto facts = cores::tas::read_movie_facts(vfs, sys->codec->format(), files.movie);
     if (!facts) {
-        const std::optional<cores::MovieRefusal> why = cores::movie_refusal_of(facts.error());
+        const std::optional<cores::tas::MovieRefusal> why = cores::tas::movie_refusal_of(
+            facts.error()
+        );
         const char* s = why ? tasty_movie_refusal_sentence(*why) : nullptr;
         if (s != nullptr) {
             std::fprintf(stderr, "tasty: %s\n", s);
@@ -73,10 +75,10 @@ tasty::Exit tasty_check_movie(const svc::Vfs& vfs, TastyFiles files) {
         report_unhashable(*sys->codec, files.rom, src.error());
         return tasty::Exit::Code::Refused;
     }
-    const cores::MovieRomMatch match{vfs, sys->codec->format()};
+    const cores::tas::MovieRomMatch match{vfs, sys->codec->format()};
     const auto got = match.digest(*src, facts->digest->kind);
     if (!got.value) {
-        if (got.fail == cores::MovieRomMatch::DigestFail::Open)
+        if (got.fail == cores::tas::MovieRomMatch::DigestFail::Open)
             std::fprintf(
                 stderr,
                 "tasty: cannot open rom %.*s\n",
@@ -86,8 +88,9 @@ tasty::Exit tasty_check_movie(const svc::Vfs& vfs, TastyFiles files) {
         else
             std::fprintf(
                 stderr,
-                got.fail == cores::MovieRomMatch::DigestFail::Short ? "tasty: short rom read\n"
-                                                                    : "tasty: rom read failed\n"
+                got.fail == cores::tas::MovieRomMatch::DigestFail::Short
+                    ? "tasty: short rom read\n"
+                    : "tasty: rom read failed\n"
             );
         return tasty::Exit::Code::Refused;
     }
@@ -109,7 +112,7 @@ tasty::Exit tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         );
         return tasty::Exit::Code::Refused;
     }
-    const auto sys = cores::movie_system_for(vfs, movie);
+    const auto sys = cores::tas::movie_system_for(vfs, movie);
     if (!sys || !sys->codec) {
         std::fprintf(
             stderr,
@@ -119,7 +122,7 @@ tasty::Exit tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         );
         return tasty::Exit::Code::Refused;
     }
-    auto facts = cores::read_movie_facts(vfs, sys->codec->format(), movie);
+    auto facts = cores::tas::read_movie_facts(vfs, sys->codec->format(), movie);
     if (!facts) {
         std::fprintf(
             stderr,
@@ -133,10 +136,10 @@ tasty::Exit tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         "system %.*s\nplays %s\n",
         static_cast<int>(sys->conf_str_name.size()),
         sys->conf_str_name.data(),
-        cores::movie_system_supported(*sys) ? "yes" : "no"
+        cores::tas::movie_system_supported(*sys) ? "yes" : "no"
     );
-    const cores::MovieFrameTally
-        count = cores::count_movie_frames(vfs, sys->codec->format(), movie, *facts);
+    const cores::tas::MovieFrameTally
+        count = cores::tas::count_movie_frames(vfs, sys->codec->format(), movie, *facts);
     std::printf(count.capped ? "frames %s or more\n" : "frames %s\n", count.frames.text().c_str());
     if (facts->rerecords)
         std::printf("rerecords %s\n", facts->rerecords->text().c_str());

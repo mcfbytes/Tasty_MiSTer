@@ -7,6 +7,7 @@
 #include "cores/mount_state.h"
 #include "cores/stage_plan.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/link_op.h"
 #include "proto/types.h"
 

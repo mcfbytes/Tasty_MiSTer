@@ -11,17 +11,17 @@
 #include <string>
 
 #include "app/autosave_cells.h"
-#include "app/rumble_players_cell.h"
+#include "app/input/rumble_players_cell.h"
 #include "app/types.h"
 #include "app/delivered.h"
 #include "app/link_encoder.h"
 #include "app/core_terms.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "hal/pin_levels.h"
 #include "proto/link_event.h"
 #include "proto/link_op.h"
 #include "proto/link_port.h"
-#include "proto/download_session.h"
+#include "proto/link/download_session.h"
 #include "app/board_ops.h"
 #include "app/boot_args.h"
 #include "app/boot_arm.h"
@@ -53,9 +53,9 @@
 #include "app/nvram_upload.h"
 #include "proto/osd_focus.h"
 #include "proto/session_live.h"
-#include "proto/spi_osd_mask_decoder.h"
-#include "proto/spi_sampler.h"
-#include "proto/user_io/poll_reader.h"
+#include "proto/link/spi_osd_mask_decoder.h"
+#include "proto/link/spi_sampler.h"
+#include "proto/link/poll_reader.h"
 #include "app/save_image_source.h"
 #include "app/ui_request.h"
 #include "app/uart_mode.h"
@@ -66,22 +66,29 @@
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
 #include "infra/error.h"
-#include "infra/log_lane.h"
-#include "infra/telemetry.h"
+#include "app/log_lane.h"
+#include "infra/xthread/telemetry.h"
 #include "infra/seat.h"
 #include "infra/opt_ref.h"
 #include "os/clock.h"
 
 #include "reactor/executive.h"
+#include "infra/prelude.h"
 #include "reactor/link_decoder.h"
 #include "hal/spi_transport.h"
-#include "proto/core_session.h"
+#include "proto/link/core_session.h"
 #include "proto/types.h"
-#include "svc/joy_plan.h"
+#include "svc/input/joy_plan.h"
 
 namespace mister::svc {
-class DiscReadService;
 class Vfs;
+}
+
+namespace mister::svc::disc {
+class DiscReadService;
+}
+
+namespace mister::svc::input {
 class InputEmitter;
 }
 
@@ -95,12 +102,15 @@ namespace mister::app {
 class VideoWire;
 class ICheatApply;
 class OsdWire;
-class MailboxRelay;
 class DiskRelay;
 class SaveUploadRelay;
 class WindowJobService;
 template <SeatTag Consumer>
 class LinkRxChannel;
+
+namespace pcm {
+class MailboxRelay;
+}
 
 struct SupervisorParts;
 
@@ -133,7 +143,7 @@ public:
 
     [[nodiscard]] SessionState state() const noexcept { return machine_.state(); }
 
-    proto::CoreSession& session() noexcept { return session_; }
+    proto::link::CoreSession& session() noexcept { return session_; }
 
     [[nodiscard]] const CoreTenancy& tenancy() const noexcept { return tenancy_; }
 
@@ -153,7 +163,7 @@ public:
 
     [[nodiscard]] const SessionRows& rows() const noexcept { return rows_; }
 
-    [[nodiscard]] const proto::user_io::PollReader& f12_mod_poll() const noexcept {
+    [[nodiscard]] const proto::link::PollReader& f12_mod_poll() const noexcept {
         return f12_mod_poll_;
     }
 
@@ -161,9 +171,11 @@ public:
         return sampler_.levels();
     }
 
-    const proto::SpiOsdMaskDecoder& osd_mask_decoder() const noexcept { return osd_mask_decoder_; }
+    const proto::link::SpiOsdMaskDecoder& osd_mask_decoder() const noexcept {
+        return osd_mask_decoder_;
+    }
 
-    [[nodiscard]] svc::DiscReadService& discs() noexcept { return discs_; }
+    [[nodiscard]] svc::disc::DiscReadService& discs() noexcept { return discs_; }
 
     [[nodiscard]] const CoreTerms& core_terms() const noexcept { return terms_; }
 
@@ -248,7 +260,7 @@ public:
 
     [[nodiscard]] SaveUploadRelay& saves() noexcept { return saves_; }
 
-    [[nodiscard]] MailboxRelay& mailbox() noexcept { return mailbox_; }
+    [[nodiscard]] pcm::MailboxRelay& mailbox() noexcept { return mailbox_; }
 
     void settle_boot_slot_mount() noexcept;
 
@@ -288,7 +300,7 @@ public:
         return slot_bindings_.save_extent_cell();
     }
 
-    proto::BlockSlots& block_slots() noexcept { return slot_bindings_.slots(); }
+    proto::link::BlockSlots& block_slots() noexcept { return slot_bindings_.slots(); }
 
     const SaveImageSource& save_source() const noexcept { return slot_bindings_.save_source(); }
 
@@ -339,6 +351,7 @@ public:
 
     [[nodiscard]] const proto::ISessionLive& liveness() const noexcept { return *this; }
 
+    [[nodiscard]] bool drops_live_pad(const proto::LinkOp& op) noexcept;
     [[nodiscard]] Ex<void> load_core(const LoadRequest& req);
 
     [[nodiscard]] Ex<ExitReboot> shutdown();
@@ -420,9 +433,9 @@ private:
     SessionMachine machine_;
 
     infra::OptRef<const svc::Vfs> vfs_{};
-    svc::DiscReadService& discs_;
-    svc::DiscReadService& unbound_discs_;
-    MailboxRelay& mailbox_;
+    svc::disc::DiscReadService& discs_;
+    svc::disc::DiscReadService& unbound_discs_;
+    pcm::MailboxRelay& mailbox_;
     DiskRelay& disks_;
     SaveUploadRelay& saves_;
     NvramUpload nvram_;
@@ -433,7 +446,7 @@ private:
     LinkRxChannel<SeatTag::Main>& link_rx_;
     LinkRouter& router_;
     Port out_;
-    proto::SpiSampler sampler_;
+    proto::link::SpiSampler sampler_;
 
     IdentityRecordCell& identity_record_cell_;
 
@@ -449,10 +462,10 @@ private:
     cores::CdFlow cd_flow_{};
 
     VideoWire& video_;
-    const RumblePlayersCell& rumble_players_;
+    const input::RumblePlayersCell& rumble_players_;
     OsdWire& osd_;
 
-    proto::SpiOsdMaskDecoder osd_mask_decoder_;
+    proto::link::SpiOsdMaskDecoder osd_mask_decoder_;
 
     infra::OptRef<OsdMaskCell> osd_mask_cell_;
 
@@ -483,14 +496,14 @@ private:
 
     bool ever_running_ = false;
 
-    proto::CoreSession session_;
+    proto::link::CoreSession session_;
     UartModeController uart_;
 
     SessionBindings bindings_{};
 
     bool core_ready_ = true;
 
-    xthread::LogLane::Producer log_lane_;
+    LogLane::Producer log_lane_;
     LogInstant load_start_{};
 
     DiagCountersCell diag_{};
@@ -523,7 +536,7 @@ private:
 
     SessionRows rows_;
 
-    proto::user_io::PollReader f12_mod_poll_;
+    proto::link::PollReader f12_mod_poll_;
 
     CoreTenancy tenancy_;
 

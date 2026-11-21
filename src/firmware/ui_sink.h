@@ -6,8 +6,10 @@
 #include "app/conf_str_cell.h"
 #include "app/event.h"
 #include "app/event_sink.h"
+#include "handoff_root.h"
 #include "ui/osd_visible_file.h"
 #include "ui/ui_round.h"
+#include "infra/prelude.h"
 #include "hal/thread_map.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -50,7 +52,7 @@ public:
 
         const app::ConfStrCell& conf_str;
 
-        const char* tmp_root = "/tmp";
+        const char* tmp_root = kHandoffRoot;
 
         infra::OptRef<os::ProcessTitle> title{};
     };

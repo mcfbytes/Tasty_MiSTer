@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstdio>
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 bool CoreSwitch::validate(const UiRequest::LoadCore& req) {
@@ -184,12 +186,7 @@ std::optional<CoreSwitch::Barrier> CoreSwitch::try_program(Host& host) {
 
 bool CoreSwitch::hold_on_lease_() noexcept {
 
-    const bool sector_free = !builder_.sector().mapped()
-        || builder_.sector().retire(readiness_.fabric_configured());
-    const bool osd_free = !builder_.osd().mapped()
-        || builder_.osd().retire(readiness_.fabric_configured());
-    const bool sys_free = !builder_.sys().mapped() || builder_.sys().retire();
-    if (sector_free && osd_free && sys_free) {
+    if (builder_.lends().retire_all()) {
         lease_hold_.reset();
         return false;
     }
@@ -205,8 +202,8 @@ bool CoreSwitch::hold_on_lease_() noexcept {
         builder_.count_lease_hold(true);
         std::fprintf(
             stderr,
-            "mister: core switch %s held: an LW lease (T-IO's sector, T-UI's OSD) is "
-            "still out; the FPGA is not programmed while it is\n",
+            "mister: core switch %s held: an LW lease (T-IO's sector or SYS, T-UI's OSD, "
+            "T-INPUT's pad) is still out; the FPGA is not programmed while it is\n",
             gen_.text().c_str()
         );
         advise_switch_held_();

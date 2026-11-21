@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "app/link_tx_channel.h"
+#include "infra/prelude.h"
 #include "ui/glyph_rom.h"
 #include "ui/status_bar_facts.h"
 
@@ -410,7 +411,7 @@ void OsdRenderer::composite_status_bar(const StatusBarFacts& facts) {
             str[n++] = kGlyphWired;
         if (facts.bluetooth)
             str[n++] = kGlyphBluetooth;
-        if (facts.sdram_cfg.has(proto::kSdramPresent)) {
+        if (facts.sdram_cfg.intersects(proto::kSdramPresent)) {
             const proto::OsdMask size = facts.sdram_cfg.only(proto::kSdramSizeBits);
             if (size == proto::kSdramSize128) {
                 str[n] = kGlyphSdram128M;

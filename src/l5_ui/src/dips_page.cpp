@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-#include "app/hd_window.h"
+#include "app/hd/hd_window.h"
 #include "ui/draw_classic.h"
 #include "ui/page_ask.h"
 #include "ui/osd_renderer.h"
@@ -29,8 +29,9 @@ Layout layout_for(RowCount count, RowCount rows) noexcept {
 
     const RowCount needed = count + kOneRow;
     const bool fits = needed <= rows;
+    constexpr std::uint32_t kHalfDivisor = 2;
     l.lead = (fits && count < rows - kOneRow)
-        ? row_after(saturating_sub(rows - kOneRow, count).half())
+        ? row_after(infra::affine::saturating_sub(rows - kOneRow, count) / kHalfDivisor)
         : RowIndex{};
 
     l.reset = fits ? last_row(rows) : row_after(count);
@@ -95,9 +96,9 @@ bool DipsPage::walk(PageWalk& out) const {
     const RowCount total = count + kOneRow;
     const RowIndex selected = sel_ <= reset_row() ? sel_ : RowIndex{};
 
-    const app::HdWindow win = out.window(selected, total);
-    const RowCount win_first = win.first.before();
-    const RowCount win_count = win.count;
+    const app::hd::HdWindow win = out.window(selected, total);
+    const RowCount win_first = win.start.before();
+    const RowCount win_count = win.len;
     const RowCount win_last = win_first + win_count;
 
     const auto row_of = [&](RowIndex at) -> std::optional<RowIndex> {
@@ -147,14 +148,14 @@ bool DipsPage::walk(PageWalk& out) const {
             while (!name.empty() && name.back() == ' ')
                 name.remove_suffix(1);
             (void)r.hd.label.assign(name);
-            r.hd.kind = app::PageDescription::RowKind::Value;
+            r.hd.kind = app::hd::PageDescription::RowKind::Value;
             const proto::DipChoice current = table_->current(dip_at);
             const std::string_view id = current.within(d.choices) ? current.pick(d.ids).view()
                                                                   : std::string_view{};
             (void)r.hd.value.assign(id);
             r.hd.selected = sel_ == at;
         } else {
-            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.kind = app::hd::PageDescription::RowKind::Action;
             (void)r.hd.label.assign("Reset to apply");
             r.hd.selected = sel_ == reset_row();
         }
@@ -199,13 +200,13 @@ void DipsPage::track_viewport() noexcept {
 
 Transition DipsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(DipsPage);
-    const bool back = ev.buttons.has_any({UiEvent::Menu | UiEvent::Back | UiEvent::Left});
+    const bool back = ev.buttons.intersects({UiEvent::Menu | UiEvent::Back | UiEvent::Left});
     if (back) {
 
         save_dips();
         return Transition::pop();
     }
-    if (!ev.buttons.has_any({UiEvent::Select}))
+    if (!ev.buttons.intersects({UiEvent::Select}))
         return Transition{};
 
     if (sel_ == reset_row()) {

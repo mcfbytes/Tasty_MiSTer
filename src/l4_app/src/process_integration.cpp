@@ -4,16 +4,20 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
-#include <array>
+#include <span>
 
+#include "infra/file_mode.h"
+#include "infra/prelude.h"
+#include "os/file_create.h"
 #include "infra/unique_fd.h"
-
+#include "hal/thread_map.h"
 #include "os/bt_probe.h"
 #include "os/run_sync.h"
-#include "hal/thread_map.h"
+#include "os/write_all.h"
 
 namespace mister::app::proc {
 
@@ -100,23 +104,12 @@ void restore_ui_affinity() noexcept {
 
 [[nodiscard]] Ex<void> write_tmp_handoff(const char* path, std::string_view data) {
 
-    const int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-    if (fd < 0) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    UniqueFd guard{fd};
-    std::size_t off = 0;
-    while (off < data.size()) {
-        const ::ssize_t n = ::write(fd, data.data() + off, data.size() - off);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-        }
-        if (n == 0)
-            break;
-        off += static_cast<std::size_t>(n);
-    }
+    constexpr os::OpenFlags kHandoffFlags = os::OpenFlags::write_only().creating().truncating();
+    static_assert(kHandoffFlags.open_word() == (O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC));
+    auto fd = os::open_created(path, kHandoffFlags, infra::kSharedFileMode);
+    if (!fd)
+        return std::unexpected(fd.error().refusal(Errc::os, ERR_SITE()));
+    os::write_all_best_effort(*fd, std::as_bytes(std::span(data)));
     return {};
 }
 

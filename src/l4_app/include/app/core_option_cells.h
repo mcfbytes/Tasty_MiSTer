@@ -28,6 +28,7 @@
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/link_event.h"
 #include "proto/link_op.h"

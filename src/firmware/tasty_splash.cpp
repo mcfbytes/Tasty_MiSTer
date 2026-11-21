@@ -14,7 +14,8 @@
 #include "app/picture_size.h"
 #include "app/video_pump.h"
 #include "hal/phys_region.h"
-#include "svc/video_service.h"
+#include "infra/prelude.h"
+#include "svc/video/video_service.h"
 
 #include <zlib.h>
 
@@ -158,15 +159,15 @@ Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept 
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), 0});
     const app::PictureSize size = app::PictureSize::of(out);
     const auto halves = fb_region_->region().phys.advanced(app::kFramebufferPageBytes).low_halves();
-    const std::array<std::uint16_t, 10> words{
+    const std::array<hal::SpiWord, 10> words{
         kFbEnWord,
-        halves[0],
-        halves[1],
+        hal::SpiWord{halves[0]},
+        hal::SpiWord{halves[1]},
         size.width.wire_word(),
         size.rows.wire_word(),
-        0,
+        hal::SpiWord{},
         (size.width - app::PicturePixels{1}).wire_word(),
-        0,
+        hal::SpiWord{},
         (size.rows - app::PictureRows{1}).wire_word(),
         size.stride_bytes(app::PixelBytes::of(sizeof(std::uint32_t))).wire_word(),
     };
@@ -175,7 +176,7 @@ Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept 
 
 Ex<void> TastySplash::hide(app::VideoPump& video) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    const std::array<std::uint16_t, 1> words{0};
+    const std::array<hal::SpiWord, 1> words{hal::SpiWord{}};
     return video.mode_sink().publish(proto::UioOp::SetFbuf, words);
 }
 

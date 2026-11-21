@@ -33,7 +33,7 @@ std::optional<bool> IdleBlank::tick(
 
     if (!armed_ || moved || !grabbed) {
         armed_ = true;
-        deadline_ = now + minutes_;
+        deadline_ = os::Deadline::at_point(now + minutes_);
         if (blanked_) {
             blanked_ = false;
             ++wakes_;
@@ -42,7 +42,7 @@ std::optional<bool> IdleBlank::tick(
         return std::nullopt;
     }
 
-    if (now >= deadline_ && !blanked_) {
+    if (deadline_.expired_at(now) && !blanked_) {
         blanked_ = true;
         ++blanks_;
         return false;

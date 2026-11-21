@@ -5,9 +5,13 @@
 
 namespace mister::ui {
 
-RecentRow::RecentRow(RecentLaunch& launch, app::RecentGames::Record record, app::RowTier tier)
+RecentRow::RecentRow(
+    RecentLaunch& launch,
+    app::recents::RecentGames::Record record,
+    app::hd::RowTier tier
+)
     : launch_(launch),
-      record_(static_cast<app::RecentGames::Record&&>(record)),
+      record_(static_cast<app::recents::RecentGames::Record&&>(record)),
       tier_(tier) {
     TASTY_SEAT_BODY(RecentRow);
 
@@ -39,17 +43,17 @@ std::optional<RowKey> RecentRow::key() const {
     return RowKey::hashed(RowKeySpace::Recent, RowDigest{h});
 }
 
-app::PageDescription::Row RecentRow::describe() const {
+app::hd::PageDescription::Row RecentRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(RecentRow);
-    app::PageDescription::Row out{};
-    out.kind = app::PageDescription::RowKind::Action;
+    app::hd::PageDescription::Row out{};
+    out.kind = app::hd::PageDescription::RowKind::Action;
     out.tier = tier_;
     (void)out.label.assign(title_);
     (void)out.value.assign(record_.core);
     return out;
 }
 
-Transition RecentRow::select() {
+Transition RecentRow::select(const RowCx&) {
     TASTY_SEAT_BODY(RecentRow);
     if (!launch_.asks_first(record_))
         return launch_.launch(record_);

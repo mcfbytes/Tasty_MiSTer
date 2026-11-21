@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/byte_count.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/block_ctl.h"
 
@@ -15,14 +17,14 @@ class IStorageBackend {
 public:
     virtual ~IStorageBackend() = default;
 
-    [[nodiscard]] virtual Ex<std::span<std::uint8_t>> read_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> read_at(
         proto::FileOffset at,
-        std::span<std::uint8_t> dst
+        std::span<std::byte> dst
     ) = 0;
 
-    [[nodiscard]] virtual Ex<std::span<const std::uint8_t>> write_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> write_at(
         proto::FileOffset at,
-        std::span<const std::uint8_t> src
+        std::span<const std::byte> src
     ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> open_extent(
@@ -37,7 +39,7 @@ public:
         return open_extent(slot, order);
     }
 
-    [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::uint8_t>) {
+    [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::byte>) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
 

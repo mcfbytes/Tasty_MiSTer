@@ -11,9 +11,10 @@
 #include <string_view>
 #include <vector>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rewalk.h"
 #include "ui/hd_rows/hd_action.h"
@@ -28,7 +29,7 @@
 #include "ui/slot_pick_host.h"
 #include "svc/types.h"
 
-namespace mister::app {
+namespace mister::app::recents {
 class RecentGames;
 }
 
@@ -50,14 +51,14 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
     RowCount pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
     bool hub() const noexcept override;
     void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
-    svc::Tally refusals() const noexcept override;
+    infra::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
     enum class RootRow : std::uint8_t {
@@ -93,7 +94,7 @@ public:
 
     static constexpr std::size_t kRows = std::size(kRootRows);
     static constexpr std::size_t kReserved = 2;
-    static_assert(kRows + kReserved <= app::PageDescription::kMaxRows);
+    static_assert(kRows + kReserved <= app::hd::PageDescription::kMaxRows);
 
     static constexpr std::uint8_t kPinned = [] consteval {
         std::uint8_t pinned = 0;
@@ -118,18 +119,18 @@ public:
         "the pinned rows must be the tail of kRootRows"
     );
 
-    static constexpr app::RowTier kTier = app::RowTier::Verb;
+    static constexpr app::hd::RowTier kTier = app::hd::RowTier::Verb;
 
 private:
-    class LoadRow final : public IHdRow {
+    class LoadRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         explicit LoadRow(HdRootPlan& plan) noexcept : plan_(plan) {}
 
         bool shown() const override;
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
 
     private:
         HdRootPlan& plan_;
@@ -161,7 +162,7 @@ private:
 
     void walk_(const proto::ItemTable& table, const BuildEnv& env);
 
-    [[nodiscard]] IHdRow& row_for_(RootRow row) noexcept;
+    [[nodiscard]] IRow& row_for_(RootRow row) noexcept;
 
     void gate_() noexcept;
     Transition reset_yes_();
@@ -169,7 +170,7 @@ private:
 
     PageContext& ctx_;
     const NowPlaying& now_playing_;
-    const app::RecentGames& recent_games_;
+    const app::recents::RecentGames& recent_games_;
     const CoreVerbs& verbs_;
     const bool table_settings_;
     SlotPickHost::Env env_;
@@ -190,7 +191,7 @@ private:
     bool reset_ = false;
     bool core_settings_ = false;
     bool main_menu_ = false;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 
     ResetAction reset_action_{*this};
@@ -212,7 +213,7 @@ private:
     HdPushRow settings_row_;
     HdAskRow main_menu_row_;
     HdGatedRow main_menu_gate_{main_menu_row_, main_menu_};
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

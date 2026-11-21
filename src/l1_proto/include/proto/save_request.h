@@ -2,13 +2,19 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
+#include "hal/types.h"
 #include "infra/error.h"
 
 namespace mister::proto {
 
 struct SaveRequestWord {
     std::uint16_t v = 0;
+
+    [[nodiscard]] static constexpr SaveRequestWord of(hal::SpiWord reply) noexcept {
+        return SaveRequestWord{reply.decoded(std::identity{})};
+    }
 
     [[nodiscard]] constexpr bool requested() const noexcept { return v != 0; }
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "svc/crc32_accumulator.h"
 #include "svc/types.h"

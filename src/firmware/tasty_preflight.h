@@ -3,6 +3,7 @@
 
 #include "app/path_text.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "tasty_cli.h"
 #include "tasty_cli_refusal.h"

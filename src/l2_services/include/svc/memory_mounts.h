@@ -14,10 +14,12 @@
 #include "infra/errno.h"
 #include "infra/opt_ref.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 #include "svc/io_meter.h"
 #include "svc/types.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 
 namespace mister::svc {
 
@@ -36,7 +38,7 @@ public:
         Crc32 crc
     ) const;
 
-    [[nodiscard]] Tally sequential_hints(std::string_view key) const noexcept;
+    [[nodiscard]] infra::Tally sequential_hints(std::string_view key) const noexcept;
 
     enum class IoVerb : std::uint8_t { Open, Read, Write };
     [[nodiscard]] std::optional<Error> refusal(std::string_view key, IoVerb verb) const noexcept;

@@ -7,10 +7,8 @@
 #include <utility>
 
 namespace mister::infra {
-struct Errno;
-}
 
-namespace mister {
+struct Errno;
 
 enum class Errc : std::uint16_t {
 
@@ -68,8 +66,6 @@ static_assert(
     && detail::errc_code(Errc::contract) == 27
 );
 
-namespace infra {
-
 enum class ErrorSite : std::uint16_t {};
 
 inline constexpr ErrorSite kNoSite{};
@@ -78,14 +74,12 @@ inline constexpr ErrorSite kNoSite{};
     return static_cast<ErrorSite>(line);
 }
 
-}
-
 struct Error {
     Errc code;
-    infra::ErrorSite site;
+    ErrorSite site;
     std::uint32_t detail;
 
-    [[nodiscard]] constexpr infra::Errno os_errno() const noexcept;
+    [[nodiscard]] constexpr Errno os_errno() const noexcept;
 
     friend constexpr bool operator==(const Error&, const Error&) = default;
 };
@@ -97,17 +91,13 @@ using Ex = std::expected<T, Error>;
 
 #define ERR_SITE() (::mister::infra::site_at_line(__LINE__))
 
-namespace infra {
-
 [[nodiscard]] constexpr Error errno_error(Errc errc, ErrorSite at, int err) noexcept {
     return Error{errc, at, static_cast<std::uint32_t>(err)};
 }
 
-}
-
 [[noreturn]] void fatal(Error e, const char* what);
 
-inline std::unexpected<Error> unimplemented(infra::ErrorSite site) {
+inline std::unexpected<Error> unimplemented(ErrorSite site) {
     return std::unexpected(Error{Errc::unimplemented, site, 0});
 }
 

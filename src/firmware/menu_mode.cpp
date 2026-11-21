@@ -10,8 +10,10 @@
 #include "app/link_session.h"
 #include "app/session_owner.h"
 #include "hal/boards_table.h"
+#include "infra/prelude.h"
 #include "menu_block.h"
 #include "report.h"
+#include "svc/card_dirs.h"
 #include "svc/card_writer.h"
 
 extern char** environ;
@@ -216,7 +218,7 @@ void MenuMode::StderrVoice::fabric_not_ready(const hal::BoardProfile& board) con
 void MenuMode::storage_ready(svc::Vfs& vfs) {
 
     svc::CardWriter card{vfs};
-    if (auto d = card.ensure_dir("config"); !d) {
+    if (auto d = card.ensure_dir(svc::kConfigDir); !d) {
         report("ensure_dir(config)", d.error());
     }
 }

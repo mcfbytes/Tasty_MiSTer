@@ -3,7 +3,6 @@
 
 #include <fcntl.h>
 #include <pthread.h>
-#include <time.h>
 
 #include <atomic>
 #include <cerrno>
@@ -13,6 +12,8 @@
 #include "infra/persist.h"
 
 #include "app/process_integration.h"
+#include "infra/prelude.h"
+#include "os/delay.h"
 #include "ui/script_launch.h"
 #include "ui/script_request.h"
 
@@ -142,11 +143,11 @@ void ScriptRunner::close_detached() {
 }
 
 bool ScriptRunner::quiesce_closes(std::chrono::milliseconds timeout) noexcept {
-    const ::timespec tick{0, 1'000'000};
+    constexpr std::chrono::milliseconds kTick{1};
     for (std::chrono::milliseconds waited{0}; waited <= timeout; ++waited) {
         if (g_closes_in_flight.load(std::memory_order_acquire) == 0)
             return true;
-        (void)::nanosleep(&tick, nullptr);
+        os::sleep_for(kTick);
     }
     return g_closes_in_flight.load(std::memory_order_acquire) == 0;
 }

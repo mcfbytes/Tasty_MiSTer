@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "infra/prelude.h"
 #include "svc/disc_file_access.h"
 #include "svc/vfs_image_opener.h"
 
@@ -32,7 +33,7 @@ Ex<std::string> DiscFileAccess::read_cue_text(std::string_view cue_path) const {
         auto rd = (*cue)->read_at(proto::kFileStart, std::as_writable_bytes(std::span<char>(text)));
         if (!rd)
             return std::unexpected(rd.error());
-        text.resize(*rd);
+        proto::FileSize::of(*rd).resize_in(text);
     }
     return text;
 }

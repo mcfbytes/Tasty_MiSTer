@@ -4,8 +4,9 @@
 #include <cstdint>
 
 #include "hal/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "os/raw_monotonic_clock.h"
 
 namespace mister::reactor {

@@ -2,16 +2,18 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <span>
-#include <string_view>
 
+#include "cores/core_profile.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "reactor/executive.h"
 
 namespace mister::fw {
 
 struct DocCensus {
-    std::string_view core;
+    cores::CoreKind kind;
     std::span<const reactor::LinkDecoderDecl> rows;
 };
 
@@ -129,18 +131,49 @@ inline constexpr auto kNeoGeoDocRows = std::to_array<reactor::LinkDecoderDecl>({
 });
 
 inline constexpr auto kDocCensus = std::to_array<DocCensus>({
-    {"MEGACD", kMegaCdDocRows},
-    {"TGFX16", kPceCdDocRows},
-    {"PSX", kPsxDocRows},
-    {"SNES", kSnesDocRows},
-    {"SGB", kSgbDocRows},
-    {"AtariST", kAtariStDocRows},
-    {"3DO", kThreeDoDocRows},
-    {"MegaDrive", kMegaDriveDocRows},
-    {"N64", kN64DocRows},
-    {"Saturn", kSaturnDocRows},
-    {"NEOGEO", kNeoGeoDocRows},
+    {cores::CoreKind::MegaCd, kMegaCdDocRows},
+    {cores::CoreKind::PceCd, kPceCdDocRows},
+    {cores::CoreKind::Psx, kPsxDocRows},
+    {cores::CoreKind::Snes, kSnesDocRows},
+    {cores::CoreKind::Sgb, kSgbDocRows},
+    {cores::CoreKind::AtariSt, kAtariStDocRows},
+    {cores::CoreKind::ThreeDo, kThreeDoDocRows},
+    {cores::CoreKind::MegaDrive, kMegaDriveDocRows},
+    {cores::CoreKind::N64, kN64DocRows},
+    {cores::CoreKind::Saturn, kSaturnDocRows},
+    {cores::CoreKind::NeoGeo, kNeoGeoDocRows},
 });
+
+namespace detail {
+
+consteval bool doc_census_keys_are_distinct() {
+    for (std::size_t i = 0; i < kDocCensus.size(); ++i) {
+        for (std::size_t j = i + 1; j < kDocCensus.size(); ++j) {
+            if (kDocCensus[i].kind == kDocCensus[j].kind)
+                return false;
+        }
+    }
+    return true;
+}
+
+consteval bool doc_census_keys_ship_rows() {
+    for (const DocCensus& d : kDocCensus) {
+        if (d.kind == cores::CoreKind::Generic || d.kind == cores::CoreKind::Count)
+            return false;
+    }
+    return true;
+}
+
+}
+
+static_assert(
+    detail::doc_census_keys_are_distinct(),
+    "one document table per CoreKind: a repeated key makes the census join ambiguous"
+);
+static_assert(
+    detail::doc_census_keys_ship_rows(),
+    "Generic ships no census rows and Count is not a kind: neither may be a doc key"
+);
 
 [[nodiscard]] Ex<void> verify_census();
 

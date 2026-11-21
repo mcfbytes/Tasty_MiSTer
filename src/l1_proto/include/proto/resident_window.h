@@ -6,6 +6,8 @@
 #include <optional>
 #include <span>
 
+#include "infra/byte_count.h"
+#include "infra/run.h"
 #include "proto/block_geometry.h"
 #include "proto/types.h"
 
@@ -16,6 +18,10 @@ struct ResidentBytes {
 
     [[nodiscard]] static constexpr ResidentBytes of(std::size_t got) noexcept {
         return ResidentBytes{static_cast<std::uint32_t>(got)};
+    }
+
+    [[nodiscard]] static constexpr ResidentBytes of(infra::ByteCount got) noexcept {
+        return of(got.size());
     }
 
     [[nodiscard]] static constexpr ResidentBytes staging() noexcept {
@@ -32,10 +38,13 @@ struct ResidentWindow {
     enum class Source : std::uint8_t { Image, Substitute };
 
     struct Ask {
-        Lba lba{};
-        BlockCount blocks{};
+        infra::affine::Run<Lba> run{};
         std::optional<BlockSize> geometry{};
     };
+
+    static_assert(
+        sizeof(Ask) == sizeof(infra::affine::Run<Lba>) + sizeof(std::optional<BlockSize>)
+    );
 
     struct Hit {
         enum class Is : std::uint8_t { Miss, Image, Substitute };
@@ -67,9 +76,9 @@ struct ResidentWindow {
     }
 
     [[nodiscard]] constexpr bool covers(const Ask& ask, BlockCount capacity) const noexcept {
-        return ask.lba >= base
-            && ask.blocks <= capacity
-            && (ask.lba - base) <= (capacity - ask.blocks);
+        return ask.run.start >= base
+            && ask.run.len <= capacity
+            && (ask.run.start - base) <= (capacity - ask.run.len);
     }
 
     [[nodiscard]] Hit hit(const Ask& ask, std::span<const std::uint8_t> bytes) const noexcept {
@@ -83,11 +92,11 @@ struct ResidentWindow {
         const BlockCount capacity = block_size.blocks_in(FileSize{kBlockStagingBytes});
         if (!covers(ask, capacity))
             return Hit{};
-        const std::size_t offset = block_size.offset_of(ask.lba - base);
-        const std::size_t length = block_size.length_of(ask.blocks);
+        const std::size_t offset = block_size.window_bytes(ask.run.start - base);
+        const std::size_t length = block_size.window_bytes(ask.run.len);
         if (offset + length > bytes.size())
             return Hit{};
-        const Lba next = ask.lba + ask.blocks;
+        const Lba next = ask.run.start + ask.run.len;
         const bool at_end = (next - base) == capacity;
         return Hit{
             .is = Hit::Is::Image,

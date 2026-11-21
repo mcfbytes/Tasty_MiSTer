@@ -5,8 +5,8 @@
 #include <string>
 
 #include "infra/message_sum.h"
-#include "os/country_code.h"
-#include "svc/connect_request.h"
+#include "os/connect/country_code.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/slot_range.h"
@@ -14,8 +14,8 @@
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 
 struct Country {
     std::string_view code;
@@ -65,7 +65,7 @@ constexpr std::array<Country, 40> kCountries{{
     {"AU", "Australia"},
 }};
 
-constexpr SlotRange kTable = SlotRange::table(RowCount::of(kCountries.size()));
+constexpr SlotRange kTable = SlotRange::table(RowCount::truncating(kCountries.size()));
 
 }
 
@@ -93,10 +93,10 @@ bool CountryPickPlan::slot_shown(SlotId slot) const {
     return kTable.contains(slot);
 }
 
-app::PageDescription::Row CountryPickPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row CountryPickPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(CountryPickPlan);
     const Country& c = kCountries[kTable.subscript_of(slot).value_or(0)];
-    const std::optional<svc::WifiView>& v = views().wifi;
+    const std::optional<svc::connect::WifiView>& v = views().wifi;
     const bool current = v && v->country && v->country->code() == c.code;
     std::string label{c.code};
     label.append("  ").append(c.name);
@@ -108,7 +108,7 @@ Transition CountryPickPlan::slot_select(SlotId slot) {
     const std::optional<std::size_t> at = kTable.subscript_of(slot);
     if (!at)
         return Transition{};
-    if (const auto code = os::CountryCode::parse(kCountries[*at].code)) {
+    if (const auto code = os::connect::CountryCode::parse(kCountries[*at].code)) {
         (void)send(infra::make<Request>(Request::WifiSetCountry{*code}));
     }
     return Transition::pop();

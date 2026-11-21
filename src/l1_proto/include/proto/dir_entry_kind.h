@@ -5,6 +5,8 @@
 #include <optional>
 #include <utility>
 
+#include "hal/reg_word.h"
+
 namespace mister::proto {
 
 enum class DirEntryKind : std::uint32_t { Pad = 1, Sector = 2, Osd = 3, Sys = 4, Lane = 5 };
@@ -14,7 +16,11 @@ static_assert(std::to_underlying(DirEntryKind::Osd) == 3);
 static_assert(std::to_underlying(DirEntryKind::Sys) == 4);
 static_assert(std::to_underlying(DirEntryKind::Lane) == 5);
 
-[[nodiscard]] constexpr std::optional<DirEntryKind> kind_of_wire(std::uint32_t w) noexcept {
+[[nodiscard]] constexpr bool linked(DirEntryKind kind) noexcept {
+    return kind == DirEntryKind::Sector || kind == DirEntryKind::Osd || kind == DirEntryKind::Lane;
+}
+
+[[nodiscard]] constexpr std::optional<DirEntryKind> kind_of_wire(hal::RegWord w) noexcept {
     constexpr DirEntryKind kKinds[]{
         DirEntryKind::Pad,
         DirEntryKind::Sector,
@@ -23,7 +29,7 @@ static_assert(std::to_underlying(DirEntryKind::Lane) == 5);
         DirEntryKind::Lane
     };
     for (const DirEntryKind kind : kKinds)
-        if (w == std::to_underlying(kind))
+        if (w == hal::RegWord{std::to_underlying(kind)})
             return kind;
     return std::nullopt;
 }

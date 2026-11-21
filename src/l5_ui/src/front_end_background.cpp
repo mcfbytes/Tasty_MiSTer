@@ -3,7 +3,9 @@
 
 #include <linux/input-event-codes.h>
 
+#include "infra/prelude.h"
 #include "ui/page_ask.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -19,7 +21,7 @@ void FrontEndBackground::round(
 
     const app::IdleKnobsCell::Sample knobs = knobs_.sample();
     const bool terminal = knobs && knobs.value.fb_terminal;
-    bg_ = front_end && terminal ? app::front_end_bg_of(value) : app::FrontEndBg::None;
+    bg_ = front_end && terminal ? app::hd::front_end_bg_of(value) : app::hd::FrontEndBg::None;
     if (!pending_)
         return;
     if (value == wanted_) {
@@ -39,7 +41,7 @@ void FrontEndBackground::round(
 }
 
 bool FrontEndBackground::on_key(
-    const app::RawKeyEdge& edge,
+    const app::input::RawKeyEdge& edge,
     const StatusView& status,
     bool front_end,
     app::LinkTxChannel<SeatTag::Ui>& tx
@@ -64,7 +66,7 @@ bool FrontEndBackground::on_key(
     }
     wanted_ = wanted;
     pending_ = true;
-    ack_rounds_ = svc::Tally{};
+    ack_rounds_ = infra::Tally{};
     return true;
 }
 

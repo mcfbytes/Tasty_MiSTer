@@ -6,10 +6,11 @@
 #include <string>
 #include <string_view>
 
-#include "app/replay_feeder.h"
-#include "cores/movie_codec.h"
-#include "cores/movie_rom_match.h"
-#include "cores/movie_system.h"
+#include "app/replay/replay_feeder.h"
+#include "cores/tas/movie_codec.h"
+#include "cores/tas/movie_rom_match.h"
+#include "cores/tas/movie_system.h"
+#include "infra/prelude.h"
 #include "svc/vfs.h"
 #include "tasty_cli_refusal.h"
 #include "tasty_say.h"
@@ -21,14 +22,16 @@ namespace {
 
 [[nodiscard]] Ex<app::PathText> rom_search(
     const svc::Vfs& vfs,
-    const cores::IMovieFormat& format,
-    const cores::MovieFacts& facts,
+    const cores::tas::IMovieFormat& format,
+    const cores::tas::MovieFacts& facts,
     std::string_view folder
 ) {
-    using Search = cores::MovieRomMatch::Search;
-    const cores::MovieRomMatch match{vfs, format};
+    using Search = cores::tas::MovieRomMatch::Search;
+    const cores::tas::MovieRomMatch match{vfs, format};
     const Search found = match.find_rom(facts, folder);
-    const std::string at = "/" + std::string(cores::MovieRomMatch::kGamesRel) + std::string(folder);
+    const std::string at = "/"
+        + std::string(cores::tas::MovieRomMatch::kGamesRel)
+        + std::string(folder);
     switch (found.end) {
         case Search::End::Found: {
             app::PathText rom{};
@@ -67,7 +70,7 @@ Ex<app::PathText> TastyPreflight::play_rom(const TastyArgs& a) const {
         TastyRefusal{TastyRefusal::LoopWithRecord}.say();
         return std::unexpected(TastyRefusal{TastyRefusal::LoopWithRecord}.error(ERR_SITE()));
     }
-    const auto sys = cores::movie_system_for(vfs_, a.movie.view());
+    const auto sys = cores::tas::movie_system_for(vfs_, a.movie.view());
     if (!sys || !sys->codec) {
         std::fprintf(stderr, "tasty: no codec for %s\n", a.movie.c_str());
         return std::unexpected(TastyRefusal{TastyRefusal::NoCodec}.error(ERR_SITE()));
@@ -76,7 +79,7 @@ Ex<app::PathText> TastyPreflight::play_rom(const TastyArgs& a) const {
         TastyRefusal{TastyRefusal::RamInitUnsupported}.say();
         return std::unexpected(TastyRefusal{TastyRefusal::RamInitUnsupported}.error(ERR_SITE()));
     }
-    auto facts = cores::read_movie_facts(vfs_, sys->codec->format(), a.movie.view());
+    auto facts = cores::tas::read_movie_facts(vfs_, sys->codec->format(), a.movie.view());
     if (!facts) {
         std::fprintf(stderr, "tasty: cannot read movie %s\n", a.movie.c_str());
         return std::unexpected(TastyRefusal{TastyRefusal::MovieUnreadable}.error(ERR_SITE()));
@@ -95,7 +98,7 @@ Ex<app::PathText> TastyPreflight::play_rom(const TastyArgs& a) const {
         return std::unexpected(TastyRefusal{TastyRefusal::LeadOutOfRange}.error(ERR_SITE()));
     }
     if (a.phase_us) {
-        if (!app::ReplayFeeder::phase_fits(
+        if (!app::replay::ReplayFeeder::phase_fits(
                 *a.phase_us,
                 sys->codec->core().raster(*facts).period_ns
             )) {
@@ -114,12 +117,12 @@ Ex<app::PathText> TastyPreflight::play_rom(const TastyArgs& a) const {
 }
 
 Ex<void> TastyPreflight::rom_readable(TastyFiles files) const {
-    const std::string why = cores::movie_unplayable_reason(vfs_, files.movie);
+    const std::string why = cores::tas::movie_unplayable_reason(vfs_, files.movie);
     if (!why.empty()) {
         std::fprintf(stderr, "tasty: %s\n", why.c_str());
         return std::unexpected(TastyRefusal{TastyRefusal::RomUnplayable}.error(ERR_SITE()));
     }
-    const auto sys = cores::movie_system_for(vfs_, files.movie);
+    const auto sys = cores::tas::movie_system_for(vfs_, files.movie);
     if (!sys || !sys->codec)
         return {};
     auto src = sys->codec->format().digest_source(vfs_, files.rom);

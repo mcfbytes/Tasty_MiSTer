@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "app/cmd_verb_sink.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "app/bitstream_resolve.h"
 #include "app/ui_request_ring.h"
 #include "infra/message_sum.h"
@@ -18,6 +18,7 @@
 #include "ui/draw_classic.h"
 #include "ui/free_space.h"
 #include "ui/osd_renderer.h"
+#include "ui/osd_tree.h"
 #include "ui/page_ask.h"
 #include "ui/page_row.h"
 #include "ui/page_walk.h"
@@ -74,61 +75,76 @@ struct SystemRowFact {
     std::string_view text;
     std::string_view hd_label;
     std::string_view hd_value;
-    app::PageDescription::RowKind kind;
+    app::hd::PageDescription::RowKind kind;
 };
 
 constexpr std::array<SystemRowFact, kSystemItemTotal> kSystemRows{{
-    {SystemItem::Core, proto::OsdRow{0}, kRowCore, {}, {}, app::PageDescription::RowKind::Submenu},
+    {SystemItem::Core,
+     proto::OsdRow{0},
+     kRowCore,
+     {},
+     {},
+     app::hd::PageDescription::RowKind::Submenu},
     {SystemItem::SwitchStorage,
      proto::OsdRow{5},
      {},
      {},
      {},
-     app::PageDescription::RowKind::Action},
+     app::hd::PageDescription::RowKind::Action},
     {SystemItem::RemapKeyboard,
      proto::OsdRow{7},
      kRowRemap,
      {},
      {},
-     app::PageDescription::RowKind::Action},
+     app::hd::PageDescription::RowKind::Action},
     {SystemItem::DefineJoystick,
      proto::OsdRow{8},
      kRowJoy,
      {},
      {},
-     app::PageDescription::RowKind::Submenu},
+     app::hd::PageDescription::RowKind::Submenu},
     {SystemItem::Scripts,
      proto::OsdRow{9},
      kRowScripts,
      {},
      {},
-     app::PageDescription::RowKind::Submenu},
-    {SystemItem::Help, proto::OsdRow{10}, kRowHelp, {}, {}, app::PageDescription::RowKind::Action},
+     app::hd::PageDescription::RowKind::Submenu},
+    {SystemItem::Help,
+     proto::OsdRow{10},
+     kRowHelp,
+     {},
+     {},
+     app::hd::PageDescription::RowKind::Action},
     {SystemItem::SaveSettings,
      proto::OsdRow{11},
      kRowSave,
      {},
      {},
-     app::PageDescription::RowKind::Submenu},
+     app::hd::PageDescription::RowKind::Submenu},
     {SystemItem::Reboot,
      proto::OsdRow{12},
      kRowReboot,
      kHdRebootLabel,
      kHdRebootValue,
-     app::PageDescription::RowKind::Action},
+     app::hd::PageDescription::RowKind::Action},
     {SystemItem::Autosave,
      proto::OsdRow{13},
      {},
      kAutosaveLabel,
      {},
-     app::PageDescription::RowKind::Value},
+     app::hd::PageDescription::RowKind::Value},
     {SystemItem::UseHd,
      proto::OsdRow{14},
      kRowUseHd,
      {},
      {},
-     app::PageDescription::RowKind::Action},
-    {SystemItem::Exit, proto::OsdRow{15}, kStdExit, {}, {}, app::PageDescription::RowKind::Action},
+     app::hd::PageDescription::RowKind::Action},
+    {SystemItem::Exit,
+     proto::OsdRow{15},
+     kStdExit,
+     {},
+     {},
+     app::hd::PageDescription::RowKind::Action},
 }};
 
 consteval bool system_rows_are_ordinal() {
@@ -161,12 +177,12 @@ static_assert(system_rows_ascend(), "kSystemRows' lines ascend with its ordinals
     return row ? row->text : std::string_view{};
 }
 
-app::PageDescription::RowKind system_row_kind(std::optional<SystemItem> item) noexcept {
+app::hd::PageDescription::RowKind system_row_kind(std::optional<SystemItem> item) noexcept {
     if (!item.has_value())
-        return app::PageDescription::RowKind::Text;
+        return app::hd::PageDescription::RowKind::Text;
     const SystemRowFact* const row = find_system_row(*item);
 
-    return row ? row->kind : app::PageDescription::RowKind::Action;
+    return row ? row->kind : app::hd::PageDescription::RowKind::Action;
 }
 
 }
@@ -192,7 +208,7 @@ constexpr std::array<proto::OsdRow, 5>
 
 inline constexpr std::size_t kClassicPageRows = std::size(kTextOnlyLines) + kSystemRows.size();
 static_assert(
-    RowCount::of(kClassicPageRows) == kFullOsdRows,
+    RowCount::truncating(kClassicPageRows) == kFullOsdRows,
     "the item rows and the text-only rows fill the classic page"
 );
 
@@ -200,7 +216,7 @@ consteval bool rows_partition_the_classic_page() {
     std::array<bool, kClassicPageRows> drawn{};
     const auto claim = [&drawn](proto::OsdRow row) {
         for (std::size_t i = 0; i < drawn.size(); ++i) {
-            if (row != proto::OsdRow::of(i))
+            if (row != proto::OsdRow::saturating(i))
                 continue;
             if (drawn[i])
                 return false;
@@ -317,9 +333,9 @@ bool SystemPage::walk(PageWalk& out) const {
         total += kOneRow;
     });
 
-    const app::HdWindow win = out.window(selected, total);
+    const app::hd::HdWindow win = out.window(selected, total);
 
-    const RowRange window = rows(win.first, win.count);
+    const RowRange window = rows(win.start, win.len);
     RowIndex at{};
     for_each_row([&](proto::OsdRow row,
                      std::optional<SystemItem> item,
@@ -380,13 +396,13 @@ bool SystemPage::walk(PageWalk& out) const {
 Transition SystemPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(SystemPage);
 
-    if (ev.buttons.has_any({UiEvent::Menu})) {
-        if (session_.front_end && !session_.in_hd_tree)
+    if (ev.buttons.intersects({UiEvent::Menu})) {
+        if (session_.front_end && session_.tree == OsdTree::Classic)
             return open_cores_(false);
         return Transition::close_all();
     }
 
-    if (ev.buttons.has_any({UiEvent::Left})) {
+    if (ev.buttons.intersects({UiEvent::Left})) {
         (void)reboot_release(ev);
 
         if (session_.front_end)
@@ -394,10 +410,10 @@ Transition SystemPage::handle(const UiEvent& ev) {
         return Transition::replace(PageId::CoreOptions);
     }
 
-    if (ev.buttons.has_any({UiEvent::Recent}) && item_selected(SystemItem::Core)) {
+    if (ev.buttons.intersects({UiEvent::Recent}) && item_selected(SystemItem::Core)) {
         return open_cores_(true);
     }
-    if (!ev.buttons.has_any({UiEvent::Select}))
+    if (!ev.buttons.intersects({UiEvent::Select}))
         return reboot_release(ev);
 
     const auto item = system_item_of(sel_);

@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <optional>
+#include <string_view>
+#include <utility>
+
+#include "app/launcher/launcher_demand.h"
+#include "app/launcher/launcher_fb_ack.h"
+#include "app/launcher_state.h"
+#include "app/launcher/scanout_channel.h"
+#include "app/launcher/scanout_lease.h"
+#include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
+#include "infra/seat.h"
+#include "infra/tally.h"
+#include "os/child_process.h"
+#include "os/clock.h"
+#include "os/epoll_set.h"
+#include "os/vt_console.h"
+
+namespace mister::app::launcher {
+
+class LauncherHost {
+    TASTY_SEAT_RESIDENT(Launcher);
+
+public:
+    struct Wiring {
+        const LauncherDemandCell& demand;
+        LauncherStateCell& state;
+        const LauncherFbAckCell& fb_ack;
+        ScanoutChannel::Owner scanout;
+        os::IVtSwitch& console;
+        std::string_view tty{};
+        const os::IClock& clock;
+    };
+
+    struct Timing {
+        std::chrono::milliseconds respawn{1000};
+        std::chrono::milliseconds kill_after{400};
+        std::chrono::milliseconds settle_limit{1000};
+        std::chrono::milliseconds fb_ack_limit{500};
+        std::chrono::milliseconds healthy_run{10000};
+        unsigned strikes = 3;
+    };
+
+    static constexpr os::ChildProcessExit::ExitStatus kExitReload{42};
+
+    struct Counters {
+        std::uint32_t spawns = 0;
+        std::uint32_t spawn_failures = 0;
+        std::uint32_t exits = 0;
+        std::uint32_t kills = 0;
+        std::uint32_t strikes = 0;
+        infra::Tally leases{};
+        infra::Tally refusals{};
+        infra::Tally bursts{};
+        infra::Tally invalid_packets{};
+        std::uint32_t stale_swept = 0;
+    };
+
+    LauncherHost(os::EpollSet epoll, Wiring w, const Timing& t) noexcept
+        : w_(std::move(w)),
+          t_(t),
+          epoll_(std::move(epoll)),
+          lease_(
+              {.state = w_.state,
+               .fb_ack = w_.fb_ack,
+               .scanout = std::move(w_.scanout),
+               .hold_limit = t_.fb_ack_limit}
+          ) {}
+
+    LauncherHost(os::EpollSet epoll, Wiring w) noexcept
+        : LauncherHost(std::move(epoll), std::move(w), Timing{}) {}
+
+    LauncherHost(const LauncherHost&) = delete;
+    LauncherHost& operator=(const LauncherHost&) = delete;
+
+    [[nodiscard]] int poll_fd() const noexcept { return epoll_.fd(); }
+
+    void serve() noexcept;
+
+    void pause() noexcept;
+    void resume() noexcept;
+    [[nodiscard]] bool quiescent() const noexcept;
+
+    [[nodiscard]] bool idle() const noexcept;
+
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
+
+    [[nodiscard]] Counters counters() const noexcept {
+        Counters c = n_;
+        const ScanoutLease::Tally& t = lease_.tally_counts();
+        c.leases = t.leases;
+        c.refusals = t.refusals;
+        c.bursts = t.bursts;
+        c.invalid_packets = t.invalid_packets;
+        return c;
+    }
+
+    [[nodiscard]] bool child_running() const noexcept { return child_.has_value(); }
+
+    [[nodiscard]] bool lease_open() const noexcept { return lease_.open(); }
+
+private:
+    using Ns = std::chrono::nanoseconds;
+    using Instant = os::RawMonotonicClock::time_point;
+
+    [[nodiscard]] Instant now_() const noexcept { return w_.clock.now(); }
+
+    void step_() noexcept;
+    void take_demand_() noexcept;
+    [[nodiscard]] bool wanted_() const noexcept;
+    [[nodiscard]] bool hosting_() const noexcept;
+    void claim_screen_() noexcept;
+    void spawn_() noexcept;
+    void settle_() noexcept;
+    void reap_() noexcept;
+    void on_exit_(const os::ChildProcessExit& e) noexcept;
+    void on_spawn_failure_() noexcept;
+    [[nodiscard]] bool end_attempt_() noexcept;
+    void strike_(Instant now) noexcept;
+    void begin_stop_() noexcept;
+    void release_screen_(bool restore_console) noexcept;
+    void sweep_stale_() noexcept;
+
+    void sync_lease_() noexcept;
+    void watch_(int fd) noexcept;
+    void publish_() noexcept;
+
+    Wiring w_;
+    Timing t_;
+    os::EpollSet epoll_;
+    LauncherDemandCell::Reader demand_seen_{};
+    LauncherDemand demand_{};
+    std::optional<os::ChildProcess> child_{};
+    ScanoutLease lease_;
+    LauncherState state_{};
+    bool paused_ = false;
+    bool stopping_ = false;
+    bool claiming_ = false;
+    bool swept_ = false;
+    std::uint32_t escaped_gen_ = 0;
+    std::uint32_t given_up_gen_ = 0;
+    unsigned strikes_ = 0;
+    os::VtNumber prior_vt_{};
+    std::optional<Instant> respawn_at_{};
+    std::optional<Instant> kill_at_{};
+    std::optional<Instant> settle_by_{};
+    std::optional<Instant> ack_by_{};
+    Instant spawned_at_{};
+    Counters n_{};
+};
+
+}

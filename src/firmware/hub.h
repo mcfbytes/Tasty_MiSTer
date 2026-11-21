@@ -6,6 +6,7 @@
 
 #include "app/cmd_fifo.h"
 #include "app/cmd_router.h"
+#include "app/game_id_pump.h"
 #include "app/link_session.h"
 #include "app/rt_main.h"
 #include "app/screenshot_pump.h"
@@ -15,6 +16,7 @@
 #include "device_block.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "process_main.h"
 #include "recorder_block.h"
@@ -68,6 +70,7 @@ private:
     std::unique_ptr<SessionMode::Face> face_;
     const SessionMode::Face::Parts face_parts_;
     app::ScreenshotPump shot_pump_;
+    app::GameIdPump game_id_pump_;
     ReplayBlock replay_;
     RecorderBlock rec_;
     std::unique_ptr<SessionMode::Tail> tail_;

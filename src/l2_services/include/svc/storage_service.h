@@ -7,13 +7,14 @@
 #include <optional>
 #include <span>
 
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
-#include "infra/loan_channel.h"
+#include "infra/xthread/loan_channel.h"
 #include "infra/opt_ref.h"
-#include "infra/polled.h"
-#include "infra/pool_slot.h"
+#include "infra/xthread/polled.h"
+#include "infra/xthread/pool_slot.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/slot_attributes.h"
@@ -59,7 +60,7 @@ public:
         infra::OptRef<SlotArena> arena{};
         proto::StorageCompletion answer{};
         infra::OptRef<IStorageBackend> backend{};
-        Generation gen{};
+        SlotBindGen gen{};
 
         infra::OptRef<const BlockCtl> hand{};
 
@@ -183,7 +184,7 @@ private:
 
             [[nodiscard]] infra::OptRef<IStorageBackend> bound() const noexcept { return bound_; }
 
-            [[nodiscard]] Generation gen() const noexcept { return gen_; }
+            [[nodiscard]] SlotBindGen gen() const noexcept { return gen_; }
 
             void bind(infra::OptRef<IStorageBackend> stage) noexcept {
                 bound_ = stage;
@@ -201,7 +202,7 @@ private:
             Data::Loan data_hand_{};
             Ctl::Loan ctl_hand_{};
             infra::OptRef<IStorageBackend> bound_{};
-            Generation gen_{};
+            SlotBindGen gen_{};
         };
 
         infra::IndexedArray<Slot, kSlots, proto::SlotIndex> slots{};
@@ -215,9 +216,9 @@ private:
             TASTY_SEAT_RESIDENT(Io);
 
         public:
-            [[nodiscard]] bool serves(Generation gen) const noexcept { return gen == served_; }
+            [[nodiscard]] bool serves(SlotBindGen gen) const noexcept { return gen == served_; }
 
-            void serve(Generation gen) noexcept { served_ = gen; }
+            void serve(SlotBindGen gen) noexcept { served_ = gen; }
 
             void attached(
                 infra::OptRef<IStorageBackend> file,
@@ -240,7 +241,7 @@ private:
             [[nodiscard]] const ISaveFilesOnIo::Save& save() const noexcept { return save_; }
 
         private:
-            Generation served_{};
+            SlotBindGen served_{};
             ISaveFilesOnIo::Save save_{};
         };
 

@@ -4,8 +4,9 @@
 #include "app/ini_cell.h"
 #include "app/link_tx_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
+#include "infra/xthread/wake_flag.h"
 #include "proto/osd_rotation.h"
 #include "ui/page_launches.h"
 #include "ui/status_bar_facts.h"
@@ -15,13 +16,19 @@ namespace mister::app {
 class ICmdVerbSink;
 class IdentityLatch;
 class InfoSink;
-struct JoyMapEnds;
 class CheatStore;
 class NameConfig;
+class UiRequestRing;
+}
+
+namespace mister::app::recents {
 class PlayedHistory;
 class RecentsStore;
-class UiRequestRing;
 class UiWriteLane;
+}
+
+namespace mister::app::input {
+struct JoyMapEnds;
 }
 
 namespace mister::os {
@@ -50,10 +57,10 @@ struct PageContext {
 
     PageLaunches launches{};
 
-    infra::OptRef<app::RecentsStore> recents{};
+    infra::OptRef<app::recents::RecentsStore> recents{};
     infra::OptRef<app::NameConfig> names{};
 
-    infra::OptRef<app::PlayedHistory> played{};
+    infra::OptRef<app::recents::PlayedHistory> played{};
 
     infra::OptRef<app::CheatStore> cheats{};
 
@@ -63,10 +70,10 @@ struct PageContext {
 
     infra::OptRef<ConnectPort> connect{};
 
-    infra::OptRef<const app::JoyMapEnds> joymap{};
+    infra::OptRef<const app::input::JoyMapEnds> joymap{};
     infra::OptRef<const svc::Vfs> files{};
 
-    infra::OptRef<app::UiWriteLane> writes{};
+    infra::OptRef<app::recents::UiWriteLane> writes{};
     infra::OptRef<const app::IdentityLatch> identity{};
 
     bool bt_reset_before_pair = false;

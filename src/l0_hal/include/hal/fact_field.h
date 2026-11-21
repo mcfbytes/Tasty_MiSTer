@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "hal/fact.h"
+#include "infra/prelude.h"
 
 namespace mister::hal {
 

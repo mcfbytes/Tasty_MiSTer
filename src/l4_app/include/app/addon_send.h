@@ -14,6 +14,7 @@
 #include "app/rung.h"
 #include "cores/ladder_host.h"
 #include "cores/payload_pieces.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 

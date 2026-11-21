@@ -7,9 +7,10 @@
 #include <string>
 
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
-namespace mister::cores::mra {
+namespace mister::cores {
 
 using Md5Hex = FixedStr<33, StrFit::Reject>;
 

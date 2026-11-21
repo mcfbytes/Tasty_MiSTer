@@ -9,7 +9,9 @@
 #include "app/cheat_row.h"
 #include "app/link_tx_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/list_view.h"
 #include "ui/page.h"
 #include "svc/types.h"
@@ -51,7 +53,7 @@ public:
         return view_.viewport().selected;
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(CheatsPage);
         return refusals_;
     }
@@ -67,7 +69,7 @@ private:
     std::vector<app::CheatRow> rows_;
     ListView<app::CheatRow> view_;
     std::uint32_t opens_seen_ = 0;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

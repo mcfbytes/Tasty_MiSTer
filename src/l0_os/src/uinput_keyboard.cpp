@@ -9,6 +9,8 @@
 #include <cerrno>
 #include <cstring>
 
+#include "infra/prelude.h"
+
 namespace mister::os {
 
 namespace {

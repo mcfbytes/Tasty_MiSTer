@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_upload_relay.h"
 
-#include <algorithm>
 #include <cstring>
 #include <span>
 #include <utility>
@@ -18,9 +17,9 @@ namespace {
 
 }
 
-bool SaveUploadRelay::order(const cores::SaveImage& image, std::string_view rel) noexcept {
+bool SaveUploadRelay::order(const cores::mra::NvramSave& image, std::string_view rel) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
-    if (image.size == 0 || rel.empty() || !rt_.order.rel.assign(rel)) {
+    if (image.size.empty() || rel.empty() || !rt_.order.rel.assign(rel)) {
         rt_.refused.add();
         return false;
     }
@@ -29,10 +28,13 @@ bool SaveUploadRelay::order(const cores::SaveImage& image, std::string_view rel)
     return true;
 }
 
-void SaveUploadRelay::service_rt(std::uint32_t budget_words, bool fio_free) noexcept {
+void SaveUploadRelay::service_rt(proto::FioWordCount budget_words, bool fio_free) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
 
-    const std::uint32_t left = budget_words - std::min(budget_words, rt_.round_words);
+    const proto::FioWordCount left = infra::affine::saturating_sub(
+        budget_words,
+        rt_.round_words.spent()
+    );
     const bool may_act = left >= kMaxRoundWords && (rt_.open.has_value() || fio_free);
     if (rt_.pull_out && may_act) {
         if (Loan l = chan_.reap()) {
@@ -75,7 +77,7 @@ bool SaveUploadRelay::drained() const noexcept {
 }
 
 proto::FioWordCount SaveUploadRelay::take_round_words() noexcept {
-    return proto::FioWordCount{std::exchange(rt_.round_words, 0u)};
+    return rt_.round_words.take();
 }
 
 void SaveUploadRelay::yield_to_reset() noexcept {
@@ -90,7 +92,7 @@ void SaveUploadRelay::cut_() noexcept {
     rt_.unanswered = 0;
     if (rt_.open) {
         rt_.open.reset();
-        rt_.round_words += 2;
+        rt_.round_words.charge(kCutWords);
     }
     if (!rt_.pull_out)
         return;
@@ -102,7 +104,7 @@ void SaveUploadRelay::end_pull_() noexcept {
     rt_.unanswered = 0;
     if (rt_.open) {
         rt_.open.reset();
-        rt_.round_words += 2;
+        rt_.round_words.charge(kCutWords);
     }
     rt_.pull_out = false;
 }
@@ -113,11 +115,7 @@ void SaveUploadRelay::start_() noexcept {
         return;
     rt_.stamp = rt_.stamp.next_epoch();
     rt_.width = link_.width();
-    const Ask::Start s{
-        .size = rt_.order.image.size,
-        .index = rt_.order.image.index,
-        .width = rt_.width
-    };
+    const Ask::Start s = Ask::Start::of(rt_.order.image, rt_.width);
     l->ask = infra::make<Ask>(s, head_());
     l->act = {};
     (void)l->rel.assign(rt_.order.rel.view());
@@ -158,13 +156,13 @@ void SaveUploadRelay::land_(Loan&& l) noexcept {
 }
 
 bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l) noexcept {
-    const std::uint32_t words = proto::save_act_words(a, rt_.width);
+    const proto::FioWordCount words = proto::save_act_words(a, rt_.width);
     switch (a.kind) {
         case proto::SaveAct::Kind::Open: {
             if (rt_.open)
                 break;
-            auto s = proto::UploadSession::begin(link_, a.index);
-            rt_.round_words += words;
+            auto s = proto::link::UploadSession::begin(link_, a.index);
+            rt_.round_words.charge(words);
             if (!s) {
                 rt_.wire_faults.add();
                 return false;
@@ -177,7 +175,7 @@ bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l) noexcept {
             if (!rt_.open || a.len == 0 || a.len > l->bytes.size() || words > kMaxRoundWords)
                 break;
             const auto r = rt_.open->read(std::span<std::uint8_t>(l->bytes.data(), a.len));
-            rt_.round_words += words;
+            rt_.round_words.charge(words);
             if (!r) {
                 rt_.wire_faults.add();
                 return false;
@@ -189,7 +187,7 @@ bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l) noexcept {
                 break;
             const auto r = rt_.open->end();
             rt_.open.reset();
-            rt_.round_words += words;
+            rt_.round_words.charge(words);
             if (!r) {
                 rt_.wire_faults.add();
                 return false;
@@ -214,7 +212,7 @@ void SaveUploadRelay::serve() noexcept {
 void SaveUploadRelay::on(const Ask::Start& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
     io_.serving = h;
-    const cores::SaveImage image{.index = a.index, .size = a.size};
+    const cores::mra::NvramSave image{.index = a.index, .size = proto::FileSize{a.size}};
     job->act = io_.servant->start(image, job->rel.view(), a.width);
 }
 

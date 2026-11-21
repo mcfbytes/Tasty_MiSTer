@@ -9,6 +9,7 @@
 #include "ui/hd_plan_inputs.h"
 #include "ui/page_context.h"
 #include "ui/text_entry_launch.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -17,12 +18,12 @@ bool HdSlotRow::shown() const {
     return owner_->slot_shown(slot_);
 }
 
-app::PageDescription::Row HdSlotRow::describe() const {
+app::hd::PageDescription::Row HdSlotRow::describe(const RowCx&) const {
     TASTY_SEAT_BODY(HdSlotRow);
     return owner_->slot_describe(slot_);
 }
 
-Transition HdSlotRow::select() {
+Transition HdSlotRow::select(const RowCx&) {
     TASTY_SEAT_BODY(HdSlotRow);
     return owner_->slot_select(slot_);
 }
@@ -35,12 +36,12 @@ ConnectSlotPlan::ConnectSlotPlan(const HdPlanInputs& in, RowCount slots) : ctx_(
         refs_.emplace_back(row);
 }
 
-std::span<const std::reference_wrapper<IHdRow>> ConnectSlotPlan::rows() const {
+std::span<const std::reference_wrapper<IRow>> ConnectSlotPlan::rows() const {
     TASTY_SEAT_BODY(ConnectSlotPlan);
     return refs_;
 }
 
-svc::Tally ConnectSlotPlan::refusals() const noexcept {
+infra::Tally ConnectSlotPlan::refusals() const noexcept {
     TASTY_SEAT_BODY(ConnectSlotPlan);
     return refusals_;
 }
@@ -49,7 +50,7 @@ const ConnectViews& ConnectSlotPlan::views() const noexcept {
     return ctx_.connect ? ctx_.connect->views() : none_;
 }
 
-bool ConnectSlotPlan::send(const svc::ConnectRequest& request) {
+bool ConnectSlotPlan::send(const svc::connect::ConnectRequest& request) {
     if (ctx_.connect && ctx_.connect->send(request))
         return true;
     refusals_.add();

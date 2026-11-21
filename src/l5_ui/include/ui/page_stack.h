@@ -8,6 +8,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/page.h"
 #include "svc/types.h"
 
@@ -22,7 +23,7 @@ public:
     std::size_t depth() const noexcept { return pages_.size(); }
 
     [[nodiscard]] StackDepth top_level() const noexcept {
-        return StackDepth::of(pages_.size() - 1);
+        return StackDepth::truncating(pages_.size() - 1);
     }
 
     infra::OptRef<Page> top() noexcept { return infra::opt_ref_of(top_()); }
@@ -57,7 +58,7 @@ public:
     void replace(std::unique_ptr<Page> p);
     void clear() noexcept;
 
-    svc::Tally page_refusals() const noexcept;
+    infra::Tally page_refusals() const noexcept;
 
     bool any_bt_pairing() const noexcept;
 
@@ -89,7 +90,7 @@ private:
     }
 
     std::vector<std::unique_ptr<Page>> pages_;
-    svc::Tally retired_refusals_{};
+    infra::Tally retired_refusals_{};
 };
 
 }

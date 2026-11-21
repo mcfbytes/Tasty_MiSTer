@@ -11,6 +11,7 @@
 #include "hal/phys_region.h"
 #include "hal/reg_block.h"
 #include "hal/register_window.h"
+#include "infra/prelude.h"
 #include "hal/types.h"
 #include "os/map_length.h"
 

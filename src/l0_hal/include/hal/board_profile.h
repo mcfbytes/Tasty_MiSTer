@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "hal/aperture_node_decl.h"
 #include "hal/axi.h"
 #include "hal/compatible_blob.h"
 #include "hal/doorbell_policy.h"
@@ -25,6 +26,7 @@
 #include "hal/thread_map.h"
 #include "hal/video_out_decl.h"
 #include "hal/window_decl.h"
+#include "infra/prelude.h"
 #include "os/types.h"
 #include "os/uio_line_space.h"
 
@@ -148,6 +150,10 @@ constexpr os::UioLineSpace doorbell_nodes(const BoardProfile& profile) noexcept 
         .first_node = profile.doorbells.vsync_line.next(),
         .last_node = os::F2hLine{profile.f2h_lines - 1u}
     };
+}
+
+constexpr ApertureNodeDecl aperture_node(const BoardProfile& profile) noexcept {
+    return {.uio_name = profile.kernel.ddr_aperture, .base = profile.fpga_mem.region.phys};
 }
 
 inline constexpr const char* kCompatiblePath = "/proc/device-tree/compatible";

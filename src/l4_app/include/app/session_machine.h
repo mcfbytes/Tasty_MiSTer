@@ -7,19 +7,14 @@
 
 #include "app/event.h"
 #include "app/log_clock.h"
+#include "app/log_lane.h"
+#include "app/session_state.h"
 #include "app/types.h"
 #include "infra/error.h"
-#include "infra/log_lane.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::app {
-
-enum class SessionState : std::uint8_t {
-    Boot,
-    Running,
-    Failed,
-    kCount,
-};
 
 struct SessionArrow {
     SessionState from;
@@ -80,7 +75,7 @@ class SessionMachine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept;
+    SessionMachine(EventQueue<SeatTag::RT>& events, LogLane& lane) noexcept;
 
     SessionMachine(const SessionMachine&) = delete;
     SessionMachine& operator=(const SessionMachine&) = delete;
@@ -108,7 +103,7 @@ private:
 
     CorrelationTag tag_{};
 
-    xthread::LogLane::Producer log_lane_;
+    LogLane::Producer log_lane_;
     LogInstant last_transition_{};
 };
 

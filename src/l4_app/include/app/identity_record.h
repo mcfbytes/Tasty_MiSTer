@@ -9,8 +9,9 @@
 #include "app/session_identity.h"
 #include "cores/button_override.h"
 #include "cores/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
+#include "infra/xthread/telemetry.h"
 #include "proto/link_op.h"
 
 namespace mister::app {

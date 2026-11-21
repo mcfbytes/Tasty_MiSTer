@@ -6,12 +6,12 @@
 namespace mister::app {
 
 void LauncherLatch::latch(
-    const LauncherProfile& l,
+    const launcher::LauncherProfile& l,
     std::string_view core_name,
     std::string_view pending_path
 ) {
     TASTY_SEAT_BODY(LauncherLatch);
-    demand_.profile = infra::OptRef<const LauncherProfile>{l};
+    demand_.profile = infra::OptRef<const launcher::LauncherProfile>{l};
     const svc::SearchPolicy root{svc::search::kRootOnly, true};
     if (auto p = vfs_.resolve(l.program, root); p) {
         struct ::stat st = {};
@@ -23,7 +23,7 @@ void LauncherLatch::latch(
         (void)image_.assign(l.front_end_image);
 
     swap_owed_ = !image_.empty()
-        && cores::profile_for(core_name).is_front_end
+        && cores::profile_for(core_name).host.front_end
         && !same_image_name(pending_path, image_.view());
 }
 
@@ -45,7 +45,7 @@ void LauncherLatch::publish(
     if (!cell_ || !demand_.profile)
         return;
 
-    demand_.front_end = cores::profile_for(core_name).is_front_end && !swap_owed_;
+    demand_.front_end = cores::profile_for(core_name).host.front_end && !swap_owed_;
     demand_.direct_video = direct;
     demand_.scanout_core = demand_.front_end
         && !image_.empty()

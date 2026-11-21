@@ -12,6 +12,7 @@
 #include <string>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
 #include "os/small_file.h"
 #include "proto/types.h"

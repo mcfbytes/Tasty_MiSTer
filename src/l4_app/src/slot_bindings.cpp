@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/slot_bindings.h"
 
+#include "infra/prelude.h"
+
 namespace mister::app {
 
 static_assert(std::tuple_size_v<svc::SaveSlotBackends> == SaveImageSource::kSlots);
@@ -25,7 +27,7 @@ SlotBindings::SlotBindings(const Wiring& g) noexcept
       owed_save_(make_owed_saves<SaveImageSource::kSlots + 1>(save_extent_cell_, g.link_rx)),
       save_src_(vfs_ ? std::make_unique<SaveImageSource>() : nullptr),
       slots_(
-          proto::BlockSlots::Wiring{
+          proto::link::BlockSlots::Wiring{
               .link = link_,
               .source = save_src_ ? infra::OptRef<proto::IImageSource>{*save_src_}
                                   : infra::OptRef<proto::IImageSource>{},
@@ -47,7 +49,7 @@ ILinkEncoder::Outcome SlotBindings::on(
         return ILinkEncoder::Outcome::Dropped;
     }
 
-    proto::SpiFrame frame{link_};
+    proto::link::SpiFrame frame{link_};
     if (auto r = announce_.flag_form(frame, a.loaded); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -89,8 +91,8 @@ ILinkEncoder::Outcome SlotBindings::on(
     if (!a.bracketed) {
         if (a.sends_index && kind != proto::LinkOp::SlotBind::MountCd) {
             (void)binder_.fio_queue().flush();
-            proto::SpiFrame frame{link_};
-            if (auto r = proto::DownloadSession::set_index(frame, a.index_word); !r)
+            proto::link::SpiFrame frame{link_};
+            if (auto r = proto::link::DownloadSession::set_index(frame, a.index_word); !r)
                 return ILinkEncoder::Outcome::Dropped;
         }
         if (auto r = apply_bind_slot_(si, kind, size, path_id, roles); !r) {
@@ -294,7 +296,7 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     const svc::BlankSaveSpec blank = core.has_value() ? core->profile().blank_save
                                                       : svc::BlankSaveSpec{};
     if (!save_src_->bind(si, path, manual, blank)) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), si.detail()});
+        return std::unexpected(si.refusal(Errc::bad_format, ERR_SITE()));
     }
 
     if (!storage_life_) {
@@ -303,7 +305,7 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     }
     const auto backend = save_backend_(si);
     if (!backend)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), si.detail()});
+        return std::unexpected(si.refusal(Errc::slot_range, ERR_SITE()));
 
     const infra::OptRef<const svc::BlankSaveSpec> blank_spec = core.has_value()
         ? infra::OptRef<const svc::BlankSaveSpec>{core->profile().blank_save}
@@ -359,7 +361,7 @@ void SlotBindings::begin_detach_(proto::SlotIndex si) noexcept {
 
 void SlotBindings::release_save_slots_() noexcept {
     for (unsigned i = 0; i < SaveImageSource::kSlots; ++i) {
-        begin_detach_(proto::SlotIndex::of(i));
+        begin_detach_(proto::SlotIndex::truncating(i));
     }
 }
 
@@ -380,7 +382,7 @@ ILinkEncoder::Outcome SlotBindings::perform_bound_mount_(
     } else if (image.has_value()) {
         r = core->mount(bm.index, cores::MountedPath{image->path.view(), image->size_bytes});
     } else {
-        r = std::unexpected(Error{Errc::not_found, ERR_SITE(), bm.index.block_slot().detail()});
+        r = std::unexpected(bm.index.block_slot().refusal(Errc::not_found, ERR_SITE()));
     }
     if (!r) {
 
@@ -397,7 +399,7 @@ ILinkEncoder::Outcome SlotBindings::on(
 ) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
     const bool pendable = SaveImageSource::holds(a.slot);
-    OwedSaveBind& owed = owed_save_[pendable ? std::size_t{a.slot.detail()} : kOffSlot];
+    OwedSaveBind& owed = owed_save_[pendable ? a.slot.index() : kOffSlot];
     return owed_save_bind_(owed, true, a.slot, a.act, a.path, a.manual, ctx.tx, ctx.core);
 }
 
@@ -407,7 +409,7 @@ ILinkEncoder::Outcome SlotBindings::on(
 ) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
     const bool pendable = SaveImageSource::holds(a.slot);
-    OwedSaveBind& owed = owed_save_[pendable ? std::size_t{a.slot.detail()} : kOffSlot];
+    OwedSaveBind& owed = owed_save_[pendable ? a.slot.index() : kOffSlot];
     return owed_save_bind_(owed, false, a.slot, a.act, proto::FileId{}, false, ctx.tx, ctx.core);
 }
 
@@ -465,7 +467,7 @@ void SlotBindings::settle_save_binds_() noexcept {
         return;
     using Attach = SaveImageSource::Attach;
     for (unsigned i = 0; i < SaveImageSource::kSlots; ++i) {
-        const proto::SlotIndex si = proto::SlotIndex::of(i);
+        const proto::SlotIndex si = proto::SlotIndex::truncating(i);
 
         if (save_src_->close_owed(si) && save_src_->attach_state(si) == Attach::Attached)
             begin_detach_(si);
@@ -519,14 +521,14 @@ cores::MountState SlotBindings::disc_backend_ready_(
     TASTY_SEAT_BODY(SlotBindings);
     if (!core.has_value())
         return cores::MountState::Failed;
-    if (channel_borrows_.has(disc))
+    if (channel_borrows_.contains(disc))
         return cores::MountState::Done;
 
     if (!storage_life_)
         return cores::MountState::Done;
     if (!disc_backend_) {
         ++tally_.stage_refusals;
-        session_tally_.last_error = Error{Errc::core_load, ERR_SITE(), disc.detail()};
+        session_tally_.last_error = disc.refusal(Errc::core_load, ERR_SITE());
         return cores::MountState::Failed;
     }
     if (!storage_life_->stage_backend(disc, *disc_backend_, {}, {}))
@@ -535,7 +537,7 @@ cores::MountState SlotBindings::disc_backend_ready_(
     if (!slots_.submit_attach(disc, roles)) {
         if (!storage_life_->release_slot(disc)) {
             ++tally_.stage_refusals;
-            session_tally_.last_error = Error{Errc::core_load, ERR_SITE(), disc.detail()};
+            session_tally_.last_error = disc.refusal(Errc::core_load, ERR_SITE());
             return cores::MountState::Failed;
         }
         ++tally_.stage_refusals;
@@ -610,7 +612,7 @@ cores::SaveExtent SlotBindings::save_body_(proto::FileSize size_bytes, bool exis
     proto::FileSize size,
     proto::IBlockRoles& roles
 ) {
-    proto::SpiFrame frame{link_};
+    proto::link::SpiFrame frame{link_};
     return announce_.mount_disc(slots_, frame, slot, size, roles);
 }
 
@@ -645,13 +647,13 @@ void SlotBindings::mount_save_channel(
 
         if (slots_.server(si) == proto::SlotServer::CoreBlock) {
             ++tally_.save_mount_collisions;
-            session_tally_.last_error = Error{Errc::busy, ERR_SITE(), si.detail()};
+            session_tally_.last_error = si.refusal(Errc::busy, ERR_SITE());
             continue;
         }
 
-        if (poisoned.has(si)) {
+        if (poisoned.contains(si)) {
             ++tally_.stage_refusals;
-            session_tally_.last_error = Error{Errc::would_block, ERR_SITE(), si.detail()};
+            session_tally_.last_error = si.refusal(Errc::would_block, ERR_SITE());
             continue;
         }
         if (!storage_life_) {
@@ -684,7 +686,7 @@ void SlotBindings::mount_save_channel(
             continue;
         }
         channel_slots_ = channel_slots_.with(si);
-        log_lane_.push(LogRec::Mount{si}, log_stamp(log_now()));
+        log_lane_.push(LogRec::Mount{.slot = si}, log_stamp(log_now()));
     }
 }
 
@@ -692,7 +694,7 @@ void SlotBindings::unmount_save_channel() {
     proto::NoBlockRoles none;
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
         const proto::SlotIndex si{i};
-        if (!channel_slots_.has(si))
+        if (!channel_slots_.contains(si))
             continue;
         slots_.bind_server(si, proto::SlotServer::Session);
         if (auto r = apply_bind_slot_(
@@ -703,7 +705,7 @@ void SlotBindings::unmount_save_channel() {
                 none
             );
             r)
-            log_lane_.push(LogRec::Unmount{si}, log_stamp(log_now()));
+            log_lane_.push(LogRec::Unmount{.slot = si}, log_stamp(log_now()));
     }
     channel_slots_ = {};
 }
@@ -716,10 +718,10 @@ void SlotBindings::release_channel_slots_(
     proto::NoBlockRoles none;
     (void)slots_.install_completions(none);
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
-        const proto::SlotIndex si = proto::SlotIndex::of(i);
-        if (!mask.has(si))
+        const proto::SlotIndex si = proto::SlotIndex::truncating(i);
+        if (!mask.contains(si))
             continue;
-        if (!kept.has(si) && storage_life_) {
+        if (!kept.contains(si) && storage_life_) {
             if (!slots_.submit_detach(si, none))
                 ++tally_.stage_refusals;
             continue;

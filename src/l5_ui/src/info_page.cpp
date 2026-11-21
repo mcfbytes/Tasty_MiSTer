@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <string_view>
 
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "ui/osd_renderer.h"
 #include "ui/ui_event.h"
 
@@ -97,13 +97,13 @@ public:
         return proto::info_window_for(facts_.text);
     }
 
-    bool describe(app::PageDescription& out) const override {
+    bool describe(app::hd::PageDescription& out) const override {
         out = {};
-        app::PageDescription::Row& row = out.rows[0];
-        row.kind = app::PageDescription::RowKind::Text;
+        app::hd::PageDescription::Row& row = out.rows[0];
+        row.kind = app::hd::PageDescription::RowKind::Text;
         (void)row.label.assign(facts_.text);
-        out.row_count = RowCount::of(1);
-        out.total = RowCount::of(1);
+        out.row_count = RowCount::truncating(1);
+        out.total = RowCount::truncating(1);
         return true;
     }
 

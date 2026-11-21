@@ -8,7 +8,7 @@
 #include "hal/boards_table.h"
 #include "infra/seat.h"
 #include "reactor/executive.h"
-#include "svc/device_table.h"
+#include "svc/input/device_table.h"
 #include "ui_main.h"
 
 namespace mister::fw {
@@ -21,7 +21,7 @@ inline constexpr std::chrono::nanoseconds kIoStopDeadlineNs{std::chrono::seconds
 
 inline constexpr std::chrono::nanoseconds kRtJoinSliceNs{std::chrono::milliseconds{20}};
 
-inline constexpr std::size_t kInputWorstCaseFds = svc::DeviceTable::kMaxDevices + 1;
+inline constexpr std::size_t kInputWorstCaseFds = svc::input::DeviceTable::kMaxDevices + 1;
 static_assert(
     kInputWorstCaseFds > reactor::Executive::kMaxBorrowedFds,
     "The executive's "

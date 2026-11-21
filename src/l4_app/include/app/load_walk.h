@@ -21,6 +21,8 @@
 #include "cores/loader.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/prelude.h"
+#include "os/deadline.h"
 #include "infra/seat_owner_main.h"
 #include "hal/fpga_aperture.h"
 #include "svc/vfs.h"
@@ -56,7 +58,7 @@ public:
         ILoadWindowMap<seat_owner::Main>& map;
         hal::FpgaAperture aperture;
         const svc::Vfs& vfs;
-        std::chrono::nanoseconds now_ns{};
+        os::RawMonotonicClock::time_point now{};
     };
 
     [[nodiscard]] static Ex<LoadWalk> start(
@@ -126,7 +128,7 @@ private:
     proto::FileSize echo_bytes_{};
     std::size_t row_ = 0;
     proto::ActKey save_gen_{};
-    std::chrono::nanoseconds save_due_ns_{};
+    std::optional<os::Deadline> save_due_{};
     bool failed_ = false;
     bool stalled_ = false;
     bool landed_ = false;

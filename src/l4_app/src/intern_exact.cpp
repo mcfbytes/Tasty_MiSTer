@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/intern_exact.h"
+#include "infra/span_cut.h"
 
 #include <cstdint>
 #include <span>
@@ -7,6 +8,7 @@
 #include "app/link_tx_reader.h"
 #include "app/uart_binding.h"
 #include "app/uart_persist.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -23,14 +25,7 @@ bool read_whole(const svc::Vfs& vfs, std::string_view rel, std::span<std::uint8_
     auto sz = (*f)->size();
     if (!sz || *sz != proto::FileSize::of(out))
         return false;
-    proto::FileOffset at = proto::kFileStart;
-    while (sz->holds(at)) {
-        auto n = (*f)->read_at(at, std::as_writable_bytes(at.skip_in(out)));
-        if (!n || *n == 0)
-            return false;
-        at += proto::FileSize{*n};
-    }
-    return true;
+    return (*f)->read_exact_at(proto::kFileStart, std::as_writable_bytes(out)).has_value();
 }
 
 }

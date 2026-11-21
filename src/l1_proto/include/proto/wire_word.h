@@ -9,6 +9,7 @@
 #include "hal/types.h"
 #include "infra/endian.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::proto {
 

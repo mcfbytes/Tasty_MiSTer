@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "stack_extent.h"
-#include "infra/posix_compat.h"
 
 #include <pthread.h>
 #include <sys/resource.h>
@@ -9,7 +8,6 @@
 #include <cerrno>
 #include <cstdint>
 
-#include "os/kernel_tid.h"
 #include "os/stack_touch.h"
 
 namespace mister::fw {
@@ -40,7 +38,7 @@ namespace mister::fw {
 
     const std::size_t used = (sp < top && sp >= top - mapped) ? top - sp : mapped;
 
-    const bool growable = !infra::kPosixGlibc && os::calling_task_leads_process();
+    constexpr bool growable = false;
     const StackExtent stack{used, mapped, out.rlimit};
     out.bytes = stack.span(requested, growable);
     os::touch_stack_pages(os::StackWalk{.span = out.bytes, .page = os::PageSize{kStackPageBytes}});

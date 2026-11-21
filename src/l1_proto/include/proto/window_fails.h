@@ -5,32 +5,61 @@
 #include <type_traits>
 
 #include "infra/decimal_text.h"
+#include "infra/enum_set.h"
 #include "infra/message_sum.h"
 
 namespace mister::proto {
 
 struct WindowFails {
-    std::uint8_t v = 0;
+private:
+    enum class WindowSlot : std::uint8_t {
+        First,
+        Second,
+        Third,
+        Fourth,
+        Fifth,
+        Sixth,
+        Seventh,
+        Eighth,
+        kCount,
+    };
+    using Bits = infra::EnumSet<WindowSlot, std::uint8_t>;
+
+public:
+    constexpr WindowFails() noexcept = default;
+
+    constexpr explicit WindowFails(std::uint8_t bits) noexcept : bits_(Bits::from_bits(bits)) {}
 
     template <class E>
         requires std::is_enum_v<E>
-    [[nodiscard]] constexpr bool has(E w) const noexcept {
+    [[nodiscard]] constexpr bool contains(E w) const noexcept {
         static_assert(infra::ordinal(E::kCount) <= 8, "WindowFails carries at most eight windows");
-        return (v & (1u << infra::ordinal(w))) != 0;
+        return bits_.contains(slot_of(w));
     }
 
     template <class E>
         requires std::is_enum_v<E>
     [[nodiscard]] constexpr WindowFails with(E w) const noexcept {
         static_assert(infra::ordinal(E::kCount) <= 8, "WindowFails carries at most eight windows");
-        return WindowFails{static_cast<std::uint8_t>(v | (1u << infra::ordinal(w)))};
+        WindowFails out = *this;
+        out.bits_.insert(slot_of(w));
+        return out;
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept {
-        return infra::DecimalText{static_cast<std::uint16_t>(v)};
+        return infra::DecimalText{bits_.bits()};
     }
 
     friend constexpr bool operator==(WindowFails, WindowFails) = default;
+
+private:
+    template <class E>
+        requires std::is_enum_v<E>
+    [[nodiscard]] static constexpr WindowSlot slot_of(E w) noexcept {
+        return static_cast<WindowSlot>(infra::ordinal(w));
+    }
+
+    Bits bits_{};
 };
 
 static_assert(sizeof(WindowFails) == 1);

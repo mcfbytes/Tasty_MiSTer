@@ -1,42 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
-#include <limits>
 #include <type_traits>
 
+#include "infra/index_set.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
-class OpBitmap {
-public:
-    constexpr OpBitmap() noexcept = default;
+using OpBitmap = infra::IndexSet<UioOp, 256, std::uint32_t>;
 
-    [[nodiscard]] static constexpr OpBitmap of(const std::array<std::uint32_t, 8>& words) noexcept {
-        OpBitmap b;
-        b.words_ = words;
-        return b;
-    }
-
-    [[nodiscard]] constexpr bool honours(UioOp op) const noexcept {
-
-        static_assert(
-            hal::SpiWord{proto::byte(UioOp::DmaSdio)} == proto::word(UioOp::DmaSdio),
-            "the last enumerator fits the bitmap's byte"
-        );
-        const std::uint8_t o = proto::byte(op);
-        constexpr std::uint32_t kWordBits = std::numeric_limits<std::uint32_t>::digits;
-        return ((words_[o / kWordBits] >> (o % kWordBits)) & 1u) != 0u;
-    }
-
-    friend constexpr bool operator==(const OpBitmap&, const OpBitmap&) = default;
-
-private:
-    std::array<std::uint32_t, 8> words_{};
-};
-
+static_assert(
+    hal::SpiWord{proto::byte(UioOp::DmaSdio)} == proto::word(UioOp::DmaSdio),
+    "the last enumerator fits the bitmap's byte"
+);
 static_assert(std::is_trivially_copyable_v<OpBitmap> && sizeof(OpBitmap) == 32);
 
 }

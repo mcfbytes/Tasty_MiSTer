@@ -9,6 +9,7 @@
 #include "app/video_pump.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
 #include "tasty_say.h"
 
 namespace mister::fw {
@@ -21,7 +22,7 @@ void TastySink::deliver(const app::Event& e) {
 void TastySink::on(const app::Event::CoreLoaded& a, const app::Event::Head&) {
     TASTY_SEAT_BODY(TastySink);
     video_.on_core_loaded(
-        app::CoreIdentity::of(identity_ ? identity_->copy() : std::nullopt),
+        app::VideoLoadIdentity::of(identity_ ? identity_->copy() : std::nullopt),
         a.front_end
     );
 }

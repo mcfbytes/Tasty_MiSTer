@@ -3,7 +3,7 @@
 
 #include "infra/seat.h"
 
-namespace mister::seat_owner {
+namespace mister::infra::seat_owner {
 
 struct Ui {
     TASTY_SEAT_RESIDENT(Ui);

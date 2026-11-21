@@ -6,10 +6,12 @@
 
 #include "app/dip_cell.h"
 #include "app/link_tx_channel.h"
-#include "app/page_description.h"
+#include "app/hd/page_description.h"
 #include "app/ui_request_ring.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/page.h"
 #include "svc/types.h"
 
@@ -49,7 +51,7 @@ public:
         return sel_;
     }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(DipsPage);
         return refusals_;
     }
@@ -69,7 +71,7 @@ private:
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
     RowIndex sel_{};
     RowIndex first_row_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

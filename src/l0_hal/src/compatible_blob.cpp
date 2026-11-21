@@ -3,6 +3,8 @@
 
 #include <cstring>
 
+#include "infra/prelude.h"
+
 namespace mister::hal {
 
 Ex<void> CompatibleBlob::assign(std::span<const char> raw) noexcept {

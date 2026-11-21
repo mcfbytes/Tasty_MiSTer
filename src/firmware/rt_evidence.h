@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "rt_setup.h"
+#include "infra/prelude.h"
 #include "os/kernel_rt.h"
 #include "os/vm_compaction.h"
 #include "hal/thread_map.h"

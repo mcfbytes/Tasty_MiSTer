@@ -14,6 +14,7 @@
 #include "hal/reg_lend.h"
 #include "hal/reg_word.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -53,22 +54,16 @@ public:
     RegisterWindow& operator=(const RegisterWindow&) = delete;
     ~RegisterWindow() = default;
 
-    std::uint32_t read(Reg r) const
+    [[nodiscard]] RegWord read(Reg r) const
         requires(readable(Layout::kAccess))
     {
-        return detail::regs_read(base_, offset_of(r));
-    }
-
-    void write(Reg r, std::uint32_t v)
-        requires(writable(Layout::kAccess))
-    {
-        detail::regs_write(base_, offset_of(r), v);
+        return RegWord{detail::regs_read(base_, offset_of(r))};
     }
 
     void write(Reg r, RegWord w)
         requires(writable(Layout::kAccess))
     {
-        w.emit([this, r](auto bits) { write(r, bits); });
+        w.emit([this, r](std::uint32_t bits) { detail::regs_write(base_, offset_of(r), bits); });
     }
 
     class Transaction {

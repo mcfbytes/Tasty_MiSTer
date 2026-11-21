@@ -18,8 +18,10 @@
 #include "cores/staging_core.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "os/deadline.h"
 #include "proto/link_op.h"
 #include "svc/card_writer.h"
 
@@ -126,7 +128,7 @@ public:
 private:
     friend struct MountQueueTestAccess;
 
-    static constexpr std::int64_t kSaveMountBoundNs = cores::kDiscMountBoundNs.count();
+    static constexpr std::chrono::nanoseconds kSaveMountBound = cores::kDiscMountBoundNs;
 
     void arm_ladder_(Host& host, const MountAsk& ask, const cores::CoreFactory& row);
     void arm_plain_mount_(Host& host, const MountAsk& ask);
@@ -166,7 +168,7 @@ private:
     struct SaveMount {
         MountAsk ask{};
         proto::ActKey gen{};
-        std::int64_t due_ns = 0;
+        os::Deadline due{os::Deadline::immediate()};
         bool unmounted = false;
 
         bool bracketed = false;

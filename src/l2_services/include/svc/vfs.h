@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/archive.h"
 #include "svc/asset_name.h"

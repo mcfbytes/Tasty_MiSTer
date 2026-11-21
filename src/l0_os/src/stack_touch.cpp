@@ -2,6 +2,7 @@
 #include "os/stack_touch.h"
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 
 namespace mister::os {
 

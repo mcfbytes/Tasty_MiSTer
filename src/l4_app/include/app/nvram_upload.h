@@ -8,8 +8,9 @@
 #include "hal/spi_transport.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
-#include "infra/log_lane.h"
+#include "app/log_lane.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -44,7 +45,7 @@ public:
         hal::ISpiTransport& link,
         infra::OptRef<const svc::Vfs> vfs,
         SaveUploadRelay& saves,
-        xthread::LogLane& log_lane
+        LogLane& log_lane
     ) noexcept
         : link_(link),
           vfs_(vfs),
@@ -71,7 +72,7 @@ private:
     hal::ISpiTransport& link_;
     infra::OptRef<const svc::Vfs> vfs_{};
     SaveUploadRelay& saves_;
-    xthread::LogLane::Producer log_lane_;
+    LogLane::Producer log_lane_;
     Tally tally_{};
 };
 

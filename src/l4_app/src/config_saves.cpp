@@ -2,7 +2,6 @@
 #include "app/config_saves.h"
 
 #include <algorithm>
-#include <cerrno>
 
 #include <array>
 #include <cstddef>
@@ -26,6 +25,8 @@
 #include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/prelude.h"
+#include "svc/card_dirs.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -58,8 +59,7 @@ std::string ConfigSaves::slot_rel(cores::ConfigSlot slot) const {
     const auto name = codec->file_name(slot);
     if (name.view().empty())
         return {};
-    rel = "config/";
-    rel.append(name.view());
+    rel = svc::card_rel({svc::kConfigDir, name.view()});
     return rel;
 }
 
@@ -124,8 +124,7 @@ bool ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
     auto buf = read_file(vfs_, kIni);
     if (!buf) {
 
-        const Error& e = buf.error();
-        const bool absent = (e.code == Errc::os && e.detail == ENOENT) || e.code == Errc::not_found;
+        const bool absent = buf.error().code == Errc::not_found;
         if (!absent) {
             tally_.ini_write_failures.add();
             return false;
@@ -148,7 +147,7 @@ void ConfigSaves::publish_slot_previews() {
     if (codec) {
         const cores::ConfigSlotCount count = std::min(
             codec->slot_count(),
-            cores::ConfigSlotCount::of(cores::kMaxConfigSlots)
+            cores::ConfigSlotCount::truncating(cores::kMaxConfigSlots)
         );
         preview_scratch_.count = count;
         count.for_each_slot([&](cores::ConfigSlot slot) {
@@ -237,7 +236,7 @@ void ConfigSaves::on(const UiRequest::SaveConfig&, const UiRequest::Head& head) 
         return;
     }
     const auto sample = status_cell_.sample();
-    if (sample.generation == 0) {
+    if (!sample.generation.held()) {
 
         publish_save_verdict_(false, tag);
         return;

@@ -15,10 +15,13 @@
 #include <span>
 #include <string_view>
 
+#include "infra/byte_count.h"
 #include "infra/decimal_text.h"
 #include "infra/error.h"
 #include "infra/hex_text.h"
+#include "infra/index_set.h"
 #include "infra/json_out.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/map_length.h"
 
@@ -286,34 +289,37 @@ struct CpuMask {
     std::uint32_t v = 0;
 
     [[nodiscard]] static constexpr CpuMask of(CpuId cpu) noexcept {
-        return CpuMask{cpu.v < kCpuMaskGroupBits ? (1u << cpu.v) : 0u};
+        return CpuMask{Bits{}.with_or_unchanged(cpu).v};
     }
 
     [[nodiscard]] static constexpr CpuMask below(CpuId cpu) noexcept {
         return CpuMask{cpu.v >= kCpuMaskGroupBits ? ~std::uint32_t{0} : ((1u << cpu.v) - 1u)};
     }
 
-    [[nodiscard]] constexpr bool contains(CpuId cpu) const noexcept {
-        return cpu.v < kCpuMaskGroupBits && (v & (1u << cpu.v)) != 0u;
+    [[nodiscard]] constexpr bool contains(CpuId cpu) const noexcept { return bits().contains(cpu); }
+
+    [[nodiscard]] constexpr bool contains(CpuMask cpus) const noexcept {
+        return bits().contains(Bits{cpus.v});
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
-
-    [[nodiscard]] constexpr bool subset_of(CpuMask super) const noexcept {
-        return (v & ~super.v) == 0u;
-    }
+    [[nodiscard]] constexpr bool empty() const noexcept { return bits().empty(); }
 
     [[nodiscard]] constexpr bool intersects(CpuMask other) const noexcept {
-        return (v & other.v) != 0u;
+        return bits().intersects(Bits{other.v});
     }
 
     [[nodiscard]] constexpr CpuMask without(CpuMask drop) const noexcept {
-        return CpuMask{v & ~drop.v};
+        return CpuMask{bits().without(Bits{drop.v}).v};
     }
 
     [[nodiscard]] infra::HexText hex() const noexcept { return infra::HexText{v}; }
 
     friend constexpr bool operator==(CpuMask, CpuMask) = default;
+
+private:
+    using Bits = infra::IndexSet<CpuId, kCpuMaskGroupBits, std::uint32_t>;
+
+    [[nodiscard]] constexpr Bits bits() const noexcept { return Bits{v}; }
 };
 
 struct I2cAddr {
@@ -353,6 +359,21 @@ struct I2cReg {
     }
 
     friend constexpr bool operator==(I2cReg, I2cReg) = default;
+};
+
+struct SeekOffset {
+    std::int64_t v = 0;
+
+    [[nodiscard]] constexpr SeekOffset past(infra::ByteCount done) const noexcept {
+        return SeekOffset{v + static_cast<std::int64_t>(done.v)};
+    }
+
+    friend constexpr bool operator==(SeekOffset, SeekOffset) = default;
+};
+
+struct SeekLength {
+    std::int64_t v = 0;
+    friend constexpr bool operator==(SeekLength, SeekLength) = default;
 };
 
 }

@@ -13,7 +13,7 @@
 #include "app/link_binder.h"
 #include "app/log_clock.h"
 #include "app/disk_relay.h"
-#include "app/mailbox_relay.h"
+#include "app/pcm/mailbox_relay.h"
 #include "app/retiree.h"
 #include "app/session_bindings.h"
 #include "app/session_machine.h"
@@ -23,18 +23,19 @@
 #include "cores/core_support.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
-#include "infra/log_lane.h"
-#include "infra/log_rec.h"
+#include "app/log_lane.h"
+#include "app/log_rec.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/deadline.h"
-#include "proto/block_slots.h"
-#include "proto/core_session.h"
+#include "proto/link/block_slots.h"
+#include "proto/link/core_session.h"
 #include "proto/link_op.h"
 #include "proto/no_block_roles.h"
 #include "proto/types.h"
-#include "svc/disc_read_service.h"
+#include "svc/disc/disc_read_service.h"
 #include "svc/storage_lifecycle.h"
 
 namespace mister::app {
@@ -58,19 +59,19 @@ public:
         CoreBay& bay;
         BayReleasesCell& releases;
         LinkBinder& binder;
-        proto::CoreSession& session;
+        proto::link::CoreSession& session;
         const SessionBindings& bindings;
         SessionMachine& machine;
         infra::ErrorSite advise_site;
         const os::IClock& clock;
-        proto::BlockSlots& slots;
+        proto::link::BlockSlots& slots;
         SessionTally& session_tally;
-        xthread::LogLane& log_lane;
+        LogLane& log_lane;
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
-        infra::OptRef<MailboxRelay> mailbox{};
+        infra::OptRef<pcm::MailboxRelay> mailbox{};
         infra::OptRef<DiskRelay> disks{};
 
-        infra::OptRef<svc::DiscReadService> discs{};
+        infra::OptRef<svc::disc::DiscReadService> discs{};
     };
 
     explicit CoreTenancy(const Wiring& g) noexcept;
@@ -82,7 +83,7 @@ public:
 
     [[nodiscard]] proto::CoreBaySlot adopted_slot() const noexcept { return adopted_slot_; }
 
-    [[nodiscard]] bool retiring() const noexcept { return retiring_.gen != 0; }
+    [[nodiscard]] bool retiring() const noexcept { return retiring_.gen.built(); }
 
     [[nodiscard]] bool drop_owed() const noexcept { return drop_owed_; }
 
@@ -102,14 +103,14 @@ public:
 
 private:
     static constexpr std::chrono::nanoseconds kCoreRetireBoundNs{
-        2 * proto::BlockSlots::kStagingDeadlineNs
+        2 * proto::link::BlockSlots::kStagingDeadlineNs
     };
 
     [[nodiscard]] const os::IClock& clock() const noexcept { return clock_; }
 
     void drop_borrow_() noexcept;
 
-    void release_(proto::CoreBaySlot slot, std::uint16_t gen) noexcept;
+    void release_(proto::CoreBaySlot slot, proto::BuildGeneration gen) noexcept;
 
     [[nodiscard]] bool poll_retiree_(Retiree& r) noexcept;
 
@@ -123,22 +124,22 @@ private:
     BayReleasesCell& releases_;
     BayReleases released_{};
     LinkBinder& binder_;
-    proto::CoreSession& session_;
+    proto::link::CoreSession& session_;
     const SessionBindings& bindings_;
     SessionMachine& machine_;
     const infra::ErrorSite advise_site_;
     const os::IClock& clock_;
-    proto::BlockSlots& slots_;
+    proto::link::BlockSlots& slots_;
     SessionTally& session_tally_;
-    xthread::LogLane::Producer log_lane_;
+    LogLane::Producer log_lane_;
     const infra::OptRef<svc::IStorageLifecycle> storage_life_;
-    const infra::OptRef<MailboxRelay> mailbox_;
+    const infra::OptRef<pcm::MailboxRelay> mailbox_;
     const infra::OptRef<DiskRelay> disks_;
-    const infra::OptRef<svc::DiscReadService> discs_;
+    const infra::OptRef<svc::disc::DiscReadService> discs_;
 
     infra::OptRef<cores::Core> current_{};
     proto::CoreBaySlot adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
-    std::uint16_t adopted_gen_ = 0;
+    proto::BuildGeneration adopted_gen_{};
 
     Retiree retiring_{};
 

@@ -255,7 +255,8 @@ tasty_add_header_checks(tasty_ui_hd_list_header_checks LIB mister_ui HEADERS
   ui/wifi_saved_plan.h
   ui/recent_launch.h
   ui/recent_row.h
-  ui/hd_row.h
+  ui/row.h
+  ui/row_cx.h
   ui/hd_rows/hd_action.h
   ui/hd_rows/hd_ask_row.h
   ui/hd_rows/hd_close_row.h
@@ -280,7 +281,6 @@ tasty_add_header_checks(tasty_ui_options_view_header_checks LIB mister_ui HEADER
   ui/classic_options_view.h
   ui/hd_options_plan.h
   ui/hd_options_view.h
-  ui/hd_rows/hd_option_row.h
   ui/hd_rows/hd_save_row.h
   ui/options_surface.h
   ui/place_facts.h

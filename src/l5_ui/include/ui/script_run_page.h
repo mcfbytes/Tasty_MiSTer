@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/page.h"
 #include "ui/script_launch.h"
 #include "ui/script_runner.h"
@@ -54,7 +55,7 @@ public:
 
     std::string_view argv0() const noexcept { return request_.argv0(); }
 
-    svc::Tally refusals() const noexcept override {
+    infra::Tally refusals() const noexcept override {
         TASTY_SEAT_BODY(ScriptRunPage);
         return refusals_;
     }
@@ -64,7 +65,7 @@ private:
 
     ScriptRequest request_;
     ScriptRunner runner_;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
 };
 
 }

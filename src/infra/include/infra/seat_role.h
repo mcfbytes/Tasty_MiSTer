@@ -6,7 +6,7 @@
 
 #include "infra/seat.h"
 
-namespace mister {
+namespace mister::infra {
 
 struct SeatRoleRow {
     SeatTag tag;

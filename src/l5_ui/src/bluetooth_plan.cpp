@@ -4,23 +4,23 @@
 #include <array>
 
 #include "infra/message_sum.h"
-#include "svc/bt_page_mode.h"
-#include "svc/connect_request.h"
+#include "svc/connect/bt_page_mode.h"
+#include "svc/connect/connect_request.h"
 #include "ui/connect_text.h"
 #include "ui/hd_plan_inputs.h"
 
 namespace mister::ui {
 namespace {
 
-using RowKind = app::PageDescription::RowKind;
-using Request = svc::ConnectRequest;
+using RowKind = app::hd::PageDescription::RowKind;
+using Request = svc::connect::ConnectRequest;
 
 enum class Slot : std::uint8_t { Status, Pair, Paired, Reset, RemoveAll, Count };
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 constexpr std::array<std::string_view, 1> kRemoveBody{"Every paired controller is forgotten."};
-constexpr RowIndex kOnNo = RowIndex::of(1);
-constexpr RowIndex kYes = RowIndex::of(0);
+constexpr RowIndex kOnNo = RowIndex::truncating(1);
+constexpr RowIndex kYes = RowIndex::truncating(0);
 
 bool has_paired(const ConnectViews& views) {
     if (!views.devices)
@@ -57,7 +57,7 @@ RowCount BluetoothPlan::pinned() const noexcept {
 
 ConnectDemand BluetoothPlan::connect_demand() const {
     TASTY_SEAT_BODY(BluetoothPlan);
-    return ConnectDemand::bluetooth(svc::BtPageMode::Paired, PairStart::Pick);
+    return ConnectDemand::bluetooth(svc::connect::BtPageMode::Paired, PairStart::Pick);
 }
 
 bool BluetoothPlan::slot_shown(SlotId slot) const {
@@ -67,7 +67,7 @@ bool BluetoothPlan::slot_shown(SlotId slot) const {
     return true;
 }
 
-app::PageDescription::Row BluetoothPlan::slot_describe(SlotId slot) const {
+app::hd::PageDescription::Row BluetoothPlan::slot_describe(SlotId slot) const {
     TASTY_SEAT_BODY(BluetoothPlan);
     switch (slot.named<Slot>()) {
         case Slot::Status:

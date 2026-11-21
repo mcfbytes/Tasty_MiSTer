@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/disk_format_row.h"
 #include "svc/file.h"
@@ -24,11 +25,11 @@ public:
     [[nodiscard]] virtual FileSize size() const noexcept = 0;
     [[nodiscard]] virtual bool writable() const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> read_at(
         proto::FileOffset at,
         std::span<std::byte> dst
     ) = 0;
-    [[nodiscard]] virtual Ex<std::size_t> write_at(
+    [[nodiscard]] virtual Ex<infra::ByteCount> write_at(
         proto::FileOffset at,
         std::span<const std::byte> src
     ) = 0;

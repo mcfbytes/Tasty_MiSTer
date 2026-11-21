@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cstdint>
+#include <optional>
+
+#include "infra/error.h"
+#include "infra/prelude.h"
+#include "infra/seat.h"
+#include "svc/input/device_identity.h"
+#include "svc/input/map_store.h"
+#include "svc/types.h"
+
+namespace mister::svc::input {
+
+class MappingWizard {
+    TASTY_SEAT_EXEMPT(component);
+
+public:
+    enum class Step : std::uint8_t {
+        Idle,
+        AwaitDevice,
+        AwaitButton,
+        Confirm,
+        Persist,
+        Done,
+        Cancelled,
+    };
+
+    Step step() const noexcept { return step_; }
+
+    void begin(const DeviceIdentity& id, MapKind kind);
+    [[nodiscard]] Ex<Step> advance();
+    void cancel();
+
+    void on_device(const DeviceIdentity& id);
+    void on_button(EvdevCode code);
+
+    const DeviceIdentity& device() const noexcept { return device_; }
+
+    MapKind kind() const noexcept { return kind_; }
+
+    std::optional<EvdevCode> captured() const noexcept { return captured_; }
+
+private:
+    Step step_ = Step::Idle;
+    DeviceIdentity device_{};
+    MapKind kind_ = MapKind::Joystick;
+    std::optional<EvdevCode> captured_{};
+};
+
+}

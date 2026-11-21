@@ -2,6 +2,7 @@
 #include "ui/autosave_clock.h"
 
 #include "proto/autosave_policy.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -13,7 +14,7 @@ bool AutosaveClock::round(const Inputs& in, IndicatorBoard& board) noexcept {
 bool AutosaveClock::post_(const Inputs& in, IndicatorBoard& board) noexcept {
     if (!in.status)
         return false;
-    const svc::Tally saves = in.status->confirmed.sum(in.status->direct);
+    const infra::Tally saves = in.status->confirmed.sum(in.status->direct);
     const bool saved = !(saves == seen_saves_);
     const bool failed = !(in.status->fault_episodes == seen_faults_);
     seen_saves_ = saves;

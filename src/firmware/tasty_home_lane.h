@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "run_exit.h"
 #include "tasty_paths.h"

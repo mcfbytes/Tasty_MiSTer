@@ -4,19 +4,19 @@
 #include "open_verdict.h"
 
 #include "hal/board_regions.h"
+#include "infra/prelude.h"
 
 namespace mister::fw {
 
 std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
-    const hal::FpgaAperture& aperture,
-    std::span<const hal::PhysRegion> regions,
+    const BootParts& plat,
     OpenVerdict& verdict
 ) {
     std::optional<hal::ScalerBuffers> out;
-    const auto region = hal::BoardRegions::aperture_region(regions, hal::RegionId::ScalerOut);
+    const auto region = hal::BoardRegions::aperture_region(plat.regions, hal::RegionId::ScalerOut);
     if (!region)
         return out;
-    if (auto m = hal::ScalerBuffers::map(aperture, *region); m) {
+    if (auto m = hal::ScalerBuffers::map(plat.fpga_mem, plat.aperture_node, *region); m) {
         out.emplace(std::move(*m));
     } else {
         verdict.refuse("T-CAPTURE: ScalerBuffers::map", m.error());
@@ -31,7 +31,7 @@ RecorderBlock::RecorderBlock(
     const app::ReplayStatusCell& replay_status
 )
     : copier_{
-          app::FrameCopier::Wiring{
+          app::capture::FrameCopier::Wiring{
               .clock = parts.wires.clock,
               .delay = capture_delay_,
               .control = rec_control_,
@@ -44,27 +44,27 @@ RecorderBlock::RecorderBlock(
               .video = parts.wires.video.geometry_cell(),
               .channel = raw_frames_
           },
-          map_scaler_buffers(plat.fpga_mem, plat.regions, verdict)
+          map_scaler_buffers(plat, verdict)
       },
-      avi_encoder_{app::AviEncoder::Wiring{
-          .out = infra::OptRef<app::ChunkChannel>{chunks_},
-          .raw = infra::OptRef<const app::RawFrameChannel>{raw_frames_},
+      avi_encoder_{app::capture::AviEncoder::Wiring{
+          .out = infra::OptRef<app::capture::ChunkChannel>{chunks_},
+          .raw = infra::OptRef<const app::capture::RawFrameChannel>{raw_frames_},
           .clock = infra::OptRef<const os::IClock>{parts.wires.clock},
           .cpu = infra::OptRef<const os::IClock>{encode_cpu_}
       }},
-      hasher_{app::FrameHasher::Wiring{
+      hasher_{app::capture::FrameHasher::Wiring{
           .channel = raw_frames_,
           .out = sidecar_ring_,
           .status = encode_status_,
           .clock = parts.wires.clock,
           .video = avi_encoder_
       }},
-      sidecar_writer_{app::SidecarWriter::Wiring{.status = rec_write_status_}},
-      avi_writer_{app::AviWriter::Wiring{.in = chunks_, .status = avi_write_status_}},
+      sidecar_writer_{app::capture::SidecarWriter::Wiring{.status = rec_write_status_}},
+      avi_writer_{app::capture::AviWriter::Wiring{.in = chunks_, .status = avi_write_status_}},
       recorder_{app::RecorderControl::Wiring{
-          .control = infra::OptRef<app::RecControlChannel>{rec_control_},
-          .status = infra::OptRef<const app::RecorderStatusCell>{rec_status_},
-          .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write_status_},
+          .control = infra::OptRef<app::capture::RecControlChannel>{rec_control_},
+          .status = infra::OptRef<const app::capture::RecorderStatusCell>{rec_status_},
+          .writer = infra::OptRef<const app::capture::RecWriteStatusCell>{rec_write_status_},
           .diag = infra::OptRef<xthread::DiagLog>{parts.wires.diag},
           .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()}
       }} {

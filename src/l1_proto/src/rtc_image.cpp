@@ -8,24 +8,27 @@
 #include <optional>
 #include <span>
 
-#include "infra/endian.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
 namespace mister::proto {
 
-std::array<std::uint16_t, 4> RtcImage::rtc_words() const noexcept {
-    std::array<std::uint16_t, 4> words{};
-    infra::load_le_run<std::uint16_t>(std::span<const std::uint8_t>(rtc), words);
+std::array<hal::SpiWord, 4> RtcImage::rtc_words() const noexcept {
+    std::array<hal::SpiWord, 4> words{};
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        words[i] = hal::SpiWord::load_le(
+            std::span<const std::uint8_t>(rtc)
+                .subspan(sizeof(hal::SpiWord) * i)
+                .first<sizeof(hal::SpiWord)>()
+        );
+    }
     return words;
 }
 
-std::array<std::uint16_t, 2> RtcImage::stamp_words() const noexcept {
-    std::array<std::uint8_t, sizeof(std::uint32_t)> bytes{};
-    infra::store_le<std::uint32_t>(std::span<std::uint8_t, sizeof(std::uint32_t)>(bytes), stamp);
-    std::array<std::uint16_t, 2> words{};
-    infra::load_le_run<std::uint16_t>(std::span<const std::uint8_t>(bytes), words);
-    return words;
+std::array<hal::SpiWord, 2> RtcImage::stamp_words() const noexcept {
+    const hal::SpiHalves halves = hal::SpiHalves::of(stamp);
+    return {halves.low, halves.high};
 }
 
 namespace {

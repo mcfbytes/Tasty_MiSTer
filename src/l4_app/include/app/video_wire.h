@@ -19,30 +19,31 @@
 #include "hal/types.h"
 #include "infra/opt_ref.h"
 #include "proto/reset_fence.h"
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
 #include "infra/error.h"
-#include "infra/telemetry.h"
-#include "infra/wake_flag.h"
+#include "infra/prelude.h"
+#include "infra/xthread/telemetry.h"
+#include "infra/xthread/wake_flag.h"
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
-#include "proto/link.h"
+#include "proto/link/link.h"
 #include "proto/link_event.h"
 #include "proto/link_port.h"
 #include "proto/link_router.h"
 #include "os/raw_monotonic_clock.h"
 #include "reactor/tick.h"
-#include "svc/filter_resend.h"
-#include "svc/geometry_gate.h"
-#include "svc/scaling_policy.h"
-#include "svc/video_service.h"
+#include "svc/video/filter_resend.h"
+#include "svc/video/geometry_gate.h"
+#include "svc/video/scaling_policy.h"
+#include "svc/video/video_service.h"
 #include "infra/seat.h"
-#include "infra/seq_cell.h"
+#include "infra/xthread/seq_cell.h"
 
 namespace mister::app {
 
 struct VideoGeoLatch {
-    svc::VideoSample sample{};
-    std::uint32_t core_seq = 0;
+    svc::video::VideoSample sample{};
+    CoreEdgeSeq core_seq{};
     ResendSeq filter_seq{};
     ResendSeq scaling_seq{};
 };
@@ -57,12 +58,13 @@ struct BoundCore {
     CoreEdgeSeq core_seq{};
 };
 
-class VideoWire : public svc::VideoService::IResolutionSampler, public svc::IFilterResend {
+class VideoWire : public svc::video::VideoService::IResolutionSampler,
+                  public svc::video::IFilterResend {
     TASTY_SEAT_MEDIATOR(Ui, RT);
 
 public:
     static constexpr std::size_t kSlots = proto::kLinkTxCapacity + 1;
-    static constexpr std::size_t kWords = svc::kVideoWireWords;
+    static constexpr std::size_t kWords = svc::video::kVideoWireWords;
 
     static_assert(
         kSlots == proto::kLinkTxCapacity + 1,
@@ -110,12 +112,12 @@ public:
     [[nodiscard]] Delivered on(
         const proto::LinkOp::StagedFrame& op,
         const LinkOpCtx& ctx,
-        proto::Link& link
+        proto::link::Link& link
     ) noexcept;
     [[nodiscard]] Delivered misrouted(
         const proto::LinkOp& op,
         const LinkOpCtx& ctx,
-        proto::Link& link
+        proto::link::Link& link
     ) noexcept;
 
     void bind_core(
@@ -132,37 +134,33 @@ public:
     static constexpr std::chrono::milliseconds kGeoPeriod{500};
 
     void on_rt_round(
-        proto::Link& link,
+        proto::link::Link& link,
         std::int64_t now_ns,
         infra::OptRef<proto::IResetFence> fence = {}
     );
 
-    [[nodiscard]] Ex<svc::VideoSample> sample() override;
+    [[nodiscard]] Ex<svc::video::VideoSample> sample() override;
 
-    [[nodiscard]] std::uint32_t sampled_core_seq() const noexcept { return sampled_seq_; }
+    [[nodiscard]] CoreEdgeSeq sampled_core_seq() const noexcept { return sampled_seq_; }
 
-    void publish_policy(const svc::ScalingPolicy& p) noexcept { policy_cell_.publish(p); }
+    void publish_policy(const svc::video::ScalingPolicy& p) noexcept { policy_cell_.publish(p); }
 
-    svc::ScalingPolicy policy() const noexcept { return policy_; }
+    svc::video::ScalingPolicy policy() const noexcept { return policy_; }
 
     void request_force() noexcept override { force_.request(); }
 
-    void reset_geometry(std::uint32_t core_seq) noexcept;
+    void reset_geometry(CoreEdgeSeq core_seq) noexcept;
 
     static constexpr std::chrono::nanoseconds kRoundBudgetNs{reactor::kTickNs / 2};
 
     void set_key_map(proto::ConfSwitches conf) noexcept {
-        tail_but_sw_ = static_cast<std::uint16_t>(
-            (tail_but_sw_ & (kButton1 | kButton2)) | conf.word()
-        );
+        tail_but_sw_ = conf.with_buttons(tail_but_sw_.buttons());
     }
 
-    std::uint16_t key_map() const noexcept { return tail_but_sw_; }
+    [[nodiscard]] proto::ConfSwitches key_map() const noexcept { return tail_but_sw_; }
 
-    static constexpr std::uint16_t kButton1 = 0x0001;
-    static constexpr std::uint16_t kButton2 = 0x0002;
     bool update_but_sw(
-        proto::Link& link,
+        proto::link::Link& link,
         hal::ButtonMask buttons,
         bool osd_visible,
         infra::OptRef<proto::IResetFence> fence = {}
@@ -172,11 +170,11 @@ public:
 
     std::uint32_t but_sw_errors() const noexcept { return but_sw_errors_; }
 
-    bool plan_filter_send(const svc::VideoSample& s, bool resend) override;
+    bool plan_filter_send(const svc::video::VideoSample& s, bool resend) override;
 
     [[nodiscard]] std::optional<VideoGeoLatch> geo_latch() const noexcept;
 
-    [[nodiscard]] svc::ScalingPolicy published_policy() const noexcept;
+    [[nodiscard]] svc::video::ScalingPolicy published_policy() const noexcept;
 
     struct GeoStats {
         std::uint32_t rounds = 0;
@@ -185,7 +183,7 @@ public:
         std::uint32_t resends = 0;
         std::uint32_t errors = 0;
         std::uint32_t late = 0;
-        std::uint32_t generation = 0;
+        infra::CellGen generation{};
         std::uint32_t reads = 0;
         std::uint32_t torn = 0;
     };
@@ -211,7 +209,7 @@ public:
 private:
     struct FrameArms {
         using Result = Delivered;
-        proto::Link& link;
+        proto::link::Link& link;
         infra::OptRef<proto::IResetFence> fence;
         Port& replies;
         VideoWire& self;
@@ -239,7 +237,7 @@ private:
     [[nodiscard]] Delivered run_frame_(
         const StagedFrame& f,
         const proto::LinkOp::StagedFrame& op,
-        proto::Link& link,
+        proto::link::Link& link,
         infra::OptRef<proto::IResetFence> fence
     ) noexcept;
 
@@ -258,28 +256,28 @@ private:
     xthread::Telemetry<PreludeLevel, SeatTag::Ui>::Reader level_seen_{};
 
     xthread::Telemetry<VideoGeoLatch, SeatTag::RT> geo_cell_{};
-    std::uint32_t geo_core_seq_ = 0;
-    std::uint32_t sampled_seq_ = 0;
+    CoreEdgeSeq geo_core_seq_{};
+    CoreEdgeSeq sampled_seq_{};
 
     ResendSeq filter_seq_{};
     ResendSeq scaling_seq_{};
 
-    xthread::Telemetry<svc::ScalingPolicy, SeatTag::Ui> policy_cell_{};
-    xthread::Telemetry<svc::ScalingPolicy, SeatTag::Ui>::Reader policy_seen_{};
-    svc::ScalingPolicy policy_{};
+    xthread::Telemetry<svc::video::ScalingPolicy, SeatTag::Ui> policy_cell_{};
+    xthread::Telemetry<svc::video::ScalingPolicy, SeatTag::Ui>::Reader policy_seen_{};
+    svc::video::ScalingPolicy policy_{};
     xthread::WakeFlag force_{};
     xthread::WakeFlag::Cursor force_seen_{};
 
-    svc::GeometryGate geo_gate_{};
+    svc::video::GeometryGate geo_gate_{};
 
-    std::uint16_t tail_but_sw_ = 0;
-    std::uint16_t but_sw_sent_ = 0;
+    proto::ConfSwitches tail_but_sw_{};
+    proto::ConfSwitches but_sw_sent_{};
     [[nodiscard]] Ex<void> emit_but_sw_(
-        proto::Link& link,
-        std::uint16_t word,
+        proto::link::Link& link,
+        proto::ConfSwitches word,
         infra::OptRef<proto::IResetFence> fence
     ) noexcept;
-    std::uint16_t but_sw_shadow_ = 0;
+    proto::ConfSwitches but_sw_shadow_{};
     bool but_sw_seen_ = false;
     std::uint32_t but_sw_writes_ = 0;
     std::uint32_t but_sw_errors_ = 0;

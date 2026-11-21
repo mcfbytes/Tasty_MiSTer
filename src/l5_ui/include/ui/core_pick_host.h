@@ -6,12 +6,15 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "svc/types.h"
+#include "infra/tally.h"
 #include "ui/browser_host.h"
 #include "ui/page.h"
 
 namespace mister::app {
 class ICmdVerbSink;
+}
+
+namespace mister::app::recents {
 class RecentsStore;
 }
 
@@ -25,7 +28,7 @@ class CorePickHost final : public IBrowserHost {
 public:
     struct Borrows {
         infra::OptRef<app::ICmdVerbSink> route{};
-        infra::OptRef<app::RecentsStore> recents{};
+        infra::OptRef<app::recents::RecentsStore> recents{};
     };
 
     void bind(Borrows b) noexcept;
@@ -33,7 +36,7 @@ public:
     Transition on_picked(const BrowserEntry& e, std::string_view path) override;
     Transition on_cancel() override;
 
-    svc::Tally refusals() const noexcept { return refusals_; }
+    infra::Tally refusals() const noexcept { return refusals_; }
 
     std::uint32_t commands_published() const noexcept { return published_; }
 
@@ -41,7 +44,7 @@ private:
     [[nodiscard]] bool deliver_pick_(std::string_view path);
 
     Borrows b_{};
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
 };
 

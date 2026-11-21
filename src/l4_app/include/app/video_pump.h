@@ -16,24 +16,28 @@
 #include "app/idle_blank.h"
 #include "app/ini_cell.h"
 #include "app/output_geometry.h"
+#include "app/output_lock.h"
+#include "app/core_name.h"
 #include "app/session_identity.h"
 #include "app/video_geometry_record.h"
 #include "app/video_ini.h"
 #include "app/video_pump_stats.h"
 #include "app/video_wire.h"
+#include "infra/xthread/coworker.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
-#include "svc/filter_store.h"
+#include "infra/xthread/telemetry.h"
+#include "svc/video/filter_store.h"
 #include "os/clock.h"
+#include "infra/prelude.h"
 #include "hal/hdmi_int.h"
 #include "hal/video_out_decl.h"
-#include "svc/adv7513_probe_report.h"
-#include "app/input_gates_cell.h"
-#include "infra/counter.h"
-#include "svc/i2c_adapter.h"
-#include "svc/pll_params.h"
-#include "svc/stored_mode.h"
-#include "svc/video_service.h"
+#include "svc/video/adv7513_probe_report.h"
+#include "app/input/input_gates_cell.h"
+#include "infra/xthread/counter.h"
+#include "svc/video/i2c_adapter.h"
+#include "svc/video/pll_params.h"
+#include "svc/video/stored_mode.h"
+#include "svc/video/video_service.h"
 
 namespace mister::svc {
 class Vfs;
@@ -43,19 +47,19 @@ namespace mister::app {
 
 struct RunPolicy;
 
-struct CoreIdentity {
+struct VideoLoadIdentity {
     std::string_view core;
     std::string_view home;
     proto::RotationDir rotation = proto::RotationDir::None;
 
-    [[nodiscard]] static CoreIdentity of(const std::optional<SessionIdentity>& id) noexcept {
+    [[nodiscard]] static VideoLoadIdentity of(const std::optional<SessionIdentity>& id) noexcept {
         if (!id)
             return {};
-        return CoreIdentity{id->core.view(), home_name(*id), id->rotation};
+        return VideoLoadIdentity{id->core.view(), home_name(*id), id->rotation};
     }
 };
 
-class VideoPump : public IOutputGeometry {
+class VideoPump : public IOutputGeometry, public xthread::ICoworker {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -63,19 +67,19 @@ public:
 
     struct Wiring {
         const xthread::Counter& activity;
-        const InputGatesCell& gates;
+        const input::InputGatesCell& gates;
         LinkTxChannel<SeatTag::Ui>& link_tx;
         proto::ILinkRouter& replies;
         const IniCell& ini;
 
-        infra::OptRef<UiWriteLane> writes{};
+        infra::OptRef<app::recents::UiWriteLane> writes{};
     };
 
     VideoPump(
         const svc::Vfs& vfs,
         const os::IClock& clock,
         const hal::VideoOutDecl& board,
-        infra::OptRef<svc::adv7513::II2cAdapter> i2c,
+        infra::OptRef<svc::video::adv7513::II2cAdapter> i2c,
         const hal::IHdmiInterrupt& hdmi_int,
         Wiring wiring
     ) noexcept;
@@ -87,16 +91,17 @@ public:
 
     [[nodiscard]] bool take_fb_cmd(std::string_view line) noexcept;
 
-    void tick();
+    void serve() noexcept override;
 
-    void on_pause() noexcept {
+    void on_pause() noexcept override {
+        TASTY_SEAT_BODY(VideoPump);
         i2c_held_ = true;
         composer_.abandon();
     }
 
     [[nodiscard]] bool i2c_held() const noexcept { return i2c_held_; }
 
-    void on_core_loaded(const CoreIdentity& id, bool front_end);
+    void on_core_loaded(const VideoLoadIdentity& id, bool front_end);
     void on_session_over();
 
     VideoWire& wire() noexcept { return wire_; }
@@ -107,7 +112,7 @@ public:
 
     AudioPump& audio() noexcept { return audio_; }
 
-    svc::VideoService::IVideoWireSink& mode_sink() noexcept { return composer_; }
+    svc::video::VideoService::IVideoWireSink& mode_sink() noexcept { return composer_; }
 
     void on_frame_reply(const proto::LinkEvent::FrameReply& r) noexcept;
 
@@ -158,15 +163,15 @@ public:
 
     static constexpr std::int64_t kModeSettleMs = 250;
 
-    const svc::adv7513::ProbeReport& i2c_probe() const noexcept { return seat_.probe(); }
+    const svc::video::adv7513::ProbeReport& i2c_probe() const noexcept { return seat_.probe(); }
 
     bool i2c_attached() const noexcept { return seat_.attached(); }
 
-    static bool pll_usable(const svc::PllParams& p) noexcept { return p.c != 0u; }
+    static bool pll_usable(const svc::video::PllParams& p) noexcept { return p.c != 0u; }
 
-    const svc::VideoService& video() const noexcept { return *video_; }
+    const svc::video::VideoService& video() const noexcept { return *video_; }
 
-    svc::VideoService& video() noexcept { return *video_; }
+    svc::video::VideoService& video() noexcept { return *video_; }
 
     using I2cOutcome = VideoI2cOutcome;
 
@@ -174,7 +179,7 @@ public:
 
     [[nodiscard]] Stats stats() const noexcept { return stats_cell_.sample().value; }
 
-    [[nodiscard]] bool output_locked() const noexcept { return output_locked_; }
+    [[nodiscard]] const OutputLock& output_lock() const noexcept { return output_lock_; }
 
     [[nodiscard]] const VideoStatsCell& stats_cell() const noexcept { return stats_cell_; }
 
@@ -188,7 +193,9 @@ public:
 
     [[nodiscard]] proto::RotationDir spd_rotation() const noexcept { return spd_dir_; }
 
-    std::int64_t last_apply_ns() const noexcept { return last_apply_ns_; }
+    [[nodiscard]] std::optional<os::RawMonotonicClock::time_point> last_apply() const noexcept {
+        return last_apply_;
+    }
 
 private:
     void set_core_name(std::string_view name) noexcept;
@@ -198,9 +205,9 @@ private:
     struct FamilyMode {
         bool configured = false;
         VideoModeIndex index = kVideoModeIndexCustom;
-        svc::video_timing::StoredMode stored{};
+        svc::video::video_timing::StoredMode stored{};
         bool have_raw_pll = false;
-        svc::PllBlock raw_pll{};
+        svc::video::PllBlock raw_pll{};
     };
 
     void note_i2c(I2cOutcome o) noexcept;
@@ -211,9 +218,9 @@ private:
 
     void resolve_families();
     FamilyMode resolve_one(std::string_view spec, bool count_fallback);
-    FamilyMode& family(svc::VmodeFamily f) noexcept;
+    FamilyMode& family(svc::video::VmodeFamily f) noexcept;
 
-    [[nodiscard]] Ex<void> apply_family(svc::VmodeFamily f, double fpix_mhz);
+    [[nodiscard]] Ex<void> apply_family(svc::video::VmodeFamily f, double fpix_mhz);
 
     void service_family_switch();
     void service_recovery();
@@ -234,7 +241,7 @@ private:
     VideoWire wire_;
     AudioPump audio_;
     PreludeComposer composer_;
-    std::optional<svc::VideoService> video_;
+    std::optional<svc::video::VideoService> video_;
 
     VideoIni ini_{};
     VideoIni::Force ini_force_{};
@@ -262,16 +269,15 @@ private:
     bool support_fhd_ = false;
     bool mode_pending_ = false;
     const xthread::Counter& activity_;
-    const InputGatesCell& gates_cell_;
+    const input::InputGatesCell& gates_cell_;
     const IniCell& ini_cell_;
 
-    InputGatesCell::Reader gates_reader_{};
+    input::InputGatesCell::Reader gates_reader_{};
     svc::InputGates gates_{};
     IdleBlank idle_{};
-    std::uint32_t emit_watermark_ = 0;
-    std::int64_t stage_ns_ = 0;
-    svc::Modeline pending_mode_{};
-    std::int64_t last_apply_ns_ = -1;
+    os::RawMonotonicClock::time_point stage_at_{};
+    svc::video::Modeline pending_mode_{};
+    std::optional<os::RawMonotonicClock::time_point> last_apply_{};
     std::uint32_t geo_polls_ = 0;
     std::uint32_t geo_edges_ = 0;
     svc::Generation geo_gen_seen_{};
@@ -281,20 +287,19 @@ private:
     std::uint8_t vscale_border_ = 0;
     bool front_end_ = false;
 
-    svc::ScalerSlotMode filter_mode_{};
+    svc::video::ScalerSlotMode filter_mode_{};
     bool filters_pending_ = false;
 
     std::array<FamilyMode, 3> families_{};
     bool families_valid_ = false;
 
-    bool output_locked_ = false;
+    OutputLock output_lock_ = OutputLock::Free;
     FixedStr<kSpecMax, StrFit::Clip> spec_{};
+    CoreName core_name_{};
 
-    FixedStr<SessionIdentity::kMax, StrFit::Clip> core_name_{};
-
-    FixedStr<SessionIdentity::kMax, StrFit::Clip> spd_name_{};
+    CoreName spd_name_{};
     proto::RotationDir spd_dir_{};
-    svc::SpdForm spd_form_ = svc::SpdForm::None;
+    svc::video::SpdForm spd_form_ = svc::video::SpdForm::None;
     bool menu_present_ = false;
 };
 

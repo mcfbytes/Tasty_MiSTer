@@ -3,8 +3,10 @@
 
 #include <cstdint>
 
-#include "infra/counter.h"
+#include "infra/xthread/counter.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "svc/types.h"
 
 namespace mister::app {
@@ -77,7 +79,7 @@ struct OwnerTally {
 
     std::uint32_t identity_intern_refusals = 0;
 
-    svc::Tally uart_intern_refusals{};
+    infra::Tally uart_intern_refusals{};
 
     std::uint32_t ladders_run = 0;
     std::uint32_t ladder_failures = 0;

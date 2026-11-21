@@ -5,22 +5,15 @@
 #include <cerrno>
 #include <utility>
 
-#include "infra/byte_view.h"
 #include "infra/errno.h"
+#include "infra/prelude.h"
+#include "infra/span_cut.h"
 #include "proto/autosave_policy.h"
 
 namespace mister::svc {
 
 using proto::FileSize;
 using proto::StageState;
-
-namespace {
-
-std::span<std::byte> as_file_bytes(std::span<std::uint8_t> s) noexcept {
-    return infra::byte_cast<std::byte>(s);
-}
-
-}
 
 Error StagedSave::too_large(infra::ErrorSite at) noexcept {
     return infra::Errno{EFBIG}.refusal(Errc::os, at);
@@ -46,7 +39,7 @@ void StagedSave::take_absent(proto::StageKey key, std::string_view path) {
     TASTY_SEAT_BODY(StagedSave);
     take_(key, path);
     present_ = false;
-    image_.reserve(proto::kStageFirstReserve.file_word<std::size_t>());
+    proto::kStageFirstReserve.reserve_in(image_);
     state_ = StageState::Live;
 }
 
@@ -59,7 +52,7 @@ void StagedSave::take_loading(
     TASTY_SEAT_BODY(StagedSave);
     take_(key, path);
     present_ = true;
-    image_.resize(size.file_word<std::size_t>());
+    size.resize_in(image_);
     load_ = std::move(file);
     state_ = StageState::Loading;
     if (size.empty())
@@ -73,8 +66,11 @@ void StagedSave::step_load() noexcept {
     const FileSize left = (proto::kFileStart + extent()) - loaded_;
     if (!left.empty()) {
         const FileSize n = left.min(proto::kCommitChunkBytes);
-        const std::span<std::uint8_t> dst = n.first_of(loaded_.skip_in(std::span(image_)));
-        if (auto r = read_exact(*load_, loaded_, as_file_bytes(dst)); !r) {
+        const std::span<std::byte> dst = infra::affine::first(
+            infra::affine::from(std::span(image_), loaded_),
+            n
+        );
+        if (auto r = load_->read_exact_at(loaded_, dst); !r) {
             break_(r.error());
             return;
         }
@@ -150,29 +146,29 @@ std::optional<FileSize> StagedSave::announced() const noexcept {
     return extent();
 }
 
-Ex<std::span<std::uint8_t>> StagedSave::read(proto::FileOffset at, std::span<std::uint8_t> dst) {
+Ex<infra::ByteCount> StagedSave::read(proto::FileOffset at, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(StagedSave);
     if (broken_)
         return std::unexpected(*broken_);
     if (state_ == StageState::Loading) {
-        auto n = load_->read_at(at, as_file_bytes(dst));
+        auto n = load_->read_at(at, dst);
         if (!n)
             return std::unexpected(n.error());
-        return dst.first(*n);
+        return infra::ByteCount{*n};
     }
     if (!announced())
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     if (!extent().holds(at))
-        return dst.first(0);
-    const std::span<const std::uint8_t> from = at.skip_in(image());
+        return infra::ByteCount{0};
+    const std::span<const std::byte> from = infra::affine::from(image(), at);
     const std::size_t n = std::min(from.size(), dst.size());
     std::copy_n(from.begin(), n, dst.begin());
-    return dst.first(n);
+    return infra::ByteCount{n};
 }
 
-Ex<std::span<const std::uint8_t>> StagedSave::write(
+Ex<infra::ByteCount> StagedSave::write(
     proto::FileOffset at,
-    std::span<const std::uint8_t> src,
+    std::span<const std::byte> src,
     TimePoint now
 ) {
     TASTY_SEAT_BODY(StagedSave);
@@ -183,19 +179,20 @@ Ex<std::span<const std::uint8_t>> StagedSave::write(
         return std::unexpected(too_large(ERR_SITE()));
     last_write_ = now;
     if (end <= extent()) {
-        const std::span<std::uint8_t> dst = at.skip_in(std::span(image_)).first(src.size());
+        const std::span<std::byte> dst = infra::affine::from(std::span(image_), at)
+                                             .first(src.size());
         if (std::ranges::equal(dst, src))
-            return src;
+            return infra::ByteCount{src.size()};
         std::ranges::copy(src, dst.begin());
     } else {
-        image_.resize(end.file_word<std::size_t>());
-        std::ranges::copy(src, at.skip_in(std::span(image_)).begin());
+        end.resize_in(image_);
+        std::ranges::copy(src, infra::affine::from(std::span(image_), at).begin());
     }
     rev_ = rev_.next();
-    return src;
+    return infra::ByteCount{src.size()};
 }
 
-Ex<FileSize> StagedSave::create(std::span<const std::uint8_t> first, TimePoint now) {
+Ex<FileSize> StagedSave::create(std::span<const std::byte> first, TimePoint now) {
     TASTY_SEAT_BODY(StagedSave);
     auto w = write(proto::kFileStart, first, now);
     if (!w)

@@ -41,11 +41,11 @@ struct OptionRow {
         bool arms_reset = false;
 
         [[nodiscard]] constexpr proto::FieldCount choice_count() const noexcept {
-            return choices.reach(proto::FieldCount::of(values.size()));
+            return choices.reach(proto::FieldCount::saturating(values.size()));
         }
 
         [[nodiscard]] constexpr std::string_view value_name(proto::FieldValue pick) const noexcept {
-            if (!pick.within(proto::FieldCount::of(values.size())))
+            if (!pick.within(proto::FieldCount::saturating(values.size())))
                 return {};
             return infra::at_index(values, pick);
         }

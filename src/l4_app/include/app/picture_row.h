@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <span>
 
+#include "hal/types.h"
 #include "infra/affine.h"
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
@@ -30,10 +31,6 @@ struct PictureRows {
     [[nodiscard]] constexpr bool fits_in(std::size_t rows) const noexcept { return v <= rows; }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
-
-    [[nodiscard]] constexpr PictureRows halved() const noexcept {
-        return PictureRows{static_cast<std::uint16_t>(v / kHalfDivisor)};
-    }
 
     template <std::integral I>
     [[nodiscard]] constexpr PictureRows divided_by(I divisor) const noexcept {
@@ -61,8 +58,8 @@ private:
 public:
     [[nodiscard]] constexpr int last_index() const noexcept { return static_cast<int>(v) - 1; }
 
-    [[nodiscard]] constexpr std::uint16_t wire_word() const noexcept {
-        return count<std::uint16_t>();
+    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
+        return hal::SpiWord{count<std::uint16_t>()};
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
@@ -89,6 +86,11 @@ struct PictureRow {
 
     [[nodiscard]] constexpr PictureRow doubled() const noexcept {
         return PictureRow{static_cast<std::uint16_t>(v * PictureRows::kHalfDivisor)};
+    }
+
+    template <std::integral T>
+    [[nodiscard]] constexpr T index() const noexcept {
+        return static_cast<T>(v);
     }
 
     [[nodiscard]] constexpr PictureRow flipped_in(PictureRows height) const noexcept {

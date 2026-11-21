@@ -10,6 +10,7 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "svc/file.h"
 #include "svc/io_meter.h"
 #include "svc/types.h"
@@ -34,16 +35,19 @@ public:
           read_refusal_(read_refusal),
           write_refusal_(write_refusal) {}
 
-    [[nodiscard]] Ex<std::size_t> read_at(proto::FileOffset at, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<infra::ByteCount> read_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    ) override {
         if (read_refusal_)
             return std::unexpected(*read_refusal_);
         auto n = inner_->read_at(at, dst);
         if (n && meter_)
-            meter_->read(FileSize{*n});
+            meter_->read(FileSize::of(*n));
         return n;
     }
 
-    [[nodiscard]] Ex<std::size_t> write_at(
+    [[nodiscard]] Ex<infra::ByteCount> write_at(
         proto::FileOffset at,
         std::span<const std::byte> src
     ) override {
@@ -52,9 +56,9 @@ public:
         auto n = inner_->write_at(at, src);
         if (!n)
             return n;
-        taken_ += FileSize{*n};
+        taken_ += FileSize::of(*n);
         if (meter_)
-            meter_->written(FileSize{*n});
+            meter_->written(FileSize::of(*n));
         return n;
     }
 

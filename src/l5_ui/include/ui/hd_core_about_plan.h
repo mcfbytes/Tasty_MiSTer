@@ -25,7 +25,7 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
 
 private:
     struct Line {
@@ -35,7 +35,7 @@ private:
 
     std::vector<Line> lines_;
     std::vector<HdValueRow> rows_;
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

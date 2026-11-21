@@ -8,6 +8,7 @@
 #include "hal/lw_sys_window.h"
 #include "hal/phys_region.h"
 #include "hal/register_window.h"
+#include "infra/prelude.h"
 #include "hal/types.h"
 #include "os/types.h"
 #include "os/uio_handle.h"

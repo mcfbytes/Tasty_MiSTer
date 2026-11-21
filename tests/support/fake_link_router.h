@@ -9,6 +9,7 @@
 #include <string>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/link_event.h"
 #include "proto/link_router.h"
 #include "proto/types.h"

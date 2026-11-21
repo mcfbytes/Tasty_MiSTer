@@ -3,7 +3,6 @@
 
 #include <dirent.h>
 #include <signal.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -14,38 +13,27 @@
 #include <optional>
 
 #include "infra/parse_int.h"
+#include "infra/prelude.h"
+#include "os/clock.h"
+#include "os/delay.h"
 #include "os/process_id.h"
+#include "os/timespec.h"
 
 namespace mister::fw {
 
 namespace {
 
-timespec to_timespec(std::chrono::steady_clock::duration d) noexcept {
-    const auto whole = std::chrono::duration_cast<std::chrono::duration<std::time_t>>(d);
-    const auto part = std::chrono::duration_cast<std::chrono::duration<long, std::nano>>(d - whole);
-    timespec ts{};
-    ts.tv_sec = whole.count();
-    ts.tv_nsec = part.count();
-    return ts;
+bool deadline_passed(os::MonoInstant deadline) noexcept {
+    return os::steady_now() >= deadline;
 }
 
-void sleep_until(std::chrono::steady_clock::time_point deadline) noexcept {
-    const timespec wake = to_timespec(deadline.time_since_epoch());
-    while (::clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr) == EINTR) {
-    }
-}
-
-bool deadline_passed(std::chrono::steady_clock::time_point deadline) noexcept {
-    return std::chrono::steady_clock::now() >= deadline;
-}
-
-void sleep_poll_slice(std::chrono::steady_clock::time_point deadline) noexcept {
+void sleep_poll_slice(os::MonoInstant deadline) noexcept {
     constexpr std::chrono::milliseconds kPollSlice{50};
-    sleep_until(std::min(std::chrono::steady_clock::now() + kPollSlice, deadline));
+    os::sleep_until(std::min(os::steady_now() + kPollSlice, deadline));
 }
 
 void sleep_grace(std::chrono::seconds grace) noexcept {
-    sleep_until(std::chrono::steady_clock::now() + grace);
+    os::sleep_until(os::steady_now() + grace);
 }
 
 }
@@ -79,7 +67,7 @@ Ex<bool> StockControl::stop() const noexcept {
         if (pids[i]->presence() == os::ProcessId::Presence::Alive)
             (void)pids[i]->kill_now();
     }
-    const auto deadline = std::chrono::steady_clock::now() + kKillGrace;
+    const os::MonoInstant deadline = os::steady_now() + kKillGrace;
     for (std::size_t i = 0; i < n; ++i) {
         while (pids[i]->presence() == os::ProcessId::Presence::Alive && !deadline_passed(deadline))
             sleep_poll_slice(deadline);

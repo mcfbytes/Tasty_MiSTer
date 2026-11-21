@@ -14,8 +14,9 @@
 #include "app/picture_size.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
-#include "svc/video_service.h"
+#include "svc/video/video_service.h"
 
 namespace mister::app {
 
@@ -29,15 +30,15 @@ struct FbScanWindow {
     [[nodiscard]] static FbScanWindow centred(const FbView& picture, PictureSize out) noexcept;
 };
 
-[[nodiscard]] constexpr std::array<std::uint16_t, 4> fb_scan_words(
+[[nodiscard]] constexpr std::array<hal::SpiWord, 4> fb_scan_words(
     const FbScanWindow& window
 ) noexcept {
     const HdRect& b = window.box;
     return {
-        static_cast<std::uint16_t>(b.x),
-        static_cast<std::uint16_t>(b.x + b.w - 1),
-        static_cast<std::uint16_t>(b.y),
-        static_cast<std::uint16_t>(b.y + b.h - 1)
+        hal::SpiWord{static_cast<std::uint16_t>(b.x)},
+        hal::SpiWord{static_cast<std::uint16_t>(b.x + b.w - 1)},
+        hal::SpiWord{static_cast<std::uint16_t>(b.y)},
+        hal::SpiWord{static_cast<std::uint16_t>(b.y + b.h - 1)}
     };
 }
 
@@ -48,7 +49,7 @@ public:
     static constexpr std::string_view kModeParam = "/sys/module/MiSTer_fb/parameters/mode";
 
     HpsFramebuffer(
-        svc::VideoService::IVideoWireSink& wire,
+        svc::video::VideoService::IVideoWireSink& wire,
         const IOutputGeometry& output,
         hal::PhysRegion fb,
         std::string mode_param = std::string(kModeParam)
@@ -92,7 +93,7 @@ private:
         return PictureSize::of(output_.output_size());
     }
 
-    svc::VideoService::IVideoWireSink& wire_;
+    svc::video::VideoService::IVideoWireSink& wire_;
     const IOutputGeometry& output_;
     hal::PhysRegion fb_;
     std::string mode_param_;

@@ -9,6 +9,7 @@
 
 #include "app/hd_look.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
@@ -30,8 +31,8 @@ public:
 
     PageId id() const override;
     std::string_view title() const override;
-    std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    svc::Tally refusals() const noexcept override;
+    std::span<const std::reference_wrapper<IRow>> rows() const override;
+    infra::Tally refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
 private:
@@ -47,7 +48,7 @@ private:
         HdDisplayPlan& plan_;
     };
 
-    class LookRow final : public IHdRow {
+    class LookRow final : public IRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
@@ -56,9 +57,9 @@ private:
               field_(field),
               label_(label) {}
 
-        app::PageDescription::Row describe() const override;
-        Transition select() override;
-        Transition step(CycleDir dir) override;
+        app::hd::PageDescription::Row describe(const RowCx&) const override;
+        Transition select(const RowCx&) override;
+        Transition step(CycleDir dir, const RowCx&) override;
 
     private:
         HdDisplayPlan& plan_;
@@ -68,7 +69,7 @@ private:
 
     PageContext& ctx_;
     OsdStylePreference& style_;
-    svc::Tally refusals_{};
+    infra::Tally refusals_{};
     std::uint32_t published_ = 0;
     ClassicAction classic_{*this};
     HdAskRow style_row_;
@@ -76,7 +77,7 @@ private:
     LookRow colors_row_{*this, app::HdLookField::Colors, "Colors"};
     LookRow display_row_{*this, app::HdLookField::GameDisplay, "Game display"};
     LookRow opacity_row_{*this, app::HdLookField::Opacity, "Menu opacity"};
-    std::vector<std::reference_wrapper<IHdRow>> refs_;
+    std::vector<std::reference_wrapper<IRow>> refs_;
 };
 
 }

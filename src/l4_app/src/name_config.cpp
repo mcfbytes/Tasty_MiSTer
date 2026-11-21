@@ -14,15 +14,17 @@
 #include <span>
 #include <string_view>
 
-#include "app/ui_write_lane.h"
+#include "app/recents/ui_write_lane.h"
+#include "infra/prelude.h"
 #include "infra/unique_fd.h"
+#include "svc/card_dirs.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 
 namespace {
 
-constexpr std::string_view kScriptConfirmRel = "config/script_confirm";
+constexpr std::string_view kScriptConfirmName = "script_confirm";
 
 }
 
@@ -46,7 +48,7 @@ Ex<void> NameConfig::save_path(
         return std::unexpected(row.index.refusal(Errc::not_found, ERR_SITE()));
     std::array<std::byte, kPathBlob> blob{};
     std::memcpy(blob.data(), path.data(), std::min(path.size(), kPathBlob - 1));
-    return writes_->arm("config/" + remembered_blob_name(stem, row), blob);
+    return writes_->arm(svc::card_rel({svc::kConfigDir, remembered_blob_name(stem, row)}), blob);
 }
 
 Ex<std::array<std::byte, NameConfig::kCidLen>> NameConfig::read_card_cid() const {
@@ -74,18 +76,21 @@ bool NameConfig::scripts_confirm_skippable() const {
         return false;
     std::array<std::byte, kCidLen> stored{};
 
-    const auto armed = writes_->peek(kScriptConfirmRel);
+    const auto armed = writes_->peek(svc::card_rel({svc::kConfigDir, kScriptConfirmName}));
     if (!armed)
         return false;
     if (!armed->empty()) {
         const std::span<const std::byte> kept = armed->first(std::min(armed->size(), kCidLen));
         std::copy(kept.begin(), kept.end(), stored.begin());
     } else {
-        auto f = vfs_->open(kScriptConfirmRel, svc::OpenMode::ReadWhole);
+        auto f = vfs_->open(
+            svc::card_rel({svc::kConfigDir, kScriptConfirmName}),
+            svc::OpenMode::ReadWhole
+        );
         if (!f)
             return false;
         auto n = (*f)->read_at(proto::kFileStart, stored);
-        if (!n || *n == 0)
+        if (!n || n->empty())
             return false;
     }
 
@@ -98,7 +103,7 @@ Ex<void> NameConfig::remember_scripts_confirm() {
     const std::array<std::byte, kCidLen> live = read_card_cid().value_or(
         std::array<std::byte, kCidLen>{}
     );
-    return writes_->arm(kScriptConfirmRel, live);
+    return writes_->arm(svc::card_rel({svc::kConfigDir, kScriptConfirmName}), live);
 }
 
 }

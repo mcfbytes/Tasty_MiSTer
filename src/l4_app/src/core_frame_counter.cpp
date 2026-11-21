@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/core_frame_counter.h"
 
-#include "proto/link.h"
+#include "infra/prelude.h"
+#include "proto/link/link.h"
 
 namespace mister::app {
 
@@ -19,12 +20,13 @@ void CoreFrameCounter::sample_demand_() noexcept {
 
 Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
-    proto::Link link{w_.link};
+    proto::link::Link link{w_.link};
     const auto r = counter_.read(link);
     if (!r)
         return r;
     read_this_round_ = true;
-    const std::int64_t now = w_.clock.now().time_since_epoch().count();
+    const os::RawMonotonicClock::time_point now = w_.clock.now();
+    const std::int64_t now_ns = os::since_boot(now).count();
     if (!r->supported) {
         if (rec_.supported)
             dirty_ = true;
@@ -32,26 +34,26 @@ Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
         based_ = false;
         return r;
     }
-    if (!based_ || !rec_.supported || now - last_read_ns_ > kRebaseNs) {
+    if (!based_ || !rec_.supported || now - last_read_at_ > std::chrono::nanoseconds{kRebaseNs}) {
         rec_.core_frame = r->count;
-        rec_.edge_ns = now;
+        rec_.edge_ns = now_ns;
         ++rec_.epoch;
         rec_.supported = true;
         based_ = true;
         dirty_ = true;
     } else if (const auto d = static_cast<std::uint8_t>(r->count - last_raw_); d != 0) {
         rec_.core_frame += d;
-        rec_.edge_ns = now;
+        rec_.edge_ns = now_ns;
         dirty_ = true;
     }
     last_raw_ = r->count;
-    last_read_ns_ = now;
+    last_read_at_ = now;
     return r;
 }
 
 void CoreFrameCounter::settle(
     bool ready,
-    std::uint32_t core_seq,
+    CoreEdgeSeq core_seq,
     MoviePosition movie_frame
 ) noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
@@ -64,12 +66,12 @@ void CoreFrameCounter::settle(
     }
     if (demanded() && ready && !read_this_round_) {
         (void)read();
-        round_words_ += proto::FrameCounterRead::kReadWords;
+        round_words_.charge(proto::link::FrameCounterRead::kReadWords);
     }
     read_this_round_ = false;
     if (!demanded())
         return;
-    if (movie_frame != rec_.movie_frame) {
+    if (movie_frame != rec_.movie_frame.value_or(kNoMovieFrame)) {
         rec_.movie_frame = movie_frame;
         dirty_ = true;
     }

@@ -9,9 +9,10 @@
 #include "cores/progress_ticker.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/image_sink.h"
-#include "proto/spi_image_sink.h"
+#include "proto/link/spi_image_sink.h"
 
 namespace mister::app {
 
@@ -19,7 +20,7 @@ class ProgressImageSink final : public proto::IImageSink {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit ProgressImageSink(proto::SpiImageSink& inner) noexcept : inner_(inner) {}
+    explicit ProgressImageSink(proto::link::SpiImageSink& inner) noexcept : inner_(inner) {}
 
     [[nodiscard]] Ex<void> begin(
         proto::WideIoIndex index,
@@ -92,7 +93,7 @@ public:
     [[nodiscard]] bool armed() const noexcept { return armed_; }
 
 private:
-    proto::SpiImageSink& inner_;
+    proto::link::SpiImageSink& inner_;
     cores::ProgressTicker tick_{};
     infra::OptRef<IBracketClose> closing_{};
     bool remounts_saves_ = false;

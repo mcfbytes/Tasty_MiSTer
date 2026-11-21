@@ -8,6 +8,7 @@
 #include "ui/hd_options_plan.h"
 #include "ui/options_model.h"
 #include "ui/options_surface.h"
+#include "infra/tally.h"
 
 namespace mister::ui {
 
@@ -77,7 +78,7 @@ bool HdOptionsView::empty() const {
     return list_->empty();
 }
 
-svc::Tally HdOptionsView::refusals() const noexcept {
+infra::Tally HdOptionsView::refusals() const noexcept {
     TASTY_SEAT_BODY(HdOptionsView);
     return retired_refusals_.sum(list_->refusals());
 }

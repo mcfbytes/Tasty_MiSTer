@@ -115,7 +115,7 @@ std::optional<CmdVerb::RecStart> parse_rec(std::string_view args) {
             if (saw_mode)
                 return std::nullopt;
             if (*tok == "hash")
-                v.mode = RecMode::Hash;
+                v.mode = capture::RecMode::Hash;
             else if (*tok != "avi")
                 return std::nullopt;
             saw_mode = true;
@@ -132,22 +132,22 @@ std::optional<CmdVerb::RecStart> parse_rec(std::string_view args) {
             return true;
         };
         if (key == "codec") {
-            const auto c = parse_rec_codec(val);
+            const auto c = capture::parse_rec_codec(val);
             if (!c || !take(kCodec))
                 return std::nullopt;
             v.opt.codec = *c;
         } else if (key == "scale") {
-            const auto s = parse_rec_scale(val);
+            const auto s = capture::parse_rec_scale(val);
             if (!s || !take(kScale))
                 return std::nullopt;
             v.opt.scale = *s;
         } else if (key == "motion") {
-            const auto m = parse_rec_motion(val);
+            const auto m = capture::parse_rec_motion(val);
             if (!m || !take(kMotion))
                 return std::nullopt;
             v.opt.motion = *m;
         } else if (key == "every") {
-            const auto n = parse_rec_every(val);
+            const auto n = capture::parse_rec_every(val);
             if (!n || !take(kEvery))
                 return std::nullopt;
             v.opt.every = *n;
@@ -163,15 +163,15 @@ std::optional<CmdVerb::RecStart> parse_rec(std::string_view args) {
             else
                 v.opt.to_frame = MoviePosition{*n};
         } else if (key == "segment") {
-            const auto n = parse_rec_size(val);
-            if (!n || !rec_segment_ok(*n) || !take(kSeg))
+            const auto n = capture::parse_rec_size(val);
+            if (!n || !capture::rec_segment_ok(*n) || !take(kSeg))
                 return std::nullopt;
             v.opt.segment_bytes = *n;
         } else {
             return std::nullopt;
         }
     }
-    if (!lstrip(args).empty() || !rec_bounds_ok(v.opt))
+    if (!lstrip(args).empty() || !capture::rec_bounds_ok(v.opt))
         return std::nullopt;
     return v;
 }

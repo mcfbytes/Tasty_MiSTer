@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "hal/fabric_region.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

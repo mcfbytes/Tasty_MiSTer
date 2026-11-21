@@ -10,7 +10,9 @@
 #include "app/owner_tally.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "os/clock.h"
 #include "os/deadline.h"
 #include "proto/autosave_policy.h"
@@ -68,7 +70,7 @@ public:
     struct Tally {
         std::uint32_t reboots_settled = 0;
         std::uint32_t reboot_drain_expiries = 0;
-        svc::Tally reboot_commit_expiries{};
+        infra::Tally reboot_commit_expiries{};
     };
 
     static constexpr std::int64_t kDrainBoundNs = 5'000'000'000;

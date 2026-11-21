@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/prelude.h"
 #include "proto/session_params.h"
 #include "proto/types.h"
 

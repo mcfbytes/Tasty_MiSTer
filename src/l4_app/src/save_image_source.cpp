@@ -42,7 +42,7 @@ bool SaveImageSource::bind(
 
 void SaveImageSource::unbind_all() {
     for (unsigned i = 0; i < kSlots; ++i) {
-        (void)bind(proto::SlotIndex::of(i), {});
+        (void)bind(proto::SlotIndex::truncating(i), {});
     }
 }
 

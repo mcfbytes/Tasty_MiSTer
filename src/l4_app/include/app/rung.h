@@ -9,6 +9,7 @@
 #include "cores/file_tx.h"
 #include "cores/ladder_host.h"
 #include "cores/wire_chunk.h"
+#include "infra/prelude.h"
 
 namespace mister::app {
 

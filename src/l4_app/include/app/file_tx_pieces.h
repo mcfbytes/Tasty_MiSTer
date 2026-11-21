@@ -18,9 +18,10 @@
 #include "cores/payload_pieces.h"
 #include "cores/wire_chunk.h"
 #include "hal/types.h"
+#include "infra/prelude.h"
 #include "infra/error.h"
 #include "infra/seat.h"
-#include "proto/spi_fio_queue.h"
+#include "proto/link/spi_fio_queue.h"
 #include "proto/types.h"
 #include "svc/file.h"
 
