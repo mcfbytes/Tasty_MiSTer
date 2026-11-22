@@ -17,16 +17,16 @@ ZLIB_NG_VER = "2.3.3"
 ZLIB_NG_URL = f"https://github.com/zlib-ng/zlib-ng/archive/{ZLIB_NG_VER}/zlib-ng-{ZLIB_NG_VER}.tar.gz"
 ZLIB_NG_SHA = "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
 
-ZLIB_VER = "1.3.2"
+ZLIB_VER = "1.4"
 ZLIB_URL = f"https://github.com/madler/zlib/releases/download/v{ZLIB_VER}/zlib-{ZLIB_VER}.tar.xz"
-ZLIB_SHA = "d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3"
+ZLIB_SHA = "4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c"
 
 LZO_URL = "https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz"
 LZO_SHA = "c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072"
 
-LIBCHDR_REV = "607694ca0812edfc9cc2030c64634fc2393668de"
+LIBCHDR_REV = "47d794151b2b64f6aba60304e6480f4f5a2bc24b"
 LIBCHDR_URL = f"https://github.com/rtissera/libchdr/archive/{LIBCHDR_REV}.tar.gz"
-LIBCHDR_SHA = "02e772a74c4e5ec110bb646e729e1910268d2dae2c76df2a1b35525cc3826a9c"
+LIBCHDR_SHA = "ee1131e748a2c7d7559b7054540ebe49637433901f92071560df52e369f7c7af"
 
 # Buildroot_MiSTer's target flags (gcc --with-cpu/fpu/float/mode, TARGET_CFLAGS), plus the 64-bit
 # off_t/time_t tasty itself compiles with: zlib's gz* API passes off_t across the boundary.
