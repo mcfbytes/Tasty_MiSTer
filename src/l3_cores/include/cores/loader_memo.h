@@ -4,6 +4,7 @@
 #include "infra/fixed_str.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "svc/slot_path.h"
 
 namespace mister::cores {
@@ -12,6 +13,8 @@ struct LoaderMemo {
     TASTY_SEAT_RESIDENT(Main);
 
     FixedStr<svc::kSlotPathCap, StrFit::Reject> last_boot{};
+
+    proto::FileSize first_cart{};
 };
 
 }

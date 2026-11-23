@@ -3,6 +3,7 @@
 
 #include <string_view>
 
+#include "cores/load_choice.h"
 #include "hal/types.h"
 #include "proto/types.h"
 
@@ -18,6 +19,8 @@ struct LoadAsk {
     bool disc = false;
 
     bool dongle = false;
+
+    LoadChoice choice{};
 };
 
 }

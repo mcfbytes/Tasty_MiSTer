@@ -7,6 +7,9 @@ namespace mister::cores {
 
 enum class ConfigFit : std::uint8_t {
     Partial,
+    Strict,
+    Bounded,
+    VersionGated,
     kCount,
 };
 

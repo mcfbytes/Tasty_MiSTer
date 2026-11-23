@@ -12,26 +12,32 @@
 
 namespace mister::svc {
 
-Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap) {
-    constexpr std::uint64_t kChunk = 64u * 1024u;
+Ex<std::vector<std::byte>> read_bounded(IFile& file, proto::FileSize cap) {
+    constexpr proto::FileSize kChunk{64u * 1024u};
     std::vector<std::byte> out;
-    std::vector<std::byte> chunk(static_cast<std::size_t>(std::min(cap, kChunk)));
-    while (out.size() < cap) {
-        const std::size_t want = static_cast<std::size_t>(
-            std::min<std::uint64_t>(chunk.size(), cap - out.size())
-        );
-        auto n = file.read_at(
-            proto::kFileStart + proto::FileSize{out.size()},
-            std::span<std::byte>(chunk.data(), want)
-        );
+    std::vector<std::byte> chunk = kChunk.min(cap).zeroed<std::vector<std::byte>>();
+    const proto::FileSize chunk_size = proto::FileSize::of(std::span<std::byte>(chunk));
+    proto::FileSize at{};
+    while (cap.holds(proto::kFileStart + at)) {
+        const proto::FileSize want = chunk_size.min(cap - at);
+        const std::span<std::byte> asked = infra::affine::first(std::span<std::byte>(chunk), want);
+        auto n = file.read_at(proto::kFileStart + at, asked);
         if (!n)
             return std::unexpected(n.error());
         if (n->empty())
             break;
-        const std::span<const std::byte> got = n->first_in(std::span<const std::byte>(chunk));
+        const std::span<const std::byte> got = infra::affine::first_clamped(
+            std::span<const std::byte>(asked),
+            proto::FileSize::of(*n)
+        );
         out.insert(out.end(), got.begin(), got.end());
+        at += proto::FileSize::of(got);
     }
     return out;
+}
+
+Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap) {
+    return read_bounded(file, proto::FileSize{cap});
 }
 
 Ex<std::vector<std::byte>> read_bounded(const Vfs& vfs, std::string_view path, std::uint64_t cap) {

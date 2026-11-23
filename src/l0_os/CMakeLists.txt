@@ -12,6 +12,7 @@ add_library(mister_os STATIC
   src/framebuffer.cpp
   src/i2c_device.cpp
   src/kernel_rt_probe.cpp
+  src/local_time.cpp
   src/mmio_region.cpp
   src/monotonic_clock.cpp
   src/nanosleep_delay.cpp
@@ -85,7 +86,9 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/kernel_tid.h
   os/key_injector.h
   os/linux_vt_console.h
+  os/local_time.h
   os/ui_vt_console.h
+  os/ui_vt_switch.h
   os/map_length.h
   os/mmio_region.h
   os/monotonic_clock.h

@@ -19,10 +19,13 @@ MountQueue::MountQueue(const Wiring& w) noexcept
       card_(w.vfs),
       inbox_(w.inbox),
       owner_events_(w.events.producer()),
+      refusals_(w.refusals),
       clock_(w.clock),
       ladder_(w.ladder),
       negotiated_(w.negotiated),
-      owner_tally_(w.owner_tally) {}
+      owner_tally_(w.owner_tally),
+      window_map_(w.window_map),
+      aperture_(w.aperture) {}
 
 bool MountQueue::start_mounts_live_() const noexcept {
     return !start_mounts_.empty()
@@ -70,18 +73,20 @@ void MountQueue::arm_mount(Host& host, const MountAsk& ask) {
         return;
     }
     const cores::CoreProfile& p = negotiated_.loaded_profile();
-    if (cores::role_of(p, ask.index) == cores::SlotRole::Save) {
+    const bool serviced = cores::mounts_via_slot_service(p.slots, ask.index);
+    if (cores::slot_service_serves(cores::role_of(p, ask.index)) || serviced) {
         ++tally_.mounts_armed;
         const cores::StagingPolicy& sp = p.staging;
         const bool framed = sp.save && sp.save->bracket && sp.save->slot == ask.index;
         MountAsk routed = ask;
-        if (!framed && !routed.index_word)
+        if (!framed && !routed.index_word && ask.servant == MountAsk::Servant::None)
             routed.index_word = pick_index_word_(ask.index, ask.path.view());
         save_mount_.emplace(
             SaveMount{
                 .ask = routed,
                 .due = os::Deadline::in(clock_, kSaveMountBound),
-                .bracketed = framed
+                .bracketed = framed,
+                .class_follows = serviced
             }
         );
         return;
@@ -146,77 +151,144 @@ void MountQueue::step_save_mount(Host& host) {
     TASTY_SEAT_BODY(MountQueue);
     if (!save_mount_)
         return;
-    SaveMount& m = *save_mount_;
-    const proto::SlotIndex slot = m.ask.index.block_slot();
+    const proto::SlotIndex slot = save_mount_->ask.index.block_slot();
 
-    if (m.gen && on_known_(host, slot))
+    if (on_known_(host, slot))
         return;
-    if (m.due.expired(clock_)) {
+    SaveMount& m = *save_mount_;
+
+    if (m.step != SaveMount::Step::Mirror && m.due.expired(clock_)) {
         on_timeout_(host, slot);
         return;
     }
-    if (m.gen)
-        return;
-    if (m.ask.path.view().empty()) {
-        advance_unmount_(host, slot);
-        return;
+    switch (m.step) {
+        case SaveMount::Step::Unmount:
+            advance_unmount_(host, slot);
+            return;
+        case SaveMount::Step::Act:
+            if (m.gen)
+                return;
+            if (m.ask.path.view().empty()) {
+                advance_detach_(host, slot);
+            } else {
+                advance_attach_(host, slot);
+            }
+            return;
+        case SaveMount::Step::Mirror:
+            advance_mirror_();
+            return;
+        case SaveMount::Step::Announce:
+        case SaveMount::Step::ClassHalf:
+            return;
     }
-    advance_attach_(host, slot);
 }
 
 bool MountQueue::on_known_(Host& host, proto::SlotIndex slot) {
-    if (!save_mount_ || !save_mount_->gen)
+    if (!save_mount_)
+        return false;
+    SaveMount& m = *save_mount_;
+    if (m.step == SaveMount::Step::Act) {
+        if (!m.gen)
+            return false;
+        const cores::SaveExtent e = host.ladder_host().save_extent();
+        if (e.act != m.gen)
+            return false;
+        if (e.answer == cores::SaveVerdict::Declined)
+            m.gen = {};
+        if (e.answer != cores::SaveVerdict::Known)
+            return false;
+        m.bytes = e.size_bytes;
+
+        if (m.ask.path.view().empty()) {
+            m.step = SaveMount::Step::ClassHalf;
+        } else {
+            begin_mirror_(m);
+        }
+    }
+    if (m.step == SaveMount::Step::Announce) {
+        if (m.then_load)
+            return hand_load_(host);
+        if (!announce_(host, slot))
+            return false;
+        m.step = SaveMount::Step::ClassHalf;
+    }
+    if (m.step != SaveMount::Step::ClassHalf)
+        return false;
+    if (m.class_follows) {
+
+        const bool ordered = m.ask.path.view().empty() ? order_class_eject_(host, m.ask.index)
+                                                       : order_class_mount_(host, m.ask, m.bytes);
+        if (!ordered)
+            return false;
+    }
+    finish_save_mount_(host, true);
+    return true;
+}
+
+bool MountQueue::hand_load_(Host& host) {
+    if (!save_mount_ || !save_mount_->then_load)
         return false;
     SaveMount& m = *save_mount_;
     const std::string_view path = m.ask.path.view();
-    const cores::SaveExtent e = host.ladder_host().save_extent();
-    if (e.act == m.gen && e.answer == cores::SaveVerdict::Declined)
-        m.gen = {};
-    if (e.act != m.gen || e.answer != cores::SaveVerdict::Known)
-        return false;
-    if (path.empty()) {
-        finish_save_mount_(host, true);
+
+    if (!negotiated_.owns_loader() && host.arm_loader(*m.then_load, path, m.bytes)) {
+        finish_save_mount_(host, true, true);
         return true;
     }
-    if (m.then_load) {
 
-        if (!negotiated_.owns_loader() && host.arm_loader(*m.then_load, path, e.size_bytes)) {
-            finish_save_mount_(host, true, true);
-            return true;
-        }
-
-        if (const auto id = host.ladder_host().intern_path(path, e.size_bytes); id) {
-            ContentRequest load = *m.then_load;
-            load.save = *id;
-            host.perform_content(load);
-            finish_save_mount_(host, true, true);
-            return true;
-        }
+    const auto id = host.ladder_host().intern_path(path, m.bytes);
+    if (!id)
         return false;
-    }
-    if (const auto id = host.ladder_host().intern_path(path, e.size_bytes); id) {
-        const proto::LinkOp::BindSlot op{
+    ContentRequest load = *m.then_load;
+    load.save = *id;
+    host.perform_content(load);
+    finish_save_mount_(host, true, true);
+    return true;
+}
+
+bool MountQueue::announce_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_)
+        return false;
+    const SaveMount& m = *save_mount_;
+
+    if (m.ask.servant == MountAsk::Servant::Control)
+        return host.ladder_host().order(
+            proto::LinkOp::BindSlot{.slot = slot, .bind = proto::LinkOp::SlotBind::Announce}
+        );
+    const auto id = host.ladder_host().intern_path(m.ask.path.view(), m.bytes);
+    if (!id)
+        return false;
+    return host.ladder_host().order(
+        proto::LinkOp::BindSlot{
             .slot = slot,
             .bind = proto::LinkOp::SlotBind::Mount,
             .bracketed = m.bracketed,
             .path = *id,
             .sends_index = m.ask.index_word.has_value(),
             .index_word = m.ask.index_word.value_or(proto::FioIndexByte{})
-        };
-        if (host.ladder_host().order(op)) {
-            finish_save_mount_(host, true);
-            return true;
         }
-    }
-    return false;
+    );
+}
+
+bool MountQueue::order_class_mount_(Host& host, const MountAsk& ask, proto::FileSize bytes) {
+    const auto id = host.ladder_host().intern_path(ask.path.view(), bytes);
+    if (!id)
+        return false;
+    return host.ladder_host().order(
+        proto::LinkOp::BindMount{.index = ask.index, .perform = true, .image = *id}
+    );
+}
+
+bool MountQueue::order_class_eject_(Host& host, proto::IoIndex index) {
+    return host.ladder_host().order(proto::LinkOp::BindMount{.index = index, .perform = true});
 }
 
 void MountQueue::on_timeout_(Host& host, proto::SlotIndex slot) {
     if (!save_mount_)
         return;
     SaveMount& m = *save_mount_;
-    const std::string_view path = m.ask.path.view();
-    if (!path.empty() && m.gen)
+    const bool mount = !m.ask.path.view().empty();
+    if (mount && m.gen)
         (void)host.ladder_host().order(
             proto::LinkOp::DetachSave{.slot = slot, .act = host.ladder_host().next_act()}
         );
@@ -228,6 +300,10 @@ void MountQueue::on_timeout_(Host& host, proto::SlotIndex slot) {
         finish_save_mount_(host, false, true);
         return;
     }
+
+    const bool announced = mount && m.step == SaveMount::Step::ClassHalf;
+    if (m.class_follows && !announced)
+        (void)order_class_eject_(host, m.ask.index);
     finish_save_mount_(host, false);
 }
 
@@ -235,23 +311,27 @@ void MountQueue::advance_unmount_(Host& host, proto::SlotIndex slot) {
     if (!save_mount_)
         return;
     SaveMount& m = *save_mount_;
-    if (!m.unmounted) {
-        if (!host.ladder_host().order(
-                proto::LinkOp::BindSlot{
-                    .slot = slot,
-                    .bind = proto::LinkOp::SlotBind::Unmount,
-                    .bracketed = m.bracketed,
-                    .sends_index = m.ask.index_word.has_value(),
-                    .index_word = m.ask.index_word.value_or(proto::FioIndexByte{})
-                }
-            ))
-            return;
-        m.unmounted = true;
-    }
+    if (!host.ladder_host().order(
+            proto::LinkOp::BindSlot{
+                .slot = slot,
+                .bind = proto::LinkOp::SlotBind::Unmount,
+                .bracketed = m.bracketed,
+                .sends_index = m.ask.index_word.has_value(),
+                .index_word = m.ask.index_word.value_or(proto::FioIndexByte{})
+            }
+        ))
+        return;
+    m.step = SaveMount::Step::Act;
+    advance_detach_(host, slot);
+}
+
+void MountQueue::advance_detach_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_)
+        return;
     const proto::ActKey g = host.ladder_host().next_act();
     if (!host.ladder_host().order(proto::LinkOp::DetachSave{.slot = slot, .act = g}))
         return;
-    m.gen = g;
+    save_mount_->gen = g;
 }
 
 void MountQueue::advance_attach_(Host& host, proto::SlotIndex slot) {
@@ -263,6 +343,8 @@ void MountQueue::advance_attach_(Host& host, proto::SlotIndex slot) {
     if (!id)
         return;
     const proto::ActKey g = host.ladder_host().next_act();
+
+    (void)refusal_reader_.take_if_changed(refusals_);
 
     if (!host.ladder_host().order(
             proto::LinkOp::AttachSave{
@@ -276,6 +358,50 @@ void MountQueue::advance_attach_(Host& host, proto::SlotIndex slot) {
     m.gen = g;
 }
 
+void MountQueue::begin_mirror_(SaveMount& m) {
+    m.step = SaveMount::Step::Announce;
+    const cores::CoreProfile& p = negotiated_.loaded_profile();
+    const std::optional<cores::DiskMirror> mirror = cores::mirror_of(p.slots, m.ask.index);
+    if (!mirror)
+        return;
+    auto source = svc::open_mirror_source(
+        vfs_,
+        m.ask.path.view(),
+        cores::disk_formats_of(p, m.ask.index),
+        mirror->room
+    );
+    if (!source) {
+        tally_.mirror_fills_refused.add();
+        return;
+    }
+    if (*source == nullptr) {
+        tally_.mirror_fills_skipped.add();
+        return;
+    }
+    auto fill = MirrorFill::open(std::move(*source), *mirror, p.windows, aperture_, window_map_);
+    if (!fill) {
+        tally_.mirror_fills_refused.add();
+        return;
+    }
+    m.fill.emplace(std::move(*fill));
+    m.step = SaveMount::Step::Mirror;
+    tally_.mirror_fills.add();
+}
+
+void MountQueue::advance_mirror_() {
+    if (!save_mount_ || !save_mount_->fill)
+        return;
+    SaveMount& m = *save_mount_;
+    auto done = m.fill->step();
+    if (!done || *done) {
+        if (!done)
+            tally_.mirror_fills_refused.add();
+        m.fill.reset();
+        m.step = SaveMount::Step::Announce;
+        m.due = os::Deadline::in(clock_, kSaveMountBound);
+    }
+}
+
 void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     if (!save_mount_)
         return;
@@ -283,8 +409,28 @@ void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     const CorrelationTag tag = save_mount_->ask.tag;
     const UiRequest::Kind which = save_mount_->ask.which;
     quiet = quiet || save_mount_->start;
+    const bool servant = save_mount_->ask.servant != MountAsk::Servant::None;
+    quiet = quiet || servant;
+    const proto::SlotIndex slot = index.block_slot();
+    const bool mounting = ok && !save_mount_->ask.path.view().empty();
+    const std::optional<svc::MountRefusal> refused = mounting ? refusal_at_(slot)
+                                                              : std::optional<svc::MountRefusal>{};
+    if (save_mount_->ask.servant == MountAsk::Servant::Control) {
+        if (ok)
+            announced_ = announced_.with(slot);
+    } else if (const auto held = mounted_.find(slot)) {
+        *held = ok && !refused ? save_mount_->ask.path : PathText{};
+    }
     save_mount_.reset();
-    if (ok && !quiet) {
+    if (refused) {
+
+        if (!servant) {
+            owner_events_.push(
+                Event::MountRefused{.slot = slot, .reason = *refused},
+                Event::Head{ERR_SITE(), {}, tag}
+            );
+        }
+    } else if (ok && !quiet) {
         ++tally_.save_mounts_done;
         owner_events_.push(
             Event::SdActivity{.index = proto::WideIoIndex::of(index).fio_byte()},
@@ -298,6 +444,13 @@ void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
         );
     }
     arm_next_mount(host);
+}
+
+std::optional<svc::MountRefusal> MountQueue::refusal_at_(proto::SlotIndex slot) noexcept {
+    const std::optional<svc::MountRefusalNote> note = refusal_reader_.take_if_changed(refusals_);
+    if (!note || note->slot != slot)
+        return std::nullopt;
+    return note->reason;
 }
 
 void MountQueue::arm_next_mount(Host& host) {
@@ -339,6 +492,7 @@ void MountQueue::arm_start_mount_(Host& host, const MountAsk& ask) {
             ++tally_.remembered_mounts_skipped;
             return;
         case cores::SlotRole::Save:
+        case cores::SlotRole::Drive:
 
             ++tally_.remembered_mounts_armed;
             ++tally_.mounts_armed;
@@ -390,11 +544,15 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
         slot0_held = slot0_held || digit == proto::FileSlotDigit::zero();
         const proto::IoIndex io = digit.io_index();
         MountAsk ask{.which = UiRequest::Kind::MountImage, .index = io, .tag = kUncaused};
-        ask.index_word = proto::WideIoIndex::of(
-                             io,
-                             proto::ext_subindex(path, items.subfield(it, 1))
-        )
-                             .fio_byte();
+
+        if (cores::mount_index_form_of(negotiated_.named_profile().slots, io)
+            == cores::MountIndexForm::ExtOrdinal) {
+            ask.index_word = proto::WideIoIndex::of(
+                                 io,
+                                 proto::ext_subindex(path, items.subfield(it, 1))
+            )
+                                 .fio_byte();
+        }
         if (!ask.path.assign(path)) {
             ++tally_.remembered_mounts_skipped;
             continue;
@@ -422,6 +580,7 @@ void MountQueue::queue_boot_images(const StartChain& chain) {
 void MountQueue::arm_boot_image_(const MountAsk& ask) {
     switch (cores::role_of(negotiated_.loaded_profile(), ask.index)) {
         case cores::SlotRole::Save:
+        case cores::SlotRole::Drive:
             ++tally_.boot_images_armed;
             ++tally_.mounts_armed;
             save_mount_.emplace(
@@ -455,6 +614,8 @@ void MountQueue::drop() noexcept {
     start_mounts_.clear();
     boot_images_.clear();
     start_pick_ladder_ = false;
+    mounted_ = {};
+    announced_ = {};
 }
 
 void MountQueue::ladder_ended() noexcept {

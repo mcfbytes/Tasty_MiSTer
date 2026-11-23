@@ -250,6 +250,12 @@ private:
     void after_mount_answer_(infra::OptRef<cores::Core> core) noexcept;
 
     [[nodiscard]] infra::OptRef<svc::IStorageBackend> save_backend_(proto::SlotIndex si) noexcept;
+    void bind_window_slots_(infra::OptRef<cores::Core> core) noexcept;
+
+    [[nodiscard]] infra::OptRef<svc::IStorageBackend> servant_of_(
+        infra::OptRef<cores::Core> core,
+        proto::SlotIndex slot
+    ) noexcept;
 
     hal::ISpiTransport& link_;
     LinkBinder& binder_;

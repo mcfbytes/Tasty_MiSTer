@@ -9,6 +9,10 @@ infra::Tally PadEgress::binds() const noexcept {
     return lw_ ? lw_->bind_count() : infra::Tally{};
 }
 
+infra::Tally PadEgress::gate_ends() const noexcept {
+    return lw_ ? lw_->gate_end_count() : infra::Tally{};
+}
+
 IPadLevelSink& PadEgress::route_() noexcept {
     if (lw_ && lw_->bound())
         return *lw_;

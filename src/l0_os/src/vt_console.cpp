@@ -17,6 +17,7 @@
 #include "infra/unique_fd.h"
 #include "os/path_buf.h"
 #include "os/ui_vt_console.h"
+#include "os/ui_vt_switch.h"
 #include "os/write_all.h"
 
 namespace mister::os {
@@ -141,6 +142,26 @@ void LinuxVtConsole::blank(VtNumber vt) noexcept {
 
 void LinuxVtConsole::restore_text(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
+    restore_text_op(vt);
+}
+
+std::optional<VtNumber> UiVtSwitch::active() noexcept {
+    TASTY_SEAT_BODY(UiVtSwitch);
+    return active_op();
+}
+
+Ex<void> UiVtSwitch::activate(VtNumber vt) noexcept {
+    TASTY_SEAT_BODY(UiVtSwitch);
+    return activate_op(vt);
+}
+
+void UiVtSwitch::blank(VtNumber vt) noexcept {
+    TASTY_SEAT_BODY(UiVtSwitch);
+    blank_op(vt);
+}
+
+void UiVtSwitch::restore_text(VtNumber vt) noexcept {
+    TASTY_SEAT_BODY(UiVtSwitch);
     restore_text_op(vt);
 }
 

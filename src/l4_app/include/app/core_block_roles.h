@@ -3,6 +3,7 @@
 
 #include "cores/core_support.h"
 #include "cores/save_channel.h"
+#include "cores/slot_servants.h"
 #include "infra/opt_ref.h"
 #include "proto/block_backing.h"
 #include "proto/block_roles.h"
@@ -26,6 +27,12 @@ public:
                 if (const auto channel = core_.save_channel())
                     return proto::BlockBacking::core_descriptor(
                         infra::OptRef<proto::IImageSource>{channel->descriptor()}
+                    );
+                return {};
+            case proto::SlotServer::CoreWindow:
+                if (const auto servants = core_.slot_servants())
+                    return proto::BlockBacking::core_window(
+                        infra::OptRef<const proto::IWindowGeometry>{servants->window_geometry()}
                     );
                 return {};
             case proto::SlotServer::Session:

@@ -67,7 +67,7 @@ public:
     void count_error() noexcept { ++tally_.save_upload_errors; }
 
 private:
-    [[nodiscard]] Ex<std::size_t> write_save_upload_(cores::ISaveUpload& up);
+    [[nodiscard]] Ex<std::size_t> write_save_upload_(cores::ISaveUpload& up, std::string_view core);
 
     hal::ISpiTransport& link_;
     infra::OptRef<const svc::Vfs> vfs_{};

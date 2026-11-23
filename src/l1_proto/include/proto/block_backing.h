@@ -11,11 +11,12 @@
 #include "infra/opt_ref.h"
 #include "proto/block_geometry.h"
 #include "proto/block_server.h"
+#include "proto/window_geometry.h"
 #include "proto/types.h"
 
 namespace mister::proto {
 
-enum class SlotServer : std::uint8_t { Session, CoreBlock, CoreDescriptor, kCount };
+enum class SlotServer : std::uint8_t { Session, CoreBlock, CoreDescriptor, CoreWindow, kCount };
 
 class BlockBacking {
 public:
@@ -29,7 +30,11 @@ public:
         infra::OptRef<IImageSource> descriptor;
     };
 
-    using Served = std::variant<Session, CoreBlock, CoreDescriptor>;
+    struct CoreWindow {
+        infra::OptRef<const IWindowGeometry> geometry;
+    };
+
+    using Served = std::variant<Session, CoreBlock, CoreDescriptor, CoreWindow>;
 
     static_assert(
         std::variant_size_v<Served> == static_cast<std::size_t>(SlotServer::kCount),
@@ -42,6 +47,7 @@ public:
         kArmIs<SlotServer::Session, Session>
         && kArmIs<SlotServer::CoreBlock, CoreBlock>
         && kArmIs<SlotServer::CoreDescriptor, CoreDescriptor>
+        && kArmIs<SlotServer::CoreWindow, CoreWindow>
     );
 
     constexpr BlockBacking() noexcept = default;
@@ -60,6 +66,12 @@ public:
         return BlockBacking{CoreDescriptor{descriptor}};
     }
 
+    [[nodiscard]] static constexpr BlockBacking core_window(
+        infra::OptRef<const IWindowGeometry> geometry
+    ) noexcept {
+        return BlockBacking{CoreWindow{geometry}};
+    }
+
     [[nodiscard]] constexpr SlotServer kind() const noexcept {
         return static_cast<SlotServer>(served_.index());
     }
@@ -76,6 +88,12 @@ public:
     [[nodiscard]] constexpr infra::OptRef<IBlockServer> server() const noexcept {
         if (const auto* b = std::get_if<CoreBlock>(&served_))
             return b->server;
+        return {};
+    }
+
+    [[nodiscard]] constexpr infra::OptRef<const IWindowGeometry> window() const noexcept {
+        if (const auto* w = std::get_if<CoreWindow>(&served_))
+            return w->geometry;
         return {};
     }
 

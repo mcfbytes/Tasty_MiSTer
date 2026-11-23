@@ -12,6 +12,7 @@ enum class Grant : std::uint8_t {
     SaveCopy = 1u << 2,
     Lamp = 1u << 3,
     Discs = 1u << 4,
+    Servants = 1u << 5,
 };
 
 class GrantSet {

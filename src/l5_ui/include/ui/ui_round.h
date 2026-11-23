@@ -234,6 +234,8 @@ private:
     void publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show);
     void publish_page_record();
 
+    [[nodiscard]] bool terminal_owns_keys_() const noexcept;
+
     [[nodiscard]] bool host_board_(os::RawMonotonicClock::time_point now);
 
     void tick_autosave_(os::RawMonotonicClock::time_point now);

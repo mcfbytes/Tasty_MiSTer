@@ -9,6 +9,7 @@
 #include "app/uart_binding.h"
 #include "app/uart_persist.h"
 #include "infra/prelude.h"
+#include "proto/status_word.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -48,19 +49,7 @@ template std::optional<std::array<std::uint8_t, UartPersist::kCardBytes>> read_e
 template std::optional<std::array<std::uint8_t, UartBinding::SpeedsFile::kBytes>> read_exact<
     UartBinding::SpeedsFile::kBytes>(const svc::Vfs&, std::string_view) noexcept;
 
-proto::TxSlabId intern_exact(
-    const svc::Vfs& vfs,
-    LinkTxChannel<SeatTag::Main>& inbox,
-    std::string_view rel,
-    std::size_t want
-) {
-    if (rel.empty() || want == 0 || want > kLinkTxSlabBytes)
-        return proto::TxSlabId::kNone;
-    std::uint8_t buf[kLinkTxSlabBytes]{};
-    if (!read_whole(vfs, rel, std::span<std::uint8_t>(buf, want)))
-        return proto::TxSlabId::kNone;
-    const auto id = inbox.intern(std::span<const std::uint8_t>(buf, want));
-    return id ? *id : proto::TxSlabId::kNone;
-}
+template std::optional<std::array<std::uint8_t, sizeof(proto::StatusWord::Bytes)>> read_exact<
+    sizeof(proto::StatusWord::Bytes)>(const svc::Vfs&, std::string_view) noexcept;
 
 }

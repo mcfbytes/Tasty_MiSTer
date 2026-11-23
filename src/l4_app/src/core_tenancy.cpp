@@ -37,8 +37,6 @@ Ex<void> CoreTenancy::adopt(const proto::LinkOp::AdoptCore& a) {
         settle_retire(RetireEnd::Adopt);
     if (mailbox_)
         mailbox_->forget();
-    if (disks_)
-        disks_->forget();
     switch (a.outcome) {
         case Built::Core:
             break;
@@ -81,6 +79,9 @@ Ex<void> CoreTenancy::adopt(const proto::LinkOp::AdoptCore& a) {
     adopted_slot_ = slot;
     adopted_gen_ = a.gen;
 
+    if (disks_)
+        (void)disks_->attach(built.disk_servants);
+
     if (built.fed_ring.has_value())
         (void)binder_.adopt_fed_ring(std::move(*built.fed_ring));
     const cores::CoreAdopt adopting{
@@ -113,7 +114,8 @@ void CoreTenancy::drop(LogInstant t0, proto::BlockSlotMask channel_borrows) {
             .gen = adopted_gen_,
             .seat = storage_life_,
             .mask = storage_life_ ? channel_borrows : proto::BlockSlotMask{},
-            .sent = {}
+            .sent = {},
+            .disks = disks_ ? disks_->detach() : DiskAttachSeq{}
         };
         current_.reset();
         adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
@@ -160,9 +162,25 @@ void CoreTenancy::settle_retire(RetireEnd end) noexcept {
 
 void CoreTenancy::drop_borrow_() noexcept {
     current_.reset();
-    release_(adopted_slot_, adopted_gen_);
+    Retiree refused{
+        .slot = adopted_slot_,
+        .gen = adopted_gen_,
+        .seat = storage_life_,
+        .mask = {},
+        .sent = {},
+        .disks = disks_ ? disks_->detach() : DiskAttachSeq{}
+    };
     adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
     adopted_gen_ = {};
+    if (poll_retiree_(refused)) {
+        release_retiree_(refused);
+        return;
+    }
+
+    if (retiring_.gen.built())
+        abandon_retiring_(false);
+    retiring_ = refused;
+    retire_due_ = os::Deadline::in(clock(), kCoreRetireBoundNs);
 }
 
 void CoreTenancy::release_(proto::CoreBaySlot slot, proto::BuildGeneration gen) noexcept {
@@ -187,7 +205,10 @@ bool CoreTenancy::poll_retiree_(Retiree& r) noexcept {
         if (!r.seat || r.seat->release_slot(si))
             r.mask = r.mask.without(si);
     }
-    return r.mask.empty();
+
+    if (r.disks.ordered() && (!disks_ || disks_->settle_attach(r.disks)))
+        r.disks = {};
+    return !r.held();
 }
 
 void CoreTenancy::abandon_retiring_(bool counted) noexcept {
@@ -219,7 +240,7 @@ void CoreTenancy::settle_abandoned_() noexcept {
     for (Retiree& a : abandoned_) {
         if (!a.gen.built())
             continue;
-        if (!a.mask.empty() && !poll_retiree_(a))
+        if (a.held() && !poll_retiree_(a))
             continue;
         release_retiree_(a);
         a = Retiree{};

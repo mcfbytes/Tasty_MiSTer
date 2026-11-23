@@ -175,6 +175,14 @@ ChildProcessExit ChildProcessExit::from_wait_status(WaitStatus status) noexcept 
     return exited(status.exit_status());
 }
 
+void ChildProcess::abandon() noexcept {
+    if (pidfd_ >= 0) {
+        (void)::close(pidfd_);
+        pidfd_ = -1;
+    }
+    pid_ = -1;
+}
+
 std::optional<ChildProcessExit> ChildProcess::try_reap() noexcept {
     if (pid_ <= 0)
         return std::nullopt;

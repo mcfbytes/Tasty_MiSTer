@@ -26,6 +26,7 @@ bool SaveImageSource::bind(
         return false;
     b->exists = false;
     b->size = proto::FileSize{};
+    b->track = proto::TrackShape{};
     b->blank = blank;
     b->manual = !path.empty() && manual;
     b->close_owed = false;
@@ -55,10 +56,12 @@ proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
     const auto b = find(slot);
     if (!b || b->path.view().empty())
         return proto::SlotAttributes{};
-    return proto::SlotAttributes::at_mount(
+    proto::SlotAttributes attr = proto::SlotAttributes::at_mount(
         b->manual ? proto::MountClass::Image : proto::MountClass::Save,
         b->exists
     );
+    attr.track = b->track;
+    return attr;
 }
 
 bool SaveImageSource::manual(proto::SlotIndex slot) const noexcept {
@@ -89,6 +92,12 @@ bool SaveImageSource::exists(proto::SlotIndex slot) const noexcept {
     return b.has_value() && b->exists;
 }
 
+void SaveImageSource::note_track_shape(proto::SlotIndex slot, proto::TrackShape shape) noexcept {
+    TASTY_SEAT_BODY(SaveImageSource);
+    if (const auto b = find(slot))
+        b->track = shape;
+}
+
 void SaveImageSource::note_attached(
     proto::SlotIndex slot,
     bool exists,
@@ -110,6 +119,7 @@ void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
         return;
     b->exists = false;
     b->size = proto::FileSize{};
+    b->track = proto::TrackShape{};
 
     b->path.clear();
     b->blank = svc::BlankSaveSpec{};

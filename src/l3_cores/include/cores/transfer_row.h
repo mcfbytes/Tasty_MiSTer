@@ -45,6 +45,7 @@ struct TransferRow {
 
     RowDest dest = RowDest::Fio;
     bool shaped = false;
+    bool derived = false;
     RowShapeKey shape{};
     bool byte_words = false;
     proto::WideIoIndex index{};
@@ -52,7 +53,7 @@ struct TransferRow {
     RowBracket bracket = RowBracket::AroundWithLength;
     std::uint8_t stride = 1;
     std::uint8_t lane = 0;
-    std::uint8_t fill = 0;
+    std::byte fill = std::byte{0};
 
     std::string_view source{};
     proto::FileOffset file_offset{};

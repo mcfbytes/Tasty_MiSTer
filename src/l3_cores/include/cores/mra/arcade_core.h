@@ -32,6 +32,7 @@ inline constexpr CoreProfile kArcadeProfile{
     .start = StartRule::None,
     .signatures = {},
     .undeclared_role = SlotRole::Save,
+    .largest_save = proto::FileSize{kNvramCap},
 };
 
 class ArcadeCore final : public Core, public IDipSwitches, public ISaveUpload {

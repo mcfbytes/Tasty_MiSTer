@@ -5,22 +5,21 @@
 
 #include <algorithm>
 #include <span>
+#include <utility>
 
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
 #include "infra/message_sum.h"
+#include "proto/link/poll_frame_read.h"
 #include "proto/link/spi_fio_queue.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::app::pcm {
 
-namespace {
-constexpr proto::FioWordCount kHeadWord{1};
-}
-
 void MailboxRelay::bind(proto::MailboxPoll poll, proto::CompanionBindGen gen) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     gen_ = gen;
+    bound_afresh_ = true;
     if (poll != proto::MailboxPoll::Keep)
         polling_ = poll == proto::MailboxPoll::On;
 }
@@ -29,83 +28,187 @@ void MailboxRelay::forget() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     polling_ = false;
     gen_ = proto::CompanionBindGen::none();
-    last_head_.reset();
+    mirrors_ = {};
+    bound_afresh_ = false;
+    held_act_.reset();
 }
 
 void MailboxRelay::service_rt(
     proto::link::Link& link,
     proto::link::SpiFioQueue& queue,
-    const proto::MailboxFrameDecl& frame
+    const proto::MailboxProgramme& programme,
+    const os::IClock& clock
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     ++round_;
+    const RoundActs acted = write_acts_(link, queue, programme, clock);
+    if (polling_)
+        run_programme_(link, programme, acted);
+}
+
+MailboxRelay::RoundActs MailboxRelay::write_acts_(
+    proto::link::Link& link,
+    proto::link::SpiFioQueue& queue,
+    const proto::MailboxProgramme& programme,
+    const os::IClock& clock
+) noexcept {
     const std::size_t widest = queue.bracket_windows(proto::kMailboxActBytes);
     const proto::link::SpiFioQueue::ActShape ask{
         .windows = proto::WindowCount{widest},
         .bytes = proto::FileSize{proto::kMailboxActBytes},
         .brackets = proto::BracketCount{1}
     };
+    RoundActs acted{};
+    bool bus_spent = false;
     for (unsigned i = 0; i < kReapPerRound; ++i) {
         if (!queue.fits(ask))
             break;
-        const Chan::Loan done = chan_.reap();
+        Chan::Loan done;
+        if (held_act_) {
+            done = std::move(*held_act_);
+            held_act_.reset();
+        } else {
+            done = chan_.reap();
+        }
         if (!done)
             break;
         if (!done.completed() || done->gen != gen_ || gen_.is_none()) {
             stale_.add();
-            last_head_.reset();
+
+            if (const auto mirror = mirrors_.find(done->select))
+                mirror->reset();
             continue;
         }
-        write_(queue, *done);
-    }
-    if (!polling_ || !proto::well_formed(frame))
-        return;
-
-    const proto::FioWordCount whole{frame.words};
-    proto::MailboxFrame f{};
-    bool moved = true;
-    {
-
-        const auto op = link.command(frame.poll_opcode);
-        if (!op) {
-            wire_faults_.add();
-            round_words_.charge(whole);
-            return;
+        detail::ActWriter w{
+            link,
+            queue,
+            programme,
+            clock,
+            *done,
+            round_words_,
+            acted.direct_spent,
+            bus_spent,
+            acted.wrote,
+            acts_,
+            refusals_,
+            none_acts_
+        };
+        const detail::ActEnd end = infra::dispatch<infra::AllRouted>(done->act, w);
+        if (end == detail::ActEnd::Held) {
+            held_act_ = std::move(done);
+            return acted;
         }
-        f.w[0] = *op;
-        moved = !last_head_ || f.w[0] != *last_head_;
-        round_words_.charge(moved ? whole : kHeadWord);
-        for (std::uint8_t i = 1; i < frame.words && moved; ++i) {
-            const auto r = link.read();
-            if (!r) {
-                wire_faults_.add();
-                return;
-            }
-            f.w[i] = *r;
+        if (end == detail::ActEnd::Reported) {
+            done->origin = MailboxSlot::Origin::Result;
+            done->act = {};
+            chan_.send(std::move(done));
         }
-        link.close();
     }
-    polls_.add();
-    if (!moved)
-        return;
-    Chan::Loan l = chan_.acquire();
-    if (!l) {
-        declines_.add();
-        return;
-    }
-    l->gen = gen_;
-    l->round = round_;
-    l->frame = f;
-    l->act = {};
-    chan_.send(std::move(l));
-    last_head_ = f.w[0];
-    forwarded_.add();
+    return acted;
 }
 
-void MailboxRelay::write_(proto::link::SpiFioQueue& queue, const MailboxSlot& s) noexcept {
-    detail::ActWriter
-        w{queue, std::span<const std::uint8_t>(s.bytes), acts_, refusals_, none_acts_};
-    infra::dispatch<infra::AllRouted>(s.act, w);
+void MailboxRelay::run_programme_(
+    proto::link::Link& link,
+    const proto::MailboxProgramme& programme,
+    RoundActs acted
+) noexcept {
+    infra::IndexedArray<bool, proto::kMailboxSelects.size(), proto::MailboxSelectIndex> lent{};
+    Mirrors read{};
+    proto::MailboxSelectIndex next{};
+    const bool afresh = std::exchange(bound_afresh_, false);
+    for (const proto::MailboxSelect& select : programme.polls()) {
+        const proto::MailboxSelectIndex self = next;
+        next = next.next();
+        if (afresh && select.relent_at_bind)
+            mirrors_[self].reset();
+        if (acted.wrote && select.relent_after_act)
+            mirrors_[self].reset();
+        if (select.follows && !lent[*select.follows])
+            continue;
+        if (select.gate && !select.gate->holds(read[select.gate->on]))
+            continue;
+
+        Chan::Loan l = select.pops ? chan_.acquire() : Chan::Loan{};
+        if (select.pops && !l) {
+            declines_.add();
+            continue;
+        }
+        const proto::link::PollFrameRead first = link.read_poll_frame(select.shape, mirrors_[self]);
+        round_words_.charge(first.charged);
+        if (first.outcome == proto::link::PollFrameRead::Outcome::Faulted) {
+            wire_faults_.add();
+            return;
+        }
+        polls_.add();
+        read[self] = select.shape.guard_word(first.frame);
+        if (first.outcome == proto::link::PollFrameRead::Outcome::Held)
+            continue;
+        proto::user_io::PollFrame frame = first.frame;
+        if (select.repeats != proto::ReplyCount{}
+            && !acted.direct_spent
+            && !repeat_(link, programme, select, frame))
+            return;
+        if (!l)
+            l = chan_.acquire();
+        if (!l) {
+            declines_.add();
+            continue;
+        }
+        l->gen = gen_;
+        l->round = round_;
+        l->origin = MailboxSlot::Origin::Poll;
+        l->select = self;
+        l->frame = frame;
+        l->act = {};
+        chan_.send(std::move(l));
+        mirrors_[self] = select.shape.guard_word(first.frame);
+        forwarded_.add();
+        lent[self] = true;
+    }
+}
+
+bool MailboxRelay::repeat_(
+    proto::link::Link& link,
+    const proto::MailboxProgramme& programme,
+    const proto::MailboxSelect& select,
+    proto::user_io::PollFrame& frame
+) noexcept {
+    const proto::MailboxSelect& gate = select.gate->on.in(programme.polls());
+    for (proto::ReplyCount done{}; done < select.repeats; done += proto::ReplyCount{1}) {
+        if (frame.kept + select.shape.kept() > proto::user_io::kMaxPollFrameReplies)
+            return true;
+        const proto::link::PollFrameRead asked = link.read_poll_frame(gate.shape, std::nullopt);
+        round_words_.charge(asked.charged);
+        if (asked.outcome == proto::link::PollFrameRead::Outcome::Faulted)
+            return faulted_();
+        if (!select.gate->holds(gate.shape.guard_word(asked.frame)))
+            return true;
+        const proto::link::PollFrameRead more = link.read_poll_frame(select.shape, std::nullopt);
+        round_words_.charge(more.charged);
+        if (more.outcome == proto::link::PollFrameRead::Outcome::Faulted)
+            return faulted_();
+        frame.keep_all(more.frame);
+    }
+    return true;
+}
+
+bool MailboxRelay::faulted_() noexcept {
+    wire_faults_.add();
+    return false;
+}
+
+proto::MailboxAct MailboxRelay::answer_(
+    cores::IMailboxServant& servant,
+    MailboxSlot& slot
+) noexcept {
+    switch (slot.origin) {
+        case MailboxSlot::Origin::Poll:
+            return servant
+                .serve(slot.select, slot.frame, std::span(slot.bytes), std::span(slot.bulk));
+        case MailboxSlot::Origin::Result:
+            return servant.settle(slot.result, std::span(slot.bytes), std::span(slot.bulk));
+    }
+    return {};
 }
 
 void MailboxRelay::serve_worker(CompanionHost& host) noexcept {
@@ -124,8 +227,7 @@ void MailboxRelay::serve_worker(CompanionHost& host) noexcept {
             held_awaited_ = true;
             return;
         }
-        (**held_).act = s ? s->serve((**held_).frame, std::span((**held_).bytes))
-                          : proto::MailboxAct{};
+        (**held_).act = s ? answer_(*s, **held_) : proto::MailboxAct{};
         held_->complete();
         held_.reset();
         held_awaited_ = false;

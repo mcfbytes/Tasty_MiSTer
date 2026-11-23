@@ -3,134 +3,134 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include "cores/config_blob.h"
+#include "cores/config_slots.h"
 #include "cores/core_support.h"
-#include "cores/minimig/host_file_server.h"
-#include "cores/nvram_store.h"
+#include "cores/mailbox_carriage.h"
+#include "cores/minimig/cd_decl.h"
+#include "cores/disk_port.h"
+#include "cores/mount_state.h"
+#include "cores/sector_kick.h"
+#include "cores/slot_mount.h"
+#include "cores/minimig/io_frame_sink.h"
+#include "cores/minimig/minimig_config.h"
+#include "cores/minimig/minimig_options.h"
+#include "cores/option_rows.h"
 #include "infra/error.h"
+#include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/image_sink.h"
+#include "proto/types.h"
 
 namespace mister::cores::minimig {
 
-enum class KickstartLayout : std::uint8_t {
-    Rom256K,
-    Rom512K,
-    Rom512KMirrored,
-    Rom1M,
-    Rom1MSplit,
-    Ext512K,
-    Unknown,
-};
-
-inline constexpr std::uint32_t kConfigBlobMaxSize = 7270;
-inline constexpr std::uint32_t kConfigBlobOldSize = 3100;
-
-struct Mm2PushRow {
-    std::uint8_t opcode;
-    std::uint16_t value_offset;
-    std::uint8_t width_words;
-    std::string_view why;
-};
-
-std::span<const Mm2PushRow> mm2_push_table();
-
-struct [[gnu::packed]] HrtmonConfigBlock {
-    std::uint32_t mon_size;
-    std::uint8_t col0h;
-    std::uint8_t col0l;
-    std::uint8_t col1h;
-    std::uint8_t col1l;
-    std::uint8_t right;
-    std::uint8_t keyboard;
-    std::uint8_t key;
-    std::uint8_t ide;
-    std::uint8_t a1200;
-    std::uint8_t aga;
-    std::uint8_t insert;
-    std::uint8_t delay;
-    std::uint8_t lview;
-    std::uint8_t cd32;
-    std::uint8_t screenmode;
-    std::uint8_t novbr;
-    std::uint8_t entered;
-    std::uint8_t hexmode;
-
-    static constexpr std::size_t kWireBytes = 22u;
-};
-
-struct HrtmonMaxChip {
-    std::uint32_t maxchip;
-};
-
-static_assert(offsetof(HrtmonConfigBlock, mon_size) == 0);
-static_assert(offsetof(HrtmonConfigBlock, col0h) == 4);
-static_assert(
-    offsetof(HrtmonConfigBlock, hexmode) == 21,
-    "D4: hexmode must be the 18th single-byte field after mon_size "
-    "(file offset +41) — not part of a flat uint32_t[20]"
-);
-
-static_assert(
-    HrtmonConfigBlock::kWireBytes == 22,
-    "D4: the block is 22 wire bytes — 4 (mon_size) + 18 single-byte "
-    "fields, hrtmon_base+20..+41 (minimig_config.cpp:303-341)"
-);
-static_assert(
-    sizeof(HrtmonConfigBlock) == HrtmonConfigBlock::kWireBytes,
-    "D4: sizeof must not include tail padding — a serializer that "
-    "takes sizeof would push 24 bytes and write 2 into the HRTmon ROM "
-    "image at hrtmon_base+42..+43, which the classic never touches"
-);
-static_assert(
-    offsetof(HrtmonConfigBlock, hexmode) + 1u == HrtmonConfigBlock::kWireBytes,
-    "D4: the last wire byte is hexmode at +41; kWireBytes must be one "
-    "past it"
-);
-static_assert(
-    alignof(HrtmonConfigBlock) == 1,
-    "D4: the block is a wire image, not an addressable record — a "
-    "non-1 alignment is what reintroduces the tail padding"
-);
-
-static_assert(
-    sizeof(HrtmonMaxChip) == 4,
-    "D4: maxchip is a lone detached u32 at +68, never adjacent to "
-    "HrtmonConfigBlock's fields"
-);
-
-class MinimigCore : public Core {
+class MinimigCore final : public Core,
+                          public IConfigSlots,
+                          public IOptionRows,
+                          public ISectorKick,
+                          public ISlotMount {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    MinimigCore(const CoreProfile& profile, const HostServices& host) : Core(profile, host) {}
+    static constexpr proto::IoIndex kKickstartSlot{4};
+    static constexpr proto::IoIndex kExtRomSlot{5};
 
-    [[nodiscard]] Ex<void> apply_configuration(const ConfigBlob& blob);
+    static constexpr std::uint8_t kFloppyDrives = 4;
 
-    [[nodiscard]] Ex<void> akiko_service(hal::SpiWord status_word);
+    static constexpr std::size_t kFloppyPathBytes = 1024;
 
-    hal::SpiWord cached_status() const noexcept { return status_cache_; }
+    MinimigCore(const CoreProfile& profile, const HostServices& host)
+        : Core(profile, host),
+          frames_(host.link),
+          mailbox_(MailboxCarriage::granted(host, cd_decl::kCdMailbox)),
+          options_(profile.option_rows) {}
 
-    [[nodiscard]] Ex<void> a2065_drain();
+    [[nodiscard]] Ex<void> apply(ConfigBlob value) override;
+    [[nodiscard]] std::span<const std::byte> value(
+        std::span<std::byte> dst
+    ) const noexcept override;
 
-    [[nodiscard]] Ex<void> mfm_write_track(
-        std::uint8_t drive,
-        std::uint8_t track,
-        std::span<const std::byte> data
-    );
+    [[nodiscard]] std::span<const OptionRow> option_rows() const noexcept override {
+        TASTY_SEAT_BODY(MinimigCore);
+        return profile().option_rows;
+    }
 
-    [[nodiscard]] Ex<void> enqueue_keycode(proto::KeyCode code_with_osd_bit);
+    [[nodiscard]] OptionRowView option_view(proto::OptionRowIndex row) noexcept override {
+        TASTY_SEAT_BODY(MinimigCore);
+        return options_.view(row, cfg_);
+    }
+
+    [[nodiscard]] Ex<void> set_option(
+        proto::OptionRowIndex row,
+        proto::FieldValue choice
+    ) override {
+        TASTY_SEAT_BODY(MinimigCore);
+        return options_.set(row, choice, cfg_, frames_);
+    }
+
+    [[nodiscard]] const IoFrameSink::Tally& frame_tally() const noexcept { return frames_.tally(); }
+
+    void service_kick() noexcept override;
+
+    [[nodiscard]] MountState mount_slot(proto::SlotIndex slot, std::string_view path) override;
+
+    [[nodiscard]] bool floppy_bound(proto::DiskUnit unit) const noexcept;
 
 private:
-    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
-    [[nodiscard]] Ex<void> do_reset() override;
-    [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
-    [[nodiscard]] Ex<void> on_osd_closed() override;
+    struct FloppyBind {
+        FixedStr<kFloppyPathBytes, StrFit::Clip> path{};
+        bool out = false;
+        bool bound = false;
+    };
 
-    hal::SpiWord status_cache_{};
+    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
+
+    [[nodiscard]] Ex<void> on_mount(proto::IoIndex slot, const MountedPath& image) override;
+
+    [[nodiscard]] infra::OptRef<IConfigSlots> on_config_slots() noexcept override {
+        return infra::OptRef<IConfigSlots>{*this};
+    }
+
+    [[nodiscard]] infra::OptRef<IOptionRows> on_options() noexcept override {
+        return infra::OptRef<IOptionRows>{*this};
+    }
+
+    [[nodiscard]] proto::IImageSink& on_image_sink() noexcept override { return frames_; }
+
+    [[nodiscard]] infra::OptRef<IMailboxRows> on_mailbox_rows() noexcept override {
+        return mailbox_ ? infra::OptRef<IMailboxRows>{*mailbox_} : infra::OptRef<IMailboxRows>{};
+    }
+
+    [[nodiscard]] infra::OptRef<ISectorKick> on_sector_kick() noexcept override {
+        return infra::OptRef<ISectorKick>{*this};
+    }
+
+    [[nodiscard]] infra::OptRef<ISlotMount> on_slot_mount() noexcept override {
+        return infra::OptRef<ISlotMount>{*this};
+    }
+
+    [[nodiscard]] Ex<void> on_apply_load_facts(
+        std::span<const std::uint8_t> facts,
+        std::string_view image
+    ) override;
+
+    [[nodiscard]] infra::OptRef<IDiskPort> floppy_port_() const noexcept;
+
+    [[nodiscard]] static std::optional<proto::DiskUnit> floppy_of_(proto::SlotIndex slot) noexcept;
+    void detach_floppies_() noexcept;
+
+    MinimigConfig cfg_ = MinimigConfig::defaults();
+    IoFrameSink frames_;
+    std::optional<MailboxCarriage> mailbox_;
+    MinimigOptions options_;
+    infra::IndexedArray<FloppyBind, kFloppyDrives, proto::DiskUnit> floppies_{};
 };
 
 }

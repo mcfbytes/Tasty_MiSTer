@@ -10,6 +10,7 @@
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "svc/file.h"
+#include "svc/move_names.h"
 #include "svc/rename_files.h"
 
 namespace mister::svc {
@@ -23,6 +24,8 @@ public:
     explicit CardWriter(const Vfs& card) noexcept : card_(card) {}
 
     [[nodiscard]] Ex<std::unique_ptr<IFile>> open(std::string_view path, OpenMode mode);
+
+    [[nodiscard]] Ex<std::unique_ptr<IFile>> open_named(std::string_view path, OpenMode mode);
     [[nodiscard]] Ex<void> ensure_dir(std::string_view rel);
     [[nodiscard]] Ex<void> replace(const RenameFiles& names);
 
@@ -31,6 +34,10 @@ public:
     [[nodiscard]] Ex<void> replace_file(std::string_view rel, std::span<const std::byte> bytes);
 
     [[nodiscard]] Ex<void> remove(std::string_view rel);
+
+    [[nodiscard]] Ex<void> remove_dir(std::string_view rel);
+
+    [[nodiscard]] Ex<void> move(const MoveNames& names);
 
 private:
     const Vfs& card_;

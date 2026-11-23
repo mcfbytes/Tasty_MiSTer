@@ -271,7 +271,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         ++owner_tally_.files_loaded;
         publish_done_(req.asked, req.tag);
         if (req.load_addr == hal::FabricAddr{})
-            return After{.companion = req.path};
+            return After{.companion = req.path, .slot = req.slot};
         return {};
     }
     auto buf = read_whole(**f, *sz);
@@ -315,7 +315,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
     ++owner_tally_.files_loaded;
     publish_done_(req.asked, req.tag);
     if (req.load_addr == hal::FabricAddr{})
-        return After{.companion = req.path};
+        return After{.companion = req.path, .slot = req.slot};
     return {};
 }
 
@@ -490,7 +490,7 @@ ContentPick::Armed ContentPick::arm_loader(
     const cores::CoreProfile& profile = negotiated_.loaded_profile();
     const std::string_view path = req.path.view();
     auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
-    const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
+    auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
     if (!sz) {
         ++owner_tally_.files_failed;
         return Armed{.taken = true};
@@ -514,9 +514,19 @@ ContentPick::Armed ContentPick::arm_loader(
         return Armed{.taken = true, .orders = {.walk = std::move(*w)}};
     }
     const cores::TransferRow& r = plan->rows[0];
-    const bool plain = !r.shaped && !r.placed;
+    const bool plain = !r.shaped && !r.placed && !r.derived;
     if (plain && r.dest != cores::RowDest::Window)
         return {};
+
+    if (r.derived) {
+        auto made = loader->source(ask, std::move(*f));
+        sz = made ? (*made)->size() : Ex<svc::FileSize>{std::unexpected(made.error())};
+        if (!sz || sz->empty()) {
+            ++owner_tally_.files_failed;
+            return Armed{.taken = true};
+        }
+        f = std::move(made);
+    }
     if (r.dest == cores::RowDest::Window) {
         auto armed = arm_window_row_(r, *f, loader, *sz, req, save, save_bytes);
         if (armed)

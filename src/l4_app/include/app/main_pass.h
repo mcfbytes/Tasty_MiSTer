@@ -15,6 +15,7 @@ struct MainPassStep {
         LastOrder,
         HeldLoad,
         Belt,
+        Servants,
         SaveStages,
         ParkAcks,
         Program,
@@ -23,7 +24,9 @@ struct MainPassStep {
         FrontEnd,
         LauncherSwap,
         Readiness,
+        Clock,
         Fabric,
+        Upkeep,
         kCount,
     };
     Step step;
@@ -53,6 +56,11 @@ inline constexpr std::array kMainPassSteps{
         MainPassStep::Step::Belt,
         "one rung per pass, after every ring this pass drained: a mount that arrived "
         "this pass is armed by its pop and takes its first rung here"
+    },
+    MainPassStep{
+        MainPassStep::Step::Servants,
+        "after the belt, so a servant slot's ask enters a queue this pass has already "
+        "stepped and takes its first rung on the next"
     },
     MainPassStep{
         MainPassStep::Step::SaveStages,
@@ -93,6 +101,16 @@ inline constexpr std::array kMainPassSteps{
         "seat's, with a recovery owed behind a switch"
     },
     MainPassStep{
+        MainPassStep::Step::Upkeep,
+        "a live core's upkeep orders only on a settled pass: a load in flight or a "
+        "switch standing owns the ring, so it runs after every step that can start one"
+    },
+    MainPassStep{
+        MainPassStep::Step::Clock,
+        "a core that keeps a calendar is told the time again once its period has run: "
+        "after every watch, so a pass that ends the session sends it nothing"
+    },
+    MainPassStep{
         MainPassStep::Step::Fabric,
         "the fabric facts go out on every pass, the empty ones included: MAIN's 1 Hz "
         "floor is what keeps the cell fresh"
@@ -118,6 +136,7 @@ consteval bool main_pass_order_holds(const std::array<MainPassStep, kMainPassSte
         S::LastOrder,
         S::HeldLoad,
         S::Belt,
+        S::Servants,
         S::SaveStages,
         S::ParkAcks,
         S::Program,
@@ -126,6 +145,8 @@ consteval bool main_pass_order_holds(const std::array<MainPassStep, kMainPassSte
         S::FrontEnd,
         S::LauncherSwap,
         S::Readiness,
+        S::Upkeep,
+        S::Clock,
         S::Fabric
     };
     static_assert(kStated.size() == static_cast<std::size_t>(S::kCount));

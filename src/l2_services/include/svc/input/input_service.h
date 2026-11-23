@@ -59,6 +59,8 @@ public:
 
     JoyMask joy_mask(PlayerIndex player) const;
 
+    [[nodiscard]] AnalogXy stick(PlayerIndex player, StickIndex which) const noexcept;
+
     [[nodiscard]] DialReport take_dials(PlayerIndex player) noexcept;
 
     PlayerSlots& players() noexcept { return players_; }
@@ -93,6 +95,8 @@ private:
 
     void fold_dials(const InputDevice& dev);
 
+    void fold_sticks(const InputDevice& dev);
+
     void maybe_assign_slot(InputDevice& dev);
 
     void refresh_slot_census() noexcept;
@@ -106,6 +110,12 @@ private:
     Generation devices_gen_{};
     infra::IndexedArray<JoyMask, kMaxPlayers, PlayerIndex> joy_mask_{};
     infra::IndexedArray<DialReport, kMaxPlayers, PlayerIndex> dials_{};
+
+    struct PlayerSticks {
+        infra::IndexedArray<AnalogXy, kSticks.size(), StickIndex> level{};
+    };
+
+    infra::IndexedArray<PlayerSticks, kMaxPlayers, PlayerIndex> sticks_{};
     InputCounters counters_{};
 };
 

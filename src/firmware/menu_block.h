@@ -15,11 +15,13 @@
 #include "infra/seat.h"
 #include "launcher_block.h"
 #include "menu_info_sink.h"
+#include "os/ui_vt_switch.h"
 #include "session_mode.h"
 #include "stores_block.h"
 #include "svc/config_snapshot.h"
 #include "thread_assembly.h"
 #include "ui/event_trace.h"
+#include "ui/fb_terminal_host.h"
 #include "ui/menu_model.h"
 #include "ui/ui_round.h"
 #include "ui/vfs_browse_source.h"
@@ -60,6 +62,8 @@ private:
     app::MapSaveVerdict map_saves_;
     app::MglPump mgl_pump_;
     app::HpsFramebuffer hps_fb_;
+    os::UiVtSwitch ui_vt_switch_;
+    ui::FbTerminalHost fb_terminal_host_;
     ui::VfsBrowseSource browse_source_;
 
     ConnectBlock connect_;

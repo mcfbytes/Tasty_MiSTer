@@ -8,6 +8,8 @@
 
 namespace mister::ui {
 
+enum class PageKeys : std::uint8_t { Menu, Below, Terminal };
+
 struct PageFacts {
 
     RowCount osd_rows{kFullOsdRows};
@@ -16,7 +18,7 @@ struct PageFacts {
 
     bool has_title_strip = true;
 
-    bool takes_input_focus = true;
+    PageKeys keys{PageKeys::Menu};
 
     bool allows_global_hotkeys = true;
     bool allows_popups = false;

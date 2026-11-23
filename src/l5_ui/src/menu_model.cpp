@@ -64,11 +64,13 @@
 #include "ui/option_item.h"
 #include "ui/osd_renderer.h"
 #include "ui/script_launch.h"
+#include "ui/fb_terminal_page.h"
 #include "ui/script_run_page.h"
 #include "ui/slot_pick_host.h"
 #include "ui/progress_page.h"
 #include "ui/indicator_page.h"
 #include "ui/info_page.h"
+#include "ui/mount_refusal_page.h"
 #include "ui/system_page.h"
 #include "ui/key_decoder.h"
 #include "ui/page_context.h"
@@ -78,6 +80,8 @@
 namespace mister::ui {
 
 bool MenuModel::global_hotkeys_allowed() const noexcept {
+    if (stack_.key_owner() == PageKeys::Terminal)
+        return false;
     const auto p = stack_.focus_top();
     return !p || p->facts().allows_global_hotkeys;
 }
@@ -180,6 +184,22 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, const PageArg& arg, PageCo
                 return nullptr;
             }
             return std::make_unique<ScriptRunPage>(static_cast<ScriptLaunch::Request&&>(*armed));
+        }
+        case PageId::FbTerminal: {
+
+            if (!ctx.launches.script) {
+                ++root_refusals_;
+                return nullptr;
+            }
+            std::optional<ScriptLaunch::Request> armed = ctx.launches.script->take();
+            if (!armed) {
+                ++root_refusals_;
+                return nullptr;
+            }
+            return std::make_unique<FbTerminalPage>(
+                static_cast<ScriptLaunch::Request&&>(*armed),
+                ctx.terminal
+            );
         }
         case PageId::Cheats: {
 
@@ -337,7 +357,6 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, const PageArg& arg, PageCo
         case PageId::Uart:
         case PageId::UartMode:
         case PageId::UartBaud:
-        case PageId::FbTerminal:
         case PageId::KbdMap:
         case PageId::LightGunCal:
         case PageId::AdvancedMapList:
@@ -686,7 +705,7 @@ bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
 void MenuModel::place_overlay(std::unique_ptr<Page> p) {
     const auto top = stack_.top();
 
-    if (top && !top->facts().takes_input_focus && top->id() != PageId::Indicators) {
+    if (top && top->facts().keys == PageKeys::Below && top->id() != PageId::Indicators) {
         stack_.replace(static_cast<std::unique_ptr<Page>&&>(p));
     } else {
         stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
@@ -720,6 +739,11 @@ bool MenuModel::push_info(PageContext& ctx, app::InfoId id) {
     auto p = make_info_page(id);
     if (p == nullptr)
         return false;
+    raise_overlay(static_cast<std::unique_ptr<Page>&&>(p), ctx);
+    return true;
+}
+
+void MenuModel::raise_overlay(std::unique_ptr<Page> p, PageContext& ctx) {
     place_overlay(static_cast<std::unique_ptr<Page>&&>(p));
     if (auto top = stack_.top())
         top->on_enter(ctx);
@@ -727,7 +751,6 @@ bool MenuModel::push_info(PageContext& ctx, app::InfoId id) {
 
     arm_auto_pop(ctx);
     repaint_ = true;
-    return true;
 }
 
 MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
@@ -765,7 +788,8 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
     }
 
     if (!menu_has_focus()) {
-        if (buttons.intersects({UiEvent::Menu})) {
+
+        if (buttons.intersects({UiEvent::Menu}) && stack_.key_owner() != PageKeys::Terminal) {
             if (osd_open()) {
 
                 stack_.clear();
@@ -1004,6 +1028,16 @@ void MenuModel::on_info(app::InfoId id, PageContext& ctx) {
         return;
     }
     (void)push_info(ctx, id);
+}
+
+void MenuModel::on_mount_refused(svc::MountRefusal reason, PageContext& ctx) {
+
+    sync_cells();
+    if (!binding_.ui_capable()) {
+        ++info_refusals_;
+        return;
+    }
+    raise_overlay(make_mount_refusal_page(reason), ctx);
 }
 
 void MenuModel::on_progress(cores::Progress progress, PageContext& ctx) {

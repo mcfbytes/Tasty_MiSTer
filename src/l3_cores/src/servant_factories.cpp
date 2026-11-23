@@ -5,24 +5,12 @@
 
 #include "cores/registry.h"
 #include "cores/servant_grant.h"
-#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 
 namespace mister::cores {
 
-std::unique_ptr<IDiskServant> make_disk_servant(
-    const svc::Vfs& vfs,
-    infra::OptRef<xthread::WakeFlag> activity
-) {
-    const ServantGrant grant{.vfs = vfs, .activity = activity};
-    for (const CoreFactory& row : core_table())
-        if (row.serves_disks())
-            return row.disk_servants.front().make(row.profile, grant);
-    return nullptr;
-}
-
-ServantSet make_servants(const svc::Vfs& vfs) {
-    const ServantGrant grant{.vfs = vfs};
+ServantSet make_servants(const svc::Vfs& vfs, const os::IClock& clock) {
+    const ServantGrant grant{.vfs = vfs, .clock = infra::OptRef<const os::IClock>{clock}};
     ServantSet set{};
     for (const CoreFactory& row : core_table()) {
         if (!row.has_mailbox_servant())

@@ -18,6 +18,7 @@
 #include "hal/spi_transport.h"
 #include "proto/conf_switches.h"
 #include "proto/link/download_session.h"
+#include "proto/aux_value.h"
 #include "proto/fio_tenant.h"
 #include "proto/fio_window.h"
 #include "proto/reset_fence.h"
@@ -42,9 +43,14 @@ public:
     static constexpr std::uint32_t kWindowHeaderWords = 2;
     static constexpr std::uint32_t kDataHeaderWords = 1;
 
+    static constexpr FioWordCount kUploadFramingWords{
+        3 * kWindowHeaderWords + 2 + kDataHeaderWords
+    };
+
     struct Bracket {
         WideIoIndex index{};
         std::span<const std::uint8_t> bytes{};
+        AuxValue address{};
     };
 
     struct ActShape {
@@ -89,6 +95,14 @@ public:
     [[nodiscard]] Ex<void> append(std::span<const Bracket> act);
 
     [[nodiscard]] Ex<void> append_command(std::span<const hal::SpiWord> words);
+
+    [[nodiscard]] Ex<FioWordCount> upload(
+        WideIoIndex index,
+        AuxValue address,
+        std::span<std::uint8_t> into
+    ) noexcept;
+
+    [[nodiscard]] FioWordCount upload_words(FileSize bytes) const noexcept;
 
     [[nodiscard]] FioWordCount drain(FioWordCount budget_words) noexcept;
 
@@ -148,7 +162,10 @@ private:
 
         std::uint32_t on(const FioWindow::Index&) const noexcept { return kWindowHeaderWords; }
 
-        std::uint32_t on(const FioWindow::Open&) const noexcept { return kWindowHeaderWords; }
+        std::uint32_t on(const FioWindow::Open& o) const noexcept {
+            constexpr std::uint32_t kAddressedWords = kWindowHeaderWords + 2;
+            return AuxValue::of(o.address).empty() ? kWindowHeaderWords : kAddressedWords;
+        }
 
         std::uint32_t on(const FioWindow::Data& d) const noexcept {
             return kDataHeaderWords + static_cast<std::uint32_t>(hal::words(width, d.len));

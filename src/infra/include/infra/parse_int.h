@@ -2,12 +2,16 @@
 #pragma once
 
 #include <charconv>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
+#include <utility>
 
 namespace mister::infra {
+
+enum class Radix : std::uint8_t { Binary = 2, Octal = 8, Decimal = 10, Hex = 16 };
 
 template <class T>
     requires std::is_integral_v<T> && (!std::is_same_v<T, bool>)
@@ -20,6 +24,12 @@ template <class T>
     if (ec != std::errc{} || p != last)
         return std::nullopt;
     return v;
+}
+
+template <class T>
+    requires std::is_integral_v<T> && (!std::is_same_v<T, bool>)
+[[nodiscard]] inline std::optional<T> parse_int(std::string_view s, Radix radix) noexcept {
+    return parse_int<T>(s, std::to_underlying(radix));
 }
 
 [[nodiscard]] constexpr std::string_view trim_line_end(std::string_view s) noexcept {

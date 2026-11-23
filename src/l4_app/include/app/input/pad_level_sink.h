@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "proto/link/pad_ports.h"
 #include "proto/pad_masks.h"
+#include "proto/stick_pos.h"
 #include "svc/types.h"
 
 namespace mister::app::input {
@@ -13,6 +15,12 @@ public:
     [[nodiscard]] virtual bool emit(svc::PlayerIndex player, proto::PadMasks masks) noexcept = 0;
 
     [[nodiscard]] virtual bool release(svc::PlayerIndex player, svc::JoyMask tested) noexcept = 0;
+
+    [[nodiscard]] virtual bool stick(
+        svc::PlayerIndex player,
+        proto::StickSide side,
+        proto::StickPos pos
+    ) noexcept = 0;
 
 protected:
     IPadLevelSink() = default;

@@ -41,6 +41,7 @@ public:
         SectorAck ack{};
         BlockSize block_size{kDefaultBlockBytes};
         BlockCount window_blocks{};
+        WindowPolicy policy = WindowPolicy::Image;
     };
 
     [[nodiscard]] Ex<Decode> poll(

@@ -2,10 +2,12 @@
 #pragma once
 
 #include "cores/cdi/q_control.h"
-#include "cores/cdi/toc_point.h"
+#include "svc/disc/toc_point.h"
 #include "svc/msf.h"
 
 namespace mister::cores::cdi {
+
+using svc::disc::TocPoint;
 
 struct TocEntry {
     QControl control;

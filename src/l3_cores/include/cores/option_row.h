@@ -17,11 +17,11 @@
 
 namespace mister::cores {
 
-inline constexpr std::size_t kMaxOptionRows = 40;
+inline constexpr std::size_t kMaxOptionRows = 80;
 
 inline constexpr std::size_t kOptionTextChars = 31;
 
-inline constexpr std::size_t kMaxOptionPages = 4;
+inline constexpr std::size_t kMaxOptionPages = 5;
 inline constexpr std::size_t kOptionTitleChars = 20;
 
 struct OptionRow {
@@ -59,6 +59,8 @@ struct OptionRow {
 
     struct ActionArm {
         ResetAct reset_act = ResetAct::None;
+        bool core_act = false;
+        bool arms_reset = false;
     };
 
     struct LinkArm {

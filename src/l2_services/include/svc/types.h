@@ -165,6 +165,8 @@ struct TrackNumber {
 
     constexpr void store_byte(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = v; }
 
+    constexpr void store_byte(std::span<std::byte, 1> dst) const noexcept { dst[0] = std::byte{v}; }
+
     [[nodiscard]] constexpr hal::SpiWord in_high_byte(hal::SpiWord base) const noexcept {
         return base.with_high_byte(v);
     }
@@ -185,9 +187,16 @@ struct TrackNumber {
     friend constexpr auto operator<=>(TrackNumber, TrackNumber) = default;
 };
 
+inline constexpr TrackNumber kLastTrackNumber{99};
+
 struct TrackCount {
     std::uint8_t v = 0;
     using affine_count = TrackCount;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr TrackCount truncating(I n) noexcept {
+        return TrackCount{static_cast<std::uint8_t>(n)};
+    }
 
     [[nodiscard]] constexpr bool contains(TrackIndex index) const noexcept;
 
@@ -212,6 +221,8 @@ struct TrackCount {
     }
 
     constexpr void store_byte(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = v; }
+
+    constexpr void store_byte(std::span<std::byte, 1> dst) const noexcept { dst[0] = std::byte{v}; }
 
     [[nodiscard]] constexpr Msf as_toc_minute() const noexcept;
 
@@ -250,6 +261,10 @@ struct TrackIndex {
     [[nodiscard]] constexpr TrackNumber number() const noexcept {
         return TrackNumber{static_cast<std::uint8_t>(v + 1)};
     }
+
+    constexpr void store_byte(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = v; }
+
+    constexpr void store_byte(std::span<std::byte, 1> dst) const noexcept { dst[0] = std::byte{v}; }
 
     [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
         return Error{code, at, v};
@@ -495,6 +510,10 @@ struct Crc32 {
         return std::bit_cast<std::array<std::uint8_t, 4>>(
             std::endian::native == std::endian::little ? std::byteswap(v) : v
         );
+    }
+
+    constexpr void store_le32(std::span<std::byte, 4> dst) const noexcept {
+        infra::store_le<std::uint32_t>(dst, v);
     }
 
     friend constexpr bool operator==(Crc32, Crc32) = default;

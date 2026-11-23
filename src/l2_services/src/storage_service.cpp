@@ -51,6 +51,7 @@ proto::StorageStatus status_of(Errc e) noexcept {
         case Errc::busy:
         case Errc::seat_absent:
         case Errc::contract:
+        case Errc::choice_needed:
             return proto::StorageStatus::Refused;
     }
 
@@ -157,37 +158,69 @@ void StorageService::on(const Req::Fetch& a, const Req::Head& h, Work& w) noexce
         w.arena->window = proto::ResidentWindow::substitute();
         o = from(refusal(Errc::stale, ERR_SITE()));
     } else {
-        IStorageBackend& b = *live;
-        b.note_tag(h.tag);
-        const std::span<std::uint8_t> whole = w.arena->bytes;
-        auto n = b.read_at(a.block_size.position_of(a.base), infra::byte_cast<std::byte>(whole));
-        const ISaveFilesOnIo::Save& save = io_.slots[h.slot].save();
-        const proto::SaveSlotRule rule = proto::SaveSlotRule::at_mount(
-            save.extent.has_value(),
-            save.extent.value_or(proto::FileSize{}),
-            save.mount
-        );
-
-        if (!n && n.error().code == Errc::not_found && rule.deferred_create) {
-            svc::fill_absent(save.blank, a.base, whole);
-            w.arena->window = proto::ResidentWindow::image(
-                a.base,
-                a.block_size,
-                proto::ResidentBytes::staging()
-            );
-        } else if (n) {
-
-            const infra::ByteCount got = *n;
-            got.zero_past_in(whole);
-            w.arena->window = !got.empty()
-                ? proto::ResidentWindow::image(a.base, a.block_size, proto::ResidentBytes::of(got))
-                : proto::ResidentWindow::substitute();
-        } else {
-            w.arena->window = proto::ResidentWindow::substitute();
-            o = from(n.error());
+        live->note_tag(h.tag);
+        switch (a.space) {
+            case proto::ImageSpace::Bytes:
+                o = fetch_bytes_(a, h, *w.arena, *live);
+                break;
+            case proto::ImageSpace::Track:
+                o = fetch_track_(a, *w.arena, *live);
+                break;
         }
     }
     finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
+}
+
+StorageService::Outcome StorageService::fetch_bytes_(
+    const Req::Fetch& a,
+    const Req::Head& h,
+    SlotArena& arena,
+    IStorageBackend& b
+) noexcept {
+    const std::span<std::uint8_t> whole = arena.bytes;
+    auto n = b.read_at(a.block_size.position_of(a.base), infra::byte_cast<std::byte>(whole));
+    const ISaveFilesOnIo::Save& save = io_.slots[h.slot].save();
+    const proto::SaveSlotRule rule = proto::SaveSlotRule::at_mount(
+        save.extent.has_value(),
+        save.extent.value_or(proto::FileSize{}),
+        save.mount
+    );
+
+    if (!n && n.error().code == Errc::not_found && rule.deferred_create) {
+        svc::fill_absent(save.blank, a.base, whole);
+        arena.window = proto::ResidentWindow::image(
+            a.base,
+            a.block_size,
+            proto::ResidentBytes::staging()
+        );
+        return {};
+    }
+    if (!n) {
+        arena.window = proto::ResidentWindow::substitute();
+        return from(n.error());
+    }
+
+    const infra::ByteCount got = *n;
+    got.zero_past_in(whole);
+    arena.window = !got.empty()
+        ? proto::ResidentWindow::image(a.base, a.block_size, proto::ResidentBytes::of(got))
+        : proto::ResidentWindow::substitute();
+    return {};
+}
+
+StorageService::Outcome StorageService::fetch_track_(
+    const Req::Fetch& a,
+    SlotArena& arena,
+    IStorageBackend& b
+) noexcept {
+    const proto::TrackShape::Ask ask{a.base, a.units};
+    auto n = b.read_track(ask, infra::byte_cast<std::byte>(std::span<std::uint8_t>{arena.bytes}));
+    if (!n || n->empty()) {
+        arena.window = proto::ResidentWindow::substitute();
+        return n ? Outcome{} : from(n.error());
+    }
+    arena.window = proto::ResidentWindow::track(ask, a.block_size, proto::ResidentBytes::of(*n));
+    return {};
 }
 
 void StorageService::on(const Req::ReadAhead& a, const Req::Head& h, Work& w) noexcept {
@@ -231,14 +264,29 @@ void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexce
         b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.arena->bytes;
         const std::span<const std::uint8_t> want = clamped_extent(whole, a.bytes);
-        auto n = b.write_at(a.offset, infra::byte_cast<const std::byte>(want));
-        if (!n) {
-            o = from(n.error());
-        } else if (*n != infra::ByteCount{want.size()}) {
+        switch (a.space) {
+            case proto::ImageSpace::Bytes: {
+                auto n = b.write_at(a.offset, infra::byte_cast<const std::byte>(want));
+                if (!n) {
+                    o = from(n.error());
+                } else if (*n != infra::ByteCount{want.size()}) {
 
-            o = from(proto::FileSize::of(*n).refusal(Errc::short_write, ERR_SITE()));
-        } else {
-            c.end = a.offset + proto::FileSize::of(*n) - proto::kFileStart;
+                    o = from(proto::FileSize::of(*n).refusal(Errc::short_write, ERR_SITE()));
+                } else {
+                    c.end = a.offset + proto::FileSize::of(*n) - proto::kFileStart;
+                }
+                break;
+            }
+            case proto::ImageSpace::Track: {
+
+                const proto::TrackShape::Ask ask = b.track_shape().written_ask(
+                    a.offset,
+                    proto::FileSize::of(want)
+                );
+                if (auto r = b.write_track(ask, infra::byte_cast<const std::byte>(want)); !r)
+                    o = from(r.error());
+                break;
+            }
         }
     }
     finish_(o, w, infra::make<Cmp>(c, answer_head(h, o)));
@@ -294,6 +342,7 @@ void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexc
             : w.backend->open_extent(h.slot, w.hand->order);
         if (e) {
             c.size = *e;
+            c.track = w.backend->track_shape();
         } else {
             o = from(e.error());
         }
@@ -557,6 +606,24 @@ bool StorageService::stage_backend(
     std::span<const std::byte> order,
     infra::OptRef<const BlankSaveSpec> blank
 ) noexcept {
+    return stage_(slot, backend, order, StageRiders{.blank = blank});
+}
+
+bool StorageService::stage_image(
+    proto::SlotIndex slot,
+    IStorageBackend& backend,
+    std::span<const std::byte> order,
+    std::span<const DiskFormatRow> formats
+) noexcept {
+    return stage_(slot, backend, order, StageRiders{.formats = formats});
+}
+
+bool StorageService::stage_(
+    proto::SlotIndex slot,
+    IStorageBackend& backend,
+    std::span<const std::byte> order,
+    const StageRiders& riders
+) noexcept {
 
     if (!rt_.slots.find(slot) || !home_(slot) || order.size() > kStorageOrderBytes) {
         refusals_.add();
@@ -567,7 +634,7 @@ bool StorageService::stage_backend(
     infra::OptRef<IStorageBackend>& staged = hand.stage;
 
     if (staged && &*staged == &backend) {
-        set_order_(hand, order, blank);
+        set_order_(hand, order, riders);
         return true;
     }
     if (staged) {
@@ -575,17 +642,17 @@ bool StorageService::stage_backend(
         return false;
     }
     staged = infra::OptRef<IStorageBackend>{backend};
-    set_order_(hand, order, blank);
+    set_order_(hand, order, riders);
     return true;
 }
 
 void StorageService::set_order_(
     BlockCtl& hand,
     std::span<const std::byte> order,
-    infra::OptRef<const BlankSaveSpec> blank
+    const StageRiders& riders
 ) noexcept {
-    (void)hand.order.set(order);
-    hand.blank = blank;
+    (void)hand.order.set(order, riders.formats);
+    hand.blank = riders.blank;
 }
 
 bool StorageService::release_slot(proto::SlotIndex slot) noexcept {

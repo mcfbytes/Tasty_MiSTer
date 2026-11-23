@@ -182,6 +182,10 @@ void UiRound::ask_user_reset_() {
     ++user_resets_asked_;
 }
 
+bool UiRound::terminal_owns_keys_() const noexcept {
+    return model_.stack().key_owner() == PageKeys::Terminal;
+}
+
 bool UiRound::publish_visibility(proto::LinkOp::OsdShow show, proto::OsdTarget target) {
     ++vis_pubs_;
     const proto::LinkOp::SetOsdVisible op{.show = show, .target = target};
@@ -194,17 +198,19 @@ bool UiRound::publish_visibility(proto::LinkOp::OsdShow show, proto::OsdTarget t
 }
 
 void UiRound::publish_focus_(std::optional<proto::LinkOp::OsdShow> published_show) {
-    const app::input::KeyFocus focus = last_show_ != proto::LinkOp::OsdShow::Menu
-        ? app::input::KeyFocus::Core
-        : (model_.allow_cfg_switch() ? app::input::KeyFocus::MenuIniSwitch
-                                     : app::input::KeyFocus::Menu);
+    const app::input::KeyFocus focus = terminal_owns_keys_()
+        ? app::input::KeyFocus::Terminal
+        : (last_show_ == proto::LinkOp::OsdShow::Menu
+               ? (model_.allow_cfg_switch() ? app::input::KeyFocus::MenuIniSwitch
+                                            : app::input::KeyFocus::Menu)
+               : app::input::KeyFocus::Core);
     const bool focus_edge = focus != last_focus_;
     if (focus_edge) {
         last_focus_ = focus;
         key_focus_.publish(focus);
     }
     if (focus_edge || published_show.has_value()) {
-        osd_file_.on_visible(focus != app::input::KeyFocus::Core);
+        osd_file_.on_visible(app::input::raises_osd_gate(focus));
     }
 }
 
@@ -343,6 +349,11 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         fb_ && fb_->raised()
     );
     ctx_.session.info_plane = info_plane_();
+
+    const app::IdleKnobsCell::Sample idle_knobs = idle_.sample();
+    const bool console_view = idle_knobs
+        && idle_knobs.value.fb_terminal
+        && !(video_ && video_->direct_video());
     const bool idle = !drained
         && !page_poll
         && !decoder_.pending()
@@ -358,14 +369,16 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         ctx_.status = host.bar;
         ctx_.session.hd_switchable = hd_switchable;
         ctx_.session.autosave = autosave_on;
+        ctx_.session.console_view = console_view;
         ++samples_;
 
         (void)model_.pump(ctx_, renderer_);
     }
 
+    const bool terminal_top = terminal_owns_keys_();
     front_end_.round(
         model_.status_words(),
-        model_.front_end() && !model_.launcher_hosting(),
+        model_.front_end() && !model_.launcher_hosting() && !terminal_top,
         ctx_.ui_requests
     );
 
@@ -376,7 +389,7 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
     }
 
     const os::RawMonotonicClock::time_point now = clock_.now();
-    const app::IdleKnobsCell::Sample knobs = idle_.sample();
+    const app::IdleKnobsCell::Sample knobs = idle_knobs;
     const FrontEndIdleClock::Result idle_state = idle_clock_.round(
         FrontEndIdleClock::Inputs{
             .now = now,
@@ -417,8 +430,9 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
         model_.set_hd_root(hd_->available());
     }
 
-    const proto::OsdTarget menu_target = hd_ && hd_->intends_hdmi() ? proto::OsdTarget::Vga
-                                                                    : proto::OsdTarget::All;
+    const proto::OsdTarget menu_target = (hd_ && hd_->intends_hdmi()) || terminal_top
+        ? proto::OsdTarget::Vga
+        : proto::OsdTarget::All;
     return app::UiRoundEdge{
         .pumped = !idle,
         .target = model_.stack().top_id() == PageId::Indicators ? board_.target() : menu_target,

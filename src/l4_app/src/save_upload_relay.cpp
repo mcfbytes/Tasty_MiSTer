@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_upload_relay.h"
 
+#include <algorithm>
 #include <cstring>
 #include <span>
 #include <utility>
 
 #include "infra/message_sum.h"
+#include "infra/span_cut.h"
 
 namespace mister::app {
 
@@ -17,13 +19,22 @@ namespace {
 
 }
 
-bool SaveUploadRelay::order(const cores::mra::NvramSave& image, std::string_view rel) noexcept {
+bool SaveUploadRelay::order(
+    const cores::mra::NvramSave& image,
+    std::string_view rel,
+    const cores::SaveShape& shape
+) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
-    if (image.size.empty() || rel.empty() || !rt_.order.rel.assign(rel)) {
+
+    const bool framed = shape.frames(image.size) && proto::FileSize::of(shape.lead) <= kMaxLead;
+    if (image.size.empty() || rel.empty() || !framed || !rt_.order.rel.assign(rel)) {
         rt_.refused.add();
         return false;
     }
     rt_.order.image = image;
+    rt_.order.frame = shape.frame;
+    if (!shape.lead.empty())
+        std::memcpy(rt_.order.lead.data(), shape.lead.data(), shape.lead.size());
     rt_.order.owed = true;
     return true;
 }
@@ -119,6 +130,13 @@ void SaveUploadRelay::start_() noexcept {
     l->ask = infra::make<Ask>(s, head_());
     l->act = {};
     (void)l->rel.assign(rt_.order.rel.view());
+    l->frame = rt_.order.frame;
+    const std::span<const std::uint8_t> lead = infra::affine::first(
+        std::span<const std::uint8_t>(rt_.order.lead),
+        rt_.order.frame.banks.lead
+    );
+    if (!lead.empty())
+        std::memcpy(l->bytes.data(), lead.data(), lead.size());
     rt_.order.owed = false;
     rt_.pull_out = true;
     rt_.started.add();
@@ -213,7 +231,12 @@ void SaveUploadRelay::on(const Ask::Start& a, const RelayStamp& h, Job& job) noe
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
     io_.serving = h;
     const cores::mra::NvramSave image{.index = a.index, .size = proto::FileSize{a.size}};
-    job->act = io_.servant->start(image, job->rel.view(), a.width);
+    const std::span<const std::uint8_t> piece{job->bytes};
+    const cores::SaveShape shape{
+        .frame = job->frame,
+        .lead = infra::affine::first_clamped(piece, job->frame.banks.lead)
+    };
+    job->act = io_.servant->start(image, job->rel.view(), a.width, shape);
 }
 
 void SaveUploadRelay::on(const Ask::Resume&, const RelayStamp& h, Job& job) noexcept {

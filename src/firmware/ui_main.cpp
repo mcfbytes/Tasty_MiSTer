@@ -80,6 +80,7 @@ UiMain::UiMain(
     slots[infra::ordinal(Roster::Slot::mgl)] = slot_of(wiring.mgl);
     slots[infra::ordinal(Roster::Slot::video)] = slot_of(wiring.video);
     slots[infra::ordinal(Roster::Slot::launcher)] = slot_of(wiring.launcher_screen);
+    slots[infra::ordinal(Roster::Slot::terminal)] = slot_of(wiring.terminal);
     slots[infra::ordinal(Roster::Slot::shots)] = slot_of(wiring.shots);
     slots[infra::ordinal(Roster::Slot::replay)] = slot_of(wiring.replay);
     slots[infra::ordinal(Roster::Slot::recorder)] = slot_of(wiring.recorder);

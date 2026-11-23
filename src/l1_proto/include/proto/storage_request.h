@@ -8,6 +8,7 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/image_space.h"
 #include "proto/slot_attributes.h"
 #include "proto/types.h"
 
@@ -40,6 +41,8 @@ struct StorageRequest {
         static constexpr Kind kKind = Kind::Fetch;
         Lba base{};
         BlockSize block_size{};
+        BlockCount units{};
+        ImageSpace space = ImageSpace::Bytes;
     };
 
     struct ReadAhead {
@@ -52,7 +55,7 @@ struct StorageRequest {
         static constexpr Kind kKind = Kind::Write;
         FileOffset offset{};
         std::uint32_t bytes = 0;
-        std::uint8_t pad_[4]{};
+        ImageSpace space = ImageSpace::Bytes;
     };
 
     struct Create {
@@ -84,5 +87,10 @@ struct StorageRequest {
 
 static_assert(infra::MessageSum<StorageRequest> && infra::alternatives_are_total<StorageRequest>());
 static_assert(sizeof(StorageRequest) == 32 && alignof(StorageRequest) == 8);
+static_assert(
+    sizeof(StorageRequest::Fetch) == StorageRequest::kStore
+        && sizeof(StorageRequest::Write) == StorageRequest::kStore,
+    "a data request fills the store exactly, with no padding field"
+);
 
 }

@@ -42,6 +42,13 @@ public:
     [[nodiscard]] Ex<void> push_analog_l(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos);
     [[nodiscard]] Ex<void> push_analog_r(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos);
 
+    [[nodiscard]] Ex<void> push_stick(
+        ILinkPadEncoder& pads,
+        PlayerIndex player,
+        StickSide side,
+        StickPos pos
+    );
+
     [[nodiscard]] Ex<void> push_paddle(
         ILinkPadEncoder& pads,
         PlayerIndex player,

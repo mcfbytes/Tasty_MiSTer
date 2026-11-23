@@ -5,6 +5,7 @@
 #include "app/log_clock.h"
 #include "app/save_upload_relay.h"
 #include "cores/core_support.h"
+#include "cores/save_home.h"
 #include "cores/save_upload.h"
 #include "app/log_rec.h"
 #include "infra/prelude.h"
@@ -40,13 +41,35 @@ bool NvramUpload::settle_step(bool fio_free) {
     return true;
 }
 
-Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up) {
-    const auto rel = config_rel("nvram/", up.save_file_name());
+namespace {
+
+[[nodiscard]] FixedStr<kConfigRelCap, StrFit::Reject> save_rel(
+    const cores::ISaveUpload& up,
+    std::string_view core
+) {
+    const std::string_view name = up.save_file_name();
+    switch (up.save_home()) {
+        case cores::SaveHome::ConfigNvram:
+            return config_rel("nvram/", name);
+        case cores::SaveHome::CoreSaves: {
+            auto rel = core_saves_dir(core);
+            if (rel.empty() || name.empty() || !rel.append(name))
+                rel.clear();
+            return rel;
+        }
+    }
+    return {};
+}
+
+}
+
+Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up, std::string_view core) {
+    const auto rel = save_rel(up, core);
     if (rel.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
 
     const std::optional<cores::mra::NvramSave> image = up.save_image();
-    if (!image || !saves_.order(*image, rel.view())) {
+    if (!image || !saves_.order(*image, rel.view(), up.save_shape())) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
     return image->size.file_word<std::size_t>();
@@ -76,7 +99,7 @@ Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
         return std::unexpected(req.error());
     if (!req->requested())
         return std::size_t{0};
-    return write_save_upload_(*up);
+    return write_save_upload_(*up, current->profile().name);
 }
 
 bool NvramUpload::save_upload_counted(const SaveCtx& ctx) noexcept {
@@ -98,14 +121,14 @@ Ex<std::size_t> NvramUpload::save_upload_now(const SaveCtx& ctx) {
     if (ctx.fenced)
         return std::size_t{0};
     const auto up = current->save_upload();
-    if (!up)
+    if (!up || !up->saved_with_settings())
         return std::size_t{0};
     if (!vfs_)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     if (up->save_file_name().empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    return write_save_upload_(*up);
+    return write_save_upload_(*up, current->profile().name);
 }
 
 }

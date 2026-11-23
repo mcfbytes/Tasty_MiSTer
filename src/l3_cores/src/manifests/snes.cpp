@@ -27,7 +27,7 @@ std::unique_ptr<ILoader> make_snes_loader(const LoaderContext& ctx) {
 }
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
-    return std::make_unique<snes::SgbCore>(p, g.services, kSgbMailboxFrame);
+    return std::make_unique<snes::SgbCore>(p, g.services, kSgbMailbox);
 }
 
 std::unique_ptr<ICompanion> make_msu_companion(const svc::Vfs& vfs) {
@@ -57,8 +57,8 @@ static_assert(
         && kSgb.services[0].impl == &kMailboxTick<kSgb>
         && kSgb.services[0].period == reactor::kEveryRound
         && kSgb.services[0].cause == kSnes.services[0].cause
-        && kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode
-        && kSgbMailboxFrame.words == kSnesMailboxFrame.words,
+        && kSgbMailbox.polls().data() == kSnesMailbox.polls().data()
+        && kSgbMailbox.polls().size() == kSnesMailbox.polls().size(),
     "user_io.cpp:3223: snes_poll runs for is_snes() || is_sgb(), one cadence and frame"
 );
 static_assert(
@@ -74,8 +74,16 @@ static_assert(
     "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
 );
 static_assert(
-    snes::msu::kFrameWords == 4 && proto::well_formed(kSnesMailboxFrame),
+    kSnesMailbox.polls().size() == 1
+        && kSnesMailboxFrame.row().opcode == proto::word(proto::UioOp::CdGet)
+        && kSnesMailboxFrame.kept() == proto::ReplyCount{4}
+        && kSnesMailboxFrame.max_words() == proto::FioWordCount{4},
     "snes.cpp:536-541: spi_uio_cmd_cont(UIO_CD_GET), then three spi_w(0)"
+);
+static_assert(
+    kSnesMailboxFrame.held_words() == proto::FioWordCount{1}
+        && kSnesMailboxFrame.row().guard.reply == snes::msu::kCounterReply,
+    "snes.cpp:542-545: an unmoved request byte ends the read after the opcode beat"
 );
 static_assert(
     snes::msu::kCdSet == 0x35

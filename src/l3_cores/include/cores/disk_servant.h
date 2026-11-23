@@ -7,11 +7,14 @@
 #include <string_view>
 
 #include "cores/mount_state.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/xthread/wake_flag.h"
 #include "proto/disk_act.h"
+#include "proto/disk_protocol.h"
 #include "proto/types.h"
+#include "proto/user_io/poll_frame.h"
 
 namespace mister::svc {
 class Vfs;
@@ -26,7 +29,7 @@ public:
     [[nodiscard]] virtual MountState bind(proto::DiskUnit unit, std::string_view path) noexcept = 0;
 
     [[nodiscard]] virtual proto::DiskAct start(
-        std::span<const std::byte, proto::kDiskStateBytes> state,
+        const proto::user_io::PollFrame& block,
         std::span<std::byte, proto::kDiskActBytes> bytes
     ) noexcept = 0;
 
@@ -36,10 +39,17 @@ public:
 
     virtual void release() noexcept = 0;
 
+    [[nodiscard]] virtual proto::DiskAct standing() const noexcept {
+        return proto::DiskAct::none();
+    }
+
 protected:
     IDiskServant() = default;
     IDiskServant(const IDiskServant&) = default;
     IDiskServant& operator=(const IDiskServant&) = default;
 };
+
+using DiskServantSet = infra::
+    IndexedArray<std::unique_ptr<IDiskServant>, proto::DiskProtocol::kCount, proto::DiskProtocol>;
 
 }

@@ -15,8 +15,6 @@ void SubcodeInterleaver::shape(SubcodeBlock block) const noexcept {
     constexpr unsigned kTopBit = 7;
     constexpr unsigned kBitIndexMask = 7;
 
-    TASTY_SEAT_BODY(SubcodeInterleaver);
-
     std::array<std::byte, kSubcodeBytes> channels{};
     for (std::size_t i = 0; i < kSubcodeBytes; ++i)
         channels[i] = block[i];

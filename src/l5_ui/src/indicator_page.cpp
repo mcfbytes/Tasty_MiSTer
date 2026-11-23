@@ -17,7 +17,7 @@ PageFacts IndicatorPage::facts() const {
     TASTY_SEAT_BODY(IndicatorPage);
     PageFacts f{};
     f.has_title_strip = false;
-    f.takes_input_focus = false;
+    f.keys = PageKeys::Below;
     f.allows_popups = true;
     f.counts_as_menu_present = false;
     return f;

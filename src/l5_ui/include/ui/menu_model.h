@@ -37,6 +37,7 @@
 #include "ui/page_arg.h"
 #include "ui/saved_baseline.h"
 #include "ui/osd_style_preference.h"
+#include "svc/mount_refusal.h"
 #include "ui/page.h"
 #include "ui/page_deadlines.h"
 #include "ui/page_stack.h"
@@ -77,6 +78,8 @@ public:
 
     void on_hd_mask(proto::OsdMask m, bool front_end, infra::OptRef<app::UiRequestRing> asks);
     void on_info(app::InfoId id, PageContext& ctx);
+
+    void on_mount_refused(svc::MountRefusal reason, PageContext& ctx);
     void on_progress(cores::Progress progress, PageContext& ctx);
 
     void on_request_done(proto::CorrelationTag tag, std::int64_t unix_time, PageContext& ctx);
@@ -332,6 +335,8 @@ private:
     void arm_auto_pop(const PageContext& ctx) noexcept;
 
     bool push_info(PageContext& ctx, app::InfoId id);
+
+    void raise_overlay(std::unique_ptr<Page> p, PageContext& ctx);
     void place_overlay(std::unique_ptr<Page> p);
 
     struct KeyPhase {

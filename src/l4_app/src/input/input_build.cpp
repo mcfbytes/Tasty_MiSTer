@@ -59,7 +59,13 @@ bool InputBuild::rebind_round() {
 
         const CoreInputFacts facts = ends_.facts.sample().value;
         const cores::HostPolicy& host = facts.policy();
-        (void)en_.load_maps_for(facts.core.view(), host.front_end, host.analog_reshape, facts.plan);
+        (void)en_.load_maps_for(
+            facts.core.view(),
+            host.front_end,
+            host.analog_reshape,
+            facts.plan,
+            host.stick_reach
+        );
     }
     hand_over_(std::move(loan));
     rebuilds_done_.add();

@@ -13,6 +13,14 @@ inline constexpr ParkTimeout kNoWait{0};
 
 static_assert(sizeof(ParkTimeout) == 4);
 
+[[nodiscard]] constexpr ParkTimeout sooner_of(ParkTimeout a, ParkTimeout b) noexcept {
+    if (a == kForever)
+        return b;
+    if (b == kForever)
+        return a;
+    return a < b ? a : b;
+}
+
 [[nodiscard]] constexpr ParkTimeout park_timeout_for(
     std::chrono::nanoseconds left,
     ParkTimeout ceiling

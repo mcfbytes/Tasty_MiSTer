@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "proto/stick_pos.h"
+
 namespace mister::svc::input {
 
 struct AnalogXy {
@@ -12,8 +14,14 @@ struct AnalogXy {
     std::int32_t y = 0;
 
     static constexpr std::int32_t kAxisMax = 127;
+
+    static constexpr std::int32_t kAxisLowByte = 128;
     friend constexpr bool operator==(AnalogXy, AnalogXy) = default;
 };
+
+[[nodiscard]] constexpr proto::StickPos stick_pos(AnalogXy in) noexcept {
+    return proto::StickPos{static_cast<std::uint8_t>(in.x), static_cast<std::uint8_t>(in.y)};
+}
 
 [[nodiscard]] constexpr AnalogXy::Axis dominant_axis(AnalogXy in) noexcept {
     return (in.x > in.y) == (in.x > -in.y) ? AnalogXy::Axis::X : AnalogXy::Axis::Y;

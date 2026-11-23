@@ -102,6 +102,7 @@ public:
     struct After {
         BeltOrders orders{};
         std::optional<PathText> companion{};
+        proto::WideIoIndex slot{};
     };
 
     struct Armed {

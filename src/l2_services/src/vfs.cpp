@@ -4,14 +4,19 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
+#include <climits>
+#include <cstdlib>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <utility>
@@ -126,6 +131,10 @@ std::optional<std::string> fold_case_lookup(std::string_view base, std::string_v
 }
 
 namespace {
+
+[[nodiscard]] FileSize size_of(const struct ::stat& st) noexcept {
+    return FileSize{static_cast<std::uint64_t>(st.st_size)};
+}
 
 std::expected<UniqueFd, infra::Errno> open_in_mode(const char* path, OpenMode m) noexcept {
     using os::OpenFlags;
@@ -269,19 +278,40 @@ Ex<std::unique_ptr<IFile>> Vfs::open_write_(std::string_view path, OpenMode mode
     return open_backend_(path, mode);
 }
 
-Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mode) const {
-    const std::string full = compose(root_path_, path);
-
-    if (memory_ != nullptr && memory_->mounted(full)) {
+std::optional<Ex<std::unique_ptr<IFile>>> Vfs::open_memory_(
+    const std::string& full,
+    OpenMode mode
+) const {
+    if (memory_ == nullptr)
+        return std::nullopt;
+    if (memory_->mounted(full)) {
         if (!opens_read_only(mode)) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
         }
         return memory_->open(full);
     }
-    if (memory_ != nullptr) {
-        if (auto no = memory_->refusal(full, MemoryMounts::IoVerb::Open))
-            return std::unexpected(*no);
-    }
+    if (auto no = memory_->refusal(full, MemoryMounts::IoVerb::Open))
+        return std::unexpected(*no);
+    return std::nullopt;
+}
+
+Ex<std::unique_ptr<IFile>> Vfs::open_named_(std::string_view path, OpenMode mode) const {
+    const std::string full = compose(root_path_, path);
+    if (auto seam = open_memory_(full, mode))
+        return std::move(*seam);
+    return open_file_(full, mode);
+}
+
+Ex<std::unique_ptr<IFile>> Vfs::open_named(std::string_view path, OpenMode mode) const {
+    if (!opens_read_only(mode))
+        return std::unexpected(read_only_refusal(mode, ERR_SITE()));
+    return open_named_(path, mode);
+}
+
+Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mode) const {
+    const std::string full = compose(root_path_, path);
+    if (auto seam = open_memory_(full, mode))
+        return std::move(*seam);
 
     const asset_name::ZipSplit zs = asset_name::zip_split(full);
     if (zs.zipped) {
@@ -297,7 +327,10 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
         }
         return zip_open_member(std::string(zs.archive), std::string(zs.member));
     }
+    return open_file_(full, mode);
+}
 
+Ex<std::unique_ptr<IFile>> Vfs::open_file_(const std::string& full, OpenMode mode) const {
     auto opened = open_in_mode(full.c_str(), mode);
     if (!opened) {
 
@@ -378,6 +411,15 @@ Vfs::NameKind Vfs::name_kind(std::string_view path) const noexcept {
     if (::lstat(full.c_str(), &st) != 0)
         return errno == ENOENT ? NameKind::Absent : NameKind::Other;
     return S_ISREG(st.st_mode) ? NameKind::PlainFile : NameKind::Other;
+}
+
+Ex<std::string> Vfs::canonical(std::string_view path) const {
+    const std::string full = compose(root_path_, path);
+    std::array<char, PATH_MAX> real{};
+    if (::realpath(full.c_str(), real.data()) == nullptr) {
+        return std::unexpected(infra::Errno{errno}.refusal(Errc::not_found, ERR_SITE()));
+    }
+    return std::string(real.data());
 }
 
 Ex<std::chrono::sys_seconds> Vfs::modified(std::string_view path) const {
@@ -464,13 +506,49 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
         e.is_zip_member = false;
 
         if (!e.is_dir && have_st) {
-            e.size = FileSize{static_cast<std::uint64_t>(st.st_size)};
+            e.size = size_of(st);
         }
         out.push_back(std::move(e));
     }
     ::closedir(d);
 
     std::stable_sort(out.begin(), out.end(), detail::dirent_less);
+    return out;
+}
+
+Ex<std::vector<DirEntry>> Vfs::list_names(std::string_view dir) const {
+    const std::string full = compose(root_path_, dir);
+    ::DIR* d = ::opendir(full.c_str());
+    if (d == nullptr)
+        return std::unexpected(infra::Errno{errno}.refusal(Errc::os, ERR_SITE()));
+
+    std::vector<DirEntry> out;
+    for (;;) {
+        errno = 0;
+        const ::dirent* de = ::readdir(d);
+        if (de == nullptr) {
+            const int e = errno;
+            ::closedir(d);
+            if (e != 0)
+                return std::unexpected(infra::Errno{e}.refusal(Errc::os, ERR_SITE()));
+            break;
+        }
+        const std::string_view name(de->d_name);
+        if (name == "." || name == "..")
+            continue;
+        DirEntry e;
+        e.name = std::string(name);
+        std::string child = full;
+        child.push_back('/');
+        child.append(name);
+        struct ::stat st{};
+        if (::stat(child.c_str(), &st) == 0) {
+            e.is_dir = S_ISDIR(st.st_mode);
+            if (!e.is_dir)
+                e.size = size_of(st);
+        }
+        out.push_back(std::move(e));
+    }
     return out;
 }
 
@@ -521,6 +599,34 @@ Ex<void> Vfs::remove_(std::string_view rel) const {
     if (e == ENOENT)
         return {};
     return std::unexpected(infra::Errno{e}.refusal(Errc::os, ERR_SITE()));
+}
+
+Ex<void> Vfs::remove_dir_(std::string_view rel) const {
+    const std::string full = compose(root_path_, rel);
+    if (::rmdir(full.c_str()) == 0)
+        return {};
+    return std::unexpected(infra::Errno{errno}.refusal(Errc::os, ERR_SITE()));
+}
+
+Ex<void> Vfs::move_(const MoveNames& names) const {
+    const std::string from = compose(root_path_, names.from);
+    const std::string to = compose(root_path_, names.to);
+    if (::rename(from.c_str(), to.c_str()) == 0)
+        return {};
+    return std::unexpected(infra::Errno{errno}.refusal(Errc::os, ERR_SITE()));
+}
+
+Ex<Vfs::Space> Vfs::space(std::string_view path) const {
+    const std::string full = compose(root_path_, path);
+    struct ::statvfs st{};
+    if (::statvfs(full.c_str(), &st) != 0) {
+        return std::unexpected(infra::Errno{errno}.refusal(Errc::os, ERR_SITE()));
+    }
+    const std::uint64_t block = st.f_bsize;
+    return Space{
+        .total = FileSize{block * st.f_blocks},
+        .available = FileSize{block * st.f_bavail}
+    };
 }
 
 Vfs::DurabilityLog Vfs::durability_log() noexcept {

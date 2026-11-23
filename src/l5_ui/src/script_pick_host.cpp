@@ -7,6 +7,7 @@
 #include "ui/browser_entry.h"
 #include "ui/page_launches.h"
 #include "ui/script_launch.h"
+#include "ui/session_facts.h"
 
 namespace mister::ui {
 
@@ -30,7 +31,9 @@ Transition ScriptPickHost::on_picked(const BrowserEntry&, std::string_view path)
         return Transition::pop();
     }
     const std::string argv0 = std::string(b_.storage->root_path()) + "/" + std::string(path);
-    return script->open(PageId::ScriptRun, ScriptLaunch::Request::script(argv0), true);
+    const PageId page = b_.session && b_.session->console_view ? PageId::FbTerminal
+                                                               : PageId::ScriptRun;
+    return script->open(page, ScriptLaunch::Request::script(argv0), true);
 }
 
 }

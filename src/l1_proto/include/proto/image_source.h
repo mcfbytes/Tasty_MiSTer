@@ -19,6 +19,8 @@ public:
 
     virtual void note_attached(SlotIndex, bool, FileSize) noexcept {}
 
+    virtual void note_track_shape(SlotIndex, TrackShape) noexcept {}
+
     virtual void note_detached(SlotIndex) noexcept {}
 
     virtual ImageTag request_tag(SlotIndex) const noexcept { return {}; }

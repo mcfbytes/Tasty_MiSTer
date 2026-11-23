@@ -45,6 +45,11 @@ public:
     [[nodiscard]] Ex<void> read_exact_at(proto::FileOffset at, std::span<std::byte> dst);
     [[nodiscard]] Ex<void> write_all_at(proto::FileOffset at, std::span<const std::byte> src);
 
+    [[nodiscard]] Ex<infra::ByteCount> read_prefix_at(
+        proto::FileOffset at,
+        std::span<std::byte> dst
+    );
+
     [[nodiscard]] virtual Ex<FileSize> size() const = 0;
     [[nodiscard]] virtual Ex<void> flush() = 0;
 
@@ -85,6 +90,21 @@ protected:
         src = n->past_in(src);
     }
     return {};
+}
+
+[[nodiscard]] inline Ex<infra::ByteCount> IFile::read_prefix_at(
+    proto::FileOffset at,
+    std::span<std::byte> dst
+) {
+    std::span<std::byte> left = dst;
+    while (!left.empty()) {
+        const auto n = read_at(at, left);
+        if (!n || n->empty())
+            break;
+        at += proto::FileSize::of(*n);
+        left = n->past_in(left);
+    }
+    return infra::ByteCount{dst.size() - left.size()};
 }
 
 }

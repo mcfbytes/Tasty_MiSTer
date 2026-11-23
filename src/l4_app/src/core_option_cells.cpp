@@ -137,8 +137,24 @@ ILinkEncoder::Outcome CoreOptionCells::misrouted(
     return ILinkEncoder::Outcome::Dropped;
 }
 
+void CoreOptionCells::publish_config_value_(infra::OptRef<cores::Core> core) noexcept {
+    infra::OptRef<cores::IConfigSlots> slots{};
+    if (core.has_value() && core->profile().reset.reapplies_live_config) {
+        slots = core->config_slots();
+    }
+    if (!slots && !config_value_live_)
+        return;
+    config_value_scratch_.size = proto::FileSize{};
+    if (slots) {
+        config_value_scratch_.size = proto::FileSize::of(slots->value(config_value_scratch_.bytes));
+    }
+    config_value_live_ = slots.has_value();
+    config_value_cell_.publish(config_value_scratch_);
+}
+
 void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
+    publish_config_value_(core);
     option_scratch_ = OptionTable{};
     if (core.has_value()) {
 

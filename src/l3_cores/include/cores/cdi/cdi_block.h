@@ -9,12 +9,12 @@
 #include "cores/cd_msf.h"
 #include "cores/cdi/q_control.h"
 #include "cores/cdi/toc_entry.h"
-#include "cores/cdi/toc_point.h"
 #include "cores/types.h"
 #include "infra/endian.h"
 #include "proto/block_geometry.h"
-#include "svc/msf.h"
 #include "svc/disc/toc.h"
+#include "svc/disc/toc_point.h"
+#include "svc/msf.h"
 
 namespace mister::cores::cdi {
 

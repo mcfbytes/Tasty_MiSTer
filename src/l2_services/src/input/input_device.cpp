@@ -287,7 +287,12 @@ struct PersonalityFilter {
     }
 };
 
-std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
+std::int32_t reach_range(StickReach reach) {
+    return reach == StickReach::LowByte ? AnalogXy::kAxisLowByte : AnalogXy::kAxisMax;
+}
+
+std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal, StickReach reach) {
+    const std::int32_t range = reach_range(reach);
     const std::int32_t hrange = (cal.max - cal.min) / 2;
     if (hrange == 0)
         return 0;
@@ -297,9 +302,9 @@ std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
     else if (v > cal.max)
         v = cal.max;
     v -= (cal.min + cal.max) / 2;
-    v = (v * AnalogXy::kAxisMax) / hrange;
-    if (v < -AnalogXy::kAxisMax)
-        v = -AnalogXy::kAxisMax;
+    v = (v * range) / hrange;
+    if (v < -range)
+        v = -range;
     else if (v > AnalogXy::kAxisMax)
         v = AnalogXy::kAxisMax;
     return v;
@@ -309,6 +314,8 @@ struct StickAxis {
     StickIndex stick;
     AnalogXy::Axis axis;
 };
+
+constexpr Deadzone kStickJitter{1};
 
 constexpr EvdevCode kPaddleAxis{ABS_WHEEL};
 constexpr EvdevCode kSpinnerAxis{REL_DIAL};
@@ -378,7 +385,10 @@ void InputDevice::decode_abs(const input_event& ev) noexcept {
     const StickIndex stick = sa->stick;
     const AnalogXy::Axis axis = sa->axis;
     StickState& st = sticks_[stick];
-    const std::int32_t v = normalize_axis(ev.value, cal);
+
+    const std::int32_t norm = normalize_axis(ev.value, cal, reach_);
+    const bool jitter = kStickJitter.swallows(norm < 0 ? -norm : norm);
+    const std::int32_t v = jitter && takes_stick_arm(facts_.quirk) ? 0 : norm;
     st.raw = axis == AnalogXy::Axis::X ? AnalogXy{v, st.raw.y} : AnalogXy{st.raw.x, v};
 
     st.learn(rules::is_diagonal(st.raw));
@@ -391,7 +401,10 @@ void InputDevice::decode_abs(const input_event& ev) noexcept {
 
     const StickCal sc = st.cal();
 
-    AnalogXy xy = rules::apply_deadzone(st.raw, rules::DeadzoneParams{deadzone_, sc});
+    AnalogXy xy = rules::apply_deadzone(
+        st.raw,
+        rules::DeadzoneParams{deadzone_, sc, -reach_range(reach_)}
+    );
 
     if (reshape_)
         xy = reshape_->reshape(xy, cal, sc);

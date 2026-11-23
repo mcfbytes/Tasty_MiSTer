@@ -1,10 +1,12 @@
 add_library(mister_cores_base STATIC
   src/addressed_load.cpp
   src/boot_ladder.cpp
+  src/cmos_image.cpp
   src/core_profile.cpp
   src/core_support.cpp
   src/disc_save_migration.cpp
   src/fio_cheat_sink.cpp
+  src/held_image_file.cpp
   src/mailbox_carriage.cpp
   src/mailbox_window.cpp
   src/md5.cpp
@@ -12,10 +14,12 @@ add_library(mister_cores_base STATIC
   src/payload_pieces.cpp
   src/stream_load_bracket.cpp
   src/stream_load_host.cpp
+  src/host_file_sandbox.cpp
+  src/sidecar_send.cpp
 )
 target_include_directories(mister_cores_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_cores_base
-  PUBLIC mister_svc mister_svc_disc mister_proto_link
+  PUBLIC mister_svc mister_svc_disc mister_svc_input mister_proto_link
   PRIVATE tasty_options)
 
 add_library(mister_cores_cd STATIC
@@ -101,6 +105,52 @@ target_link_libraries(mister_cores_st
   PUBLIC mister_cores_base
   PRIVATE tasty_options)
 
+add_library(mister_cores_ide STATIC
+  src/ide/atapi_disc.cpp
+  src/ide/atapi_drive.cpp
+  src/ide/atapi_replies.cpp
+  src/ide/atapi_toc.cpp
+  src/ide/cdda_egress.cpp
+  src/ide/ide_act_wire.cpp
+  src/ide/ide_channel.cpp
+  src/ide/ide_engine.cpp
+  src/ide/ide_identify.cpp
+)
+target_link_libraries(mister_cores_ide
+  PUBLIC mister_cores_base
+  PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_ide_header_checks LIB mister_cores_ide HEADERS
+  cores/ide/atapi_disc.h
+  cores/ide/atapi_drive.h
+  cores/ide/atapi_identify.h
+  cores/ide/atapi_packet.h
+  cores/ide/atapi_packet_op.h
+  cores/ide/atapi_replies.h
+  cores/ide/atapi_reply_writer.h
+  cores/ide/atapi_sense.h
+  cores/ide/atapi_step.h
+  cores/ide/atapi_toc.h
+  cores/ide/atapi_volume.h
+  cores/ide/cdda_egress.h
+  cores/ide/ide_act_wire.h
+  cores/ide/ide_channel.h
+  cores/ide/ide_channel_row.h
+  cores/ide/ide_command.h
+  cores/ide/ide_drive_pair.h
+  cores/ide/ide_engine.h
+  cores/ide/ide_geometry_rule.h
+  cores/ide/ide_hot_swap.h
+  cores/ide/ide_identify.h
+  cores/ide/ide_image_geometry.h
+  cores/ide/ide_media.h
+  cores/ide/ide_remount_ask.h
+  cores/ide/ide_request.h
+  cores/ide/ide_task_file.h
+  cores/ide/ide_tray.h
+  cores/ide/ide_transport.h
+  cores/ide/ide_types.h
+)
+
 add_library(mister_cores_neogeo STATIC
   src/neogeo/neo_file.cpp
   src/neogeo/neo_transform.cpp
@@ -169,7 +219,6 @@ tasty_add_header_checks(tasty_l3_cdi_header_checks LIB mister_cores_cdi HEADERS
   cores/cdi/cdi_ladder.h
   cores/cdi/q_control.h
   cores/cdi/toc_entry.h
-  cores/cdi/toc_point.h
 )
 
 add_library(mister_cores_snes STATIC
@@ -228,15 +277,315 @@ tasty_add_header_checks(tasty_l3_electron_header_checks LIB mister_cores_electro
   cores/electron/uef_tape_file.h
 )
 
+add_library(mister_cores_zx81 STATIC
+  src/zx81/char_set.cpp
+  src/zx81/zx81_sidecars.cpp
+)
+target_link_libraries(mister_cores_zx81 PUBLIC mister_cores_base PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_zx81_header_checks LIB mister_cores_zx81 HEADERS
+  cores/zx81/char_set.h
+  cores/zx81/code_count.h
+  cores/zx81/colour_attr.h
+  cores/zx81/colour_code.h
+  cores/zx81/colour_map.h
+  cores/zx81/glyph_row.h
+  cores/zx81/glyph_slot.h
+  cores/zx81/pixel_line.h
+  cores/zx81/sidecar_class.h
+  cores/zx81/zx81_sidecars.h
+)
+
 add_library(mister_cores_minimig STATIC
   src/minimig/minimig_core.cpp
-  src/minimig/host_file_sandbox.cpp
+  src/minimig/io_frame_sink.cpp
+  src/minimig/kickstart.cpp
+  src/minimig/minimig_config.cpp
+  src/minimig/minimig_config_codec.cpp
+  src/minimig/minimig_ladder.cpp
+  src/minimig/minimig_ladder_frames.cpp
+  src/minimig/minimig_ladder_screen.cpp
+  src/minimig/a2065_mac_munge.cpp
+  src/minimig/a2065_nic.cpp
+  src/minimig/a2065_window.cpp
+  src/minimig/akiko_drive.cpp
+  src/minimig/akiko_prefetch.cpp
+  src/minimig/akiko_toc.cpp
+  src/minimig/amiga_dos_share.cpp
+  src/minimig/amiga_keyboard.cpp
+  src/minimig/cd_drives.cpp
+  src/minimig/cd_saves.cpp
+  src/minimig/cr511_drive.cpp
+  src/minimig/floppy_servant.cpp
+  src/minimig/floppy_write_capture.cpp
+  src/minimig/lance_registers.cpp
+  src/minimig/lance_rings.cpp
+  src/minimig/minimig_options.cpp
+  src/minimig/share_host.cpp
 )
 target_link_libraries(mister_cores_minimig PUBLIC mister_cores_base PRIVATE tasty_options)
 tasty_add_header_checks(tasty_l3_minimig_header_checks LIB mister_cores_minimig HEADERS
   cores/minimig/minimig_core.h
-  cores/minimig/host_file_server.h
-  cores/minimig/host_file_sandbox.h
+  cores/minimig/io_frame_sink.h
+  cores/minimig/io_frame_sink_op.h
+  cores/minimig/kickstart.h
+  cores/minimig/minimig_config.h
+  cores/minimig/minimig_config_codec.h
+  cores/minimig/minimig_config_layout.h
+  cores/minimig/minimig_ladder.h
+  cores/minimig/minimig_ladder_bus_addr.h
+  cores/minimig/minimig_ladder_bus_bytes.h
+  cores/minimig/minimig_ladder_font.h
+  cores/minimig/minimig_ladder_frames.h
+  cores/minimig/minimig_ladder_hrtmon.h
+  cores/minimig/minimig_ladder_screen.h
+  cores/minimig/a2065_command.h
+  cores/minimig/a2065_command_ring.h
+  cores/minimig/a2065_mac.h
+  cores/minimig/a2065_mac_munge.h
+  cores/minimig/a2065_nic.h
+  cores/minimig/a2065_window.h
+  cores/minimig/akiko_drive.h
+  cores/minimig/akiko_drive_status.h
+  cores/minimig/akiko_opcode.h
+  cores/minimig/akiko_prefetch.h
+  cores/minimig/akiko_subcode.h
+  cores/minimig/akiko_subq_reply.h
+  cores/minimig/akiko_toc.h
+  cores/minimig/akiko_wire.h
+  cores/minimig/amiga_date.h
+  cores/minimig/amiga_dos_share.h
+  cores/minimig/amiga_key_code.h
+  cores/minimig/amiga_keyboard.h
+  cores/minimig/cd_bridge.h
+  cores/minimig/cd_bus.h
+  cores/minimig/cd_decl.h
+  cores/minimig/cd_disc.h
+  cores/minimig/cd_drives.h
+  cores/minimig/cd_saves.h
+  cores/minimig/cd_slot.h
+  cores/minimig/cd_status.h
+  cores/minimig/cr511_address.h
+  cores/minimig/cr511_drive.h
+  cores/minimig/cr511_wire.h
+  cores/minimig/ext_cfg_word.h
+  cores/minimig/floppy_poll.h
+  cores/minimig/floppy_servant.h
+  cores/minimig/floppy_write_capture.h
+  cores/minimig/lance_addr.h
+  cores/minimig/lance_bits.h
+  cores/minimig/lance_csr.h
+  cores/minimig/lance_events.h
+  cores/minimig/lance_filter.h
+  cores/minimig/lance_registers.h
+  cores/minimig/lance_ring.h
+  cores/minimig/lance_rings.h
+  cores/minimig/lance_span.h
+  cores/minimig/lance_word.h
+  cores/minimig/minimig_fact.h
+  cores/minimig/minimig_option_names.h
+  cores/minimig/minimig_option_rows.h
+  cores/minimig/minimig_options.h
+  cores/minimig/share_cursor.h
+  cores/minimig/share_host.h
+  cores/minimig/share_key.h
+  cores/minimig/share_packet.h
+  cores/minimig/share_reply.h
+  cores/minimig/share_request.h
+  cores/minimig/share_request_word.h
+  cores/minimig/share_seek_to.h
+  cores/minimig/share_wire.h
+  cores/minimig/share_word.h
+)
+
+add_library(mister_cores_mac STATIC
+  src/mac/blue_scsi_toolbox.cpp
+  src/mac/blue_scsi_changer.cpp
+  src/mac/mcda_toc.cpp
+  src/mac/mac_cd_image.cpp
+  src/mac/mac_core.cpp
+)
+target_link_libraries(mister_cores_mac PUBLIC mister_cores_base mister_svc_disc PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_mac_header_checks LIB mister_cores_mac HEADERS
+  cores/mac/blue_scsi_wire.h
+  cores/mac/image_ext.h
+  cores/mac/listing_index.h
+  cores/mac/blue_scsi_cdb.h
+  cores/mac/blue_scsi_reply.h
+  cores/mac/blue_scsi_toolbox.h
+  cores/mac/blue_scsi_changer.h
+  cores/mac/toolbox_slot.h
+  cores/mac/mcda_toc.h
+  cores/mac/mac_windows.h
+  cores/mac/mac_cd_image.h
+  cores/mac/mac_core.h
+)
+
+add_library(mister_cores_archie STATIC
+  src/archie/archie_config.cpp
+  src/archie/archie_core.cpp
+  src/archie/archie_ladder.cpp
+  src/archie/kart_controller.cpp
+)
+target_link_libraries(mister_cores_archie PUBLIC mister_cores_base PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_archie_header_checks LIB mister_cores_archie HEADERS
+  cores/archie/archie_config.h
+  cores/archie/archie_config_codec.h
+  cores/archie/archie_core.h
+  cores/archie/archie_ctrl.h
+  cores/archie/archie_ladder.h
+  cores/archie/archie_option.h
+  cores/archie/kart_axis.h
+  cores/archie/kart_byte.h
+  cores/archie/kart_controller.h
+  cores/archie/kart_key.h
+  cores/archie/kart_key_map.h
+)
+
+add_library(mister_cores_x86 STATIC
+  src/x86/bus_servant.cpp
+  src/x86/x86_floppy_servant.cpp
+  src/x86/x86_boot_loader.cpp
+  src/x86/x86_core.cpp
+  src/x86/x86_ladder.cpp
+  src/x86/x86_sys_config.cpp
+  src/x86/dos_share.cpp
+  src/x86/x86_share_host.cpp
+)
+target_link_libraries(mister_cores_x86
+  PUBLIC mister_cores_base mister_cores_ide
+  PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_x86_header_checks LIB mister_cores_x86 HEADERS
+  cores/x86/bus_register_write.h
+  cores/x86/bus_servant.h
+  cores/x86/cmos_checksum.h
+  cores/x86/cmos_drive_type.h
+  cores/x86/cmos_register.h
+  cores/x86/fdc_request.h
+  cores/x86/fdc_sector_word.h
+  cores/x86/floppy_format.h
+  cores/x86/floppy_media.h
+  cores/x86/x86_floppy_servant.h
+  cores/x86/hdd_table.h
+  cores/x86/hdd_table_rule.h
+  cores/x86/uma_row.h
+  cores/x86/x86_boot_loader.h
+  cores/x86/x86_bus_poll.h
+  cores/x86/x86_cmos.h
+  cores/x86/x86_cmos_inputs.h
+  cores/x86/x86_core.h
+  cores/x86/x86_family.h
+  cores/x86/x86_ladder.h
+  cores/x86/x86_slot.h
+  cores/x86/x86_sys_config.h
+  cores/x86/x86_sys_config_codec.h
+  cores/x86/dos_attr.h
+  cores/x86/dos_cursor.h
+  cores/x86/dos_long.h
+  cores/x86/dos_name83.h
+  cores/x86/dos_open_mode.h
+  cores/x86/dos_path.h
+  cores/x86/dos_share.h
+  cores/x86/dos_share_op.h
+  cores/x86/dos_share_reply.h
+  cores/x86/dos_share_request.h
+  cores/x86/dos_share_word.h
+  cores/x86/dos_stamp.h
+  cores/x86/dos_token.h
+  cores/x86/dos_word.h
+  cores/x86/x86_share_host.h
+  cores/x86/x86_share_key.h
+)
+
+add_library(mister_cores_atari8 STATIC
+  src/atari8/apt_table.cpp
+  src/atari8/atari8_disks.cpp
+  src/atari8/atari8_loader.cpp
+  src/atari8/atari8_sequencer.cpp
+  src/atari8/atari8_servant.cpp
+  src/atari8/cart_image.cpp
+  src/atari8/cart_matches.cpp
+  src/atari8/cart_stream_load.cpp
+  src/atari8/cart_write_back.cpp
+  src/atari8/cas_feed.cpp
+  src/atari8/pbi_mailbox.cpp
+  src/atari8/sio_drive.cpp
+  src/atari8/sio_drives.cpp
+  src/atari8/sio_engine.cpp
+  src/atari8/xex_boot_image.cpp
+  src/atari8/xex_feed.cpp
+)
+target_link_libraries(mister_cores_atari8 PUBLIC mister_cores_base PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_atari8_header_checks LIB mister_cores_atari8 HEADERS
+  cores/atari8/apt_table.h
+  cores/atari8/atari8_address.h
+  cores/atari8/atari8_core.h
+  cores/atari8/atari8_decl.h
+  cores/atari8/atari8_disks.h
+  cores/atari8/atari8_fill.h
+  cores/atari8/atari8_loader.h
+  cores/atari8/atari8_machine.h
+  cores/atari8/atari8_sequencer.h
+  cores/atari8/atari8_servant.h
+  cores/atari8/atari8_status.h
+  cores/atari8/atari8_status2.h
+  cores/atari8/atari8_status3.h
+  cores/atari8/atari8_wire.h
+  cores/atari8/cart_flash.h
+  cores/atari8/cart_form.h
+  cores/atari8/cart_image.h
+  cores/atari8/cart_kib.h
+  cores/atari8/cart_layout.h
+  cores/atari8/cart_match.h
+  cores/atari8/cart_matches.h
+  cores/atari8/cart_mode.h
+  cores/atari8/cart_row.h
+  cores/atari8/cart_rows.h
+  cores/atari8/cart_selects.h
+  cores/atari8/cart_size_test.h
+  cores/atari8/cart_slot.h
+  cores/atari8/cart_stream_load.h
+  cores/atari8/cart_table.h
+  cores/atari8/cart_type.h
+  cores/atari8/cart_write_back.h
+  cores/atari8/cas_feed.h
+  cores/atari8/cas_types.h
+  cores/atari8/pbi_drive_mode.h
+  cores/atari8/pbi_mailbox.h
+  cores/atari8/pbi_types.h
+  cores/atari8/reboot_phase.h
+  cores/atari8/sio_blocks.h
+  cores/atari8/sio_call.h
+  cores/atari8/sio_checksum.h
+  cores/atari8/sio_command.h
+  cores/atari8/sio_dma.h
+  cores/atari8/sio_drive.h
+  cores/atari8/sio_drives.h
+  cores/atari8/sio_engine.h
+  cores/atari8/sio_formats.h
+  cores/atari8/sio_frame.h
+  cores/atari8/sio_frame_reader.h
+  cores/atari8/sio_partition.h
+  cores/atari8/sio_reply.h
+  cores/atari8/sio_slot.h
+  cores/atari8/sio_terms.h
+  cores/atari8/sio_types.h
+  cores/atari8/sio_wire.h
+  cores/atari8/xex_boot_image.h
+  cores/atari8/xex_feed.h
+  cores/atari8/xex_loaders.h
+)
+
+add_library(mister_cores_c64 STATIC
+  src/c64/c64_core.cpp
+  src/c64/c64_loader.cpp
+  src/c64/easyflash_image.cpp
+)
+target_link_libraries(mister_cores_c64 PUBLIC mister_cores_base PRIVATE tasty_options)
+tasty_add_header_checks(tasty_l3_c64_header_checks LIB mister_cores_c64 HEADERS
+  cores/c64/c64_core.h
+  cores/c64/c64_loader.h
+  cores/c64/easyflash_image.h
+  cores/c64/easyflash_save_name.h
 )
 
 add_library(mister_cores STATIC
@@ -256,9 +605,16 @@ add_library(mister_cores STATIC
   src/manifests/threedo.cpp
   src/manifests/saturn.cpp
   src/manifests/cdi.cpp
+  src/manifests/archie.cpp
+  src/manifests/x86.cpp
+  src/manifests/mac.cpp
+  src/manifests/atari8.cpp
+  src/manifests/minimig.cpp
+  src/manifests/c64.cpp
+  src/manifests/zx81.cpp
 )
 target_link_libraries(mister_cores
-  PUBLIC mister_cores_base mister_cores_cd mister_cores_neogeo mister_cores_psx mister_cores_cdi mister_cores_n64dd mister_cores_n64 mister_cores_mra mister_cores_st mister_cores_snes mister_cores_megadrive mister_cores_electron mister_cores_minimig
+  PUBLIC mister_cores_base mister_cores_cd mister_cores_neogeo mister_cores_psx mister_cores_cdi mister_cores_n64dd mister_cores_n64 mister_cores_mra mister_cores_st mister_cores_snes mister_cores_megadrive mister_cores_electron mister_cores_minimig mister_cores_archie mister_cores_mac mister_cores_atari8 mister_cores_c64 mister_cores_zx81 mister_cores_x86
          mister_svc mister_svc_input mister_svc_disc mister_svc_video mister_proto_link
   PRIVATE tasty_options)
 
@@ -298,6 +654,7 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/fnv1a64.h
   cores/addressed_load.h
   cores/disk_port.h
+  cores/disk_ports.h
   cores/disk_servant.h
   cores/disk_servant_row.h
   cores/slot_mount.h
@@ -323,6 +680,8 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/stream_load_host.h
   cores/stream_tx_record.h
   cores/load_ask.h
+  cores/load_choice.h
+  cores/held_image_file.h
   cores/load_plan.h
   cores/loader.h
   cores/loader_context.h
@@ -342,9 +701,28 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/core_profile.h
   cores/core_window.h
   cores/core_support.h
+  cores/host_file_server.h
+  cores/host_file_sandbox.h
+  cores/share_host.h
+  cores/share_root.h
+  cores/share_row.h
+  cores/window_shape.h
+  cores/lba_window_row.h
+  cores/lba_window_geometry.h
+  cores/slot_servants.h
+  cores/slot_servant_terms.h
+  cores/slot_servant_row.h
+  cores/slot_servant_grant.h
+  cores/mount_serial.h
+  cores/read_count.h
+  cores/control_slot.h
+  cores/repulse_rule.h
+  cores/mount_reads.h
+  cores/remount_asked.h
   cores/dip_row_view.h
   cores/dip_switches.h
   cores/file_slot.h
+  cores/disk_mirror.h
   cores/fio_cheat_sink.h
   cores/grant_set.h
   cores/init_step.h
@@ -353,6 +731,7 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/host_services.h
   cores/core_grant.h
   cores/core_manifest.h
+  cores/mailbox_types.h
   cores/mailbox_window.h
   cores/md5.h
   cores/mounted_path.h
@@ -390,7 +769,11 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/romset_no_match.h
   cores/romset_retype.h
   cores/romset_files.h
+  cores/save_filter.h
+  cores/save_frame.h
+  cores/save_home.h
   cores/save_servant.h
+  cores/save_shape.h
   cores/save_upload.h
   cores/sector_kick.h
   cores/sector_kick_row.h
@@ -424,6 +807,7 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/file_tx.h
   cores/host_bit_row.h
   cores/host_policy.h
+  cores/key_policy.h
   cores/ladder_carry.h
   cores/ladder_pc.h
   cores/load_progress.h
@@ -442,6 +826,17 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/save_store_column.h
   cores/start_rule.h
   cores/wire_chunk.h
+  cores/cmos_image.h
+  cores/cmos_layout.h
+  cores/input_sink.h
+  cores/input_sink_id.h
+  cores/asset_sweep.h
+  cores/sidecar_ask.h
+  cores/sidecar_builder.h
+  cores/sidecar_payload.h
+  cores/sidecar_plan.h
+  cores/sidecar_send.h
+  cores/mount_index_form.h
 )
 
 tasty_add_header_checks(tasty_l3_n64_header_checks LIB mister_cores_n64 HEADERS
@@ -554,6 +949,7 @@ tasty_add_header_checks(tasty_l3_cd_header_checks LIB mister_cores_cd HEADERS
   cores/cd/subcode_q_frame.h
 )
 tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
+  cores/manifests/atari8.h
   cores/generic_profile.h
   cores/servant_factories.h
   cores/generic_core.h
@@ -574,6 +970,14 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/manifests/cdi.h
   cores/manifests/uneon.h
   cores/manifests/x86.h
+  cores/manifests/archie.h
+  cores/manifests/a2.h
+  cores/manifests/mac.h
+  cores/manifests/minimig.h
+  cores/manifests/c64.h
+  cores/manifests/zx81.h
+  cores/manifests/amstrad.h
+  cores/manifests/c128.h
 )
 
 tasty_add_header_checks(tasty_l3_mra_header_checks LIB mister_cores_mra HEADERS
@@ -608,6 +1012,7 @@ tasty_add_header_checks(tasty_l3_mra_header_checks LIB mister_cores_mra HEADERS
   cores/mra/text_part.h
 )
 tasty_add_header_checks(tasty_l3_st_header_checks LIB mister_cores_st HEADERS
+  cores/st/acsi_poll.h
   cores/st/acsi_servant.h
   cores/st/st_config.h
   cores/st/st_config_layout.h

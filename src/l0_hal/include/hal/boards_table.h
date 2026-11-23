@@ -58,7 +58,7 @@ inline constexpr std::array<PhysRegion, kRegionCount> kDe10Regions{
     regions::kMinimigShare,
     regions::kX86Share,
     regions::kX86Mem,
-    regions::kA2065Flat,
+    regions::kNicMailbox,
     regions::kVideoFb,
     regions::kScalerOut,
 };

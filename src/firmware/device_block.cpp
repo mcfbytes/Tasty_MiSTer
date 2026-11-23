@@ -116,6 +116,7 @@ std::optional<app::input::InputPipeline> DeviceBlock::open_input_pipeline_(
             .capture_hit = capture_hit_,
             .rumble_players = rumble_players_,
             .pads = infra::OptRef<app::input::LwPadEndpoint>{lw_pad_},
+            .core_facts = core_facts_,
         }
     };
 }
@@ -255,8 +256,6 @@ DeviceBlock::DeviceBlock(
 )
     : threads_(plat.threads),
       io_doorbells_(open_io_doorbells_()),
-
-      disk_relay_{io_wake_, cores::make_disk_servant(plat.vfs, infra::OptRef{disk_activity_})},
       events_(),
       owner_events_(),
       clock_(),
@@ -315,7 +314,9 @@ DeviceBlock::DeviceBlock(
       io_main_(open_io_main_()),
       save_stage_orders_{io_wake_},
       save_stage_keeper_{plat.vfs, clock_, save_stage_orders_, save_stage_cell_},
-      save_backends_{svc::make_save_slot_backends(plat.vfs, save_stage_keeper_)},
+      save_backends_{
+          svc::make_save_slot_backends(plat.vfs, save_stage_keeper_, mount_refusal_cell_)
+      },
       save_relay_{plat.link, io_wake_, std::make_unique<app::FlatSaveServant>(save_stage_keeper_)},
       storage_(io_wake_),
       disc_store_{plat.vfs, disc_geometry_, disc_counters_, prefetch_},
@@ -347,6 +348,14 @@ DeviceBlock::DeviceBlock(
           }
       ),
       window_jobs_(plat.vfs, io_window_map_, plat.fpga_mem, io_wake_),
+      share_lane_(
+          app::ShareLane::Wiring{
+              .grant = share_grant_,
+              .vfs = plat.vfs,
+              .map = io_window_map_,
+              .aperture = plat.fpga_mem
+          }
+      ),
       shots_(),
       frame_src_(open_frame_source_(plat)),
       surface_(),
@@ -401,6 +410,8 @@ DeviceBlock::DeviceBlock(
           .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
           .lamp = plat.disk_lamp,
           .disk_activity = infra::OptRef<xthread::WakeFlag>{disk_activity_},
+          .remount = infra::OptRef<cores::RemountCell>{remount_cell_},
+          .mount_reads = infra::OptRef<cores::MountReadsCell>{mount_reads_cell_},
 
           .board_ops = {.stop = infra::OptRef<app::IStopSignal>{stop}},
           .save_copy = infra::OptRef<const cores::SaveCopyCell>{save_copy_},
@@ -409,6 +420,7 @@ DeviceBlock::DeviceBlock(
       },
       session_{plat.link, plat.link, plat.link, plat.fpga_mem.region, events_, parts_},
       bitstream_{plat.programmer, plat.bridges, plat.vfs, plat.program},
+      nic_{plat.regions, opened_},
       owner_{
           switch_park_,
           app::SessionOwner::Link{
@@ -435,6 +447,9 @@ DeviceBlock::DeviceBlock(
               .status_cell = session_.status_cell(),
               .mount_status_cell = session_.mount_status_cell(),
               .save_extent_cell = session_.save_extent_cell(),
+              .remount_cell = remount_cell_,
+              .mount_reads_cell = mount_reads_cell_,
+              .mount_refusal_cell = mount_refusal_cell_,
               .file_tx_level_cell = session_.file_tx_level_cell(),
               .option_cell = session_.option_cell(),
               .pin_levels = pin_levels_,
@@ -468,12 +483,16 @@ DeviceBlock::DeviceBlock(
                       .wake = infra::OptRef<xthread::WakeFlag>{input_ctrl_}
                   },
               .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
+              .share_grant = infra::OptRef<app::ShareGrantCell>{share_grant_},
               .save_stages = app::SaveStageDirector::
                   Ends{.orders = save_stage_orders_, .report = save_stage_cell_},
               .log_lane = infra::OptRef<app::MainLogLane>{main_log_lane_},
               .aperture = plat.fpga_mem,
               .osd_mask_cell = infra::OptRef<const app::OsdMaskCell>{osd_mask_cell_},
-              .menu_focus_cell = infra::OptRef<const app::MenuFocusCell>{menu_focus_cell_}
+              .menu_focus_cell = infra::OptRef<const app::MenuFocusCell>{menu_focus_cell_},
+              .config_value_cell = infra::OptRef<
+                  const app::ConfigValueCell>{session_.config_value_cell()},
+              .nic = nic_.inbox()
           }
       },
       frame_counter_{app::CoreFrameCounter::Wiring{
@@ -484,12 +503,12 @@ DeviceBlock::DeviceBlock(
       }},
       vfs_(plat.vfs) {
 
-    static_assert(svc::IoMain::kMaxCoworkers >= 10);
+    static_assert(svc::IoMain::kMaxCoworkers >= 11);
 
     const app::RunPolicy& policy = front.policy;
     video_pump_.apply_run_policy(policy);
     owner_.apply_run_policy(policy);
-    companion_host_.install(cores::make_servants(vfs_));
+    companion_host_.install(cores::make_servants(vfs_, clock_));
 }
 
 DeviceBlock::Parts DeviceBlock::parts() noexcept {
@@ -603,7 +622,7 @@ app::SupervisorParts::Services DeviceBlock::services_() noexcept {
         .feeder = pcm_feeder_,
         .prefetch = prefetch_,
         .mailbox = mailbox_relay_,
-        .disks = disk_relay_,
+        .disks = disk_relays_,
         .saves = save_relay_,
         .discs = discs_,
         .window_jobs = window_jobs_,
@@ -655,7 +674,7 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
 
     (void)rides_io_(window_jobs_, "T-IO: add_coworker(window_jobs)");
 
-    (void)rides_io_(disk_relay_, "T-IO: add_coworker(disk_relay)");
+    (void)rides_io_(disk_relays_, "T-IO: add_coworker(disk_relays)");
 
     (void)rides_io_(save_relay_, "T-IO: add_coworker(save_relay)");
 
@@ -668,9 +687,13 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
 
     (void)rides_io_(save_stage_keeper_, "T-IO: add_coworker(save_stage_keeper)");
 
+    (void)rides_io_(share_lane_, "T-IO: add_coworker(share_lane)");
+
     (void)rides_io_(storage_, "T-IO: add_coworker(storage)");
 
     seats.mains.bind(&seated(io_main_, "T-IO bound past a refused open"));
+
+    nic_.open_seat(seats.mains, infra::OptRef{main_wake_});
 
     if (const auto page = plat.programmer.boot_handoff()) {
         owner_.set_boot_cookie(proto::MemSizeCookie::of(page->boot_cookie()));

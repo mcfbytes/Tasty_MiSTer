@@ -16,6 +16,7 @@ namespace mister::app {
 class BindTail;
 class BoardReboot;
 class CmdRouter;
+class CmosKeeper;
 class CompanionWalk;
 class ConfigSaves;
 class ContentPick;
@@ -31,6 +32,7 @@ class LoadWalk;
 class ManifestLadder;
 class MglPlayer;
 class MountQueue;
+class RtcCadence;
 class SessionOwner;
 class VideoWire;
 
@@ -83,8 +85,6 @@ struct OpUnproduced {
 
 inline constexpr std::string_view kOwedOsdFlush = "no producer: OsdWire flushes the live row in "
                                                   "place; the arm is kept and tested";
-inline constexpr std::string_view
-    kOwedSendRtc = "no producer: no periodic RTC sender exists; the arm is kept and tested";
 inline constexpr std::string_view kOwedBlockAnswer =
     "no producer: the block answer is a wire reply the storage seat issues; the arm is tested";
 
@@ -101,7 +101,7 @@ using LinkOpProducers = std::tuple<
         ui::FrontEndBackground>,
     OpUnproduced<proto::LinkOp::Kind::OsdFlush, kOwedOsdFlush>,
     OpProducer<proto::LinkOp::Kind::JoyEmit, input::LinkPadSink>,
-    OpUnproduced<proto::LinkOp::Kind::SendRtc, kOwedSendRtc>,
+    OpProducer<proto::LinkOp::Kind::SendRtc, RtcCadence>,
     OpUnproduced<proto::LinkOp::Kind::BlockAnswer, kOwedBlockAnswer>,
     OpProducer<proto::LinkOp::Kind::BindDecoders, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindSlot, LoadLadder, LoadWalk, MountQueue, cores::BootLadder>,
@@ -110,14 +110,18 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::BindConfig, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindUart, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindSlotConfig, ConfigSaves>,
-    OpProducer<proto::LinkOp::Kind::BindMount, MountQueue, cores::st::StMediaLadder>,
+    OpProducer<
+        proto::LinkOp::Kind::BindMount,
+        MountQueue,
+        cores::BootLadder,
+        cores::st::StMediaLadder>,
     OpProducer<proto::LinkOp::Kind::RebootNow, BoardReboot>,
     OpProducer<proto::LinkOp::Kind::ApplyCore, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::AbortSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::BindIdentity, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindJoy, BindTail>,
     OpProducer<proto::LinkOp::Kind::JoyRelease, input::LinkPadSink>,
-    OpProducer<proto::LinkOp::Kind::SaveUpload, ConfigSaves>,
+    OpProducer<proto::LinkOp::Kind::SaveUpload, CmosKeeper, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::SaveAsk, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::Ps2Frame, input::Ps2Egress>,
     OpProducer<proto::LinkOp::Kind::DropCore, CoreSwitch>,
@@ -143,11 +147,12 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::SetWideIndex, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::CoreReset, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::LoadFacts, LinkTxChannel<SeatTag::Main>>,
-    OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk>,
+    OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::AttachSave, LoadWalk, MountQueue, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>,
     OpProducer<proto::LinkOp::Kind::MenuCtl, ui::UiRound>,
-    OpProducer<proto::LinkOp::Kind::PlainDownload, cores::PayloadPieces>>;
+    OpProducer<proto::LinkOp::Kind::PlainDownload, cores::PayloadPieces>,
+    OpProducer<proto::LinkOp::Kind::JoyStick, input::LinkPadSink>>;
 
 namespace detail {
 template <class T>

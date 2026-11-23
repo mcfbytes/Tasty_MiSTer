@@ -58,6 +58,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/seat_owner_io.h
   infra/seat_owner_main.h
   infra/seat_owner_ui.h
+  infra/static_bytes.h
   infra/niche.h
   infra/tally.h
   infra/unique_fd.h

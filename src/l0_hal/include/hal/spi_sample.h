@@ -11,7 +11,7 @@ inline constexpr GpiField kGpiWidthField{16, 0x1};
 inline constexpr GpiField kGpiAckField{17, 0x1};
 inline constexpr GpiField kGpiIoVersionField{18, 0x3};
 inline constexpr GpiField kGpiHdmiField{20, 0x1};
-inline constexpr GpiField kGpiFreeCapsField{21, 0x65};
+inline constexpr GpiField kGpiFreeCapsField{21, 0x45};
 inline constexpr GpiField kGpiLwEnabledField{22, 0x1};
 inline constexpr GpiField kGpiLwIdleField{24, 0x1};
 inline constexpr GpiField kGpiLwPresentField{25, 0x1};

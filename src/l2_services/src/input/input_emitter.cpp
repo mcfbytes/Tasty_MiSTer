@@ -74,6 +74,16 @@ Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, Joy
     return joy_.release(route(), player, composed);
 }
 
+Ex<void> InputEmitter::push_stick(
+    proto::ILinkFrame& frame,
+    PlayerIndex player,
+    proto::StickSide side,
+    proto::StickPos pos
+) {
+    framed_.over(frame);
+    return joy_.push_stick(route(), player, side, pos);
+}
+
 JoyMask InputEmitter::PlayerMasks::composed() const noexcept {
     return joy_.with(autofire_);
 }

@@ -20,6 +20,9 @@
 #include "app/boot_restore.h"
 #include "app/cheat_catalog_cell.h"
 #include "app/companion_slot.h"
+#include "app/sidecar_slot.h"
+#include "app/start_chain.h"
+#include "app/start_file.h"
 #include "app/config_saves.h"
 #include "app/ui_admission.h"
 #include "app/content_pick.h"
@@ -40,6 +43,9 @@
 #include "app/game_id.h"
 #include "app/mount_status_cell.h"
 #include "app/option_cell.h"
+#include "app/config_value_cell.h"
+#include "svc/nic_control.h"
+#include "app/rtc_cadence.h"
 #include "app/negotiated_core.h"
 #include "app/owner_ladder.h"
 #include "app/owner_tally.h"
@@ -48,6 +54,7 @@
 #include "app/main_pass.h"
 #include "app/save_director_status.h"
 #include "app/save_extent_cell.h"
+#include "app/servant_mounts.h"
 #include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
 #include "app/save_stage_director.h"
@@ -65,12 +72,18 @@
 #include "infra/xthread/counter.h"
 #include "app/log_lane.h"
 #include "infra/opt_ref.h"
+#include "app/cmos_keeper.h"
+#include "app/reload_hold.h"
+#include "hal/pin_levels.h"
 #include "infra/park_timeout.h"
 #include "infra/prelude.h"
+#include "infra/tally.h"
 #include "os/clock.h"
 #include "proto/reset_edge.h"
 #include "proto/status_cell.h"
+#include "proto/status_word.h"
 #include "svc/card_writer.h"
+#include "svc/mount_refusal.h"
 
 namespace mister::app {
 
@@ -110,6 +123,9 @@ public:
         const proto::StatusCell& status_cell;
         const MountStatusCell& mount_status_cell;
         const SaveExtentCell& save_extent_cell;
+        const cores::RemountCell& remount_cell;
+        const cores::MountReadsCell& mount_reads_cell;
+        const svc::MountRefusalCell& mount_refusal_cell;
         const FileTxLevelCell& file_tx_level_cell;
         const OptionCell& option_cell;
         const hal::PinLevelCell& pin_levels;
@@ -130,12 +146,18 @@ public:
 
         infra::OptRef<xthread::WakeFlag> io_wake{};
 
+        infra::OptRef<ShareGrantCell> share_grant{};
+
         std::optional<SaveStageDirector::Ends> save_stages{};
         infra::OptRef<MainLogLane> log_lane{};
         hal::FpgaAperture aperture{};
 
         infra::OptRef<const OsdMaskCell> osd_mask_cell{};
         infra::OptRef<const MenuFocusCell> menu_focus_cell{};
+
+        infra::OptRef<const ConfigValueCell> config_value_cell{};
+
+        infra::OptRef<svc::NicControlInbox> nic{};
     };
     template <class T>
     using Cell = xthread::Telemetry<T, SeatTag::Main>;
@@ -227,6 +249,8 @@ public:
     void on(const proto::LinkEvent::CoreMade& e) noexcept;
     void on(const proto::LinkEvent::StartRefused& e) noexcept;
     void on(const proto::LinkEvent::RebootQuiesced& e);
+
+    void on(const proto::LinkEvent::PolledWord& w) noexcept;
     void misrouted(const proto::LinkEvent& m) noexcept;
 
     [[nodiscard]] LinkTxChannel<SeatTag::Main>& inbox() noexcept;
@@ -365,6 +389,8 @@ private:
     );
     void begin_companion(std::string_view path);
 
+    void follow_content_(std::string_view path, proto::WideIoIndex index);
+
     void switch_minted(const UiRequest::LoadCore& req) noexcept override;
     void drop_core_acts() override;
     void forget_core() noexcept override;
@@ -386,6 +412,7 @@ private:
     );
     [[nodiscard]] bool prime_replay_save_(std::string_view path, bool seeded);
     void step_ladder_();
+    void step_servants_();
     void bios_missing_();
     void finish_ladder_(const OwnerLadder::Ended& end);
     void drop_ladder_();
@@ -404,9 +431,13 @@ private:
     void program_();
     void swap_launcher_();
     void watch_readiness_();
+
+    void upkeep_();
     void watch_start_() noexcept;
 
     void watch_bridge_() noexcept;
+
+    void refresh_clock_() noexcept;
     void end_bridge_session_() noexcept;
 
     [[nodiscard]] SaveStageDirector::Facts save_facts_() const noexcept;
@@ -440,6 +471,8 @@ private:
         bool slot0_held = false;
         bool remembered = false;
         bool ladder = false;
+        proto::StatusWord status{};
+        std::span<const std::string_view> remembered_exts{};
     };
 
     [[nodiscard]] StartChain::Facts start_facts_(
@@ -447,7 +480,17 @@ private:
         const SessionUpFacts& up
     ) const;
     [[nodiscard]] std::string start_rbf_() const;
-    void order_start_chain_(const StartChain& chain);
+
+    struct StartRun {
+        StartChain chain{};
+        StartChain::Place next{};
+        bool held = false;
+    };
+
+    void order_start_chain_(std::span<const StartFile> files, bool ends);
+
+    void step_start_chain_();
+    [[nodiscard]] bool start_burst_due_() const noexcept;
     void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, proto::FileOffset at);
 
     struct RememberedFile {
@@ -537,8 +580,10 @@ private:
     const svc::Vfs& vfs_;
     svc::CardWriter card_;
     OwnerLadder ladder_;
+    RtcCadence rtc_{clock_};
     NegotiatedCore negotiated_;
     MountQueue mounts_;
+    ServantMounts servants_;
     LauncherLatch launcher_;
     FabricCell& cell_;
     proto::MemSizeCookie cookie_{};
@@ -557,6 +602,10 @@ private:
 
     std::optional<MadeFacts> made_{};
     CompanionSlot companion_;
+    SidecarSlot sidecars_;
+    std::optional<StartRun> start_run_{};
+
+    bool init_after_files_ = false;
     ILoadWindowMap<seat_owner::Main>& window_map_;
     const FileTxLevelCell& ftx_level_cell_;
     WindowTally windows_{};
@@ -576,6 +625,11 @@ private:
     PathText boot_companion_{};
     phase::SwitchPhase phase_{};
     std::optional<MainLogLane::Producer> log_{};
+    infra::Tally refused_names_logged_{};
+
+    const hal::PinLevelCell& pin_levels_;
+    ReloadHold reload_hold_{};
+    CmosKeeper cmos_;
 };
 
 }

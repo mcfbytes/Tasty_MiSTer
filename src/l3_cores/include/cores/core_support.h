@@ -23,6 +23,7 @@
 namespace mister::proto {
 class StatusBit;
 class IBlockServer;
+struct ResetTerms;
 }
 
 namespace mister::proto::link {
@@ -36,6 +37,7 @@ class ISaveChannel;
 
 class IStagingCore;
 class ISlotMount;
+class ISlotServants;
 class ICdServiceRows;
 class ICdDiagnostics;
 class IPcmWireRows;
@@ -62,7 +64,7 @@ public:
 
     [[nodiscard]] Ex<void> adopt(const CoreAdopt& a);
 
-    void retire() noexcept { do_retire(); }
+    void retire() noexcept;
 
     [[nodiscard]] Ex<std::optional<proto::StatusBit>> reset(const proto::ResetEdge& edge);
     [[nodiscard]] Ex<void> shutdown();
@@ -91,6 +93,10 @@ public:
     [[nodiscard]] infra::OptRef<IStagingCore> staging_core() noexcept { return on_staging_core(); }
 
     [[nodiscard]] infra::OptRef<ISlotMount> slot_mount() noexcept { return on_slot_mount(); }
+
+    [[nodiscard]] infra::OptRef<ISlotServants> slot_servants() noexcept {
+        return on_slot_servants();
+    }
 
     [[nodiscard]] infra::OptRef<ICdServiceRows> cd_service_rows() noexcept {
         return on_cd_service_rows();
@@ -132,9 +138,7 @@ public:
 
     [[nodiscard]] infra::OptRef<IWindowSave> window_save() noexcept { return on_window_save(); }
 
-    [[nodiscard]] proto::IImageSink& image_sink() noexcept {
-        return host_.bulk ? *host_.bulk : spi_sink_;
-    }
+    [[nodiscard]] proto::IImageSink& image_sink() noexcept { return on_image_sink(); }
 
 protected:
     Core(const CoreProfile& p, const HostServices& h)
@@ -150,6 +154,8 @@ protected:
     }
 
     const HostServices& host() const noexcept { return host_; }
+
+    void declare_resets(const proto::ResetTerms& terms) noexcept;
 
 private:
     [[nodiscard]] virtual Ex<void> do_adopt(const CoreAdopt& a) = 0;
@@ -180,6 +186,8 @@ private:
     [[nodiscard]] virtual infra::OptRef<IStagingCore> on_staging_core() noexcept { return {}; }
 
     [[nodiscard]] virtual infra::OptRef<ISlotMount> on_slot_mount() noexcept { return {}; }
+
+    [[nodiscard]] virtual infra::OptRef<ISlotServants> on_slot_servants() noexcept { return {}; }
 
     [[nodiscard]] virtual infra::OptRef<ICdServiceRows> on_cd_service_rows() noexcept { return {}; }
 
@@ -218,6 +226,10 @@ private:
     [[nodiscard]] virtual infra::OptRef<ISaveChannel> on_save_channel() noexcept { return {}; }
 
     [[nodiscard]] virtual infra::OptRef<IWindowSave> on_window_save() noexcept { return {}; }
+
+    [[nodiscard]] virtual proto::IImageSink& on_image_sink() noexcept {
+        return host_.bulk ? *host_.bulk : spi_sink_;
+    }
 
     [[nodiscard]] Ex<void> pre_adopt_(proto::link::CoreSession& s);
     [[nodiscard]] Ex<void> flush_dirty_state_();

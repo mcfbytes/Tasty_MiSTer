@@ -31,6 +31,7 @@
 #include "svc/input/quirk_id.h"
 #include "svc/input/rumble_channel.h"
 #include "svc/input/stick_cal.h"
+#include "svc/input/stick_reach.h"
 #include "svc/input/stick_state.h"
 #include "svc/types.h"
 
@@ -142,6 +143,10 @@ public:
 
     void set_reshape(infra::OptRef<const IAnalogReshape> r) noexcept { reshape_ = r; }
 
+    void set_stick_reach(StickReach r) noexcept { reach_ = r; }
+
+    StickReach stick_reach() const noexcept { return reach_; }
+
     infra::OptRef<const IAnalogReshape> reshape() const noexcept { return reshape_; }
 
     [[nodiscard]] Ex<unsigned> drain();
@@ -188,6 +193,7 @@ private:
     bool grabbed_ = false;
     Deadzone deadzone_{};
     infra::OptRef<const IAnalogReshape> reshape_;
+    StickReach reach_ = StickReach::Symmetric;
     proto::MouseButtons mouse_buttons_{};
     bool keys_changed_ = false;
 

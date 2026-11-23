@@ -33,6 +33,11 @@ struct BitField {
         return start.plus(width - 1u);
     }
 
+    [[nodiscard]] constexpr bool holds(StatusBit bit) const noexcept {
+        const std::optional<StatusBit> last = end();
+        return last && start <= bit && bit <= *last;
+    }
+
     constexpr std::uint32_t mask() const noexcept {
         return width >= kWordBits ? std::numeric_limits<std::uint32_t>::max()
                                   : ((1u << width) - 1u);

@@ -29,8 +29,16 @@ public:
     MsuMachine& operator=(const MsuMachine&) = delete;
 
     [[nodiscard]] proto::MailboxAct serve(
-        const proto::MailboxFrame& frame,
-        std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+        proto::MailboxSelectIndex select,
+        const proto::user_io::PollFrame& frame,
+        ActBytes bytes,
+        BulkBytes bulk
+    ) noexcept override;
+
+    [[nodiscard]] proto::MailboxAct settle(
+        const proto::MailboxResult& result,
+        ActBytes bytes,
+        BulkBytes bulk
     ) noexcept override;
     void begin_core() noexcept override;
     void rebind(std::string_view stem, bool present) noexcept override;
@@ -87,9 +95,7 @@ private:
     };
 
     [[nodiscard]] proto::MailboxAct track_(AudioTrack track) noexcept;
-    [[nodiscard]] proto::MailboxAct next_(
-        std::span<std::uint8_t, proto::kMailboxActBytes> bytes
-    ) noexcept;
+    [[nodiscard]] proto::MailboxAct next_(ActBytes bytes) noexcept;
     void seek_(SectorLba sector) noexcept;
     void close_() noexcept;
 
@@ -97,7 +103,7 @@ private:
     infra::PathText stem_{};
     infra::PathText path_{};
     bool present_ = false;
-    std::optional<std::uint8_t> last_req_{};
+    std::optional<proto::ReplyWord> last_req_{};
     std::unique_ptr<svc::IFile> file_{};
     proto::FileSize size_{};
     msu::TrackCursor cursor_{};

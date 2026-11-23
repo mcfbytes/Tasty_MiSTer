@@ -203,6 +203,8 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
         const BlockBacking backing = roles.resolve(slot_server_of(servers, d.req.slot));
         if (const auto server = backing.server()) {
             geo = server->geometry_for(d.req.slot, d.req.lba, geo);
+        } else if (const auto window = backing.window()) {
+            geo = window->geometry_for(d.req.slot, d.req.lba, geo);
         }
     }
     BlockSize size = geo.block_size;
@@ -232,6 +234,7 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
 
     d.block_size = size;
     d.window_blocks = window_blocks;
+    d.policy = geo.policy;
     return d;
 }
 

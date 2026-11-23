@@ -4,7 +4,7 @@
 #include "app/delivered.h"
 #include "app/core_switch.h"
 #include "app/log_clock.h"
-#include "app/disk_relay.h"
+#include "app/disk_relays.h"
 #include "app/pcm/mailbox_relay.h"
 #include "app/save_upload_relay.h"
 #include "infra/byte_view.h"
@@ -51,6 +51,7 @@
 #include "cores/staging_core.h"
 #include "cores/mounted_path.h"
 #include "cores/generic_core.h"
+#include "cores/host_bit_row.h"
 #include "infra/prelude.h"
 #include "reactor/executive.h"
 #include "svc/audio_service.h"
@@ -144,9 +145,11 @@ LinkSession::LinkSession(
           .discs = infra::OptRef{parts.services.discs},
           .prefetch = infra::OptRef{parts.services.prefetch},
           .mailbox = infra::OptRef<cores::IMailboxPort>{parts.services.mailbox},
-          .disk = infra::OptRef<cores::IDiskPort>{parts.services.disks},
+          .disk = parts.services.disks.ports(),
           .lamp = parts.lamp,
           .disk_activity = parts.disk_activity,
+          .remount = parts.remount,
+          .mount_reads = parts.mount_reads,
           .save_copy = parts.save_copy,
           .feeder = infra::OptRef{parts.services.feeder},
           .aperture = parts.fpga_mem,
@@ -321,7 +324,7 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
 
     if (tick && live_at_entry) {
 
-        sampler_.service(held_.fio_held());
+        sampler_.service(held_.fio_held() || saves_.holds_fio());
         const hal::SpiSample& g = sampler_.level();
 
         core_ready_ = g.ready;
@@ -533,7 +536,6 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
     }
     core_edge_seq_ = core_edge_seq_.next();
     mailbox_.forget();
-    disks_.forget();
     saves_.forget();
     if (const auto r = detach(); !r) {
         tally_.last_error = r.error();
@@ -782,8 +784,20 @@ ILinkEncoder::Outcome LinkSession::on(
     if (!*pulse)
         return ILinkEncoder::Outcome::Encoded;
     const auto out = encoder_.on(proto::LinkOp::PulseOption{.bit = **pulse}, ctx);
-    if (out == ILinkEncoder::Outcome::EncodedStatusChange)
-        ++tally_.resets_pulsed;
+    if (out != ILinkEncoder::Outcome::EncodedStatusChange)
+        return out;
+    ++tally_.resets_pulsed;
+
+    if (cores::host_pulses(
+            current->profile().host_bits,
+            cores::HostFact::SaveUploadTrigger,
+            **pulse
+        )) {
+        if (auto r = flush_save_upload(); !r) {
+            nvram_.count_error();
+            log_edge(LogRec::Refusal{r.error().code, r.error().site});
+        }
+    }
     return out;
 }
 
@@ -930,7 +944,11 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
 
     if (osd_mask_cell_)
         osd_mask_cell_->publish(proto::OsdMask{});
-    rows_.arm_session_polls(front_end);
+    rows_.arm_session_polls(
+        front_end,
+        tenancy_.core() ? tenancy_.core()->profile().polls
+                        : std::span<const proto::user_io::PollShape>{}
+    );
     machine_.close(
         Event::CoreLoaded{
             .type = session_.type(),
@@ -950,6 +968,8 @@ Ex<ExitReboot> LinkSession::shutdown() {
 
         ~PublishOnExit() { self->publish_diag_final(); }
     } publish_on_exit{this};
+
+    mailbox_.forget();
 
     const auto d = detach();
 

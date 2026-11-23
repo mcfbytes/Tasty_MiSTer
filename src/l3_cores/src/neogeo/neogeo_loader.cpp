@@ -516,7 +516,7 @@ Ex<std::uint32_t> PlanWalk::add_rom(
     row.shape = neogeo::shape_key_of(shape);
     row.index = e.index.wide();
     row.place = neogeo::rom_place(e.index, concat);
-    row.fill = row.shaped ? 0u : e.index.vrom_fill();
+    row.fill = row.shaped ? std::byte{} : std::byte{e.index.vrom_fill()};
     row.file_offset = proto::FileOffset{e.offset};
     row.file_len = neogeo::stock_read_len(s->size, extent, s->rest);
     row.extent = proto::FileSize{extent};
@@ -531,7 +531,7 @@ Ex<void> PlanWalk::add_fill() {
     const neogeo::FileIndex fill_index = neogeo::FileIndex::Fill;
     row.index = fill_index.wide();
     row.place = WindowSpot{.slot = neogeo::kMemWindowSlot};
-    row.fill = neogeo::kFillPattern;
+    row.fill = std::byte{neogeo::kFillPattern};
     row.extent = proto::FileSize{neogeo::kFillBytes};
     row.notify = neogeo::make_notify(fill_index, neogeo::kFillBytes, true);
     return {};

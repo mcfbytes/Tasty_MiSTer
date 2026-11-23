@@ -21,6 +21,7 @@ add_library(mister_ui STATIC
   src/draw_classic.cpp
   src/event_trace.cpp
   src/fb_terminal_host.cpp
+  src/fb_terminal_page.cpp
   src/front_end_background.cpp
   src/front_end_idle_clock.cpp
   src/game_slot.cpp
@@ -44,6 +45,7 @@ add_library(mister_ui STATIC
   src/page_stack.cpp
   src/page_walk.cpp
   src/progress_page.cpp
+  src/mount_refusal_page.cpp
   src/script_pick_host.cpp
   src/script_run_page.cpp
   src/script_runner.cpp
@@ -105,6 +107,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/draw_classic.h
   ui/event_trace.h
   ui/fb_terminal_host.h
+  ui/fb_terminal_page.h
   ui/front_end_background.h
   ui/front_end_idle_clock.h
   ui/game_slot.h
@@ -118,6 +121,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/indicator_row.h
   ui/indicator_source.h
   ui/info_page.h
+  ui/mount_refusal_page.h
   ui/joymap_page.h
   ui/key_decoder.h
   ui/list_view.h
@@ -191,6 +195,8 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/options_keys.h
   ui/script_request.h
   ui/session_facts.h
+  ui/terminal_recipe.h
+  ui/terminal_script.h
 )
 
 

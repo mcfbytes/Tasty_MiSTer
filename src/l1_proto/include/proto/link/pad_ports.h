@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/indexed_array.h"
+#include "proto/stick_side.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
 
@@ -22,6 +23,10 @@ inline constexpr std::array<UioOp, kPadPorts> kPadDigitalOpcode{
 
 [[nodiscard]] constexpr UioOp digital_opcode(PlayerIndex port) noexcept {
     return infra::at_index(kPadDigitalOpcode, port);
+}
+
+[[nodiscard]] constexpr UioOp stick_opcode(StickSide side) noexcept {
+    return side == StickSide::Left ? UioOp::Astick : UioOp::Astick2;
 }
 
 }

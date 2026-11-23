@@ -3,6 +3,8 @@
 #include "cores/core_adopt.h"
 #include "infra/prelude.h"
 #include "proto/link/core_session.h"
+#include "proto/link/spi_fio_queue.h"
+#include "proto/reset_terms.h"
 #include "proto/status_bit.h"
 
 #include <algorithm>
@@ -19,6 +21,16 @@ Ex<void> Core::adopt(const CoreAdopt& a) {
         return r;
     adopted_ = true;
     return {};
+}
+
+void Core::retire() noexcept {
+    do_retire();
+    declare_resets(proto::ResetTerms::framework());
+}
+
+void Core::declare_resets(const proto::ResetTerms& terms) noexcept {
+    if (host_.fio_queue)
+        host_.fio_queue->declare_resets(terms);
 }
 
 Ex<std::optional<proto::StatusBit>> Core::reset(const proto::ResetEdge& edge) {

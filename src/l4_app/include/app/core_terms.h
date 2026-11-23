@@ -4,7 +4,10 @@
 #include <cstdint>
 #include <span>
 
+#include "cores/disk_port.h"
 #include "cores/save_copy_level.h"
+#include "cores/mount_reads.h"
+#include "cores/remount_asked.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
 #include "hal/irq_pin.h"
@@ -44,7 +47,6 @@ class SpiFioQueue;
 }
 
 namespace mister::cores {
-class IDiskPort;
 class IMailboxPort;
 }
 
@@ -69,10 +71,13 @@ struct CoreTerms {
     infra::OptRef<svc::disc::DiscReadService> discs{};
     infra::OptRef<svc::disc::ChdPrefetch> prefetch{};
     infra::OptRef<cores::IMailboxPort> mailbox{};
-    infra::OptRef<cores::IDiskPort> disk{};
+    cores::DiskPorts disk{};
 
     infra::OptRef<hal::DiskLamp> lamp{};
     infra::OptRef<xthread::WakeFlag> disk_activity{};
+
+    infra::OptRef<cores::RemountCell> remount{};
+    infra::OptRef<cores::MountReadsCell> mount_reads{};
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
     infra::OptRef<pcm::PcmRingFeeder> feeder{};
     hal::FpgaAperture aperture{};

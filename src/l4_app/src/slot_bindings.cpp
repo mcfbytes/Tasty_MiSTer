@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/slot_bindings.h"
 
+#include "cores/slot_servants.h"
+
 #include "infra/prelude.h"
 
 namespace mister::app {
@@ -239,8 +241,32 @@ void SlotBindings::forget_channel_borrows() noexcept {
     channel_borrows_ = {};
 }
 
+infra::OptRef<svc::IStorageBackend> SlotBindings::servant_of_(
+    infra::OptRef<cores::Core> core,
+    proto::SlotIndex slot
+) noexcept {
+    if (!core.has_value())
+        return {};
+    const auto servants = core->slot_servants();
+    return servants ? servants->servant(slot) : infra::OptRef<svc::IStorageBackend>{};
+}
+
+void SlotBindings::bind_window_slots_(infra::OptRef<cores::Core> core) noexcept {
+    for (std::uint8_t i = 0; i < proto::kAnnounceableSlots; ++i) {
+        const proto::SlotIndex si{i};
+        const bool windowed = servant_of_(core, si).has_value();
+        const proto::SlotServer now = slots_.server(si);
+        if (windowed && now == proto::SlotServer::Session) {
+            slots_.bind_server(si, proto::SlotServer::CoreWindow);
+        } else if (!windowed && now == proto::SlotServer::CoreWindow) {
+            slots_.bind_server(si, proto::SlotServer::Session);
+        }
+    }
+}
+
 void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
+    bind_window_slots_(core);
     if (!core.has_value())
         return;
     const proto::SlotIndex slot = core->profile().staging.disc_slot.block_slot();
@@ -303,15 +329,27 @@ void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
         save_src_->note_attached(si, false, proto::FileSize{});
         return SaveBind::Ready;
     }
-    const auto backend = save_backend_(si);
+
+    const auto servant = servant_of_(core, si);
+    const auto backend = servant ? servant : save_backend_(si);
     if (!backend)
         return std::unexpected(si.refusal(Errc::slot_range, ERR_SITE()));
 
     const infra::OptRef<const svc::BlankSaveSpec> blank_spec = core.has_value()
         ? infra::OptRef<const svc::BlankSaveSpec>{core->profile().blank_save}
         : infra::OptRef<const svc::BlankSaveSpec>{};
-    if (!storage_life_->stage_backend(si, *backend, save_src_->order(si), blank_spec))
+
+    const std::span<const svc::DiskFormatRow> formats = manual && core.has_value()
+        ? cores::disk_formats_of(core->profile(), si.io_index())
+        : std::span<const svc::DiskFormatRow>{};
+    const bool staged = formats.empty()
+        ? storage_life_->stage_backend(si, *backend, save_src_->order(si), blank_spec)
+        : storage_life_->stage_image(si, *backend, save_src_->order(si), formats);
+    if (!staged)
         return SaveBind::Declined;
+
+    if (servant)
+        channel_borrows_ = channel_borrows_.with(si);
 
     proto::NoBlockRoles none;
     if (!slots_.submit_attach(si, none)) {
@@ -603,6 +641,8 @@ cores::SaveExtent SlotBindings::save_body_(proto::FileSize size_bytes, bool exis
             return slots_.unmount(slot);
         case proto::LinkOp::SlotBind::MountCd:
             return announce_disc_(slot, size, roles);
+        case proto::LinkOp::SlotBind::Announce:
+            return slots_.announce_bare(slot);
     }
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), proto::LinkOp::detail(kind)});
 }

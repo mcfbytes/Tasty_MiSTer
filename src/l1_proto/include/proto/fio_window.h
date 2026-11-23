@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include "hal/spi_halves.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -24,6 +25,7 @@ struct FioWindow {
 
     struct Open {
         static constexpr Kind kKind = Kind::Open;
+        hal::SpiHalves address{};
     };
 
     struct Data {

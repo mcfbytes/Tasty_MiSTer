@@ -41,6 +41,7 @@ public:
     void record(const app::Event::SessionEnded& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::RamImageDeclined& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::RequestDone& a, const app::Event::Head& h) noexcept;
+    void record(const app::Event::MountRefused& a, const app::Event::Head& h) noexcept;
 
     void record_misrouted() noexcept;
 

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "cores/disk_port.h"
+#include "cores/st/acsi_poll.h"
 #include "cores/st/st_media_fact.h"
 #include "infra/byte_view.h"
 #include "infra/indexed_array.h"
@@ -90,7 +91,13 @@ Ex<void> StCore::set_ext_ctrl(std::uint32_t ext) {
 }
 
 Ex<void> StCore::do_adopt(const CoreAdopt&) {
+    if (!acsi_port_())
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     return {};
+}
+
+infra::OptRef<IDiskPort> StCore::acsi_port_() const noexcept {
+    return host().disk[proto::DiskProtocol::Acsi];
 }
 
 Ex<void> StCore::eject_all_() {
@@ -111,8 +118,8 @@ Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts, std::s
     switch (f->verb) {
         case StMediaFact::Verb::Hold:
 
-            if (host().disk)
-                host().disk->abandon_command();
+            if (const auto disk = acsi_port_())
+                disk->abandon_command();
             if (auto r = update_sysctrl_(cfg_.system_ctrl.with(st_ctrl::CtrlWord::kCpuReset)); !r) {
                 return r;
             }
@@ -152,14 +159,15 @@ Ex<void> StCore::insert_disk_(st_ctrl::StSlot slot, std::string_view path) {
 }
 
 Ex<void> StCore::eject_hdd_(AcsiTarget target) {
-    if (host().disk)
-        host().disk->abandon_command_on(target.unit());
+    const infra::OptRef<IDiskPort> disk = acsi_port_();
+    if (disk)
+        disk->abandon_command_on(target.unit());
     (void)cfg_.acsi_img[target].assign({});
     store_sysctrl_(cfg_.system_ctrl.without(st_ctrl::acsi_enable_bit(target)));
     acsi_[target] = AcsiBind{};
     auto pushed = push_control_();
-    if (host().disk)
-        host().disk->order_bind(target.unit(), {});
+    if (disk)
+        disk->order_bind(target.unit(), {});
     return pushed;
 }
 
@@ -171,9 +179,10 @@ MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     const auto target = disk_slot->acsi_target();
     if (!target)
         return MountState::Failed;
-    if (!host().disk)
+    const infra::OptRef<IDiskPort> port = acsi_port_();
+    if (!port)
         return MountState::Failed;
-    IDiskPort& disk = *host().disk;
+    IDiskPort& disk = *port;
     if (!acsi_[*target].out || cfg_.acsi_img[*target].view() != path) {
         (void)cfg_.acsi_img[*target].assign(path);
         acsi_[*target] = AcsiBind{.bound = false, .out = true};
@@ -376,9 +385,9 @@ Ex<void> StCore::apply_write_(const StOptionRow::Write& w) {
 
 void StCore::service_kick() noexcept {
     TASTY_SEAT_BODY(StCore);
-    if (host().disk) {
+    if (const auto disk = acsi_port_()) {
         proto::link::Link link{host().link};
-        host().disk->service_rt(link, kAcsiPoll);
+        disk->service_rt(link, kAcsiPoll);
     }
 }
 

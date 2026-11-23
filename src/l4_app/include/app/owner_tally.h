@@ -88,6 +88,11 @@ struct OwnerTally {
 
     std::uint32_t open_saves_armed = 0;
     std::uint32_t open_saves_skipped = 0;
+
+    infra::Tally sidecars_sent{};
+    infra::Tally sidecar_failures{};
+
+    infra::Tally start_chains_stepped{};
 };
 
 }

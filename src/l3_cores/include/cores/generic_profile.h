@@ -4,6 +4,7 @@
 #include <array>
 
 #include "cores/core_profile.h"
+#include "svc/gcr_format_rows.h"
 
 namespace mister::cores {
 
@@ -24,6 +25,7 @@ inline constexpr CoreProfile kGenericProfile{
     .slots = detail::kNoSlots,
     .boot_assets = detail::kNoAssets,
     .signatures = detail::kNoSignatures,
+    .disk_formats = svc::kGcrFormatRows,
     .undeclared_role = SlotRole::Save,
 };
 

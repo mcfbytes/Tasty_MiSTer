@@ -19,6 +19,7 @@ inline constexpr CoreProfile kElectron{
     .slots = {},
     .boot_assets = {},
     .signatures = {},
+    .undeclared_role = SlotRole::Save,
 };
 
 std::unique_ptr<ILoader> make_uef_loader(const LoaderContext& ctx);

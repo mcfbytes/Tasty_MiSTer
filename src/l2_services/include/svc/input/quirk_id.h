@@ -28,4 +28,8 @@ constexpr bool is_pdsp_like(QuirkId q) {
     return q == QuirkId::Mssp || q == QuirkId::Paddle || q == QuirkId::Spinner;
 }
 
+constexpr bool takes_stick_arm(QuirkId q) {
+    return q != QuirkId::Wheel && q != QuirkId::LightGun && q != QuirkId::OpenFire;
+}
+
 }

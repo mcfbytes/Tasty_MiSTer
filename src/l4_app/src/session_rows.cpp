@@ -36,7 +36,11 @@ SessionRows::SessionRows(const Wiring& w) noexcept
           w.live,
           static_cast<proto::user_io::IPollParams&>(*this),
           proto::user_io::PollShape::RumblePoll
-      ) {}
+      ),
+      declared_polls_{
+          DeclaredPoll{w, poll_params(), kDeclarablePolls[0]},
+          DeclaredPoll{w, poll_params(), kDeclarablePolls[1]}
+      } {}
 
 [[nodiscard]] Ex<void> SessionRows::rebind_census(
     std::span<const reactor::LinkDecoderDecl> rows,
@@ -116,6 +120,12 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
     if (current.has_value()) {
         for (const reactor::LinkDecoderDecl& r : current->services())
             n = put_census_row_(out, n, r);
+
+        for (const proto::user_io::PollShape shape : current->profile().polls) {
+            for (const DeclaredPoll& poll : declared_polls_)
+                if (poll.reader.shape() == shape)
+                    n = put_census_row_(out, n, poll.reader.census_row(poll.row));
+        }
     }
 
     if (current.has_value()
@@ -182,12 +192,23 @@ void SessionRows::disarm_polls() noexcept {
     TASTY_SEAT_BODY(SessionRows);
     info_poll_.arm(false, bindings_.generation());
     rumble_poll_.arm(false, bindings_.generation());
+    for (DeclaredPoll& poll : declared_polls_)
+        poll.reader.arm(false, bindings_.generation());
 }
 
-void SessionRows::arm_session_polls(bool front_end) noexcept {
+void SessionRows::arm_session_polls(
+    bool front_end,
+    std::span<const proto::user_io::PollShape> declared
+) noexcept {
     TASTY_SEAT_BODY(SessionRows);
     info_poll_.arm(!front_end && bindings_.declares_info(), bindings_.generation());
     rumble_poll_.arm(!front_end, bindings_.generation());
+    for (DeclaredPoll& poll : declared_polls_) {
+        bool declares = false;
+        for (const proto::user_io::PollShape shape : declared)
+            declares = declares || shape == poll.reader.shape();
+        poll.reader.arm(declares, bindings_.generation());
+    }
 }
 
 void SessionRows::bind_block_drain(infra::OptRef<cores::Core> current) noexcept {

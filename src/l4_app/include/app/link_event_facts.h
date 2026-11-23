@@ -48,6 +48,8 @@ static_assert(
         return EventSink::Ui;
     if (seat == SeatTag::Input)
         return EventSink::Input;
+    if (seat == SeatTag::Main)
+        return EventSink::Main;
     return EventSink::kCount;
 }
 

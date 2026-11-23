@@ -53,6 +53,9 @@ concept LinkOpWireSink = std::same_as<typename S::Result, ILinkEncoder::Outcome>
                s.on(std::declval<const proto::LinkOp::JoyRelease&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
+               s.on(std::declval<const proto::LinkOp::JoyStick&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
+           {
                s.on(std::declval<const proto::LinkOp::SaveUpload&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
@@ -239,6 +242,7 @@ template <class S>
 concept LinkOpPadSink = requires(S& s, const proto::LinkOp& m) {
     { s.on(std::declval<const proto::LinkOp::JoyEmit&>()) } -> std::same_as<bool>;
     { s.on(std::declval<const proto::LinkOp::JoyRelease&>()) } -> std::same_as<bool>;
+    { s.on(std::declval<const proto::LinkOp::JoyStick&>()) } -> std::same_as<bool>;
     { s.misrouted(m) } -> std::same_as<bool>;
 };
 
@@ -252,6 +256,8 @@ struct LinkOpJoyPort {
     bool on(const proto::LinkOp::JoyEmit& a) const noexcept { return joy_port(a.player); }
 
     bool on(const proto::LinkOp::JoyRelease& a) const noexcept { return joy_port(a.player); }
+
+    bool on(const proto::LinkOp::JoyStick& a) const noexcept { return joy_port(a.player); }
 
     bool misrouted(const proto::LinkOp&) const noexcept { return false; }
 };

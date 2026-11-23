@@ -136,16 +136,34 @@ public:
         std::span<const std::byte> order,
         infra::OptRef<const BlankSaveSpec> blank
     ) noexcept override;
+    [[nodiscard]] bool stage_image(
+        proto::SlotIndex,
+        IStorageBackend&,
+        std::span<const std::byte> order,
+        std::span<const DiskFormatRow> formats
+    ) noexcept override;
     [[nodiscard]] bool release_slot(proto::SlotIndex) noexcept override;
     [[nodiscard]] bool quiesced() const noexcept override;
 
 private:
     void own_all_() noexcept;
 
+    struct StageRiders {
+        infra::OptRef<const BlankSaveSpec> blank{};
+        std::span<const DiskFormatRow> formats{};
+    };
+
+    [[nodiscard]] bool stage_(
+        proto::SlotIndex slot,
+        IStorageBackend& backend,
+        std::span<const std::byte> order,
+        const StageRiders& riders
+    ) noexcept;
+
     static void set_order_(
         BlockCtl& hand,
         std::span<const std::byte> order,
-        infra::OptRef<const BlankSaveSpec> blank
+        const StageRiders& riders
     ) noexcept;
 
     [[nodiscard]] bool home_(proto::SlotIndex slot) const noexcept;
@@ -156,6 +174,18 @@ private:
         proto::SlotIndex slot,
         const Work& w
     ) const noexcept;
+
+    [[nodiscard]] Outcome fetch_bytes_(
+        const proto::StorageRequest::Fetch& a,
+        const proto::StorageRequest::Head& h,
+        SlotArena& arena,
+        IStorageBackend& b
+    ) noexcept;
+    [[nodiscard]] Outcome fetch_track_(
+        const proto::StorageRequest::Fetch& a,
+        SlotArena& arena,
+        IStorageBackend& b
+    ) noexcept;
 
     void finish_(const Outcome& o, Work& w, const proto::StorageCompletion& c) noexcept;
     Data data_;

@@ -19,12 +19,24 @@
 #include "cores/disk_servant_row.h"
 #include "cores/mailbox_servant_row.h"
 #include "cores/save_store_column.h"
+#include "cores/share_host.h"
+#include "cores/slot_servant_row.h"
+
+#include "cores/sidecar_builder.h"
 #include "cores/generic_profile.h"
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "proto/types.h"
+#include "svc/nic_personality.h"
+
+namespace mister::svc {
+class Vfs;
+}
 
 namespace mister::cores {
+
+using MakeShareHost = std::unique_ptr<IShareHost> (*)(const svc::Vfs& vfs, std::string_view root);
 
 struct CoreFactory {
 
@@ -39,13 +51,21 @@ struct CoreFactory {
 
     MakeCompanion make_companion = nullptr;
 
+    MakeSidecar make_sidecar = nullptr;
+
     MakeSaveStore make_save_store = nullptr;
 
     std::span<const DiskServantRow> disk_servants{};
 
     MailboxServantRow mailbox_servant{};
 
+    std::span<const SlotServantRow> slot_servants{};
+
     infra::OptRef<const IManifestDocRole> manifest_doc{};
+
+    svc::MakeNic make_nic = nullptr;
+
+    MakeShareHost make_share_host = nullptr;
 
     [[nodiscard]] constexpr bool saves_by_channel() const noexcept {
         return make_save_store != nullptr;
@@ -57,14 +77,24 @@ struct CoreFactory {
         return mailbox_servant.declared();
     }
 
+    [[nodiscard]] constexpr bool serves_slots() const noexcept { return !slot_servants.empty(); }
+
     [[nodiscard]] constexpr bool has_ladder() const noexcept { return make_ladder != nullptr; }
 
     [[nodiscard]] constexpr bool has_loader() const noexcept { return make_loader != nullptr; }
+
+    [[nodiscard]] constexpr bool has_nic() const noexcept { return make_nic != nullptr; }
+
+    [[nodiscard]] constexpr bool serves_share() const noexcept {
+        return make_share_host != nullptr;
+    }
 
     [[nodiscard]] constexpr bool streams_files() const noexcept { return !profile.no_stream_role; }
 };
 
 std::span<const CoreFactory> core_table();
+
+[[nodiscard]] proto::FileSize largest_declared_save() noexcept;
 
 enum class LoadHint : std::uint8_t { None, XmlManifest };
 

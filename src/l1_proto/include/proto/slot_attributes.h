@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "proto/track_shape.h"
+
 namespace mister::proto {
 
 enum class MountClass : std::uint8_t { Image, Save };
@@ -14,6 +16,8 @@ struct SlotAttributes {
     MountClass mount = MountClass::Image;
 
     std::uint64_t channel_bytes = 0;
+
+    TrackShape track{};
 
     [[nodiscard]] static constexpr SlotAttributes at_mount(MountClass mount, bool exists) noexcept {
         const bool save = mount == MountClass::Save;

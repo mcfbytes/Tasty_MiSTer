@@ -16,7 +16,14 @@ struct Fnv1a64 {
     static constexpr std::size_t kHexDigits = 16;
 
     [[nodiscard]] static constexpr Fnv1a64 digest_of(std::string_view bytes) noexcept {
-        Fnv1a64 out;
+        return digest_from(Fnv1a64{}, bytes);
+    }
+
+    [[nodiscard]] static constexpr Fnv1a64 digest_from(
+        Fnv1a64 basis,
+        std::string_view bytes
+    ) noexcept {
+        Fnv1a64 out = basis;
         for (char c : bytes) {
             out.v ^= static_cast<std::uint8_t>(c);
             out.v *= kPrime;

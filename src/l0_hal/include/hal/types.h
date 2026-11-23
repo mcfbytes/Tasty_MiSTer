@@ -45,6 +45,12 @@ struct SpiWord {
         return static_cast<std::uint8_t>(v);
     }
 
+    [[nodiscard]] constexpr std::byte low_lane() const noexcept { return std::byte{low_byte()}; }
+
+    [[nodiscard]] static constexpr SpiWord of_byte(std::byte b) noexcept {
+        return SpiWord{std::to_integer<std::uint16_t>(b)};
+    }
+
     [[nodiscard]] constexpr std::uint8_t high_byte() const noexcept {
         constexpr unsigned kHighByteShift = std::numeric_limits<std::uint8_t>::digits;
         return static_cast<std::uint8_t>(v >> kHighByteShift);

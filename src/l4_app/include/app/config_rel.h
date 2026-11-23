@@ -26,6 +26,13 @@ inline FixedStr<kConfigRelCap, StrFit::Reject> config_rel(
     return rel;
 }
 
+inline FixedStr<kConfigRelCap, StrFit::Reject> core_saves_dir(std::string_view core) {
+    FixedStr<kConfigRelCap, StrFit::Reject> rel;
+    if (core.empty() || !rel.assign(svc::kSavesPrefix) || !rel.append(core) || !rel.append("/"))
+        rel.clear();
+    return rel;
+}
+
 inline constexpr std::string_view kCoreCfgExt = ".CFG";
 using CoreCfgRel = FixedStr<
     svc::kConfigDir.size() + 1 + infra::PathText::kCapacity + kCoreCfgExt.size() + 1,

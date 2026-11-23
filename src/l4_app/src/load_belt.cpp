@@ -214,6 +214,8 @@ auto LoadBelt::rung_in_(Self& self, RungSlot slot) noexcept {
         case RungSlot::SaveMount:
         case RungSlot::AddonsAfter:
         case RungSlot::Watch:
+        case RungSlot::Sidecars:
+        case RungSlot::StartChain:
         case RungSlot::kCount:
             break;
     }
@@ -249,6 +251,8 @@ void LoadBelt::settle_(RungSlot slot, Rung::Pass pass, Host& host) {
         case RungSlot::SaveMount:
         case RungSlot::AddonsAfter:
         case RungSlot::Watch:
+        case RungSlot::Sidecars:
+        case RungSlot::StartChain:
         case RungSlot::kCount:
             return;
     }

@@ -14,21 +14,24 @@
 
 namespace mister::app {
 
-enum class FbTenant : std::uint8_t { Launcher, HdOsd, kCount };
+enum class FbTenant : std::uint8_t { Launcher, HdOsd, Terminal, kCount };
 
 enum class FbArrival : std::uint8_t { Displace, Refuse };
 
 inline constexpr std::
     array<std::array<FbArrival, infra::ordinal(FbTenant::kCount)>, infra::ordinal(FbTenant::kCount)>
         kFbArrival{{
-            {FbArrival::Displace, FbArrival::Displace},
-            {FbArrival::Refuse, FbArrival::Displace},
+            {FbArrival::Displace, FbArrival::Displace, FbArrival::Displace},
+            {FbArrival::Refuse, FbArrival::Displace, FbArrival::Refuse},
+            {FbArrival::Refuse, FbArrival::Displace, FbArrival::Displace},
         }};
 
 static_assert(
     kFbArrival[infra::ordinal(FbTenant::Launcher)][infra::ordinal(FbTenant::Launcher)]
             == FbArrival::Displace
         && kFbArrival[infra::ordinal(FbTenant::HdOsd)][infra::ordinal(FbTenant::HdOsd)]
+            == FbArrival::Displace
+        && kFbArrival[infra::ordinal(FbTenant::Terminal)][infra::ordinal(FbTenant::Terminal)]
             == FbArrival::Displace,
     "kFbArrival: a tenant re-raising itself displaces its own earlier claim"
 );
@@ -39,6 +42,22 @@ static_assert(
         && kFbArrival[infra::ordinal(FbTenant::Launcher)][infra::ordinal(FbTenant::HdOsd)]
             == FbArrival::Displace,
     "kFbArrival: the launcher outranks the HD OSD, never the reverse"
+);
+
+static_assert(
+    kFbArrival[infra::ordinal(FbTenant::Terminal)][infra::ordinal(FbTenant::Launcher)]
+            == FbArrival::Refuse
+        && kFbArrival[infra::ordinal(FbTenant::Launcher)][infra::ordinal(FbTenant::Terminal)]
+            == FbArrival::Displace,
+    "kFbArrival: the launcher outranks the console view, never the reverse"
+);
+
+static_assert(
+    kFbArrival[infra::ordinal(FbTenant::HdOsd)][infra::ordinal(FbTenant::Terminal)]
+            == FbArrival::Refuse
+        && kFbArrival[infra::ordinal(FbTenant::Terminal)][infra::ordinal(FbTenant::HdOsd)]
+            == FbArrival::Displace,
+    "kFbArrival: the console view outranks the HD OSD, never the reverse"
 );
 
 enum class FbShow : std::uint8_t { Full, View };

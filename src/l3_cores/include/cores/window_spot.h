@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
 #include <span>
 
 #include "cores/core_window_decl.h"
 #include "cores/types.h"
+#include "hal/phys_region.h"
 #include "hal/types.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
 #include "os/types.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -29,6 +32,16 @@ struct WindowSpot {
         if (!fabric)
             return std::unexpected(offset.refusal(Errc::aperture_range, ERR_SITE()));
         return fabric.value_or(hal::FabricAddr{});
+    }
+
+    [[nodiscard]] constexpr bool holds(
+        std::span<const CoreWindowDecl> windows,
+        proto::FileSize bytes
+    ) const noexcept {
+        const auto window = slot.in(windows);
+        if (!window)
+            return false;
+        return hal::span_fits<std::uint64_t>(offset.v, bytes.v, window->region.len);
     }
 
     friend constexpr bool operator==(const WindowSpot&, const WindowSpot&) = default;

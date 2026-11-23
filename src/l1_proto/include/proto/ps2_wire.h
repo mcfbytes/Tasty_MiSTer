@@ -26,6 +26,7 @@ inline constexpr auto kPs2StreamFacts = std::to_array<Ps2StreamFacts>({
     {.opcode = UioOp::Keyboard, .framing = Ps2Framing::ReplyBytes},
     {.opcode = UioOp::Mouse, .framing = Ps2Framing::LePairs},
     {.opcode = UioOp::Mouse, .framing = Ps2Framing::ReplyBytes},
+    {.opcode = UioOp::Mouse, .framing = Ps2Framing::Bytes},
 });
 
 consteval bool ps2_stream_facts_are_ordinal() {

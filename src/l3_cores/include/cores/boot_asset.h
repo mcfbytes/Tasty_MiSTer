@@ -8,7 +8,10 @@
 #include <span>
 #include <string_view>
 
+#include "cores/asset_sweep.h"
+#include "cores/host_bit_row.h"
 #include "cores/types.h"
+#include "infra/ascii.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores {
@@ -40,8 +43,21 @@ struct BootAsset {
 
     std::optional<FileSize> exact_size{};
 
+    std::optional<HostFact> unless{};
+
+    AssetSweep sweep = AssetSweep::None;
+
+    std::span<const std::string_view> dropped_by_exts{};
+
     [[nodiscard]] constexpr bool accepts(FileSize size) const noexcept {
         return !exact_size || *exact_size == size;
+    }
+
+    [[nodiscard]] constexpr bool dropped_by(std::string_view ext) const noexcept {
+        for (const std::string_view mine : dropped_by_exts)
+            if (infra::ieq(mine, ext))
+                return true;
+        return false;
     }
 };
 

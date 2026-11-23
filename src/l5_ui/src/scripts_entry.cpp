@@ -48,7 +48,11 @@ void ScriptsEntry::bind(PageContext& ctx) {
     launches_ = infra::OptRef<PageLaunches>{ctx.launches};
     storage_ = ctx.storage;
     names_ = ctx.names;
-    script_pick_.bind({.launches = launches_, .storage = ctx.storage});
+    script_pick_.bind(
+        {.launches = launches_,
+         .storage = ctx.storage,
+         .session = infra::OptRef<const SessionFacts>{session_}}
+    );
 }
 
 Transition ScriptsEntry::open(PageContext& ctx) {

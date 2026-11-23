@@ -35,7 +35,17 @@ public:
         return route_().release(player, tested);
     }
 
+    [[nodiscard]] bool stick(
+        svc::PlayerIndex player,
+        proto::StickSide side,
+        proto::StickPos pos
+    ) noexcept {
+        return route_().stick(player, side, pos);
+    }
+
     [[nodiscard]] infra::Tally binds() const noexcept;
+
+    [[nodiscard]] infra::Tally gate_ends() const noexcept;
 
 private:
     [[nodiscard]] IPadLevelSink& route_() noexcept;

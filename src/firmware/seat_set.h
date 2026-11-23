@@ -43,6 +43,7 @@ class PcmMain;
 
 namespace mister::svc {
 class IoMain;
+class NicMain;
 }
 
 namespace mister::svc::disc {
@@ -72,7 +73,8 @@ using SeatMainList = SeatList<
     SeatRow<SeatTag::RecWrite, app::capture::RecWriteMain, Presence::ConfigDependent>,
     SeatRow<SeatTag::Launcher, app::launcher::LauncherMain, Presence::ConfigDependent>,
     SeatRow<SeatTag::HdOsd, app::hd::HdOsdMain, Presence::ConfigDependent>,
-    SeatRow<SeatTag::Connect, app::connect::ConnectMain, Presence::ConfigDependent>>;
+    SeatRow<SeatTag::Connect, app::connect::ConnectMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Nic, svc::NicMain, Presence::ConfigDependent>>;
 
 constexpr std::size_t seat_index(SeatTag s) noexcept {
     return hal::row_index(s);
@@ -184,6 +186,7 @@ inline constexpr std::array kSpawnOrder{
     SeatTag::Diag,
     SeatTag::Ui,
     SeatTag::Connect,
+    SeatTag::Nic,
     SeatTag::Prefetch,
     SeatTag::Pcm,
     SeatTag::Frame,
@@ -200,6 +203,7 @@ inline constexpr std::array kStopOrder{
     SeatTag::RT,
     SeatTag::Diag,
     SeatTag::Connect,
+    SeatTag::Nic,
     SeatTag::Ui,
     SeatTag::Frame,
     SeatTag::Input,
@@ -227,6 +231,7 @@ inline constexpr std::array kJoinOrder{
     SeatTag::Frame,
     SeatTag::Input,
     SeatTag::Connect,
+    SeatTag::Nic,
     SeatTag::Ui,
     SeatTag::Diag,
 };

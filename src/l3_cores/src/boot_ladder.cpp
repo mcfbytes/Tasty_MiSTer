@@ -506,4 +506,33 @@ bool BootLadder::order_set_index(WideIoIndex dest) {
     return host_.order(proto::LinkOp::SetWideIndex{.dest = dest});
 }
 
+bool BootLadder::order_register_write(proto::UioOp opcode, const proto::MailboxWords& words) {
+    return host_.order(
+        proto::LinkOp::MailboxWrite{
+            .opcode = opcode,
+            .poll = proto::MailboxPoll::Keep,
+            .words = words
+        }
+    );
+}
+
+Ex<bool> BootLadder::order_bind_mount(proto::IoIndex slot, std::string_view image) {
+    proto::LinkOp::BindMount op{.index = slot, .perform = true};
+    if (!image.empty()) {
+        proto::FileSize size{};
+        if (auto f = vfs_.open(image, svc::OpenMode::ReadWhole)) {
+            if (auto sz = (*f)->size())
+                size = *sz;
+        }
+        auto id = host_.intern_path(image, size);
+        if (!id) {
+            if (id.error().code == Errc::would_block)
+                return false;
+            return std::unexpected(id.error());
+        }
+        op.image = *id;
+    }
+    return host_.order(op);
+}
+
 }

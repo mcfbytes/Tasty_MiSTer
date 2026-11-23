@@ -83,6 +83,17 @@ Ex<DownloadSession> DownloadSession::open(hal::ISpiTransport& link, WideIoIndex 
     return DownloadSession{std::move(*b)};
 }
 
+Ex<DownloadSession> DownloadSession::open(
+    hal::ISpiTransport& link,
+    WideIoIndex index,
+    AuxValue address
+) {
+    auto b = FioBracket::window(link, index, kModeDownload, address);
+    if (!b)
+        return std::unexpected(b.error());
+    return DownloadSession{std::move(*b)};
+}
+
 DownloadSession::~DownloadSession() {
     if (dat_held_)
         release_dat();

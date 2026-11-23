@@ -12,7 +12,7 @@
 #include "app/event.h"
 #include "app/link_binder.h"
 #include "app/log_clock.h"
-#include "app/disk_relay.h"
+#include "app/disk_relays.h"
 #include "app/pcm/mailbox_relay.h"
 #include "app/retiree.h"
 #include "app/session_bindings.h"
@@ -69,7 +69,7 @@ public:
         LogLane& log_lane;
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
         infra::OptRef<pcm::MailboxRelay> mailbox{};
-        infra::OptRef<DiskRelay> disks{};
+        infra::OptRef<DiskRelays> disks{};
 
         infra::OptRef<svc::disc::DiscReadService> discs{};
     };
@@ -134,7 +134,7 @@ private:
     LogLane::Producer log_lane_;
     const infra::OptRef<svc::IStorageLifecycle> storage_life_;
     const infra::OptRef<pcm::MailboxRelay> mailbox_;
-    const infra::OptRef<DiskRelay> disks_;
+    const infra::OptRef<DiskRelays> disks_;
     const infra::OptRef<svc::disc::DiscReadService> discs_;
 
     infra::OptRef<cores::Core> current_{};

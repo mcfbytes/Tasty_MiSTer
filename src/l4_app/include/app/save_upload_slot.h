@@ -10,6 +10,7 @@
 #include "app/config_rel.h"
 #include "app/relay_stamp.h"
 #include "cores/nvram_save.h"
+#include "cores/save_frame.h"
 #include "hal/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
@@ -71,6 +72,8 @@ struct SaveUploadSlot {
 
     proto::SaveAct act{};
     FixedStr<kConfigRelCap, StrFit::Reject> rel{};
+
+    cores::SaveFrame frame{};
     std::array<std::uint8_t, proto::kSavePieceBytes> bytes{};
 };
 

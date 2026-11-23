@@ -13,6 +13,8 @@
 #include "app/ini_parse.h"
 #include "app/input/rumble_players_cell.h"
 #include "app/uart_mode.h"
+#include "cores/mount_reads.h"
+#include "cores/remount_asked.h"
 #include "cores/save_copy_level.h"
 #include "app/log_lane.h"
 #include "infra/opt_ref.h"
@@ -80,7 +82,7 @@ namespace pcm {
 class PcmRingFeeder;
 class MailboxRelay;
 }
-class DiskRelay;
+class DiskRelays;
 class SaveUploadRelay;
 class WindowJobService;
 class SwitchPark;
@@ -91,7 +93,7 @@ struct SupervisorParts {
         pcm::PcmRingFeeder& feeder;
         svc::disc::ChdPrefetch& prefetch;
         pcm::MailboxRelay& mailbox;
-        DiskRelay& disks;
+        DiskRelays& disks;
         SaveUploadRelay& saves;
         svc::disc::DiscReadService& discs;
         WindowJobService& window_jobs;
@@ -156,6 +158,9 @@ struct SupervisorParts {
 
     infra::OptRef<hal::DiskLamp> lamp{};
     infra::OptRef<xthread::WakeFlag> disk_activity{};
+
+    infra::OptRef<cores::RemountCell> remount{};
+    infra::OptRef<cores::MountReadsCell> mount_reads{};
 
     BoardOps board_ops{};
 

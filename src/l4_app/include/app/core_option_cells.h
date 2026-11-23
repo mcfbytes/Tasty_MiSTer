@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "app/config_rel.h"
+#include "app/config_value_cell.h"
 #include "app/core_option_acts.h"
 #include "app/dip_choices.h"
 #include "app/dip_labels.h"
@@ -114,6 +115,10 @@ public:
 
     [[nodiscard]] const OptionCell& option_cell() const noexcept { return option_cell_; }
 
+    [[nodiscard]] const ConfigValueCell& config_value_cell() const noexcept {
+        return config_value_cell_;
+    }
+
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
 private:
@@ -143,6 +148,11 @@ private:
     DipChoicesCell dip_choices_cell_{};
     OptionTable option_scratch_{};
     OptionCell option_cell_{};
+
+    void publish_config_value_(infra::OptRef<cores::Core> core) noexcept;
+    ConfigValueImage config_value_scratch_{};
+    ConfigValueCell config_value_cell_{};
+    bool config_value_live_ = false;
     Tally tally_{};
 };
 

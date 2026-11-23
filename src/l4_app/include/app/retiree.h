@@ -5,6 +5,7 @@
 
 #include "app/bay_releases.h"
 #include "app/built_core.h"
+#include "app/disk_attach_seq.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -26,16 +27,23 @@ struct Retiree {
     proto::BlockSlotMask mask{};
     proto::BlockSlotMask sent{};
 
+    DiskAttachSeq disks{};
+
     BayGens merged_gen{};
 
     void merge(const Retiree& from) noexcept {
         mask = mask.united(from.mask);
         sent = sent.common(from.sent);
+
+        if (!disks.at_or_past(from.disks))
+            disks = from.disks;
         const BayGens from_gens = from.bay_gens();
         for (const proto::CoreBaySlot s : kAllBaySlots)
             if (infra::at_index(from_gens, s).built())
                 infra::at_index(merged_gen, s) = infra::at_index(from_gens, s);
     }
+
+    [[nodiscard]] bool held() const noexcept { return !mask.empty() || disks.ordered(); }
 
     [[nodiscard]] BayGens bay_gens() const noexcept {
         BayGens out = merged_gen;

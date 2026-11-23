@@ -12,7 +12,7 @@
 #include "cores/mailbox_servant_row.h"
 #include "cores/snes/msu_wire.h"
 #include "cores/snes/snes_msu_decl.h"
-#include "proto/mailbox_frame_decl.h"
+#include "proto/mailbox_programme.h"
 
 namespace mister::cores {
 class ILoader;
@@ -33,6 +33,7 @@ inline constexpr auto kSnesServices = std::to_array<LinkDecoderDecl>({
     },
 });
 
+using snes::kSnesMailbox;
 using snes::kSnesMailboxFrame;
 using snes::kSnesWindows;
 
@@ -66,7 +67,7 @@ inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
     },
 });
 
-inline constexpr proto::MailboxFrameDecl kSgbMailboxFrame = kSnesMailboxFrame;
+inline constexpr proto::MailboxProgramme kSgbMailbox = kSnesMailbox;
 
 inline constexpr auto kSgbWindows = std::to_array<CoreWindowDecl>({
     {.region = {snes::msu::kTrackOffset, 0u, "sgb-msu-data"}, .feeds_pcm = false},

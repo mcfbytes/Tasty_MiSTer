@@ -2,6 +2,10 @@
 #include "proto/link/poll_reader.h"
 
 #include "hal/selected.h"
+#include "infra/affine.h"
+#include "proto/link/link.h"
+#include "proto/link/link_sel_carriers.h"
+#include "proto/link/poll_frame_read.h"
 
 namespace mister::proto::link {
 
@@ -53,10 +57,28 @@ void PollReader::issue_(const user_io::PollShapeRow& row) noexcept {
     }
 }
 
+void PollReader::frame_beat_(
+    const user_io::PollShapeRow& row,
+    const user_io::PollFrameShape& frame
+) noexcept {
+    ++polls_;
+    Link link{link_};
+    const PollFrameRead read = link.read_poll_frame(frame, std::nullopt);
+    if (read.outcome == PollFrameRead::Outcome::Faulted)
+        ++errors_;
+    if (read.outcome != PollFrameRead::Outcome::Taken)
+        return;
+    const ReplyIndex last = infra::affine::end_of<ReplyIndex>(read.frame.kept - ReplyCount{1});
+
+    (void)push_(row.shape, 0, read.frame.replies[last]);
+}
+
 void PollReader::beat_(const user_io::PollShapeRow& row, std::uint8_t param) noexcept {
+    if (row.frame)
+        return frame_beat_(row, *row.frame);
     hal::SpiWord word{};
     {
-        hal::Selected cs(link_, hal::ChipSelect::Io);
+        hal::Selected cs(link_, chip_select(row.select));
         ++polls_;
         const auto r = link_.transfer(user_io::command_word(row, param));
         if (!r) {

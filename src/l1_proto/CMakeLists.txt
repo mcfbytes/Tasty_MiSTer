@@ -67,6 +67,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_backing.h
   proto/block_roles.h
   proto/block_server.h
+  proto/window_geometry.h
   proto/build_generation.h
   proto/fixed_block_roles.h
   proto/late_answers.h
@@ -91,6 +92,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/image_bracket.h
   proto/image_sink.h
   proto/image_source.h
+  proto/image_space.h
+  proto/track_shape.h
   proto/irq_binding.h
   proto/item.h
   proto/item_probe.h
@@ -115,14 +118,26 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/ps2_mouse.h
   proto/ps2_frame.h
   proto/disk_act.h
+  proto/disk_address.h
+  proto/disk_register_count.h
+  proto/disk_poll_program.h
+  proto/disk_poll_step.h
+  proto/disk_status_tag.h
   proto/fio_tenant.h
   proto/save_act.h
-  proto/disk_poll_decl.h
   proto/disk_protocol.h
+  proto/disk_protocol_row.h
+  proto/aux_value.h
   proto/mailbox_act.h
-  proto/mailbox_frame.h
-  proto/mailbox_frame_decl.h
   proto/mailbox_poll.h
+  proto/mailbox_programme.h
+  proto/mailbox_result.h
+  proto/mailbox_run.h
+  proto/mailbox_select.h
+  proto/mailbox_select_count.h
+  proto/mailbox_select_index.h
+  proto/mailbox_gate.h
+  proto/mailbox_bus.h
   proto/ps2_wire.h
   proto/save_request.h
   proto/save_state_decl.h
@@ -151,6 +166,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/status_word.h
   proto/status_cell.h
   proto/stick_pos.h
+  proto/stick_side.h
   proto/paddle_pos.h
   proto/spinner_delta.h
   proto/spinner_travel.h
@@ -170,11 +186,13 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/reset_edge.h
   proto/reset_fence.h
   proto/reset_terms.h
+  proto/rtc_calendar.h
   proto/rtc_image.h
   proto/user_io/condition.h
   proto/user_io/poll_frame.h
   proto/user_io/poll_frame_decoder.h
   proto/user_io/poll_frame_shape.h
+  proto/user_io/head_lengths.h
   proto/user_io/poll_shape.h
   proto/user_io/rumble_motors.h
   proto/user_io/poll_params.h

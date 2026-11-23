@@ -112,6 +112,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .replay = replay_.replay_feeder_,
               .recorder = rec_.recorder_,
               .launcher_screen = face_parts_.launcher_screen,
+              .terminal = face_parts_.terminal,
               .ui_round = face_parts_.ui_round,
               .menu_keys = infra::OptRef<MenuKeyInbox>{device_.menu_keys_},
               .link_rx = device_.ui_rx_,

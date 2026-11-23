@@ -48,6 +48,27 @@ bool LwPadEndpoint::release(svc::PlayerIndex player, svc::JoyMask tested) noexce
     return true;
 }
 
+bool LwPadEndpoint::stick(
+    svc::PlayerIndex player,
+    proto::StickSide side,
+    proto::StickPos pos
+) noexcept {
+    TASTY_SEAT_BODY(LwPadEndpoint);
+    if (!pads_ || !(player < kPortLimit))
+        return false;
+    if (gated_) {
+        tally_.gated_drops.add();
+        unpublished_ = true;
+        return true;
+    }
+
+    const proto::JoystickWire& wire = grant_.body.wire;
+    if (!wire.analog_capable)
+        return true;
+    store_stick_(wire.port_of(player), side, pos);
+    return true;
+}
+
 std::optional<proto::PadWord> LwPadEndpoint::wanted(PadLevels::Slot s) const noexcept {
     if (!pads_)
         return std::nullopt;
@@ -60,11 +81,15 @@ void LwPadEndpoint::set_level_(svc::PlayerIndex player, svc::JoyMask composed) n
     (void)pads_->digital(proto::link::digital_opcode(port), composed);
     if (!wire.translates() || !wire.analog_capable)
         return;
-    (void)pads_->stick(
-        proto::UioOp::Astick,
-        port.stick_wire_index(),
-        proto::StickPos::of_directions(composed)
-    );
+    store_stick_(port, proto::StickSide::Left, proto::StickPos::of_directions(composed));
+}
+
+void LwPadEndpoint::store_stick_(
+    svc::PlayerIndex port,
+    proto::StickSide side,
+    proto::StickPos pos
+) noexcept {
+    (void)pads_->stick(proto::link::stick_opcode(side), port.stick_wire_index(), pos);
 }
 
 void LwPadEndpoint::publish_hook_(const PadRoute& r) noexcept {
@@ -125,6 +150,8 @@ bool LwPadEndpoint::apply_relay_(bool binding) noexcept {
     if (!s || s.value.gen != grant_.gen)
         return false;
     const proto::link::PadRelay& r = s.value;
+    if (gated_ && !r.gated)
+        gate_ends_.add();
     gated_ = r.gated;
     for (std::size_t i = 0; i < PadLevels::kCount; ++i) {
         const PadLevels::Slot slot = PadLevels::slot_at(i);

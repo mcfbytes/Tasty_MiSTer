@@ -33,17 +33,22 @@ void MsuMachine::close_() noexcept {
 }
 
 proto::MailboxAct MsuMachine::serve(
-    const proto::MailboxFrame& frame,
-    std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+    proto::MailboxSelectIndex,
+    const proto::user_io::PollFrame& frame,
+    ActBytes bytes,
+    BulkBytes
 ) noexcept {
     TASTY_SEAT_BODY(MsuMachine);
     if (!present_)
         return {};
-    const auto req = frame.w[0].low_byte();
+    const proto::ReplyWord req = frame.reply(msu::kCounterReply).masked(msu::kCounterByte);
     if (last_req_.has_value() && req == *last_req_)
         return {};
     last_req_ = req;
-    const hal::SpiHalves data{.low = frame.w[2], .high = frame.w[3]};
+    const hal::SpiHalves data{
+        .low = frame.replies[msu::kDataLowReply],
+        .high = frame.replies[msu::kDataHighReply]
+    };
     const std::optional<msu::Request> request = msu::request_of(frame);
     if (!request) {
         ++counts_.ignored;
@@ -62,6 +67,11 @@ proto::MailboxAct MsuMachine::serve(
             return next_(bytes);
     }
 
+    return {};
+}
+
+proto::MailboxAct MsuMachine::settle(const proto::MailboxResult&, ActBytes, BulkBytes) noexcept {
+    TASTY_SEAT_BODY(MsuMachine);
     return {};
 }
 
@@ -99,18 +109,17 @@ void MsuMachine::seek_(SectorLba sector) noexcept {
     ahead_.seek(cursor_);
 }
 
-proto::MailboxAct MsuMachine::next_(
-    std::span<std::uint8_t, proto::kMailboxActBytes> bytes
-) noexcept {
+proto::MailboxAct MsuMachine::next_(ActBytes bytes) noexcept {
     std::fill(bytes.begin(), bytes.end(), std::uint8_t{0});
     if (file_ != nullptr) {
         const std::size_t got = ahead_.take(*file_, cursor_, bytes).size();
         cursor_ += proto::FileSize{got};
     }
     ++counts_.sectors;
+    static_assert(msu::kSectorSize.block_bytes() == proto::kMailboxActBytes);
     const proto::MailboxAct::Download reply{
         .index = proto::WideIoIndex{msu::kAudioIndex},
-        .len = static_cast<std::uint16_t>(msu::kSectorSize.block_bytes())
+        .len = proto::MailboxActLen::whole()
     };
     return infra::make<proto::MailboxAct>(reply);
 }

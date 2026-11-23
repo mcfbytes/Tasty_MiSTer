@@ -25,6 +25,11 @@ public:
 
     [[nodiscard]] bool emit(svc::PlayerIndex player, proto::PadMasks masks) noexcept override;
     [[nodiscard]] bool release(svc::PlayerIndex player, svc::JoyMask tested) noexcept override;
+    [[nodiscard]] bool stick(
+        svc::PlayerIndex player,
+        proto::StickSide side,
+        proto::StickPos pos
+    ) noexcept override;
 
 private:
     LinkTxChannel<SeatTag::Input>& inbox_;

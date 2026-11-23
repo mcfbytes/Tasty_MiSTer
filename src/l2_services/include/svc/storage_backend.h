@@ -8,6 +8,7 @@
 #include "infra/byte_count.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
+#include "proto/track_shape.h"
 #include "proto/types.h"
 #include "svc/block_ctl.h"
 
@@ -44,6 +45,22 @@ public:
     }
 
     [[nodiscard]] virtual Ex<void> flush() { return {}; }
+
+    [[nodiscard]] virtual proto::TrackShape track_shape() const noexcept { return {}; }
+
+    [[nodiscard]] virtual Ex<infra::ByteCount> read_track(
+        const proto::TrackShape::Ask&,
+        std::span<std::byte>
+    ) {
+        return std::unexpected(Error{Errc::contract, ERR_SITE(), 0});
+    }
+
+    [[nodiscard]] virtual Ex<void> write_track(
+        const proto::TrackShape::Ask&,
+        std::span<const std::byte>
+    ) {
+        return std::unexpected(Error{Errc::contract, ERR_SITE(), 0});
+    }
 
     virtual void note_tag(proto::ImageTag) noexcept {}
 

@@ -67,10 +67,23 @@ bool PageStack::any_takes_focus() const noexcept {
 
 infra::OptRef<const Page> PageStack::focus_top() const noexcept {
     for (auto it = pages_.rbegin(); it != pages_.rend(); ++it) {
-        if ((*it)->facts().takes_input_focus)
+        const PageKeys keys = (*it)->facts().keys;
+        if (keys == PageKeys::Below)
+            continue;
+        if (keys == PageKeys::Menu)
             return infra::opt_ref_of<const Page>(it->get());
+        return {};
     }
     return {};
+}
+
+PageKeys PageStack::key_owner() const noexcept {
+    for (auto it = pages_.rbegin(); it != pages_.rend(); ++it) {
+        const PageKeys keys = (*it)->facts().keys;
+        if (keys != PageKeys::Below)
+            return keys;
+    }
+    return PageKeys::Menu;
 }
 
 }

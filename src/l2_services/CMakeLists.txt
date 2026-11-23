@@ -1,6 +1,7 @@
 add_library(mister_svc STATIC
   src/alt_ini_index.cpp
   src/asset_name.cpp
+  src/blank_bank_filter.cpp
   src/browse_rules.cpp
   src/card_writer.cpp
   src/crc32_accumulator.cpp
@@ -9,19 +10,47 @@ add_library(mister_svc STATIC
   src/config.cpp
   src/config_field.cpp
   src/config_parser.cpp
+  src/confine_under.cpp
   src/disc_file_access.cpp
+  src/disk_format_pick.cpp
   src/disk_format_row.cpp
-  src/disk_image.cpp
+  src/open_disk_image.cpp
+  src/g64_synthesis.cpp
+  src/gcr.cpp
+  src/sector_mirror.cpp
+  src/track_file_mirror.cpp
+  src/gcr_track_image.cpp
+  src/t64.cpp
+  src/t64_image.cpp
+  src/atx_image.cpp
+  src/atx_drive.cpp
+  src/flat_sector_image.cpp
+  src/open_sector_image.cpp
   src/durable_write_backend.cpp
   src/entropy.cpp
   src/evdev_code.cpp
   src/file_slot_backend.cpp
   src/gzip_inflate.cpp
   src/io_main.cpp
+  src/nic_bridge.cpp
+  src/nic_host_port.cpp
+  src/nic_main.cpp
+  src/nic_mapped_window.cpp
   src/option_codec.cpp
   src/posix_file.cpp
   src/raw_disk_image.cpp
+  src/six_and_two.cpp
+  src/nib_codec.cpp
+  src/woz_format.cpp
+  src/woz525_codec.cpp
+  src/woz35_codec.cpp
+  src/twomg_image.cpp
+  src/dc42_image.cpp
+  src/archive_copy_image.cpp
+  src/image_admission.cpp
+  src/adf_codec.cpp
   src/read_bounded.cpp
+  src/save_frame_layer.cpp
   src/save_stage_keeper.cpp
   src/staged_save.cpp
   src/storage_service.cpp
@@ -30,6 +59,8 @@ add_library(mister_svc STATIC
   src/vfs.cpp
   src/xml_scan.cpp
   src/xml_scanner.cpp
+  src/disk_geometry.cpp
+  src/vhd_sidecar.cpp
 )
 target_include_directories(mister_svc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_svc
@@ -165,12 +196,38 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_svc HEADERS
   svc/config_field.h
   svc/config_parser.h
   svc/config_snapshot.h
+  svc/confine_under.h
   svc/crc32_accumulator.h
   svc/dir_entry.h
   svc/disc_file_access.h
   svc/disk_codec.h
+  svc/disk_format_pick.h
   svc/disk_format_row.h
   svc/disk_image.h
+  svc/g64_synthesis.h
+  svc/gcr.h
+  svc/gcr_caps.h
+  svc/gcr_format_rows.h
+  svc/gcr_layout.h
+  svc/gcr_sector_map.h
+  svc/gcr_track_image.h
+  svc/gcr_types.h
+  svc/mirror_piece.h
+  svc/mirror_source.h
+  svc/sector_mirror.h
+  svc/track_file_mirror.h
+  svc/t64.h
+  svc/t64_image.h
+  svc/atx_types.h
+  svc/atx_drive.h
+  svc/atx_image.h
+  svc/flat_sector_image.h
+  svc/sector_ask.h
+  svc/sector_geometry.h
+  svc/sector_image.h
+  svc/sector_read.h
+  svc/sector_types.h
+  svc/track_image.h
   svc/durable_write.h
   svc/entropy.h
   svc/file.h
@@ -183,14 +240,52 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_svc HEADERS
   svc/parse_error.h
   svc/per_core_setting.h
   svc/raw_disk_image.h
+  svc/nib_track.h
+  svc/six_and_two.h
+  svc/nib_codec.h
+  svc/woz_format.h
+  svc/woz525_codec.h
+  svc/woz35_codec.h
+  svc/twomg_image.h
+  svc/dc42_image.h
+  svc/archive_copy_image.h
+  svc/image_facts.h
+  svc/image_field.h
+  svc/image_admission.h
+  svc/mount_refusal.h
+  svc/adf_codec.h
   svc/scan_filter.h
   svc/read_bounded.h
+  svc/move_names.h
   svc/rename_files.h
   svc/search_policy.h
   svc/io_coworker.h
   svc/io_main.h
+  svc/nic_bridge.h
+  svc/nic_control.h
+  svc/nic_control_dispatch.h
+  svc/nic_frame.h
+  svc/nic_grant.h
+  svc/nic_host_port.h
+  svc/nic_host_seed.h
+  svc/nic_link.h
+  svc/nic_link_plan.h
+  svc/nic_mac.h
+  svc/nic_main.h
+  svc/nic_mapped_window.h
+  svc/nic_personality.h
+  svc/nic_poll.h
+  svc/nic_port.h
+  svc/nic_slot_word.h
+  svc/nic_status.h
+  svc/nic_window.h
+  svc/nic_window_row.h
+  svc/nic_window_source.h
   svc/io_pass.h
   svc/file_slot_backend.h
+  svc/blank_bank_filter.h
+  svc/save_banks.h
+  svc/save_frame_layer.h
   svc/save_stage_crossings.h
   svc/save_stage_keeper.h
   svc/slot_path.h
@@ -213,6 +308,8 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_svc HEADERS
   svc/xml_scanner.h
   svc/xml_tag.h
   svc/xml_token.h
+  svc/disk_geometry.h
+  svc/vhd_sidecar.h
 )
 tasty_add_header_checks(tasty_svc_connect_header_checks LIB mister_svc_connect HEADERS
   svc/connect/bt_page_mode.h
@@ -284,6 +381,7 @@ tasty_add_header_checks(tasty_svc_input_header_checks LIB mister_svc_input HEADE
   svc/input/quirk_id.h
   svc/input/stick_cal.h
   svc/input/stick_index.h
+  svc/input/stick_reach.h
   svc/input/stick_state.h
 )
 tasty_add_header_checks(tasty_svc_disc_header_checks LIB mister_svc_disc HEADERS
@@ -314,6 +412,8 @@ tasty_add_header_checks(tasty_svc_disc_header_checks LIB mister_svc_disc HEADERS
   svc/disc/index_pair_cue_program.h
   svc/disc/index_triple_cue_program.h
   svc/disc/prefetch_main.h
+  svc/disc/q_channel.h
+  svc/disc/q_control.h
   svc/disc/rw_interleaver.h
   svc/disc/sector_descrambler.h
   svc/disc/sector_header.h
@@ -322,6 +422,7 @@ tasty_add_header_checks(tasty_svc_disc_header_checks LIB mister_svc_disc HEADERS
   svc/disc/subcode_sidecar.h
   svc/disc/toc.h
   svc/disc/toc_frame.h
+  svc/disc/toc_point.h
   svc/disc/track.h
   svc/disc/unbound_disc.h
   svc/disc/seek_span.h

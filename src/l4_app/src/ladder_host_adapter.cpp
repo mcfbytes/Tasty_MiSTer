@@ -7,6 +7,10 @@
 
 #include "app/negotiated_core.h"
 #include "app/owner_push.h"
+#include "app/start_chain.h"
+#include "cores/registry.h"
+#include "cores/share_root.h"
+#include "infra/message_sum.h"
 #include "infra/path_parts.h"
 #include "infra/prelude.h"
 
@@ -176,6 +180,37 @@ std::optional<proto::FieldValue> LadderHostAdapter::option_choice(cores::OptionT
     return proto::FieldValue{row->current};
 }
 
+std::span<const std::byte> LadderHostAdapter::config_value(std::span<std::byte> dst) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!edges_.config_value_cell)
+        return {};
+    const auto sample = edges_.config_value_cell->sample();
+    if (!sample)
+        return {};
+    const std::span<const std::byte> value = sample.value.view();
+    if (value.empty() || dst.size() < value.size())
+        return {};
+    std::ranges::copy(value, dst.begin());
+    return dst.first(value.size());
+}
+
+bool LadderHostAdapter::boot_screen() {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    return edges_.config_cell.sample().value.bootscreen != 0;
+}
+
+bool LadderHostAdapter::start_nic(svc::NicLink link) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!edges_.nic)
+        return true;
+    const infra::OptRef<const cores::CoreFactory> row = edges_.negotiated.load_row();
+    if (!row || !row->has_nic())
+        return true;
+    return edges_.nic->push(
+        infra::make<svc::NicControl>(svc::NicControl::Start{.make = row->make_nic, .link = link})
+    );
+}
+
 void LadderHostAdapter::game_identified(
     std::string_view image,
     const svc::disc::DiscIdText& serial
@@ -186,6 +221,71 @@ void LadderHostAdapter::game_identified(
     (void)id.serial.assign(serial.view());
     id.enabled = edges_.config_cell.sample().value.log_file_entry != 0;
     edges_.game_id_cell.publish(id);
+}
+
+void LadderHostAdapter::reset_share() {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!edges_.share_grant || !edges_.vfs)
+        return;
+    const auto row = edges_.negotiated.load_row();
+    if (!row || !row->profile.share || edges_.aperture.region.len == 0)
+        return;
+    const cores::ShareRow& share = *row->profile.share;
+    ShareGrant::Open next = share_.value_or(ShareGrant::Open{});
+    if (open_live_) {
+        next.reset = next.reset.next();
+    } else {
+        next.open = next.open.next();
+        next.reset = next.reset.next();
+    }
+    next.make = row->make_share_host;
+    next.bytes = share.bytes;
+    next.poll = share.poll;
+    const auto page = share.page.address_in(row->profile.windows, edges_.aperture.region.phys);
+
+    const std::string_view home_name = row->profile.home_dir.empty()
+        ? edges_.negotiated.core_name().view()
+        : row->profile.home_dir;
+
+    const std::string home = StartChain::core_home(home_name, *edges_.vfs);
+    const svc::ConfigSnapshot cfg = edges_.config_cell.sample().value;
+    const cores::ShareRootRule rule{
+        .home = home,
+        .configured = cfg.shared_folder,
+        .default_dir = share.default_dir,
+        .home_name = home_name
+    };
+    const std::string root = cores::share_root(rule);
+    if (!page || !next.root.assign(root)) {
+        open_live_ = false;
+        share_ = std::move(next);
+        publish_closed_();
+        return;
+    }
+    next.page = *page;
+    ShareGrant grant;
+    grant.want = next;
+    edges_.share_grant->publish(grant);
+    share_ = std::move(next);
+    open_live_ = true;
+    if (edges_.io_wake)
+        edges_.io_wake->kick();
+}
+
+void LadderHostAdapter::close_share() noexcept {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!open_live_)
+        return;
+    open_live_ = false;
+    publish_closed_();
+}
+
+void LadderHostAdapter::publish_closed_() noexcept {
+    if (!edges_.share_grant)
+        return;
+    edges_.share_grant->publish(ShareGrant{});
+    if (edges_.io_wake)
+        edges_.io_wake->kick();
 }
 
 }

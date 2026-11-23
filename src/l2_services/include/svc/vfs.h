@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "infra/affine.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
 #include "proto/types.h"
@@ -21,6 +22,7 @@
 #include "svc/dir_entry.h"
 #include "svc/durable_write.h"
 #include "svc/file.h"
+#include "svc/move_names.h"
 #include "svc/rename_files.h"
 #include "svc/scan_filter.h"
 #include "svc/search_policy.h"
@@ -83,13 +85,29 @@ public:
 
     Ex<std::vector<DirEntry>> scan(std::string_view dir, const ScanFilter& f) const;
 
+    [[nodiscard]] Ex<std::vector<DirEntry>> list_names(std::string_view dir) const;
+    [[nodiscard]] Ex<std::unique_ptr<IFile>> open_named(std::string_view path, OpenMode mode) const;
+
     bool dir_exists(std::string_view path) const noexcept;
     bool file_exists(std::string_view path) const noexcept;
 
     enum class NameKind : std::uint8_t { Absent, PlainFile, Other };
     [[nodiscard]] NameKind name_kind(std::string_view path) const noexcept;
 
+    [[nodiscard]] Ex<std::string> canonical(std::string_view path) const;
+
     [[nodiscard]] Ex<std::chrono::sys_seconds> modified(std::string_view path) const;
+
+    struct Space {
+        FileSize total{};
+        FileSize available{};
+
+        [[nodiscard]] constexpr FileSize used() const noexcept {
+            return infra::affine::saturating_sub(total, available);
+        }
+    };
+
+    [[nodiscard]] Ex<Space> space(std::string_view path) const;
 
     using DurabilityLog = DurableWrite::DurabilityLog;
     static DurabilityLog durability_log() noexcept;
@@ -112,6 +130,13 @@ private:
     Vfs(StorageRoot root, std::string root_path);
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;
+
+    Ex<std::unique_ptr<IFile>> open_named_(std::string_view path, OpenMode mode) const;
+    [[nodiscard]] std::optional<Ex<std::unique_ptr<IFile>>> open_memory_(
+        const std::string& full,
+        OpenMode mode
+    ) const;
+    Ex<std::unique_ptr<IFile>> open_file_(const std::string& full, OpenMode mode) const;
     [[nodiscard]] std::string composed_(std::string_view path) const;
 
     Ex<std::unique_ptr<IFile>> open_write_(std::string_view path, OpenMode mode) const;
@@ -123,6 +148,8 @@ private:
     void sync_parent_dir_(std::string_view path) const noexcept;
 
     [[nodiscard]] Ex<void> remove_(std::string_view rel) const;
+    [[nodiscard]] Ex<void> remove_dir_(std::string_view rel) const;
+    [[nodiscard]] Ex<void> move_(const MoveNames& names) const;
 
     StorageRoot root_{};
     std::string root_path_;

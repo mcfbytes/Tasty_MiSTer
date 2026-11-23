@@ -42,7 +42,7 @@ public:
         PageFacts f{};
         f.osd_rows = kProgressOsdRows;
         f.auto_pop = kProgressDeadMan;
-        f.takes_input_focus = false;
+        f.keys = PageKeys::Below;
         f.allows_popups = true;
         return f;
     }

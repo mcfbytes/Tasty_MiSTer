@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <optional>
 
 #include "proto/reset_edge.h"
@@ -16,9 +17,15 @@ struct ResetRow {
     bool action_reacts = false;
 
     bool ladders = false;
+
+    bool reinits = false;
     bool restore_boots = false;
 
+    bool reapplies_live_config = false;
+
     std::optional<proto::StatusBit> remapped{};
+
+    std::chrono::milliseconds reload_hold{};
 
     [[nodiscard]] constexpr bool reacts(const proto::ResetEdge& e) const noexcept {
         switch (e.source) {

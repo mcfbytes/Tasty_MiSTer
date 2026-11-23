@@ -72,6 +72,10 @@ void TastySink::on(const app::Event::RequestDone&, const app::Event::Head&) {
     note_unhandled_();
 }
 
+void TastySink::on(const app::Event::MountRefused&, const app::Event::Head&) {
+    note_unhandled_();
+}
+
 void TastySink::on(const app::Event::SessionAdvisory&, const app::Event::Head&) {
     note_unhandled_();
 }

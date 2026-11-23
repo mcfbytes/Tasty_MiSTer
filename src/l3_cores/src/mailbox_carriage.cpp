@@ -9,7 +9,7 @@ namespace mister::cores {
 void MailboxCarriage::service_mailbox_tick() noexcept {
     TASTY_SEAT_BODY(MailboxCarriage);
     proto::link::Link link{link_};
-    port_.service_rt(link, queue_, frame_);
+    port_.service_rt(link, queue_, programme_, clock_);
 }
 
 }

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "app/core_frame_counter.h"
-#include "app/disk_relay.h"
+#include "app/disk_relays.h"
 #include "app/pcm/mailbox_relay.h"
 #include "app/replay/replay_gate.h"
 #include "app/save_upload_relay.h"
@@ -31,6 +31,8 @@ struct RoundActRow {
     RoundActSpend spend;
     proto::FioWordCount max;
     proto::FioWordCount fixed;
+
+    proto::FioWordCount frame;
 };
 
 struct RoundActExclusion {
@@ -40,27 +42,36 @@ struct RoundActExclusion {
 };
 
 inline constexpr auto kRoundActs = std::to_array<RoundActRow>({
-    {RoundAct::Disk, RoundActSpend::Fixed, DiskRelay::kMaxRoundWords, DiskRelay::kMaxRoundWords},
+    {RoundAct::Disk,
+     RoundActSpend::Fixed,
+     DiskRelays::kMaxRoundWords,
+     DiskRelays::kMaxRoundWords,
+     {}},
     {RoundAct::Mailbox,
      RoundActSpend::Fixed,
      pcm::MailboxRelay::kMaxRoundWords,
-     pcm::MailboxRelay::kMaxRoundWords},
+     pcm::MailboxRelay::kMaxRoundWords,
+     pcm::MailboxRelay::kMaxBusWords},
     {RoundAct::Replay,
      RoundActSpend::Fixed,
      replay::ReplayGate::kMaxRoundWords,
-     replay::ReplayGate::kMaxRoundWords},
+     replay::ReplayGate::kMaxRoundWords,
+     {}},
     {RoundAct::Frames,
      RoundActSpend::Fixed,
      CoreFrameCounter::kMaxRoundWords,
-     CoreFrameCounter::kMaxRoundWords},
+     CoreFrameCounter::kMaxRoundWords,
+     {}},
     {RoundAct::Scanout,
      RoundActSpend::Fixed,
      launcher::ScanoutRelay::kMaxRoundWords,
-     launcher::ScanoutRelay::kMaxRoundWords},
+     launcher::ScanoutRelay::kMaxRoundWords,
+     {}},
     {RoundAct::Saves,
      RoundActSpend::Gated,
      SaveUploadRelay::kMaxRoundWords,
-     SaveUploadRelay::kCutWords},
+     SaveUploadRelay::kCutWords,
+     {}},
 });
 
 inline constexpr auto kRoundActExclusions = std::to_array<RoundActExclusion>({
@@ -132,6 +143,15 @@ template <std::size_t... Masks>
     return detail::heaviest(std::make_index_sequence<(1u << kRoundActs.size())>{});
 }
 
+[[nodiscard]] consteval proto::FioWordCount widest_frame_words() noexcept {
+    proto::FioWordCount widest{};
+    for (const RoundActRow& row : kRoundActs) {
+        if (row.frame > widest)
+            widest = row.frame;
+    }
+    return widest;
+}
+
 [[nodiscard]] consteval bool every_gated_act_fits() noexcept {
     for (const RoundActRow& row : kRoundActs) {
         if (row.spend != RoundActSpend::Gated)
@@ -154,6 +174,12 @@ static_assert(
 static_assert(
     every_gated_act_fits(),
     "a gated act's maximum fits the tightest board row's round budget"
+);
+
+static_assert(
+    worst_round_words() + widest_frame_words()
+        <= proto::FioWordCount{proto::link::tightest_load_budget_words()},
+    "the heaviest round and its one whole frame fit the tightest board row's load budget"
 );
 
 class RoundBudget final {

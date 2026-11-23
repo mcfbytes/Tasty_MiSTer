@@ -9,6 +9,7 @@
 
 #include "infra/error.h"
 #include "infra/prelude.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 
@@ -16,6 +17,8 @@ class IFile;
 class Vfs;
 
 [[nodiscard]] Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap);
+
+[[nodiscard]] Ex<std::vector<std::byte>> read_bounded(IFile& file, proto::FileSize cap);
 
 [[nodiscard]] std::span<std::byte> read_bounded_partial(IFile& file, std::span<std::byte> dst);
 

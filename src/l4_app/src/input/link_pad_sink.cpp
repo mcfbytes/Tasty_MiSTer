@@ -18,4 +18,13 @@ bool LinkPadSink::release(svc::PlayerIndex player, svc::JoyMask tested) noexcept
     return inbox_.push(proto::LinkOp::JoyRelease{.player = player, .mask = tested});
 }
 
+bool LinkPadSink::stick(
+    svc::PlayerIndex player,
+    proto::StickSide side,
+    proto::StickPos pos
+) noexcept {
+    TASTY_SEAT_BODY(LinkPadSink);
+    return inbox_.push(proto::LinkOp::JoyStick{.player = player, .side = side, .pos = pos});
+}
+
 }

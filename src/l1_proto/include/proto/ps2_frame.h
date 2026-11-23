@@ -12,6 +12,7 @@ enum class Ps2Stream : std::uint8_t {
     KeyboardReply,
     MousePacket,
     MouseReply,
+    MouseBytes,
     kCount,
 };
 

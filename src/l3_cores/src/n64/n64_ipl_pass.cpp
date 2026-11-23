@@ -26,7 +26,7 @@ bool IplPass::plan_row(TransferRow& row, std::string_view path, bool boot) {
     row.source = ipl_path_.view();
     row.file_len = *size;
     row.extent = proto::FileSize{n64dd::kIplBytes};
-    row.fill = 0;
+    row.fill = std::byte{0};
     row.mirror = boot ? kRomLoadAddr : 0u;
     ipl_boot_ = boot;
     return true;

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/start_chain.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include "app/bitstream_programmer.h"
 #include "app/stream_io.h"
+#include "cores/asset_sweep.h"
 #include "svc/search_policy.h"
 #include "svc/vfs.h"
 
@@ -32,6 +36,10 @@ void StartChain::plan_assets_(const Facts& f, const svc::Vfs& vfs) {
     for (const cores::BootAsset& row : f.declared) {
         if (!cores::start_row_sends(row, f.index0_taken))
             continue;
+
+        if (row.unless
+            && cores::host_value(f.status, f.host_bits, *row.unless) != proto::FieldValue{})
+            continue;
         std::string rel(row.subdir);
         if (!rel.empty())
             rel += '/';
@@ -46,19 +54,47 @@ void StartChain::plan_chain_(const Facts& f, const svc::Vfs& vfs) {
     if (!f.generic_identity || f.manifest_load)
         return;
     const std::string home = core_home(f.home, vfs);
-    if (f.rbf.empty() || !plan_composite_(f.rbf, vfs)) {
-        for (const cores::BootAsset& row : cores::kCoreHomeChain) {
-            if (home.empty() || !cores::start_row_sends(row, f.index0_taken))
-                continue;
-            std::string path = home;
-            path += '/';
-            path.append(row.name);
-            if (vfs.file_exists(path))
-                add_(path, row.dest);
+    const std::span<const cores::BootAsset> rows = f.declared.empty()
+        ? std::span<const cores::BootAsset>(cores::kCoreHomeChain)
+        : f.declared;
+    const bool composite = !f.rbf.empty() && plan_composite_(f.rbf, vfs);
+
+    const auto add_present = [&](std::string_view name, proto::WideIoIndex dest) {
+        std::string path(home);
+        path += '/';
+        path.append(name);
+        if (vfs.file_exists(path))
+            add_(path, dest);
+    };
+    for (const cores::BootAsset& row : rows) {
+        if (home.empty())
+            break;
+        switch (row.sweep) {
+            case cores::AssetSweep::None:
+                if (!composite && sends_(row, f))
+                    add_present(row.name, row.dest);
+                break;
+            case cores::AssetSweep::HexPage:
+                for (cores::HexPagePlace page{}; page != cores::HexPagePlace::end();
+                     page = page.next()) {
+                    const auto suffix = page.suffix();
+                    std::string name(row.name);
+                    name.append(suffix.data(), suffix.size());
+                    add_present(name, row.dest);
+                }
+                break;
         }
     }
-    hold_ = count_ > 0 || f.remembered;
+    hold_ = !files_.empty() || f.remembered;
     plan_boot_images_(f.slot0_held, home, vfs);
+}
+
+bool StartChain::sends_(const cores::BootAsset& row, const Facts& f) noexcept {
+    if (!cores::start_row_sends(row, f.index0_taken))
+        return false;
+    return std::ranges::none_of(f.remembered_exts, [&row](std::string_view ext) {
+        return row.dropped_by(ext);
+    });
 }
 
 void StartChain::plan_boot_images_(bool slot0_held, std::string_view home, const svc::Vfs& vfs) {
@@ -114,10 +150,8 @@ bool StartChain::plan_composite_(std::string_view rbf, const svc::Vfs& vfs) {
 }
 
 void StartChain::add_(std::string_view path, proto::WideIoIndex dest, proto::FileOffset at) {
-    if (count_ >= files_.size())
-        return;
     if (auto s = file_(path, dest, at))
-        files_[count_++] = *s;
+        files_.push_back(*s);
 }
 
 std::optional<StartFile> StartChain::file_(

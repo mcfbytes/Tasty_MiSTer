@@ -60,6 +60,14 @@ MenuBlock::MenuBlock(
           }
       },
       hps_fb_{parts.wires.video.mode_sink(), parts.wires.video, framebuffer_region(plat.regions)},
+      ui_vt_switch_{},
+      fb_terminal_host_{ui::FbTerminalHost::Wiring{
+          .fb = hps_fb_,
+          .vt = ui_vt_switch_,
+          .video_stats = parts.wires.video.stats_cell(),
+          .clock = parts.wires.clock,
+          .recipe = ui::TerminalRecipe::stock()
+      }},
       browse_source_{plat.vfs},
       connect_{plat.connect, verdict},
 
@@ -87,6 +95,7 @@ MenuBlock::MenuBlock(
           .files = infra::OptRef<const svc::Vfs>{plat.vfs},
           .writes = infra::OptRef<app::recents::UiWriteLane>{parts.wires.ui_writes},
           .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()},
+          .terminal = infra::OptRef<ui::FbTerminalHost>{fb_terminal_host_},
           .disk_activity = parts.cells.disk_activity,
           .ini = parts.cells.ini
       },
@@ -163,6 +172,7 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .mgl = infra::OptRef<app::MglPump>{mgl_pump_},
         .fb = infra::OptRef<app::HpsFramebuffer>{hps_fb_},
         .launcher_screen = infra::OptRef{launcher_screen_},
+        .terminal = infra::OptRef<xthread::ICoworker>{fb_terminal_host_},
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
         .verdicts =

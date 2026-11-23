@@ -4,8 +4,9 @@
 #include <cstdint>
 #include <string_view>
 
+#include "cores/disk_ports.h"
 #include "cores/mount_state.h"
-#include "proto/disk_poll_decl.h"
+#include "proto/disk_poll_program.h"
 #include "proto/types.h"
 
 namespace mister::proto::link {
@@ -18,7 +19,10 @@ class IDiskPort {
 public:
     virtual ~IDiskPort() = default;
 
-    virtual void service_rt(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept = 0;
+    virtual void service_rt(
+        proto::link::Link& link,
+        const proto::DiskPollProgram& poll
+    ) noexcept = 0;
 
     virtual void order_bind(proto::DiskUnit unit, std::string_view path) noexcept = 0;
 

@@ -64,6 +64,13 @@ public:
     );
     [[nodiscard]] Ex<bool> release(proto::ILinkFrame& frame, PlayerIndex player, JoyMask composed);
 
+    [[nodiscard]] Ex<void> push_stick(
+        proto::ILinkFrame& frame,
+        PlayerIndex player,
+        proto::StickSide side,
+        proto::StickPos pos
+    );
+
     [[nodiscard]] Ex<unsigned> service_joysticks(proto::ILinkFrame& frame, bool local_walk = true);
     [[nodiscard]] Ex<bool> push_paddle(
         proto::ILinkFrame& frame,

@@ -174,6 +174,11 @@ void UiSink::on(const app::Event::RequestDone& a, const app::Event::Head& h) {
     w_.menu.on_request_done(h.tag, static_cast<std::int64_t>(std::time(nullptr)), w_.ctx);
 }
 
+void UiSink::on(const app::Event::MountRefused& a, const app::Event::Head& h) {
+    w_.trace.record(a, h);
+    w_.menu.on_mount_refused(a.reason, w_.ctx);
+}
+
 void UiSink::on(const app::Event::InfoRequest& a, const app::Event::Head& h) {
     w_.trace.record(a, h);
     w_.menu.on_info(a.id, w_.ctx);

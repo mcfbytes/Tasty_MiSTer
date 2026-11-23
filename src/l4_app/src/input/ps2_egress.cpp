@@ -2,6 +2,7 @@
 #include "app/input/ps2_egress.h"
 
 #include "app/link_tx_channel.h"
+#include "cores/input_sink.h"
 #include "proto/link_op.h"
 #include "proto/ps2_frame.h"
 #include "infra/tally.h"
@@ -44,6 +45,19 @@ Ps2Egress::Flushed Ps2Egress::flush_ps2_frames_(
         out.framed = true;
     }
     return out;
+}
+
+bool Ps2Egress::flush_sink_frames(cores::IInputSink& sink) noexcept {
+    bool framed = false;
+    while (inbox_.ring().size() < proto::kLinkTxCapacity) {
+        const auto frame = sink.next_frame();
+        if (!frame)
+            break;
+        if (!inbox_.push(proto::LinkOp::Ps2Frame{*frame}))
+            break;
+        framed = true;
+    }
+    return framed;
 }
 
 svc::InputGates Ps2Egress::sweep_dropped_keys_(

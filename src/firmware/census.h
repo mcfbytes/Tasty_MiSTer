@@ -59,6 +59,14 @@ inline constexpr auto kAtariStDocRows = std::to_array<reactor::LinkDecoderDecl>(
      reactor::RoundClaim::Always},
 });
 
+inline constexpr auto kX86DocRows = std::to_array<reactor::LinkDecoderDecl>({
+    {"x86.bus_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     std::chrono::milliseconds{1},
+     reactor::RoundClaim::Always},
+});
+
 inline constexpr auto kThreeDoDocRows = std::to_array<reactor::LinkDecoderDecl>({
     {"3do.cmd_edge",
      reactor::Cause::Ring,
@@ -130,6 +138,34 @@ inline constexpr auto kNeoGeoDocRows = std::to_array<reactor::LinkDecoderDecl>({
      reactor::RoundClaim::Always},
 });
 
+inline constexpr auto kAtari800DocRows = std::to_array<reactor::LinkDecoderDecl>({
+    {"atari800.mailbox",
+     reactor::Cause::Tick,
+     nullptr,
+     reactor::kEveryRound,
+     reactor::RoundClaim::Never},
+});
+inline constexpr auto kAtari5200DocRows = std::to_array<reactor::LinkDecoderDecl>({
+    {"atari5200.mailbox",
+     reactor::Cause::Tick,
+     nullptr,
+     reactor::kEveryRound,
+     reactor::RoundClaim::Never},
+});
+
+inline constexpr auto kMinimigDocRows = std::to_array<reactor::LinkDecoderDecl>({
+    {"minimig.floppy_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     std::chrono::milliseconds{1},
+     reactor::RoundClaim::Always},
+    {"minimig.mailbox",
+     reactor::Cause::Tick,
+     nullptr,
+     reactor::kEveryRound,
+     reactor::RoundClaim::Never},
+});
+
 inline constexpr auto kDocCensus = std::to_array<DocCensus>({
     {cores::CoreKind::MegaCd, kMegaCdDocRows},
     {cores::CoreKind::PceCd, kPceCdDocRows},
@@ -142,6 +178,14 @@ inline constexpr auto kDocCensus = std::to_array<DocCensus>({
     {cores::CoreKind::N64, kN64DocRows},
     {cores::CoreKind::Saturn, kSaturnDocRows},
     {cores::CoreKind::NeoGeo, kNeoGeoDocRows},
+    {cores::CoreKind::Atari800, kAtari800DocRows},
+    {cores::CoreKind::Atari5200, kAtari5200DocRows},
+    {cores::CoreKind::Ao486, kX86DocRows},
+    {cores::CoreKind::Pcxt, kX86DocRows},
+    {cores::CoreKind::PcxtEga, kX86DocRows},
+    {cores::CoreKind::Tandy1000, kX86DocRows},
+    {cores::CoreKind::Pcjr, kX86DocRows},
+    {cores::CoreKind::Minimig, kMinimigDocRows},
 });
 
 namespace detail {

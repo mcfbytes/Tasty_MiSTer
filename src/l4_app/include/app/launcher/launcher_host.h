@@ -41,7 +41,7 @@ public:
     struct Timing {
         std::chrono::milliseconds respawn{1000};
         std::chrono::milliseconds kill_after{400};
-        std::chrono::milliseconds settle_limit{1000};
+        std::chrono::milliseconds settle_limit{os::kVtSettle};
         std::chrono::milliseconds fb_ack_limit{500};
         std::chrono::milliseconds healthy_run{10000};
         unsigned strikes = 3;

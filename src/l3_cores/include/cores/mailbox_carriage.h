@@ -6,7 +6,7 @@
 #include "cores/host_services.h"
 #include "cores/mailbox_rows.h"
 #include "infra/seat.h"
-#include "proto/mailbox_frame_decl.h"
+#include "proto/mailbox_programme.h"
 
 namespace mister::cores {
 
@@ -18,16 +18,18 @@ public:
         hal::ISpiTransport& link,
         IMailboxPort& port,
         proto::link::SpiFioQueue& queue,
-        proto::MailboxFrameDecl frame
+        const os::IClock& clock,
+        proto::MailboxProgramme programme
     ) noexcept
         : link_(link),
           port_(port),
           queue_(queue),
-          frame_(frame) {}
+          clock_(clock),
+          programme_(programme) {}
 
     [[nodiscard]] static std::optional<MailboxCarriage> granted(
         const HostServices& h,
-        proto::MailboxFrameDecl frame
+        proto::MailboxProgramme programme
     ) noexcept {
         if (!h.mailbox || !h.fio_queue)
             return std::nullopt;
@@ -36,7 +38,8 @@ public:
             h.link,
             *h.mailbox,
             *h.fio_queue,
-            frame
+            h.clock,
+            programme
         };
     }
 
@@ -46,7 +49,8 @@ private:
     hal::ISpiTransport& link_;
     IMailboxPort& port_;
     proto::link::SpiFioQueue& queue_;
-    proto::MailboxFrameDecl frame_;
+    const os::IClock& clock_;
+    proto::MailboxProgramme programme_;
 };
 
 }

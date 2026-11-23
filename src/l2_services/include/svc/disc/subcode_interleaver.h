@@ -12,7 +12,7 @@ namespace mister::svc::disc {
 using SubcodeBlock = std::span<std::byte, kSubcodeBytes>;
 
 class SubcodeInterleaver {
-    TASTY_SEAT_RESIDENT(Io);
+    TASTY_SEAT_EXEMPT(component);
 
 public:
     void shape(SubcodeBlock block) const noexcept;

@@ -251,7 +251,7 @@ std::vector<std::uint8_t> StMediaLadder::read_cart_() const {
     if (!f)
         return out;
     out = StLoader::kCartBufferBytes.zeroed<std::vector<std::uint8_t>>();
-    std::ranges::fill(out, std::uint8_t{StLoader::kBlankFill});
+    std::ranges::fill(out, std::to_integer<std::uint8_t>(StLoader::kBlankFill));
 
     [[maybe_unused]] const std::span<std::byte> written = svc::read_bounded_partial(
         **f,
@@ -323,7 +323,7 @@ Ex<bool> StMediaLadder::start_run_(
     std::vector<std::uint8_t> payload;
     if (row.file_len.empty()) {
         payload = row.extent.zeroed<std::vector<std::uint8_t>>();
-        std::ranges::fill(payload, row.fill);
+        std::ranges::fill(std::as_writable_bytes(std::span{payload}), row.fill);
     } else {
         const proto::FileSize skip = row.file_offset - proto::kFileStart;
         const std::span<const std::uint8_t> part = infra::affine::first(

@@ -10,6 +10,7 @@
 #include "infra/prelude.h"
 #include "hal/spi_transport.h"
 #include "proto/link/fio_bracket.h"
+#include "proto/session_params.h"
 #include "proto/types.h"
 
 namespace mister::proto::link {
@@ -19,6 +20,12 @@ class UploadSession {
 
 public:
     [[nodiscard]] static Ex<UploadSession> begin(hal::ISpiTransport& link, WideIoIndex index);
+
+    [[nodiscard]] static Ex<UploadSession> begin(
+        hal::ISpiTransport& link,
+        WideIoIndex index,
+        const SessionParams& params
+    );
 
     UploadSession(UploadSession&&) noexcept = default;
     UploadSession& operator=(UploadSession&&) = delete;

@@ -11,8 +11,8 @@ enum class RegionId : std::uint8_t {
     MinimigShare,
     X86Share,
     X86Mem,
-    A2065Flat,
 
+    NicMailbox,
     VideoFb,
     ScalerOut,
 };

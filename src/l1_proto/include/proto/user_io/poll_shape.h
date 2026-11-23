@@ -4,18 +4,28 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "hal/types.h"
 #include "infra/message_sum.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/link_sel.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
 #include "proto/user_io/condition.h"
+#include "proto/user_io/poll_frame_shape.h"
 
 namespace mister::proto::user_io {
 
-enum class PollShape : std::uint8_t { InfoPoll, RumblePoll, F12ModPoll, kCount };
+enum class PollShape : std::uint8_t {
+    InfoPoll,
+    RumblePoll,
+    F12ModPoll,
+    KbdController,
+    ChangeCounter,
+    kCount,
+};
 
 enum class CommandForm : std::uint8_t { Bare, ParamInHighByte, kCount };
 
@@ -25,13 +35,18 @@ enum class Cadence : std::uint8_t { Census, SessionStart, kCount };
 
 struct PollShapeRow {
     PollShape shape;
-    UioOp opcode;
+
+    std::optional<UioOp> opcode;
     ReplyMask mask;
     Condition push_when;
     SeatTag sink;
     CommandForm form;
     std::uint8_t params;
     Cadence cadence;
+
+    LinkSel select = LinkSel::Io;
+
+    std::optional<PollFrameShape> frame{};
 };
 
 inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
@@ -59,6 +74,31 @@ inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
      .form = CommandForm::Bare,
      .params = 1,
      .cadence = Cadence::SessionStart},
+    {.shape = PollShape::KbdController,
+     .opcode = UioOp::Mouse,
+     .mask = ReplyMask{0x0001},
+     .push_when = Condition::NonZero,
+     .sink = SeatTag::Input,
+     .form = CommandForm::Bare,
+     .params = 1,
+     .cadence = Cadence::Census,
+     .select = LinkSel::Io,
+     .frame = PollFrameShape{PollFrameShape::Row{
+         .opcode = word(UioOp::Mouse),
+         .kind = TransferKind::AckedByte,
+         .leading = ReplyCount{1},
+         .guarded = ReplyCount{1},
+         .guard = {.condition = Condition::NonZero, .mask = ReplyMask{0x0001}}
+     }}},
+    {.shape = PollShape::ChangeCounter,
+     .opcode = std::nullopt,
+     .mask = ReplyMask{0x00FF},
+     .push_when = Condition::MaskedChangedSinceLast,
+     .sink = SeatTag::Main,
+     .form = CommandForm::Bare,
+     .params = 1,
+     .cadence = Cadence::Census,
+     .select = LinkSel::Fpga},
 });
 
 consteval bool poll_rows_are_ordinal() {
@@ -84,15 +124,45 @@ consteval bool poll_rows_fit_their_form() {
 
 static_assert(poll_rows_fit_their_form(), "a Bare row issues one parameter; none exceeds the mask");
 
+consteval bool poll_rows_fit_their_select() {
+    for (const PollShapeRow& r : kPollShapes) {
+        if (r.select != LinkSel::Io && r.select != LinkSel::Fpga)
+            return false;
+        if (r.opcode.has_value() != (r.select == LinkSel::Io))
+            return false;
+        if (!r.opcode && (r.frame || r.form != CommandForm::Bare))
+            return false;
+        if (!r.frame)
+            continue;
+        const PollFrameShape::Row& f = r.frame->row();
+        if (r.form != CommandForm::Bare || r.cadence != Cadence::Census)
+            return false;
+        if (f.opcode != word(*r.opcode) || f.guard.mask != r.mask)
+            return false;
+        if (f.guard.condition != r.push_when || r.push_when != Condition::NonZero)
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    poll_rows_fit_their_select(),
+    "a framed row and its frame agree; a row names an opcode exactly on the IO select"
+);
+
 [[nodiscard]] constexpr const PollShapeRow& poll_row(PollShape s) noexcept {
     return kPollShapes[infra::ordinal(s)];
 }
+
+inline constexpr hal::SpiWord kInBandRead{};
 
 [[nodiscard]] constexpr hal::SpiWord command_word(
     const PollShapeRow& r,
     std::uint8_t param
 ) noexcept {
-    const hal::SpiWord opcode = word(r.opcode);
+    if (!r.opcode)
+        return kInBandRead;
+    const hal::SpiWord opcode = word(*r.opcode);
     switch (r.form) {
         case CommandForm::Bare:
             return opcode;

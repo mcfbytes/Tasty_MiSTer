@@ -76,6 +76,10 @@ struct WindowOffset {
         return window_base.advanced(v);
     }
 
+    [[nodiscard]] constexpr proto::FileSize from_base(proto::FileSize base) const noexcept {
+        return base + proto::FileSize{v};
+    }
+
     [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
         return Error{code, site, v};
     }

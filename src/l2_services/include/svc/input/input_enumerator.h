@@ -49,7 +49,8 @@ public:
         std::string_view core,
         bool front_end,
         infra::OptRef<const IAnalogReshape> reshape = std::nullopt,
-        const JoyPlan& joy = JoyPlan{}
+        const JoyPlan& joy = JoyPlan{},
+        StickReach reach = StickReach::Symmetric
     );
 
     [[nodiscard]] Ex<void> adopt(InputDevice&& dev);

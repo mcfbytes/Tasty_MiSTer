@@ -20,6 +20,7 @@
 #include "proto/status_word.h"
 #include "proto/types.h"
 #include "svc/disc/disc_identity.h"
+#include "svc/nic_link.h"
 
 namespace mister::cores {
 
@@ -91,6 +92,20 @@ public:
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
 
     [[nodiscard]] virtual std::optional<proto::FieldValue> option_choice(OptionTag tag) = 0;
+
+    [[nodiscard]] virtual std::span<const std::byte> config_value(std::span<std::byte> dst) {
+        (void)dst;
+        return {};
+    }
+
+    [[nodiscard]] virtual bool boot_screen() { return true; }
+
+    [[nodiscard]] virtual bool start_nic(svc::NicLink link) {
+        (void)link;
+        return true;
+    }
+
+    virtual void reset_share() {}
 
     virtual void game_identified(std::string_view image, const svc::disc::DiscIdText& serial) {
         (void)image;

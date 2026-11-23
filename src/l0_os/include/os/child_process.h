@@ -130,6 +130,8 @@ public:
 
     [[nodiscard]] std::optional<ChildProcessExit> try_reap() noexcept;
 
+    void abandon() noexcept;
+
 private:
     ChildProcess(::pid_t pid, int pidfd) noexcept : pid_(pid), pidfd_(pidfd) {}
 

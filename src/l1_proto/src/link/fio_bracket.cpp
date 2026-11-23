@@ -112,12 +112,24 @@ Ex<FioBracket> FioBracket::begin(
     return std::move(*bracket);
 }
 
-Ex<FioBracket> FioBracket::window(hal::ISpiTransport& link, WideIoIndex index, hal::SpiWord mode) {
+Ex<FioBracket> FioBracket::window(
+    hal::ISpiTransport& link,
+    WideIoIndex index,
+    hal::SpiWord mode,
+    AuxValue address
+) {
     hal::Selected cs(link, hal::ChipSelect::Fpga);
     if (auto r = link.transfer(word(FioOp::FileTx)); !r)
         return std::unexpected(r.error());
     if (auto r = link.transfer(mode); !r)
         return std::unexpected(r.error());
+    if (!address.empty()) {
+        const hal::SpiHalves halves = address.halves();
+        if (auto r = link.transfer(halves.low); !r)
+            return std::unexpected(r.error());
+        if (auto r = link.transfer(halves.high); !r)
+            return std::unexpected(r.error());
+    }
     return FioBracket{link, index};
 }
 

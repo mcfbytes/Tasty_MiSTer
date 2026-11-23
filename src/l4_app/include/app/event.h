@@ -17,6 +17,7 @@
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/mount_refusal.h"
 
 namespace mister::app {
 
@@ -52,6 +53,7 @@ struct Event {
         SessionEnded,
         RamImageDeclined,
         RequestDone,
+        MountRefused,
         kCount,
     };
     enum class ConfStrOnlyCause : std::uint8_t { RegistryMiss, NoStorage };
@@ -124,6 +126,12 @@ struct Event {
         UiRequest::Kind which{};
     };
 
+    struct MountRefused {
+        static constexpr Kind kKind = Kind::MountRefused;
+        proto::SlotIndex slot{};
+        svc::MountRefusal reason{};
+    };
+
     using Alternatives = std::tuple<
         CoreLoaded,
         SessionFailed,
@@ -135,7 +143,8 @@ struct Event {
         SessionAdvisory,
         SessionEnded,
         RamImageDeclined,
-        RequestDone>;
+        RequestDone,
+        MountRefused>;
 
     Kind kind = Kind::CoreLoaded;
     std::uint8_t pad_[3]{};
@@ -151,7 +160,7 @@ static_assert(
     "16 B: the head at 4, a 4-byte store every alternative fits"
 );
 static_assert(
-    infra::ordinal(Event::Kind::kCount) == 11,
+    infra::ordinal(Event::Kind::kCount) == 12,
     "Event::Kind changed cardinality: audit the per-kind loss consumers in "
     "firmware/diag_sampler.cpp"
 );
@@ -178,6 +187,7 @@ inline constexpr auto kDeliveryTable = std::to_array<DeliveryRow>({
     {Event::Kind::SessionEnded, Delivery::Edge},
     {Event::Kind::RamImageDeclined, Delivery::Edge},
     {Event::Kind::RequestDone, Delivery::Edge},
+    {Event::Kind::MountRefused, Delivery::Edge},
 });
 static_assert(
     infra::rows_are_ordinal(kDeliveryTable),

@@ -11,6 +11,7 @@
 #include "infra/seat.h"
 #include "proto/storage_completion.h"
 #include "proto/storage_request.h"
+#include "svc/disk_format_row.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -27,21 +28,31 @@ struct BlockCtl {
         TASTY_SEAT_EXEMPT(component);
 
     public:
-        [[nodiscard]] bool set(std::span<const std::byte> src) noexcept {
+        [[nodiscard]] bool set(
+            std::span<const std::byte> src,
+            std::span<const DiskFormatRow> formats = {}
+        ) noexcept {
             if (src.size() > kStorageOrderBytes)
                 return false;
             len_ = src.size();
+            formats_ = formats;
             if (!src.empty())
                 std::memcpy(bytes_, src.data(), src.size());
             return true;
         }
 
-        void clear() noexcept { len_ = 0; }
+        void clear() noexcept {
+            len_ = 0;
+            formats_ = {};
+        }
 
         [[nodiscard]] std::span<const std::byte> view() const noexcept { return {bytes_, len_}; }
 
+        [[nodiscard]] std::span<const DiskFormatRow> formats() const noexcept { return formats_; }
+
     private:
         std::size_t len_ = 0;
+        std::span<const DiskFormatRow> formats_{};
         alignas(8) std::byte bytes_[kStorageOrderBytes]{};
     };
 
@@ -60,7 +71,10 @@ struct BlockCtl {
 
 static_assert(
     std::is_trivially_copyable_v<BlockCtl>
-    && sizeof(BlockCtl) <= 104u + kStorageOrderBytes + sizeof(infra::OptRef<const BlankSaveSpec>)
+    && sizeof(BlockCtl) <= 104u
+            + kStorageOrderBytes
+            + sizeof(infra::OptRef<const BlankSaveSpec>)
+            + sizeof(std::span<const DiskFormatRow>)
 );
 
 }

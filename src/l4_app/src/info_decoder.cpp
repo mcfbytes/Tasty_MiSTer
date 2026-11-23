@@ -21,6 +21,8 @@ std::string_view InfoDecoder::decode(const proto::LinkEvent::PolledWord& w) {
             return info_text_(w);
         case proto::user_io::PollShape::RumblePoll:
         case proto::user_io::PollShape::F12ModPoll:
+        case proto::user_io::PollShape::KbdController:
+        case proto::user_io::PollShape::ChangeCounter:
         case proto::user_io::PollShape::kCount:
             break;
     }

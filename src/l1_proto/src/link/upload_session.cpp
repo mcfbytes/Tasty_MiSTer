@@ -36,6 +36,17 @@ Ex<UploadSession> UploadSession::begin(hal::ISpiTransport& link, WideIoIndex ind
     return UploadSession{std::move(*b)};
 }
 
+Ex<UploadSession> UploadSession::begin(
+    hal::ISpiTransport& link,
+    WideIoIndex index,
+    const SessionParams& params
+) {
+    auto b = FioBracket::begin(link, index, kModeUpload, params);
+    if (!b)
+        return std::unexpected(b.error());
+    return UploadSession{std::move(*b)};
+}
+
 Ex<void> UploadSession::read(std::span<std::uint8_t> data) {
     hal::ISpiTransport* link = bracket_.link();
     if (link == nullptr)

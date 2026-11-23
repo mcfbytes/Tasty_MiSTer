@@ -10,11 +10,11 @@
 #include "infra/error.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/disk_address.h"
+#include "proto/disk_status_tag.h"
 #include "proto/types.h"
 
 namespace mister::proto {
-
-inline constexpr std::size_t kDiskStateBytes = 16;
 
 inline constexpr std::size_t kDiskActBytes = 512;
 
@@ -69,7 +69,48 @@ struct DiskAct {
     [[nodiscard]] constexpr std::uint16_t len() const noexcept { return len_; }
 
     [[nodiscard]] constexpr FioWordCount words() const noexcept {
-        return FioWordCount{1u + len_ / kWordBytes + (has_word_ ? 1u : 0u)};
+        return FioWordCount{1u + len_ / kWordBytes + (has_word_ ? 1u : 0u)}
+        + (addressed_ ? DiskAddress::kWords : FioWordCount{});
+    }
+
+    [[nodiscard]] static constexpr FioWordCount max_words() noexcept {
+        return FioWordCount{1u + kDiskActBytes / kWordBytes} + DiskAddress::kWords;
+    }
+
+    [[nodiscard]] static constexpr FioWordCount max_signal_words() noexcept {
+        return FioWordCount{1u + 1u};
+    }
+
+    [[nodiscard]] constexpr std::optional<DiskAddress> address() const noexcept {
+        if (!addressed_)
+            return std::nullopt;
+        return address_;
+    }
+
+    [[nodiscard]] constexpr DiskAct at(DiskAddress address) const noexcept {
+        if (kind_ == Kind::None) {
+            fatal(Error{Errc::contract, ERR_SITE(), 0}, "DiskAct::at: no act to address");
+        }
+        DiskAct act = *this;
+        act.addressed_ = true;
+        act.address_ = address;
+        return act;
+    }
+
+    [[nodiscard]] constexpr DiskAct tagged(DiskStatusTag tag) const noexcept {
+        if (kind_ != Kind::Out && kind_ != Kind::In) {
+            fatal(Error{Errc::contract, ERR_SITE(), 0}, "DiskAct::tagged: not a block act");
+        }
+        DiskAct act = *this;
+        act.tagged_ = true;
+        act.tag_ = tag;
+        return act;
+    }
+
+    [[nodiscard]] constexpr std::optional<DiskStatusTag> tag() const noexcept {
+        if (!tagged_)
+            return std::nullopt;
+        return tag_;
     }
 
     [[nodiscard]] constexpr std::optional<hal::SpiWord> word() const noexcept {
@@ -99,13 +140,21 @@ private:
     Kind kind_ = Kind::None;
     bool last_ = true;
     bool has_word_ = false;
+    bool addressed_ = false;
     DiskUnit unit_ = kNoUnit_;
+    bool tagged_ = false;
     hal::SpiWord opcode_{};
     std::uint16_t len_ = 0;
     hal::SpiWord word_{};
+    DiskAddress address_{};
+    DiskStatusTag tag_{};
 };
 
 static_assert(std::is_trivially_copyable_v<DiskAct>);
-static_assert(sizeof(DiskAct) == 10u, "the loan slot's payload, unchanged");
+static_assert(
+    sizeof(DiskAct) == 20u,
+    "the loan slot's payload: eleven bytes, the address and the status tag"
+);
+static_assert(DiskAct::max_words() == FioWordCount{259});
 
 }

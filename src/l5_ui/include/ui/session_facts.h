@@ -6,12 +6,14 @@
 #include "app/info_origin.h"
 #include "app/info_plane.h"
 #include "app/core_name.h"
+#include "infra/seat.h"
 #include "proto/types.h"
 #include "ui/osd_tree.h"
 
 namespace mister::ui {
 
 struct SessionFacts {
+    TASTY_SEAT_RESIDENT(Ui);
 
     bool core_loaded = false;
     bool front_end = false;
@@ -19,6 +21,8 @@ struct SessionFacts {
     app::CoreName core_dir{};
 
     bool hd_switchable = false;
+
+    bool console_view = false;
 
     OsdTree tree = OsdTree::Classic;
 

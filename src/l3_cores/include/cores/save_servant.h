@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/nvram_save.h"
+#include "cores/save_shape.h"
 #include "hal/types.h"
 #include "proto/save_act.h"
 
@@ -19,7 +20,8 @@ public:
     [[nodiscard]] virtual proto::SaveAct start(
         const mra::NvramSave& image,
         std::string_view rel,
-        hal::Width word
+        hal::Width word,
+        const SaveShape& shape
     ) noexcept = 0;
 
     [[nodiscard]] virtual proto::SaveAct resume(

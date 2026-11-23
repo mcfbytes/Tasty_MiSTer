@@ -136,6 +136,7 @@ add_library(mister_app_input STATIC
   src/input/input_main.cpp
   src/input/input_pipeline.cpp
   src/input/joy_level_emitter.cpp
+  src/input/stick_level_emitter.cpp
   src/input/joy_menu_chords.cpp
   src/input/launcher_key_bridge.cpp
   src/input/link_pad_sink.cpp
@@ -180,7 +181,9 @@ add_library(mister_app STATIC
   src/ladder_host_adapter.cpp
   src/bind_tail.cpp
   src/config_saves.cpp
+  src/cmos_keeper.cpp
   src/companion_slot.cpp
+  src/sidecar_slot.cpp
   src/owner_push.cpp
   src/core_init.cpp
   src/core_builder.cpp
@@ -218,15 +221,19 @@ add_library(mister_app STATIC
   src/manifest_ladder.cpp
   src/load_window.cpp
   src/disk_relay.cpp
+  src/disk_relays.cpp
   src/flat_save_servant.cpp
   src/save_upload_relay.cpp
   src/mgl_player.cpp
   src/mgl_pump.cpp
   src/mount_queue.cpp
+  src/mirror_fill.cpp
+  src/servant_mounts.cpp
   src/name_config.cpp
   src/negotiated_core.cpp
   src/osd_wire.cpp
   src/owner_ladder.cpp
+  src/rtc_cadence.cpp
   src/prelude_composer.cpp
   src/process_integration.cpp
   src/quiesce_ack.cpp
@@ -244,6 +251,7 @@ add_library(mister_app STATIC
   src/session_rows.cpp
   src/save_stage_director.cpp
   src/session_owner.cpp
+  src/share_lane.cpp
   src/spi_encoder.cpp
   src/spi_osd_rows.cpp
   src/start_chain.cpp
@@ -559,6 +567,7 @@ tasty_add_header_checks(tasty_app_input_header_checks LIB mister_app_input HEADE
   app/input/raw_key_edge.h
   app/input/rumble_players_cell.h
   app/input/rumble_relay.h
+  app/input/stick_level_emitter.h
   app/input/lw_pad_endpoint.h
 )
 tasty_add_header_checks(tasty_app_pcm_header_checks LIB mister_app_pcm HEADERS
@@ -633,7 +642,9 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/ui_page_record.h
   app/page_label.h
   app/disk_slot.h
+  app/disk_attach_seq.h
   app/disk_relay.h
+  app/disk_relays.h
   app/flat_save_servant.h
   app/save_upload_slot.h
   app/save_upload_relay.h
@@ -649,6 +660,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/session_bindings.h
   app/save_image_source.h
   app/start_chain.h
+  app/start_file.h
   app/cmd_router.h
   app/identity_record.h
   app/info_decoder.h
@@ -660,12 +672,15 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/rung_edges.h
   app/rung_rows.h
   app/load_belt.h
+  app/cmos_keeper.h
+  app/reload_hold.h
   app/ladder_host_adapter.h
   app/answered.h
   app/belt_orders.h
   app/bind_tail.h
   app/config_saves.h
   app/companion_slot.h
+  app/sidecar_slot.h
   app/rung_mask.h
   app/picked_load.h
   app/window_tally.h
@@ -714,6 +729,10 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/supervisor_parts.h
   app/stream_io.h
   app/session_owner.h
+  app/mirror_fill.h
+  app/servant_mounts.h
+  app/share_grant.h
+  app/share_lane.h
   app/main_pass.h
   app/link_session.h
   app/load_key.h
@@ -768,6 +787,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mgl_item_dispatch.h
   app/mgl_slot_remember.h
   app/option_cell.h
+  app/config_value_cell.h
+  app/rtc_cadence.h
   app/owed_mount.h
   app/owed_save_bind.h
   app/owner_tally.h

@@ -14,8 +14,11 @@
 #include "app/session_routes.h"
 #include "app/sys_grant.h"
 #include "cores/core_window_grant.h"
+#include "cores/disk_servant.h"
 #include "hal/fpga_memory.h"
+#include "infra/indexed_array.h"
 #include "infra/prelude.h"
+#include "proto/block_geometry.h"
 #include "proto/build_generation.h"
 #include "proto/types.h"
 #include "svc/storage_backend.h"
@@ -41,6 +44,14 @@ struct BuiltCore {
     TASTY_SEAT_MEDIATOR(Main, RT);
 
     std::unique_ptr<svc::IStorageBackend> save_store;
+
+    cores::DiskServantSet disk_servants{};
+
+    infra::IndexedArray<
+        std::unique_ptr<svc::IStorageBackend>,
+        proto::kAnnounceableSlots,
+        proto::SlotIndex>
+        slot_servants{};
     CorePtr core;
     std::array<std::optional<CoreWindow>, cores::kMaxCoreWindows> windows{};
     std::optional<hal::FpgaMemory> fed_ring{};

@@ -75,7 +75,7 @@ public:
         PageFacts f{};
         f.auto_pop = timeout_;
         f.has_title_strip = false;
-        f.takes_input_focus = false;
+        f.keys = PageKeys::Below;
         f.allows_popups = true;
         return f;
     }

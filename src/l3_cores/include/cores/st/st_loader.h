@@ -36,7 +36,7 @@ public:
 
     static constexpr proto::FioWordCount kCartPieceWords{1024};
 
-    static constexpr std::uint8_t kBlankFill = 0xFF;
+    static constexpr std::byte kBlankFill{0xFF};
 
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
 

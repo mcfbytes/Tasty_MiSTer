@@ -21,9 +21,15 @@ inline constexpr SlotIndex kLastAnnounceableSlot{kAnnounceableSlots - 1u};
 
 enum : std::uint32_t { kDefaultBlockBytes = 512 };
 
+enum class WindowPolicy : std::uint8_t {
+    Image,
+    Extentless,
+};
+
 struct BlockGeometry {
     BlockSize block_size{kDefaultBlockBytes};
     BlockCount window_blocks{};
+    WindowPolicy policy = WindowPolicy::Image;
 };
 
 static_assert(

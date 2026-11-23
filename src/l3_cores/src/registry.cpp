@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/registry.h"
 
+#include <algorithm>
 #include <array>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -9,13 +11,17 @@
 
 #include "cores/core_window_grant.h"
 #include "cores/generic_core.h"
+#include "cores/manifests/atari8.h"
 #include "cores/manifests/megadrive.h"
+#include "cores/manifests/minimig.h"
+#include "cores/minimig/a2065_nic.h"
 #include "cores/manifests/menu.h"
 #include "cores/manifests/psx.h"
 #include "cores/manifests/snes.h"
 #include "cores/mra/arcade_core.h"
 #include "cores/mra/arcade_manifest_role.h"
 #include "cores/manifests/cdi.h"
+#include "cores/manifests/mac.h"
 #include "cores/manifests/electron.h"
 #include "cores/manifests/megacd.h"
 #include "cores/manifests/n64.h"
@@ -24,10 +30,23 @@
 #include "cores/manifests/saturn.h"
 #include "cores/manifests/st.h"
 #include "cores/manifests/threedo.h"
+#include "cores/manifests/a2.h"
+
+#include "cores/manifests/c128.h"
 #include "cores/manifests/uneon.h"
 #include "cores/manifests/x86.h"
+#include "cores/manifests/archie.h"
+#include "cores/archie/kart_controller.h"
+#include "cores/minimig/amiga_keyboard.h"
+#include "cores/input_sink.h"
+
+#include "cores/manifests/c64.h"
+
+#include "cores/manifests/zx81.h"
+#include "cores/manifests/amstrad.h"
 #include "hal/board_profile.h"
 #include "infra/ascii.h"
+#include "proto/disk_protocol_row.h"
 #include "infra/indexed_array.h"
 
 namespace mister::cores {
@@ -75,14 +94,31 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .make = &manifests::make_neogeo,
      .make_ladder = &manifests::make_neogeo_ladder,
      .make_loader = &manifests::make_neogeo_loader},
-    {.profile = manifests::kAo486, .make = &make_generic},
+    {.profile = manifests::kAo486,
+     .make = &manifests::make_ao486,
+     .make_ladder = &manifests::make_ao486_ladder,
+     .make_loader = &manifests::make_ao486_loader,
+     .disk_servants = manifests::kAo486DiskServants,
+     .make_share_host = &manifests::make_ao486_share_host},
     {.profile = manifests::kPc110, .make = &make_generic},
     {.profile = manifests::kZ486, .make = &make_generic},
     {.profile = manifests::kZ386, .make = &make_generic},
-    {.profile = manifests::kPcxt, .make = &make_generic},
-    {.profile = manifests::kTandy1000, .make = &make_generic},
-    {.profile = manifests::kPcjr, .make = &make_generic},
-    {.profile = manifests::kPcxtEga, .make = &make_generic},
+    {.profile = manifests::kPcxt,
+     .make = &manifests::make_pcxt,
+     .make_ladder = &manifests::make_pcxt_ladder,
+     .disk_servants = manifests::kPcxtDiskServants},
+    {.profile = manifests::kTandy1000,
+     .make = &manifests::make_pcxt,
+     .make_ladder = &manifests::make_pcxt_ladder,
+     .disk_servants = manifests::kPcxtDiskServants},
+    {.profile = manifests::kPcjr,
+     .make = &manifests::make_pcjr,
+     .make_ladder = &manifests::make_pcjr_ladder,
+     .disk_servants = manifests::kPcjrDiskServants},
+    {.profile = manifests::kPcxtEga,
+     .make = &manifests::make_pcxt,
+     .make_ladder = &manifests::make_pcxt_ladder,
+     .disk_servants = manifests::kPcxtDiskServants},
     {.profile = manifests::kUneon, .make = &make_generic},
     {.profile = manifests::kSaturn,
      .make = &manifests::make_saturn,
@@ -90,10 +126,43 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
     {.profile = manifests::kCdi,
      .make = &manifests::make_cdi,
      .make_ladder = &manifests::make_cdi_ladder},
+    {.profile = manifests::kArchie,
+     .make = &manifests::make_archie,
+     .make_ladder = &manifests::make_archie_ladder},
+    {.profile = manifests::kTk2000, .make = &make_generic},
+    {.profile = manifests::kOric, .make = &make_generic},
+    {.profile = manifests::kMacLc,
+     .make = &manifests::make_maclc,
+     .slot_servants = manifests::kMacLcSlotServants},
+    {.profile = manifests::kZx81,
+     .make = &make_generic,
+     .make_sidecar = &manifests::make_zx81_sidecars},
+    {.profile = manifests::kAmstrad, .make = &make_generic},
+    {.profile = manifests::kC128, .make = &make_generic},
 
     {.profile = mra::kArcadeProfile,
      .make = &mra::make_arcade,
      .manifest_doc = infra::OptRef<const IManifestDocRole>{mra::kMraRole}},
+    {.profile = manifests::kAtari800,
+     .make = &manifests::make_atari800,
+     .make_loader = &manifests::make_atari800_loader,
+     .mailbox_servant = manifests::kAtari800Servant},
+    {.profile = manifests::kAtari5200,
+     .make = &manifests::make_atari5200,
+     .make_loader = &manifests::make_atari5200_loader,
+     .mailbox_servant = manifests::kAtari5200Servant},
+    {.profile = manifests::kMinimig,
+     .make = &manifests::make_minimig,
+     .make_ladder = &manifests::make_minimig_ladder,
+     .disk_servants = manifests::kMinimigDiskServants,
+     .mailbox_servant = manifests::kMinimigCdServant,
+     .make_nic = &minimig::make_a2065_nic,
+     .make_share_host = &manifests::make_minimig_share_host},
+    {.profile = manifests::kC64,
+     .make = &manifests::make_c64,
+     .make_loader = &manifests::make_c64_loader},
+    {.profile = manifests::kAppleII, .make = &make_generic},
+    {.profile = manifests::kAppleIIgs, .make = &make_generic},
 });
 
 consteval bool channel_rows_carry_a_store() {
@@ -108,6 +177,15 @@ static_assert(
     "a saves_by_channel row needs make_save_store, and only such a row has one"
 );
 
+consteval bool nic_rows_have_a_ladder() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.has_nic() && !f.has_ladder())
+            return false;
+    return true;
+}
+
+static_assert(nic_rows_have_a_ladder(), "a make_nic row needs make_ladder: the ladder posts Start");
+
 consteval bool disk_rows_name_their_servants() {
     for (const CoreFactory& f : kCoreTable) {
         if (f.profile.grants.has(Grant::Disk) != f.serves_disks())
@@ -117,6 +195,9 @@ consteval bool disk_rows_name_their_servants() {
         for (std::size_t i = 0; i < f.disk_servants.size(); ++i) {
             const DiskServantRow& r = f.disk_servants[i];
             if (r.protocol == proto::DiskProtocol::None || r.make == nullptr)
+                return false;
+
+            if (proto::disk_protocol_row(r.protocol).protocol != r.protocol)
                 return false;
             for (std::size_t j = i + 1; j < f.disk_servants.size(); ++j)
                 if (f.disk_servants[j].protocol == r.protocol)
@@ -129,25 +210,106 @@ consteval bool disk_rows_name_their_servants() {
 static_assert(
     disk_rows_name_their_servants(),
     "a row grants Disk exactly when it declares disk servants: each names a protocol "
-    "once with its factory, and the row declares the disk formats the servant opens"
+    "of the protocol table once with its factory, and the row declares the disk formats "
+    "the servant opens"
 );
 
-consteval bool one_disk_servant_is_declared() {
-    bool declared = false;
+consteval bool window_rows_are_joined() {
     for (const CoreFactory& f : kCoreTable) {
-        if (!f.serves_disks())
-            continue;
-        if (declared || f.disk_servants.size() != 1)
+        const CoreProfile& p = f.profile;
+        if (!lba_windows_joined(p.lba_windows))
             return false;
-        declared = true;
+        const auto shaped = [&p](proto::SlotIndex slot, WindowShape shape) {
+            for (const LbaWindowRow& w : p.lba_windows)
+                if (w.slot == slot && w.shape == shape)
+                    return true;
+            return false;
+        };
+        const auto served = [&f](proto::SlotIndex slot) {
+            std::size_t rows = 0;
+            for (const SlotServantRow& s : f.slot_servants)
+                if (s.slot == slot)
+                    ++rows;
+            return rows;
+        };
+        for (const LbaWindowRow& w : p.lba_windows)
+            if (served(w.slot) != 1)
+                return false;
+        for (const SlotServantRow& s : f.slot_servants) {
+            if (s.make == nullptr || s.slot > proto::kLastAnnounceableSlot)
+                return false;
+            bool windowed = false;
+            for (const LbaWindowRow& w : p.lba_windows)
+                windowed = windowed || w.slot == s.slot;
+            if (!windowed)
+                return false;
+        }
+        for (std::size_t i = 0; i < p.control_slots.size(); ++i) {
+            const ControlSlot& c = p.control_slots[i];
+            if (c.subdir.empty() || !shaped(c.slot, WindowShape::Rpc))
+                return false;
+            for (std::size_t j = i + 1; j < p.control_slots.size(); ++j)
+                if (p.control_slots[j].slot == c.slot)
+                    return false;
+        }
+        if (p.repulse.declared() && !shaped(p.repulse.slot, WindowShape::Data))
+            return false;
+        if (f.serves_slots() != p.grants.has(Grant::Servants))
+            return false;
+        if (!f.serves_slots() && (!p.control_slots.empty() || p.repulse.declared()))
+            return false;
     }
-    return declared;
+    return true;
 }
 
 static_assert(
-    one_disk_servant_is_declared(),
-    "make_disk_servant builds the one declared servant for the process's life: a "
-    "second servant row needs the relay to take its servant per load first"
+    window_rows_are_joined(),
+    "a row's LBA windows ascend and share no storage byte; a windowed slot has one "
+    "servant row and a servant row a window; a control slot carries an Rpc window and "
+    "a repulse rule a Data one; the Servants grant goes with exactly these rows"
+);
+
+consteval bool mirror_rows_are_joined() {
+    for (const CoreFactory& f : kCoreTable) {
+        const CoreProfile& p = f.profile;
+        for (std::size_t i = 0; i < p.slots.size(); ++i) {
+            const FileSlot& s = p.slots[i];
+            if (!s.mirror)
+                continue;
+            if (!s.mirror->fits(p.windows))
+                return false;
+            if (disk_formats_of(p, s.index).empty())
+                return false;
+            if (!slot_service_serves(s.role) && !s.via_slot_service)
+                return false;
+            for (std::size_t j = i + 1; j < p.slots.size(); ++j) {
+                const FileSlot& other = p.slots[j];
+                if (other.mirror && s.mirror->overlaps(*other.mirror, p.windows))
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+static_assert(
+    mirror_rows_are_joined(),
+    "a slot's mirror names a declared window and lies inside it, a profile's mirrors "
+    "do not alias, the slot's role reaches the save mount, and it opens under format "
+    "rows"
+);
+
+consteval bool a_row_speaks_one_disk_protocol() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.disk_servants.size() > 1)
+            return false;
+    return true;
+}
+
+static_assert(
+    a_row_speaks_one_disk_protocol(),
+    "a row that declares two disk servants lets two relays write an act in one round: "
+    "the disk relays need one round rule between them before that row lands"
 );
 
 consteval bool in_servant_set(ServantId id) {
@@ -228,25 +390,66 @@ static_assert(
     "answers a CONF_STR name, so a tag on a renamed row is a core tasty cannot load"
 );
 
+constexpr bool takes_the_rowless_route(const CoreProfile& p) {
+    return p.undeclared_role == kGenericProfile.undeclared_role
+        && p.undeclared_start_mount == kGenericProfile.undeclared_start_mount;
+}
+
 consteval bool generic_rows_start_no_mount() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.make == &make_generic && f.profile.undeclared_start_mount != StartMount::Unmodelled)
+        if (f.make == &make_generic
+            && !takes_the_rowless_route(f.profile)
+            && f.profile.undeclared_start_mount != StartMount::Unmodelled)
             return false;
     return true;
 }
 
-static_assert(generic_rows_start_no_mount(), "a make_generic row must not arm an SC start mount");
+static_assert(
+    generic_rows_start_no_mount(),
+    "a make_generic row arms an SC start mount only with the whole rowless route"
+);
 
 consteval bool generic_rows_keep_the_class_route() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.make == &make_generic && f.profile.undeclared_role != SlotRole::Image)
+        if (f.make == &make_generic
+            && !takes_the_rowless_route(f.profile)
+            && f.profile.undeclared_role != SlotRole::Image)
             return false;
     return true;
 }
 
 static_assert(
     generic_rows_keep_the_class_route(),
-    "a make_generic row must not route an undeclared slot to the slot service"
+    "a make_generic row routes an undeclared slot to the slot service only with the "
+    "whole rowless route"
+);
+
+consteval bool slot_formats_ride_the_slot_service() {
+    for (const CoreFactory& f : kCoreTable) {
+        for (const FileSlot& s : f.profile.slots) {
+            if (s.disk_formats.empty())
+                continue;
+            if (s.role != SlotRole::Drive || is_load_row(s))
+                return false;
+            const svc::DiskFormatRow& last = s.disk_formats.back();
+            if ((last.codec != svc::DiskCodec::Raw && !svc::admits_by_content(last.codec))
+                || !last.ext.empty()
+                || !last.magic.empty()
+                || last.size_bytes != 0)
+                return false;
+
+            for (const svc::DiskFormatRow& row : s.disk_formats.first(s.disk_formats.size() - 1))
+                if (row.ext.empty())
+                    return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    slot_formats_ride_the_slot_service(),
+    "a FileSlot's disk_formats needs a Drive mount row, an extension on every row but "
+    "the last, and a last catch-all row, Raw or a codec that admits by content"
 );
 
 consteval bool rowless_profile_keeps_its_defaults() {
@@ -272,6 +475,26 @@ consteval bool no_row_defaults_to_a_disc() {
 
 static_assert(no_row_defaults_to_a_disc(), "no row's undeclared_role may be Disc");
 
+consteval bool caps_slots_route_alike_under_a_manifest() {
+    for (const CoreFactory& f : kCoreTable) {
+        for (const FileSlot& s : f.profile.slots) {
+            if (is_load_row(s) || s.mount_index_form != MountIndexForm::ImageCaps)
+                continue;
+            if (role_of(f.profile, s.index) != role_of(mra::kArcadeProfile, s.index))
+                return false;
+            if (start_mount_of(f.profile, s.index) != start_mount_of(mra::kArcadeProfile, s.index))
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    caps_slots_route_alike_under_a_manifest(),
+    "an ImageCaps slot takes the same route under its own row and under the manifest "
+    "row: MAIN reads the index form off the name and the route off the build"
+);
+
 consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
     return !p.host.front_end
         && p.services.empty()
@@ -295,14 +518,9 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
 }
 
 static_assert(
-    block_fact_rows_are_generic(manifests::kAo486)
-    && block_fact_rows_are_generic(manifests::kPc110)
+    block_fact_rows_are_generic(manifests::kPc110)
     && block_fact_rows_are_generic(manifests::kZ486)
     && block_fact_rows_are_generic(manifests::kZ386)
-    && block_fact_rows_are_generic(manifests::kPcxt)
-    && block_fact_rows_are_generic(manifests::kTandy1000)
-    && block_fact_rows_are_generic(manifests::kPcjr)
-    && block_fact_rows_are_generic(manifests::kPcxtEga)
     && block_fact_rows_are_generic(manifests::kUneon)
 );
 
@@ -381,6 +599,30 @@ static_assert(
     host_bit_rows_are_well_formed(),
     "a host_bits row is a valid field inside the status word, its fact declared once "
     "per profile, overlapping no other row"
+);
+
+consteval bool unless_rows_are_read() {
+    const auto declares = [](const CoreProfile& p, HostFact fact) consteval {
+        for (const HostBitRow& r : p.host_bits)
+            if (r.fact == fact)
+                return true;
+        return false;
+    };
+    for (const CoreFactory& f : kCoreTable) {
+        for (const BootAsset& r : f.profile.boot_assets)
+            if (r.unless)
+                return false;
+        for (const BootAsset& r : f.profile.start_assets)
+            if (r.unless && (f.has_ladder() || !declares(f.profile, *r.unless)))
+                return false;
+    }
+    return true;
+}
+
+static_assert(
+    unless_rows_are_read(),
+    "a BootAsset::unless sits on a start_assets row of a ladderless profile, and names "
+    "a HostFact that profile's host_bits declares"
 );
 
 consteval bool staging_cores_declare_blank_save() {
@@ -467,16 +709,22 @@ static_assert(
     "app::InternedFile::kMaxLiveFiles; raise it only with its derivation"
 );
 
+constexpr bool declares_its_chain(const CoreProfile& p) {
+    return p.start == StartRule::Chain && !p.start_assets.empty();
+}
+
 consteval bool start_rule_matches_its_rows() {
     for (const CoreFactory& f : kCoreTable)
-        if ((f.profile.start == StartRule::Assets) == f.profile.start_assets.empty())
+        if (!declares_its_chain(f.profile)
+            && (f.profile.start == StartRule::Assets) == f.profile.start_assets.empty())
             return false;
     return true;
 }
 
 static_assert(
     start_rule_matches_its_rows(),
-    "StartRule::Assets is the rule of exactly the rows that declare start_assets"
+    "StartRule::Assets is the rule of exactly the rows that declare start_assets, "
+    "a Chain row's own chain aside"
 );
 
 consteval bool no_manifest_row_anchors_core_home() {
@@ -487,14 +735,51 @@ consteval bool no_manifest_row_anchors_core_home() {
         return false;
     };
     for (const CoreFactory& f : kCoreTable)
-        if (anchored(f.profile.boot_assets) || anchored(f.profile.start_assets))
+        if (anchored(f.profile.boot_assets)
+            || (!declares_its_chain(f.profile) && anchored(f.profile.start_assets)))
             return false;
     return true;
 }
 
 static_assert(
     no_manifest_row_anchors_core_home(),
-    "AssetAnchor::CoreHome is the generic chain's alone; no ladder can resolve it"
+    "AssetAnchor::CoreHome is the start chain's alone; no ladder can resolve it"
+);
+
+consteval bool chain_rows_are_well_formed() {
+    const auto plain = [](std::span<const BootAsset> rows) consteval {
+        for (const BootAsset& r : rows)
+            if (r.sweep != AssetSweep::None || !r.dropped_by_exts.empty())
+                return false;
+        return true;
+    };
+    for (const CoreFactory& f : kCoreTable) {
+        if (!plain(f.profile.boot_assets))
+            return false;
+        if (!declares_its_chain(f.profile)) {
+            if (!plain(f.profile.start_assets))
+                return false;
+            continue;
+        }
+        if (f.has_ladder())
+            return false;
+        for (const BootAsset& r : f.profile.start_assets) {
+            if (r.anchor != AssetAnchor::CoreHome || !r.subdir.empty())
+                return false;
+
+            if (r.sweep != AssetSweep::None && r.dest == WideIoIndex{})
+                return false;
+            if (!r.dropped_by_exts.empty() && r.dest != WideIoIndex{})
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    chain_rows_are_well_formed(),
+    "a Chain row's own rows anchor at the core home with no subdir; a sweep is never "
+    "at index 0, a replaceable row always is, and no other row carries either fact"
 );
 
 consteval bool front_end_and_hint_rows_start_nothing() {
@@ -577,6 +862,30 @@ static_assert(
     "kMaxCoreWindows per manifest and feed PCM from at most one row"
 );
 
+consteval bool share_rows_are_joined() {
+    for (const CoreFactory& f : kCoreTable) {
+        const bool declared = f.profile.share.has_value();
+        if (declared != (f.make_share_host != nullptr))
+            return false;
+        if (!declared)
+            continue;
+        const ShareRow& row = *f.profile.share;
+        if (row.bytes.empty() || row.default_dir.empty())
+            return false;
+        if (!row.page.holds(f.profile.windows, row.bytes))
+            return false;
+        if (row.poll <= infra::kNoWait)
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    share_rows_are_joined(),
+    "a row declares a ShareRow exactly when it names a share host factory, and the "
+    "row's page and its length lie inside the window its spot names"
+);
+
 consteval bool staging_rows_declare_a_ladder() {
     for (const CoreFactory& f : kCoreTable) {
         const bool staged = f.profile.staging.staged;
@@ -595,6 +904,41 @@ static_assert(
     "beside it, a profile with neither names none, and only a Ladder-slot row resets "
     "through it"
 );
+
+consteval bool host_served_drives_own_the_block_service() {
+    for (const CoreFactory& f : kCoreTable) {
+        for (const DiskServantRow& d : f.disk_servants) {
+            for (const proto::DiskProtocolRow& row : proto::kDiskProtocols) {
+                if (row.protocol != d.protocol)
+                    continue;
+                for (const FileSlot& s : f.profile.slots) {
+                    if (s.role != SlotRole::Ladder)
+                        continue;
+                    if (!row.units.contains(s.index.served_unit()))
+                        continue;
+                    if (f.profile.block_service != BlockService::CoreOwn)
+                        return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+static_assert(
+    host_served_drives_own_the_block_service(),
+    "a Ladder slot at a disk-servant unit's index is a host-served drive, legal only "
+    "on a BlockService::CoreOwn row: no generic drain may serve that index too"
+);
+
+consteval bool reinit_rows_ladder() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.profile.reset.reinits && (!f.profile.reset.ladders || !f.has_ladder()))
+            return false;
+    return true;
+}
+
+static_assert(reinit_rows_ladder(), "ResetRow::reinits implies ladders and a make_ladder column");
 
 consteval bool laddered_rows_declare_one_disc_slot() {
     for (const CoreFactory& f : kCoreTable) {
@@ -679,10 +1023,58 @@ static_assert(
     "a row with a MAIN companion declares the window its sibling file loads into"
 );
 
+consteval proto::FileSize largest_save_of_the_table() {
+    proto::FileSize most{};
+    for (const CoreFactory& f : kCoreTable)
+        most = std::max(most, f.profile.largest_save);
+    return most;
+}
+
+constexpr proto::FileSize kLargestDeclaredSave = largest_save_of_the_table();
+static_assert(
+    kLargestDeclaredSave == proto::FileSize{1'050'688},
+    "the save lane holds an EasyFlash image whole, 64 + 128 x 8208 bytes "
+    "(support/c64/c64.cpp ezfl_size): 2,112 bytes over the manifest saves' 1 MiB"
+);
+
+consteval bool sidecar_rows_are_alone() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.make_sidecar == nullptr)
+            continue;
+        if (f.make_companion != nullptr || !f.streams_files())
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    sidecar_rows_are_alone(),
+    "a row with a MAIN sidecar builder has no companion and answers the stream role"
+);
+
+consteval bool serviced_rows_have_a_class_half() {
+    for (const CoreFactory& f : kCoreTable)
+        for (const FileSlot& s : f.profile.slots)
+            if (s.via_slot_service
+                && (s.role != SlotRole::Image || is_load_row(s) || f.make == &make_generic))
+                return false;
+    return true;
+}
+
+static_assert(
+    serviced_rows_have_a_class_half(),
+    "FileSlot::via_slot_service names an Image row of a core class that answers "
+    "on_mount: a Save row is the slot service's already, and GenericCore refuses it"
+);
+
 }
 
 std::span<const CoreFactory> core_table() {
     return kCoreTable;
+}
+
+proto::FileSize largest_declared_save() noexcept {
+    return kLargestDeclaredSave;
 }
 
 [[nodiscard]] infra::OptRef<const CoreFactory> find_core(std::string_view conf_str_name) {
@@ -715,6 +1107,19 @@ infra::OptRef<const IManifestDocRole> manifest_doc_role() {
             return f.manifest_doc;
     }
     return {};
+}
+
+std::unique_ptr<IInputSink> make_input_sink(InputSinkId id) {
+    switch (id) {
+        case InputSinkId::KbdController:
+            return std::make_unique<archie::KartController>();
+        case InputSinkId::PacedKeycodes:
+            return std::make_unique<minimig::AmigaKeyboard>();
+        case InputSinkId::None:
+        case InputSinkId::kCount:
+            break;
+    }
+    return nullptr;
 }
 
 const CoreProfile& profile_for(std::string_view conf_str_name) {

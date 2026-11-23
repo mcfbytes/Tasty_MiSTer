@@ -77,6 +77,7 @@ public:
     void on(const app::Event::SessionEnded& a, const app::Event::Head& h);
     void on(const app::Event::RamImageDeclined& a, const app::Event::Head& h);
     void on(const app::Event::RequestDone& a, const app::Event::Head& h);
+    void on(const app::Event::MountRefused& a, const app::Event::Head& h);
 
     void misrouted(const app::Event& e) noexcept;
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -10,7 +11,9 @@
 #include "app/round_words.h"
 #include "app/save_upload_slot.h"
 #include "cores/nvram_save.h"
+#include "cores/save_frame.h"
 #include "cores/save_servant.h"
+#include "cores/save_shape.h"
 #include "hal/spi_transport.h"
 #include "infra/xthread/counter.h"
 #include "infra/xthread/loan_channel.h"
@@ -42,6 +45,8 @@ public:
 
     static constexpr std::uint32_t kActLivenessRounds = 64;
 
+    static constexpr proto::FileSize kMaxLead{proto::kSavePieceBytes};
+
     explicit SaveUploadRelay(
         hal::ISpiTransport& link,
         xthread::Polled,
@@ -63,7 +68,11 @@ public:
     SaveUploadRelay(const SaveUploadRelay&) = delete;
     SaveUploadRelay& operator=(const SaveUploadRelay&) = delete;
 
-    [[nodiscard]] bool order(const cores::mra::NvramSave& image, std::string_view rel) noexcept;
+    [[nodiscard]] bool order(
+        const cores::mra::NvramSave& image,
+        std::string_view rel,
+        const cores::SaveShape& shape = {}
+    ) noexcept;
 
     void service_rt(proto::FioWordCount budget_words, bool fio_free) noexcept;
 
@@ -111,6 +120,9 @@ private:
     struct Order {
         cores::mra::NvramSave image{};
         FixedStr<kConfigRelCap, StrFit::Reject> rel{};
+
+        cores::SaveFrame frame{};
+        std::array<std::uint8_t, proto::kSavePieceBytes> lead{};
         bool owed = false;
     };
 

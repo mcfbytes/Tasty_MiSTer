@@ -50,8 +50,16 @@ inline constexpr auto kAtariStDiskFormats = std::to_array<svc::DiskFormatRow>({
 });
 
 inline constexpr auto kAtariStSlots = std::to_array<FileSlot>({
-    {.index = IoIndex{0}, .extensions = "ST ", .label = "A:", .writable = true},
-    {.index = IoIndex{1}, .extensions = "ST ", .label = "B:", .writable = true},
+    {.index = IoIndex{0},
+     .extensions = "ST ",
+     .label = "A:",
+     .writable = true,
+     .via_slot_service = true},
+    {.index = IoIndex{1},
+     .extensions = "ST ",
+     .label = "B:",
+     .writable = true,
+     .via_slot_service = true},
     {.index = IoIndex{2},
      .extensions = "VHD",
      .label = "ACSI 0",

@@ -1,69 +1,134 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/minimig/minimig_core.h"
-#include "cores/core_adopt.h"
-#include "infra/prelude.h"
 
-#include <array>
+#include <cstring>
+
+#include "cores/core_adopt.h"
+#include "cores/minimig/floppy_poll.h"
+#include "cores/minimig/minimig_fact.h"
+#include "cores/mounted_path.h"
+#include "infra/byte_view.h"
+#include "proto/disk_protocol.h"
+#include "proto/link/link.h"
 
 namespace mister::cores::minimig {
-namespace {
-
-constexpr std::array<Mm2PushRow, 1> kMm2Rows{{
-    {0x00, 0, 1, "req push-table shape; rows transcribed at the minimig pass"},
-}};
-
-}
-
-std::span<const Mm2PushRow> mm2_push_table() {
-    return kMm2Rows;
-}
-
-Ex<void> MinimigCore::apply_configuration(const ConfigBlob& blob) {
-
-    const bool old_format = blob.bytes.size() == kConfigBlobOldSize;
-    if (!old_format && blob.bytes.size() > kConfigBlobMaxSize) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(blob.bytes.size())}
-        );
-    }
-
-    (void)old_format;
-    return unimplemented(ERR_SITE());
-}
-
-Ex<void> MinimigCore::akiko_service(hal::SpiWord status_word) {
-    status_cache_ = status_word;
-
-    return unimplemented(ERR_SITE());
-}
-
-Ex<void> MinimigCore::a2065_drain() {
-    return unimplemented(ERR_SITE());
-}
-
-Ex<void> MinimigCore::mfm_write_track(std::uint8_t, std::uint8_t, std::span<const std::byte>) {
-    return unimplemented(ERR_SITE());
-}
-
-Ex<void> MinimigCore::enqueue_keycode(proto::KeyCode) {
-    return unimplemented(ERR_SITE());
-}
 
 Ex<void> MinimigCore::do_adopt(const CoreAdopt&) {
-
-    return unimplemented(ERR_SITE());
+    TASTY_SEAT_BODY(MinimigCore);
+    if (!floppy_port_())
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    return {};
 }
 
-Ex<void> MinimigCore::do_reset() {
-    return unimplemented(ERR_SITE());
+infra::OptRef<IDiskPort> MinimigCore::floppy_port_() const noexcept {
+    return host().disk[proto::DiskProtocol::AmigaFloppy];
 }
 
-Ex<void> MinimigCore::on_mount(IoIndex, const MountedPath&) {
-    return unimplemented(ERR_SITE());
+void MinimigCore::service_kick() noexcept {
+    TASTY_SEAT_BODY(MinimigCore);
+    if (const auto port = floppy_port_()) {
+        proto::link::Link link{host().link};
+        port->service_rt(link, kFloppyPoll);
+    }
 }
 
-Ex<void> MinimigCore::on_osd_closed() {
+MountState MinimigCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
+    TASTY_SEAT_BODY(MinimigCore);
+    const std::optional<proto::DiskUnit> drive = floppy_of_(slot);
+    const infra::OptRef<IDiskPort> port = floppy_port_();
+    if (!drive || !port)
+        return MountState::Failed;
+    const proto::DiskUnit unit = *drive;
+    const auto found = floppies_.find(unit);
+    if (!found)
+        return MountState::Failed;
+    FloppyBind& b = *found;
+    if (!b.out || b.path.view() != path) {
+        (void)b.path.assign(path);
+        b.out = true;
+        b.bound = false;
+        port->order_bind(unit, path);
+    }
+    const MountState answer = port->bind_answer(unit);
+    if (answer == MountState::Pending)
+        return MountState::Pending;
+    b.out = false;
+    b.bound = answer == MountState::Done && !path.empty();
+    return answer;
+}
 
+std::optional<proto::DiskUnit> MinimigCore::floppy_of_(proto::SlotIndex slot) noexcept {
+    for (std::uint8_t u = 0; u < kFloppyDrives; ++u) {
+        if (proto::DiskUnit{u}.slot() == slot)
+            return proto::DiskUnit{u};
+    }
+    return std::nullopt;
+}
+
+bool MinimigCore::floppy_bound(proto::DiskUnit unit) const noexcept {
+    const auto found = floppies_.find(unit);
+    return found && found->bound;
+}
+
+Ex<void> MinimigCore::on_apply_load_facts(std::span<const std::uint8_t> facts, std::string_view) {
+    TASTY_SEAT_BODY(MinimigCore);
+    for (const std::uint8_t fact : facts) {
+        switch (fact_of(fact)) {
+            case MinimigFact::DetachFloppies:
+                detach_floppies_();
+                break;
+            case MinimigFact::kCount:
+                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), fact});
+        }
+    }
+    return {};
+}
+
+void MinimigCore::detach_floppies_() noexcept {
+    const infra::OptRef<IDiskPort> port = floppy_port_();
+    for (std::uint8_t u = 0; u < kFloppyDrives; ++u) {
+        const proto::DiskUnit unit{u};
+        floppies_[unit] = FloppyBind{};
+        if (!port)
+            continue;
+        port->abandon_command_on(unit);
+        port->order_bind(unit, {});
+    }
+}
+
+Ex<void> MinimigCore::apply(ConfigBlob value) {
+    TASTY_SEAT_BODY(MinimigCore);
+    if (value.bytes.empty()) {
+        cfg_ = MinimigConfig::defaults();
+        return {};
+    }
+    if (value.bytes.size() != cfg_.image.size()) {
+        return std::unexpected(
+            proto::FileSize::of(value.bytes).refusal(Errc::bad_format, ERR_SITE())
+        );
+    }
+    std::memcpy(cfg_.image.data(), value.bytes.data(), cfg_.image.size());
+    return {};
+}
+
+std::span<const std::byte> MinimigCore::value(std::span<std::byte> dst) const noexcept {
+    TASTY_SEAT_BODY(MinimigCore);
+    if (dst.size() < cfg_.image.size())
+        return {};
+    std::memcpy(dst.data(), cfg_.image.data(), cfg_.image.size());
+    return dst.first(cfg_.image.size());
+}
+
+Ex<void> MinimigCore::on_mount(proto::IoIndex slot, const MountedPath& image) {
+    TASTY_SEAT_BODY(MinimigCore);
+    if (slot == kKickstartSlot) {
+        cfg_.set_kickstart(image.path);
+    } else if (slot == kExtRomSlot) {
+        cfg_.set_ext_rom(image.path);
+    } else {
+
+        return std::unexpected(slot.refusal(Errc::slot_range, ERR_SITE()));
+    }
     return {};
 }
 

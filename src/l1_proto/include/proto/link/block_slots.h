@@ -27,6 +27,7 @@
 #include "proto/link/spi_block_poll.h"
 #include "proto/storage_channel.h"
 #include "proto/storage_completion.h"
+#include "proto/track_shape.h"
 #include "proto/types.h"
 
 namespace mister::hal {
@@ -104,6 +105,8 @@ public:
         IBlockRoles& roles
     );
     [[nodiscard]] Ex<void> unmount(SlotIndex slot);
+
+    [[nodiscard]] Ex<void> announce_bare(SlotIndex slot);
 
     [[nodiscard]] Ex<void> install_disc(SlotIndex slot, FileSize size_bytes, IBlockRoles& roles);
 
@@ -224,13 +227,34 @@ private:
         const SdRequest& req,
         BlockSize block_size,
         SectorAck ack,
-        const BlockBacking& backing
+        const BlockBacking& backing,
+        WindowPolicy policy
     );
     [[nodiscard]] Ex<Pass> serve_write(
         const SdRequest& req,
         BlockSize block_size,
         SectorAck ack,
+        const BlockBacking& backing,
+        WindowPolicy policy
+    );
+
+    [[nodiscard]] Ex<Pass> serve_track_read_(
+        const SdRequest& req,
+        const TrackShape::Ask& ask,
+        SectorAck ack,
         const BlockBacking& backing
+    );
+    [[nodiscard]] Ex<Pass> serve_track_write_(
+        const SdRequest& req,
+        const TrackShape::Ask& ask,
+        SectorAck ack,
+        const BlockBacking& backing
+    );
+
+    [[nodiscard]] Ex<std::span<std::uint8_t>> drain_write_(
+        SlotIndex slot,
+        infra::ByteCount payload,
+        SectorAck ack
     );
 
     struct ReadPass {
@@ -241,6 +265,7 @@ private:
         FileSize nbytes;
         SectorAck ack;
         const BlockBacking& backing;
+        WindowPolicy policy;
     };
 
     [[nodiscard]] Ex<Pass> answer_read_image_(const ReadPass& p, const ResidentWindow::Hit& image);
@@ -262,7 +287,8 @@ private:
         Lba base,
         BlockSize block_size,
         bool answer_owed,
-        const BlockBacking& backing
+        const BlockBacking& backing,
+        WindowPolicy policy
     ) noexcept;
     [[nodiscard]] bool submit_create(
         SlotIndex slot,
@@ -274,6 +300,18 @@ private:
         const SaveSlotRule::Plan& plan,
         const BlockBacking& backing
     ) noexcept;
+    [[nodiscard]] bool submit_track_fetch_(
+        SlotIndex slot,
+        const TrackShape::Ask& ask,
+        const BlockBacking& backing
+    ) noexcept;
+    [[nodiscard]] bool submit_track_write_(
+        SlotIndex slot,
+        const TrackShape::Ask& ask,
+        const BlockBacking& backing
+    ) noexcept;
+
+    void credit_data_(SlotIndex slot, StorageRequest::Kind kind) noexcept;
     [[nodiscard]] Ex<void> submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept;
     [[nodiscard]] StorageRequest::Head request_head_(
         SlotIndex slot,

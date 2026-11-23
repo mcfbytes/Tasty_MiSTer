@@ -35,6 +35,16 @@ inline constexpr auto kHostPollRows = std::to_array<LinkDecoderDecl>({
      nullptr,
      reactor::kEveryRound,
      reactor::RoundClaim::Never},
+    {"link.kbd_controller_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     reactor::kEveryRound,
+     reactor::RoundClaim::Never},
+    {"link.change_counter_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     reactor::kEveryRound,
+     reactor::RoundClaim::Never},
 });
 static_assert(kHostPollRows.size() == user_io::kPollShapes.size(), "one census row per poll shape");
 
@@ -82,6 +92,8 @@ public:
 
     [[nodiscard]] bool armed() const noexcept { return armed_; }
 
+    [[nodiscard]] user_io::PollShape shape() const noexcept { return shape_; }
+
     [[nodiscard]] std::uint32_t polls() const noexcept { return polls_; }
 
     [[nodiscard]] std::uint32_t pushes() const noexcept { return pushes_; }
@@ -97,6 +109,11 @@ public:
 private:
     void issue_(const user_io::PollShapeRow& row) noexcept;
     void beat_(const user_io::PollShapeRow& row, std::uint8_t param) noexcept;
+
+    void frame_beat_(
+        const user_io::PollShapeRow& row,
+        const user_io::PollFrameShape& frame
+    ) noexcept;
     [[nodiscard]] bool push_(
         user_io::PollShape shape,
         std::uint8_t param,

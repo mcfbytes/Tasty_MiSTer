@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <optional>
 
 #include "infra/error.h"
@@ -8,6 +9,8 @@
 #include "os/types.h"
 
 namespace mister::os {
+
+inline constexpr std::chrono::milliseconds kVtSettle{1000};
 
 class IVtSwitch {
 public:

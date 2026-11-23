@@ -615,6 +615,17 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
             if (!select)
                 return Transition{};
             const cores::OptionRow::ActionArm* action = d.action_arm();
+            if (action != nullptr && action->core_act) {
+                push_op(
+                    proto::LinkOp::SetCoreOption{
+                        .row = proto::OptionRowIndex{l->index},
+                        .choice = proto::FieldValue{}
+                    }
+                );
+                if (action->arms_reset)
+                    armed_ = true;
+                return Transition{};
+            }
             if (action == nullptr || action->reset_act == cores::OptionRow::ResetAct::None) {
                 refusals_.add();
                 return Transition{};

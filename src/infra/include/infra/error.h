@@ -45,6 +45,7 @@ enum class Errc : std::uint16_t {
     busy,
     seat_absent,
     contract,
+    choice_needed,
 };
 
 namespace detail {
@@ -64,6 +65,7 @@ static_assert(
     && detail::errc_code(Errc::busy) == 25
     && detail::errc_code(Errc::seat_absent) == 26
     && detail::errc_code(Errc::contract) == 27
+    && detail::errc_code(Errc::choice_needed) == 28
 );
 
 enum class ErrorSite : std::uint16_t {};

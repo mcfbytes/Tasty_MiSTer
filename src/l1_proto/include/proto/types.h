@@ -22,6 +22,7 @@
 #include "hal/spi_halves.h"
 #include "infra/affine.h"
 #include "infra/ascii.h"
+#include "infra/byte_count.h"
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
 #include "infra/error.h"
@@ -46,6 +47,7 @@ using ::mister::infra::affine::operator/;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
+struct DiskUnit;
 struct IoIndex;
 struct ListIndex;
 struct PollParam;
@@ -89,6 +91,8 @@ struct IoIndex {
     std::uint8_t v = 0;
 
     [[nodiscard]] constexpr SlotIndex block_slot() const noexcept { return SlotIndex{v}; }
+
+    [[nodiscard]] constexpr DiskUnit served_unit() const noexcept;
 
     template <std::size_t Count>
     [[nodiscard]] constexpr bool below() const noexcept {
@@ -523,6 +527,14 @@ struct BlockCount {
     std::uint32_t v = 0;
     using affine_count = BlockCount;
 
+    [[nodiscard]] static constexpr BlockCount of(hal::SpiWord w) noexcept {
+        return w.decoded([](std::uint16_t b) { return BlockCount{b}; });
+    }
+
+    [[nodiscard]] constexpr hal::SpiWord low_word() const noexcept {
+        return hal::SpiWord{static_cast<std::uint16_t>(v)};
+    }
+
     [[nodiscard]] constexpr std::byte low_byte() const noexcept {
         return static_cast<std::byte>(static_cast<std::uint8_t>(v));
     }
@@ -535,6 +547,18 @@ struct BlockCount {
 
     constexpr void store_be32(std::span<std::byte, 4> dst) const noexcept {
         infra::store_be<std::uint32_t>(dst, v);
+    }
+
+    [[nodiscard]] constexpr bool store_le16(std::span<std::byte, 2> dst) const noexcept {
+        if (v > std::numeric_limits<std::uint16_t>::max())
+            return false;
+        infra::store_le<std::uint16_t>(dst, static_cast<std::uint16_t>(v));
+        return true;
+    }
+
+    constexpr void store_le16_saturated(std::span<std::byte, 2> dst) const noexcept {
+        constexpr std::uint32_t kField = std::numeric_limits<std::uint16_t>::max();
+        infra::store_le<std::uint16_t>(dst, static_cast<std::uint16_t>(std::min(v, kField)));
     }
 
     [[nodiscard]] constexpr float whole_turns(BlockCount per_turn) const noexcept {
@@ -566,6 +590,13 @@ struct Lba {
 
     constexpr void store_le32(std::span<std::byte, 4> dst) const noexcept {
         infra::store_le<std::uint32_t>(dst, v);
+    }
+
+    [[nodiscard]] constexpr bool store_le16(std::span<std::byte, 2> dst) const noexcept {
+        if (v > std::numeric_limits<std::uint16_t>::max())
+            return false;
+        infra::store_le<std::uint16_t>(dst, static_cast<std::uint16_t>(v));
+        return true;
     }
 
     [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
@@ -673,12 +704,15 @@ struct PackedBcd {
         return static_cast<std::uint8_t>(((v >> kNibbleBits) * kRadix) + (v & kLowNibble));
     }
 
+    [[nodiscard]] constexpr std::byte byte() const noexcept { return std::byte{v}; }
+
     friend constexpr bool operator==(PackedBcd, PackedBcd) = default;
 };
 
 static_assert(sizeof(PackedBcd) == 1);
 static_assert(PackedBcd::of(59) == PackedBcd{0x59});
 static_assert(PackedBcd{0x59}.value() == 59);
+static_assert(PackedBcd{0x59}.byte() == std::byte{0x59});
 static_assert(!PackedBcd::of(100).has_value());
 
 struct MemSizeCookie {
@@ -1081,6 +1115,11 @@ struct ReplyWord {
         return ReplyWord{static_cast<std::uint16_t>(v & m.v)};
     }
 
+    [[nodiscard]] constexpr std::size_t nibble() const noexcept {
+        constexpr std::uint16_t kHeadNibble = 0x000F;
+        return v & kHeadNibble;
+    }
+
     [[nodiscard]] static constexpr ReplyWord of(hal::SpiWord w) noexcept {
         return w.decoded([](std::uint16_t b) { return ReplyWord{b}; });
     }
@@ -1373,6 +1412,10 @@ struct BlockSize {
         return n.v * v;
     }
 
+    [[nodiscard]] constexpr infra::ByteCount window_count(BlockCount n) const noexcept {
+        return infra::ByteCount{window_bytes(n)};
+    }
+
     [[nodiscard]] constexpr FileSize bytes_of(BlockCount n) const noexcept {
         return FileSize{static_cast<std::uint64_t>(n.v) * v};
     }
@@ -1599,12 +1642,18 @@ struct DiskUnit {
 
     [[nodiscard]] constexpr SlotIndex slot() const noexcept { return SlotIndex{v}; }
 
+    [[nodiscard]] static constexpr DiskUnit of(SlotIndex slot) noexcept { return DiskUnit{slot.v}; }
+
     [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
         return Error{code, at, v};
     }
 
     friend constexpr bool operator==(DiskUnit, DiskUnit) = default;
 };
+
+constexpr DiskUnit IoIndex::served_unit() const noexcept {
+    return DiskUnit{v};
+}
 
 struct SectorAck {
     std::uint16_t v = 0;
@@ -1805,12 +1854,36 @@ constexpr PollParam PlayerIndex::poll_param() const noexcept {
     return PollParam::of(v);
 }
 
+struct ReplyCount;
+
 struct FioWordCount {
     std::uint32_t v = 0;
     using affine_count = FioWordCount;
 
+    [[nodiscard]] constexpr FioWordCount times(ReplyCount n) const noexcept;
+
     [[nodiscard]] constexpr std::size_t bytes_at(hal::Width w) const noexcept {
         return std::size_t{v} * hal::word_bytes(w);
+    }
+
+    [[nodiscard]] constexpr infra::ByteCount byte_count_at(hal::Width w) const noexcept {
+        return infra::ByteCount{bytes_at(w)};
+    }
+
+    [[nodiscard]] static constexpr FioWordCount whole_in(
+        infra::ByteCount bytes,
+        hal::Width w
+    ) noexcept {
+        constexpr std::size_t kMax = std::numeric_limits<std::uint32_t>::max();
+        return FioWordCount{
+            static_cast<std::uint32_t>(std::min(bytes.v / hal::word_bytes(w), kMax))
+        };
+    }
+
+    [[nodiscard]] static constexpr FioWordCount carrying(FileSize bytes, hal::Width w) noexcept {
+        return FioWordCount{
+            static_cast<std::uint32_t>(hal::words(w, static_cast<std::size_t>(bytes.v)))
+        };
     }
 
     friend constexpr bool operator==(FioWordCount, FioWordCount) = default;
@@ -1828,6 +1901,12 @@ struct ReplyCount {
     friend constexpr bool operator==(ReplyCount, ReplyCount) = default;
     friend constexpr auto operator<=>(ReplyCount, ReplyCount) = default;
 };
+
+constexpr FioWordCount FioWordCount::times(ReplyCount n) const noexcept {
+    return FioWordCount{v * n.link_words().v};
+}
+
+static_assert(FioWordCount{3}.times(ReplyCount{4}) == FioWordCount{12});
 
 struct ReplyIndex {
     std::uint8_t v = 0;

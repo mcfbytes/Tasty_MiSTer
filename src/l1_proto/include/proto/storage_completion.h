@@ -10,6 +10,7 @@
 #include "infra/message_sum.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "proto/track_shape.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -76,6 +77,7 @@ struct StorageCompletion {
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
         FileSize size{};
+        TrackShape track{};
     };
 
     struct Detach {
@@ -95,8 +97,9 @@ static_assert(
 );
 static_assert(sizeof(StorageCompletion) == 40 && alignof(StorageCompletion) == 8);
 static_assert(
-    sizeof(StorageCompletion::Attach) == 8 && alignof(StorageCompletion::Attach) == 8,
-    "an Attach's extent is one 64-bit FileSize"
+    sizeof(StorageCompletion::Attach) == StorageCompletion::kStore
+        && alignof(StorageCompletion::Attach) == 8,
+    "an Attach's extent is one 64-bit FileSize, its track shape the other half"
 );
 
 }

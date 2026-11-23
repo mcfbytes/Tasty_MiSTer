@@ -43,7 +43,7 @@ inline constexpr std::array<PageHome, static_cast<std::size_t>(PageId::kCount)> 
     {PageId::UartMode, PageBuilder::None, std::nullopt},
     {PageId::UartBaud, PageBuilder::None, std::nullopt},
     {PageId::ScriptRun, PageBuilder::MakePage, "ScriptRunPage"},
-    {PageId::FbTerminal, PageBuilder::None, std::nullopt},
+    {PageId::FbTerminal, PageBuilder::MakePage, "FbTerminalPage"},
     {PageId::CoreOptions, PageBuilder::MakePage, "CoreOptionsPage", PageArg::Kind::Submenu},
     {PageId::ArcadeDip, PageBuilder::MakePage, "DipsPage"},
     {PageId::CoreSettings, PageBuilder::MakePage, "CoreSettingsPage", PageArg::Kind::Submenu},

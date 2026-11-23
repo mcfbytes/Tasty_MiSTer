@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <utility>
 
+#include "app/core_input_facts.h"
 #include "app/input/device_table_loans.h"
 #include "app/input/input_decode_tally.h"
 #include "app/input/capture_arm.h"
@@ -12,6 +15,8 @@
 #include "app/input/input_gates_cell.h"
 #include "app/input/input_key_counts.h"
 #include "app/input/joy_level_emitter.h"
+#include "app/input/stick_level_emitter.h"
+#include "infra/tally.h"
 #include "app/input/joy_menu_chords.h"
 #include "app/input/key_focus.h"
 #include "app/input/ps2_egress.h"
@@ -23,10 +28,14 @@
 #include "app/input/pad_egress.h"
 #include "app/input/raw_key_edge.h"
 #include "app/input/rumble_relay.h"
+#include "cores/input_sink.h"
+#include "cores/input_sink_id.h"
+#include "cores/key_policy.h"
 #include "infra/xthread/coalesced_kick.h"
 #include "infra/xthread/counter.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
+#include "infra/message_sum.h"
 #include "infra/opt_ref.h"
 #include "infra/xthread/park_fds.h"
 #include "infra/park_timeout.h"
@@ -137,6 +146,8 @@ public:
         RumblePlayersCell& rumble_players;
 
         infra::OptRef<LwPadEndpoint> pads{};
+
+        const CoreInputCell& core_facts;
     };
 
     InputDecode(
@@ -175,6 +186,8 @@ public:
     void prepare_wait();
     void wait_events(infra::ParkTimeout timeout) noexcept;
 
+    [[nodiscard]] infra::ParkTimeout wait_bound(infra::ParkTimeout timeout) const noexcept;
+
     [[nodiscard]] bool begin_batch();
     unsigned decode_batch();
 
@@ -194,6 +207,8 @@ public:
 
     [[nodiscard]] bool f12_mod_needed() const noexcept { return f12_mod_needed_; }
 
+    [[nodiscard]] bool sink_bound() const noexcept { return sink_.has_value(); }
+
 private:
     enum class Reseat : std::uint8_t { Skip, Bridge };
 
@@ -210,6 +225,12 @@ private:
     ReadyFd drain_ready_fd(os::EpollSet::Event e);
     bool push_ui_edge(const RawKeyEdge& e);
     void flush_mouse_();
+
+    void bind_core_facts_() noexcept;
+
+    void serve_sink_() noexcept;
+
+    void kick_for_landed_() noexcept;
 
     [[nodiscard]] bool is_osd_toggle_(svc::EvdevCode code) const noexcept;
     bool apply_requests();
@@ -236,6 +257,7 @@ private:
     LinkTxChannel<SeatTag::Input>& inbox_;
 
     xthread::CoalescedKick<SeatTag::Input, SeatTag::RT>& rt_kick_;
+    infra::Tally kicked_at_{};
 
     svc::InputGates gates_{};
     svc::InputGates published_gates_{};
@@ -245,6 +267,19 @@ private:
     RumbleRelay rumble_;
 
     bool f12_mod_needed_ = false;
+
+    os::IClock& clock_;
+    const CoreInputCell& core_facts_;
+    CoreInputCell::Reader core_facts_reader_{};
+    CoreInputFacts core_facts_scratch_{};
+    bool forces_gui_f12_ = false;
+
+    cores::KeyPolicy key_policy_{};
+    bool gui_latched_ = false;
+
+    std::array<std::unique_ptr<cores::IInputSink>, infra::ordinal(cores::InputSinkId::kCount)>
+        sinks_{};
+    infra::OptRef<cores::IInputSink> sink_{};
     infra::OptRef<const LauncherStateCell> launcher_cell_;
     infra::OptRef<LauncherKeyBridge> launcher_keys_;
     JoyMenuChords chords_;
@@ -260,6 +295,7 @@ private:
     infra::OptRef<LwPadEndpoint> pads_;
     PadEgress pad_egress_;
     JoyLevelEmitter joy_;
+    StickLevelEmitter sticks_;
 
     InputKeyCounts keys_{};
 

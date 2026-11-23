@@ -15,6 +15,7 @@
 #include "app/sector_route.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
+#include "cores/disk_servant_row.h"
 #include "cores/generic_core.h"
 #include "cores/generic_profile.h"
 #include "cores/host_services.h"
@@ -129,6 +130,41 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
         return {.outcome = Built::Refused, .err = Errc::contract};
     }
 
+    cores::DiskPorts disk_ports{};
+    if (row) {
+        const cores::ServantGrant serving{
+            .vfs = *terms_.vfs,
+            .activity = terms_.disk_activity,
+            .remount = terms_.remount
+        };
+        for (const cores::DiskServantRow& declared : row->disk_servants) {
+            std::unique_ptr<cores::IDiskServant>& servant = slot.disk_servants[declared.protocol];
+            servant = declared.make(profile, serving);
+
+            if (servant == nullptr) {
+                drop_unbuilt_sector_();
+                slot.disk_servants = {};
+                slot.save_store.reset();
+                return {.outcome = Built::Refused, .err = Errc::contract};
+            }
+            disk_ports[declared.protocol] = terms_.disk[declared.protocol];
+        }
+    }
+
+    cores::SlotServantGrant lent{};
+    if (row) {
+        const cores::SlotServantTerms servant_terms{
+            .vfs = *terms_.vfs,
+            .remount = terms_.remount,
+            .mount_reads = terms_.mount_reads
+        };
+        for (const cores::SlotServantRow& servant : row->slot_servants) {
+            auto& held = slot.slot_servants[servant.slot];
+            held = servant.make(servant_terms);
+            lent.by_slot[servant.slot] = infra::opt_ref_of(held.get());
+        }
+    }
+
     if (!claimed && ask.fabric)
         grant_sector_(ask.irqs, ask.lw, profile, ask.fabric_gen, ask.lw_presence);
 
@@ -151,10 +187,11 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
         .save_copy = grants.has(cores::Grant::SaveCopy)
             ? terms_.save_copy
             : infra::OptRef<const cores::SaveCopyCell>{},
-        .disk = grants.has(cores::Grant::Disk) ? terms_.disk : infra::OptRef<cores::IDiskPort>{},
+        .disk = disk_ports,
         .lamp = grants.has(cores::Grant::Lamp) ? terms_.lamp : infra::OptRef<hal::DiskLamp>{},
         .disk_activity = terms_.disk_activity,
-        .save_store = infra::opt_ref_of(slot.save_store.get())
+        .save_store = infra::opt_ref_of(slot.save_store.get()),
+        .slot_servants = lent
     };
     const cores::CoreGrant grant{*terms_.vfs, services, ask.manifest};
     slot.core = row ? row->make(profile, grant) : cores::make_generic(profile, grant);
@@ -865,6 +902,8 @@ void CoreBuilder::free_(proto::CoreBaySlot slot) noexcept {
     BuiltCore& b = *held_[slot];
     b.core.reset();
     b.save_store.reset();
+    b.disk_servants = {};
+    b.slot_servants = {};
     for (auto& w : b.windows)
         w.reset();
     b.fed_ring.reset();

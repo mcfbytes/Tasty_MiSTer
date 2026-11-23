@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 
 #include <cerrno>
+#include <optional>
 #include <utility>
 
 #include "app/input/host_led_watch.h"
@@ -91,6 +92,8 @@ InputDecode::InputDecode(
       inbox_(w.inbox),
       rt_kick_(w.rt_kick),
       rumble_(svc, w.rumble_players, w.diag),
+      clock_(clock),
+      core_facts_(w.core_facts),
       launcher_cell_(w.cell),
       launcher_keys_(w.cell ? w.keys : infra::OptRef<LauncherKeyBridge>{}),
       chords_(launcher_keys_),
@@ -100,8 +103,12 @@ InputDecode::InputDecode(
       pads_(w.pads),
       pad_egress_(w.inbox, w.pads),
       joy_(w.joy_edge_reset, w.activity, svc, pad_egress_, tally_),
+      sticks_(w.joy_edge_reset, w.activity, svc, pad_egress_),
       egress_(kbd_, mouse_, w.inbox, w.activity, w.diag),
       epoll_(std::move(fds.epoll_)) {
+
+    for (const cores::InputSinkId id : cores::kInputSinkIds)
+        sinks_[infra::ordinal(id)] = cores::make_input_sink(id);
     {
 
         const SeatScope stands_in_for_input{kSeat};
@@ -210,11 +217,14 @@ bool InputDecode::apply_requests() {
 
     if (const auto focus = focus_reader_.take_if_changed(key_focus_)) {
         focus_ = *focus;
-        gates_.osd_visible = focus_ != KeyFocus::Core;
+        gates_.osd_visible = raises_osd_gate(focus_);
     }
 
     gates_.grabbed = svc_.grabbed();
     publish_gates_();
+
+    if (!muted_ && core_facts_reader_.take_if_changed(core_facts_, core_facts_scratch_))
+        bind_core_facts_();
 
     if (take_tables_() != 0u) {
         rebuild_registrations(Reseat::Bridge);
@@ -256,10 +266,47 @@ void InputDecode::begin_round() {
 void InputDecode::prepare_wait() {
     rebuilt_ = apply_requests();
     rumble_.refresh();
+
+    serve_sink_();
+    kick_for_landed_();
+}
+
+infra::ParkTimeout InputDecode::wait_bound(infra::ParkTimeout timeout) const noexcept {
+    if (!sink_)
+        return timeout;
+    const auto due = sink_->deadline();
+    return due ? infra::park_timeout_for(*due - clock_.now(), timeout) : timeout;
 }
 
 void InputDecode::wait_events(infra::ParkTimeout timeout) noexcept {
-    ready_ = epoll_.wait(timeout);
+    ready_ = epoll_.wait(wait_bound(timeout));
+}
+
+void InputDecode::bind_core_facts_() noexcept {
+    const cores::HostPolicy& policy = core_facts_scratch_.policy();
+    forces_gui_f12_ = policy.forces_gui_f12;
+    key_policy_ = policy.keys;
+    gui_latched_ = false;
+    const auto& made = sinks_[infra::ordinal(policy.input_sink)];
+    sink_ = made ? infra::OptRef<cores::IInputSink>{*made} : infra::OptRef<cores::IInputSink>{};
+    if (sink_)
+        sink_->bind(clock_.now());
+}
+
+void InputDecode::serve_sink_() noexcept {
+    if (!sink_)
+        return;
+    sink_->tick(clock_.now());
+    (void)egress_.flush_sink_frames(*sink_);
+}
+
+void InputDecode::kick_for_landed_() noexcept {
+    const infra::Tally at = inbox_.pushes();
+    if (at == kicked_at_)
+        return;
+    kicked_at_ = at;
+    if (rt_kick_.kick_once())
+        tally_.kick();
 }
 
 bool InputDecode::begin_batch() {
@@ -274,10 +321,10 @@ bool InputDecode::begin_batch() {
         arm_ = *a;
     bridging_ = false;
     if (launcher_keys_) {
-        const bool owns = launcher_cell_->sample().value.owns_screen
+        const bool wants = (launcher_cell_->sample().value.owns_screen || bridges_keys(focus_))
             && !muted_
             && !gates_.osd_visible;
-        bridging_ = launcher_keys_->set_active(owns);
+        bridging_ = launcher_keys_->set_active(wants);
     }
     return true;
 }
@@ -285,6 +332,8 @@ bool InputDecode::begin_batch() {
 void InputDecode::park() noexcept {
     if (pads_)
         pads_->on_pause();
+
+    sink_ = std::nullopt;
     muted_ = true;
     end_ps2_control();
 }
@@ -320,6 +369,8 @@ unsigned InputDecode::decode_batch() {
     if (pads_)
         pads_->serve();
 
+    sticks_.publish(muted_, gates_);
+
     if (published || rebuilt || joy_.owes_publish(gates_)) {
         joy_.publish(muted_, gates_);
         tally_.events(decoded);
@@ -338,12 +389,10 @@ unsigned InputDecode::decode_batch() {
     const Ps2Egress::Flushed second = egress_.flush_ps2_frames_(muted_, gates_, keys_);
     gates_ = second.gates;
     publish_gates_();
-    const bool framed = first.framed || second.framed;
-    if (!muted_ && (published || rebuilt || framed || joy_.owes_publish(gates_))) {
+    serve_sink_();
 
-        if (rt_kick_.kick_once())
-            tally_.kick();
-    }
+    if (!muted_)
+        kick_for_landed_();
     counts_cell_.publish(counts());
     return decoded;
 }
@@ -421,6 +470,12 @@ void InputDecode::on(const proto::LinkEvent::PolledWord& w) noexcept {
         case proto::user_io::PollShape::F12ModPoll:
             f12_mod_needed_ = w.word != hal::SpiWord{};
             return;
+        case proto::user_io::PollShape::KbdController:
+
+            if (sink_)
+                sink_->controller_word(w.word, clock_.now());
+            return;
+        case proto::user_io::PollShape::ChangeCounter:
         case proto::user_io::PollShape::InfoPoll:
         case proto::user_io::PollShape::kCount:
             break;
@@ -433,7 +488,7 @@ bool InputDecode::is_osd_toggle_(svc::EvdevCode code) const noexcept {
         return true;
     if (code != kKeyF12)
         return false;
-    if (!f12_mod_needed_)
+    if (!f12_mod_needed_ && !forces_gui_f12_)
         return true;
     for (const DeviceInputState& state : devices_) {
         if (state.ui_down.contains(kKeyLeftMeta) || state.ui_down.contains(kKeyRightMeta))
@@ -459,6 +514,12 @@ void InputDecode::flush_mouse_() {
     if (!p)
         return;
 
+    if (!gates_.osd_visible && sink_) {
+        sink_->mouse(p->motion, p->buttons, clock_.now());
+        tally_.mouse_packet();
+        activity_.add();
+        return;
+    }
     if (!gates_.osd_visible) {
         if (mouse_.motion(p->motion, p->buttons)) {
             tally_.mouse_packet();
@@ -494,7 +555,7 @@ void InputDecode::publish_from(
 ) {
 
     const KeyFocus focus = focus_;
-    const bool osd_visible = focus != KeyFocus::Core;
+    const bool osd_visible = raises_osd_gate(focus);
     DeviceInputState& state = devices_[slot];
     for (std::size_t i = 0; i < r.keys.count(); ++i) {
         const svc::input::KeyEvent e = r.keys.at(i);
@@ -530,6 +591,23 @@ void InputDecode::publish_from(
         if (bridging_) {
             launcher_keys_->key(code, ke.pressed != 0);
             continue;
+        }
+
+        if (sink_) {
+            if (!ui_repeat) {
+                sink_->key(code, ke.pressed, clock_.now());
+                tally_.key_published();
+            }
+            continue;
+        }
+
+        if (key_policy_.gui_chords_own) {
+            if (code == kKeyLeftMeta || code == kKeyRightMeta) {
+                gui_latched_ = ke.pressed;
+                continue;
+            }
+            if (gui_latched_)
+                continue;
         }
 
         if (kbd_.key_event(hid_usage_of(code), ke.pressed != 0)) {

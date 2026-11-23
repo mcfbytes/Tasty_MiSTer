@@ -52,7 +52,15 @@ public:
     [[nodiscard]] bool emit(svc::PlayerIndex player, proto::PadMasks masks) noexcept override;
     [[nodiscard]] bool release(svc::PlayerIndex player, svc::JoyMask tested) noexcept override;
 
+    [[nodiscard]] bool stick(
+        svc::PlayerIndex player,
+        proto::StickSide side,
+        proto::StickPos pos
+    ) noexcept override;
+
     [[nodiscard]] infra::Tally bind_count() const noexcept { return tally_.binds; }
+
+    [[nodiscard]] infra::Tally gate_end_count() const noexcept { return gate_ends_; }
 
     [[nodiscard]] const PadRoute& route() const noexcept { return tally_; }
 
@@ -81,6 +89,8 @@ private:
     void store_() noexcept;
 
     void set_level_(svc::PlayerIndex player, svc::JoyMask composed) noexcept;
+
+    void store_stick_(svc::PlayerIndex port, proto::StickSide side, proto::StickPos pos) noexcept;
     [[nodiscard]] Port& port_() noexcept;
 
     Wiring w_;
@@ -90,6 +100,7 @@ private:
     infra::IndexedArray<infra::Tally, proto::link::PadLevels::kCount, proto::link::PadLevels::Slot>
         seen_{};
     bool gated_ = false;
+    infra::Tally gate_ends_{};
     bool unpublished_ = false;
     infra::Tally refused_before_{};
     infra::Tally stores_before_{};

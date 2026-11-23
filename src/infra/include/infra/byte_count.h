@@ -22,6 +22,18 @@ struct ByteCount {
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
 
+    template <class Buf>
+        requires(sizeof(typename Buf::value_type) == sizeof(char))
+    void resize_in(Buf& buf) const {
+        buf.resize(static_cast<std::size_t>(v));
+    }
+
+    template <class Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] constexpr bool fits_in(std::span<Byte> buf) const noexcept {
+        return v <= buf.size();
+    }
+
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
     template <class Byte>
@@ -47,6 +59,11 @@ struct ByteCount {
         requires(sizeof(Byte) == 1)
     [[nodiscard]] constexpr bool covers(std::span<Byte> buf) const noexcept {
         return v >= buf.size();
+    }
+
+    template <class D>
+    [[nodiscard]] constexpr D passing_time(D per_byte) const noexcept {
+        return D{static_cast<typename D::rep>(v) * per_byte.count()};
     }
 
     [[nodiscard]] constexpr Error refusal(Errc code, ErrorSite at) const noexcept {

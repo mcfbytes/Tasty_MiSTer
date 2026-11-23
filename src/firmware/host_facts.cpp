@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "host_facts.h"
 
-#include <sys/statvfs.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -46,12 +44,8 @@ ui::HostSample HostFacts::snapshot() {
         (void)std::fclose(f);
     }
 
-    struct statvfs st{};
-    if (::statvfs(vfs_.root_path().c_str(), &st) == 0) {
-        avail_ = proto::FileSize{
-            static_cast<std::uint64_t>(st.f_bsize) * static_cast<std::uint64_t>(st.f_bavail)
-        };
-    }
+    if (const auto space = vfs_.space({}))
+        avail_ = space->available;
 
     sys.avail = avail_;
     sys.storage_usb = vfs_.root().on_usb();

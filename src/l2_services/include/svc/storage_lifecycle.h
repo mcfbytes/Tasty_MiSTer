@@ -6,6 +6,7 @@
 
 #include "infra/opt_ref.h"
 #include "proto/types.h"
+#include "svc/disk_format_row.h"
 #include "svc/storage_backend.h"
 
 namespace mister::svc {
@@ -22,6 +23,15 @@ public:
         std::span<const std::byte> order,
         infra::OptRef<const BlankSaveSpec> blank
     ) noexcept = 0;
+
+    [[nodiscard]] virtual bool stage_image(
+        proto::SlotIndex slot,
+        IStorageBackend& backend,
+        std::span<const std::byte> order,
+        std::span<const DiskFormatRow>
+    ) noexcept {
+        return stage_backend(slot, backend, order, {});
+    }
 
     [[nodiscard]] virtual bool release_slot(proto::SlotIndex slot) noexcept = 0;
 

@@ -14,6 +14,10 @@ Ex<std::unique_ptr<IFile>> CardWriter::open(std::string_view path, OpenMode mode
     return card_.open_write_(path, mode);
 }
 
+Ex<std::unique_ptr<IFile>> CardWriter::open_named(std::string_view path, OpenMode mode) {
+    return card_.open_named_(path, mode);
+}
+
 Ex<void> CardWriter::ensure_dir(std::string_view rel) {
     return card_.ensure_dir_(rel);
 }
@@ -57,6 +61,14 @@ Ex<void> CardWriter::replace_file(std::string_view rel, std::span<const std::byt
 
 Ex<void> CardWriter::remove(std::string_view rel) {
     return card_.remove_(rel);
+}
+
+Ex<void> CardWriter::remove_dir(std::string_view rel) {
+    return card_.remove_dir_(rel);
+}
+
+Ex<void> CardWriter::move(const MoveNames& names) {
+    return card_.move_(names);
 }
 
 }

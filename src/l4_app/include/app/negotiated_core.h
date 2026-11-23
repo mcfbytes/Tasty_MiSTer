@@ -39,6 +39,7 @@
 #include "proto/link_event.h"
 #include "proto/save_trigger.h"
 #include "proto/session_terms.h"
+#include "proto/status_word.h"
 #include "proto/types.h"
 #include "svc/vfs.h"
 
@@ -209,6 +210,11 @@ public:
         return saved_cfg_stem_;
     }
 
+    [[nodiscard]] proto::StatusWord saved_status() const noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        return terms_.bursts_status ? saved_status_ : proto::StatusWord{};
+    }
+
     [[nodiscard]] const RememberedStem& remembered_stem() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return remembered_stem_;
@@ -262,6 +268,8 @@ public:
     [[nodiscard]] infra::OptRef<const cores::CoreFactory> load_row() const;
 
     [[nodiscard]] const cores::CoreProfile& loaded_profile() const;
+
+    [[nodiscard]] const cores::CoreProfile& named_profile() const;
     [[nodiscard]] bool owns_loader() const;
 
     [[nodiscard]] const PathText& manifest_rel() const noexcept {
@@ -298,6 +306,8 @@ private:
     proto::SessionTerms terms_{};
 
     PathText saved_cfg_stem_{};
+
+    proto::StatusWord saved_status_{};
 
     RememberedStem remembered_stem_{};
 

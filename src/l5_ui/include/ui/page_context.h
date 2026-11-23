@@ -43,6 +43,7 @@ namespace mister::ui {
 
 class IBrowseSource;
 class ConnectPort;
+class FbTerminalHost;
 class KeyDecoder;
 
 struct PageContext {
@@ -75,6 +76,8 @@ struct PageContext {
 
     infra::OptRef<app::recents::UiWriteLane> writes{};
     infra::OptRef<const app::IdentityLatch> identity{};
+
+    infra::OptRef<FbTerminalHost> terminal{};
 
     bool bt_reset_before_pair = false;
 

@@ -9,6 +9,8 @@
 #include "infra/byte_count.h"
 #include "infra/run.h"
 #include "proto/block_geometry.h"
+#include "proto/image_space.h"
+#include "proto/track_shape.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -29,6 +31,12 @@ struct ResidentBytes {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr std::span<const std::uint8_t> prefix_of(
+        std::span<const std::uint8_t> arena
+    ) const noexcept {
+        return v <= arena.size() ? arena.first(v) : std::span<const std::uint8_t>{};
+    }
 
     friend constexpr bool operator==(ResidentBytes, ResidentBytes) = default;
     friend constexpr auto operator<=>(ResidentBytes, ResidentBytes) = default;
@@ -57,6 +65,8 @@ struct ResidentWindow {
     BlockSize block_size{};
     ResidentBytes valid{};
     Source source = Source::Image;
+    ImageSpace space = ImageSpace::Bytes;
+    BlockCount units{};
 
     [[nodiscard]] static constexpr ResidentWindow image(
         Lba base,
@@ -68,6 +78,21 @@ struct ResidentWindow {
             .block_size = geometry,
             .valid = valid,
             .source = Source::Image
+        };
+    }
+
+    [[nodiscard]] static constexpr ResidentWindow track(
+        const TrackShape::Ask& ask,
+        BlockSize unit,
+        ResidentBytes valid
+    ) noexcept {
+        return ResidentWindow{
+            .base = ask.word,
+            .block_size = unit,
+            .valid = valid,
+            .source = Source::Image,
+            .space = ImageSpace::Track,
+            .units = ask.units
         };
     }
 
@@ -85,7 +110,7 @@ struct ResidentWindow {
         if (source == Source::Substitute) {
             return Hit{.is = Hit::Is::Substitute};
         }
-        if (valid.empty())
+        if (valid.empty() || space != ImageSpace::Bytes)
             return Hit{};
         if (ask.geometry && *ask.geometry != block_size)
             return Hit{};
@@ -103,6 +128,21 @@ struct ResidentWindow {
             .bytes = bytes.subspan(offset, length),
             .read_ahead = at_end ? std::optional<Lba>{next} : std::nullopt
         };
+    }
+
+    [[nodiscard]] Hit track_hit(
+        const TrackShape::Ask& ask,
+        std::span<const std::uint8_t> bytes
+    ) const noexcept {
+        if (source == Source::Substitute) {
+            return Hit{.is = Hit::Is::Substitute};
+        }
+        if (valid.empty() || space != ImageSpace::Track)
+            return Hit{};
+        const std::span<const std::uint8_t> reply = valid.prefix_of(bytes);
+        if (ask != TrackShape::Ask{base, units} || reply.empty())
+            return Hit{};
+        return Hit{.is = Hit::Is::Image, .bytes = reply};
     }
 };
 

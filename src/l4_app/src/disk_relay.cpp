@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/disk_relay.h"
-#include "proto/link/link.h"
 
 #include <concepts>
 #include <span>
 #include <utility>
 
-#include "hal/selected.h"
+#include "hal/spi_halves.h"
 #include "hal/spi_transport.h"
-#include "infra/endian.h"
 #include "infra/message_sum.h"
 #include "infra/prelude.h"
+#include "proto/link/link.h"
+#include "proto/link/poll_frame_read.h"
 
 namespace mister::app {
 
@@ -22,14 +22,16 @@ using Ask = DiskSlot::Ask;
     return infra::make<Ask>(alt, stamp);
 }
 
-struct CommandLegs {
+struct HeldLegs {
     template <class A>
-    static constexpr bool routed = std::same_as<A, Ask::Command> || std::same_as<A, Ask::Resume>;
+    static constexpr bool routed = std::same_as<A, Ask::Command>
+        || std::same_as<A, Ask::Resume>
+        || std::same_as<A, Ask::Attach>;
 };
 
 }
 
-void DiskRelay::service_rt(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept {
+void DiskRelay::service_rt(proto::link::Link& link, const proto::DiskPollProgram& poll) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     const bool was_open = rt_.command_open;
     if (Chan::Loan l = chan_.reap())
@@ -38,16 +40,23 @@ void DiskRelay::service_rt(proto::link::Link& link, const proto::DiskPollDecl& p
         return;
     if (was_open || rt_.command_open)
         return;
-    poll_(link, poll);
+    if (poll_(link, poll))
+        write_standing_(link);
 }
 
 proto::FioWordCount DiskRelay::take_round_words() noexcept {
     return rt_.round_words.take();
 }
 
+infra::OptRef<DiskRelay::Order> DiskRelay::order_of_(proto::DiskUnit unit) noexcept {
+    if (!row_.units.contains(unit))
+        return {};
+    return rt_.orders.find(unit);
+}
+
 void DiskRelay::order_bind(proto::DiskUnit unit, std::string_view path) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    const infra::OptRef<Order> order = rt_.orders.find(unit);
+    const infra::OptRef<Order> order = order_of_(unit);
     if (!order)
         return;
     Order& o = *order;
@@ -68,8 +77,7 @@ void DiskRelay::order_bind(proto::DiskUnit unit, std::string_view path) noexcept
 
 cores::MountState DiskRelay::bind_answer(proto::DiskUnit unit) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    const auto& orders = rt_.orders;
-    const infra::OptRef<const Order> order = orders.find(unit);
+    const infra::OptRef<Order> order = order_of_(unit);
     if (!order)
         return cores::MountState::Failed;
     const Order& o = *order;
@@ -99,16 +107,41 @@ void DiskRelay::abandon_command_on(proto::DiskUnit unit) noexcept {
     abandon_command();
 }
 
-void DiskRelay::forget() noexcept {
+void DiskRelay::attach(DiskAttachSeq order, infra::OptRef<cores::IDiskServant> servant) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     rt_.stamp = rt_.stamp.next_core();
     close_command_();
     rt_.orders = {};
-
+    rt_.last_seen.reset();
+    rt_.standing = proto::DiskAct::none();
     while (Chan::Loan l = chan_.reap())
-        rt_.stale.add();
-    rt_.release_owed = true;
+        land_(std::move(l), nullptr);
+    Attachment& at = rt_.attach;
+    at.servant = servant;
+    at.ordered = order;
+    at.owed = true;
+
+    if (!servant && !at.lent) {
+        at.owed = false;
+        at.home = order;
+        return;
+    }
     (void)send_orders_();
+}
+
+bool DiskRelay::settle_attach(DiskAttachSeq order) noexcept {
+    TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
+    if (rt_.attach.home.at_or_past(order))
+        return true;
+
+    while (!rt_.command_open) {
+        Chan::Loan l = chan_.reap();
+        if (!l)
+            break;
+        land_(std::move(l), nullptr);
+    }
+    (void)send_orders_();
+    return rt_.attach.home.at_or_past(order);
 }
 
 void DiskRelay::close_command_() noexcept {
@@ -116,13 +149,23 @@ void DiskRelay::close_command_() noexcept {
     rt_.open_unit.reset();
 }
 
+void DiskRelay::close_stale_command_(const RelayStamp& h) noexcept {
+    if (!h.matches(rt_.stamp))
+        return;
+    close_command_();
+    rt_.last_seen.reset();
+}
+
+void DiskRelay::owe_attach_again_(DiskAttachSeq order) noexcept {
+    if (order == rt_.attach.ordered)
+        rt_.attach.owed = true;
+}
+
 void DiskRelay::land_(Chan::Loan&& l, proto::link::Link* link) noexcept {
     if (!l.completed()) {
         rt_.stale.add();
-        if (l->ask.head.matches(rt_.stamp)) {
-            StaleLanding stale{*this};
-            infra::dispatch<CommandLegs>(l->ask, stale);
-        }
+        StaleLanding stale{*this};
+        infra::dispatch<HeldLegs>(l->ask, stale);
         return;
     }
     infra::dispatch<infra::AllRouted>(l->ask, *this, l, link);
@@ -135,11 +178,13 @@ void DiskRelay::on(
     proto::link::Link*
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    const infra::OptRef<Order> order = rt_.orders.find(a.unit);
+    const infra::OptRef<Order> order = order_of_(a.unit);
     if (!h.same_core(rt_.stamp) || !order) {
         rt_.stale.add();
         return;
     }
+
+    rt_.standing = l->act;
     Order& o = *order;
     if (a.seq != o.seq)
         return;
@@ -168,12 +213,19 @@ void DiskRelay::on(
 }
 
 void DiskRelay::on(
-    const Ask::Release&,
+    const Ask::Attach& a,
     const RelayStamp&,
-    Chan::Loan&,
+    Chan::Loan& l,
     proto::link::Link*
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
+    Attachment& at = rt_.attach;
+    if (a.order == at.ordered)
+        rt_.standing = l->act;
+    if (a.order.at_or_past(at.home))
+        at.home = a.order;
+    if (!a.servant && a.order == at.sent)
+        at.lent = false;
 }
 
 void DiskRelay::misrouted(const Ask&, Chan::Loan&, proto::link::Link*) noexcept {
@@ -193,10 +245,18 @@ void DiskRelay::act_(const RelayStamp& h, Chan::Loan& l, proto::link::Link* link
         close_command_();
         return;
     }
-    if (link == nullptr || !write_(*link, a, *l)) {
-        rt_.wire_faults.add();
-        close_command_();
-        return;
+    const Written written = link == nullptr ? Written::Faulted : write_(*link, a, l->bytes);
+    switch (written) {
+        case Written::Whole:
+            break;
+        case Written::Dropped:
+            rt_.dropped.add();
+            close_command_();
+            return;
+        case Written::Faulted:
+            rt_.wire_faults.add();
+            close_command_();
+            return;
     }
     rt_.acts.add();
     if (a.last()) {
@@ -208,113 +268,158 @@ void DiskRelay::act_(const RelayStamp& h, Chan::Loan& l, proto::link::Link* link
     chan_.send(std::move(l));
 }
 
-bool DiskRelay::write_(proto::link::Link& link, const proto::DiskAct& a, DiskSlot& s) noexcept {
+DiskRelay::Written DiskRelay::write_(
+    proto::link::Link& link,
+    const proto::DiskAct& a,
+    std::span<std::byte> bytes
+) noexcept {
+    const bool block = a.kind() == proto::DiskAct::Kind::Out
+        || a.kind() == proto::DiskAct::Kind::In;
+    const proto::ReplyCount reads = block ? row_.status_reads : proto::ReplyCount{};
 
-    if ((a.len() & 1u) != 0u || a.len() > s.bytes.size())
-        return false;
+    if ((a.len() & 1u) != 0u || a.len() > bytes.size())
+        return Written::Faulted;
+    if (a.address() && reads != proto::ReplyCount{})
+        return Written::Faulted;
 
-    rt_.round_words.charge(a.words());
-    if (!link.command(proto::LinkSel::Io, a.opcode()))
-        return false;
+    rt_.round_words.charge(a.words() + reads.link_words());
+    const auto beat = link.command(row_.select, a.opcode());
+    if (!beat)
+        return Written::Faulted;
+    if (const std::optional<proto::DiskAddress> address = a.address()) {
+        const hal::SpiHalves at = address->halves();
+        if (!link.word(at.low) || !link.word(at.high))
+            return Written::Faulted;
+    }
+    for (proto::ReplyCount n{}; n < reads; n += proto::ReplyCount{1}) {
+        if (!link.read())
+            return Written::Faulted;
+    }
+
+    if (const std::optional<proto::DiskStatusTag> tag = a.tag(); tag && !tag->holds(*beat)) {
+        link.close();
+        return Written::Dropped;
+    }
     switch (a.kind()) {
         case proto::DiskAct::Kind::Out:
             for (std::size_t i = 0; i < a.len(); i += proto::DiskAct::kWordBytes) {
                 const auto word = hal::SpiWord::load_le(
-                    std::span<const std::byte>(s.bytes)
-                        .subspan(i)
-                        .first<proto::DiskAct::kWordBytes>()
+                    std::span<const std::byte>(bytes).subspan(i).first<proto::DiskAct::kWordBytes>()
                 );
                 if (!link.word(word))
-                    return false;
+                    return Written::Faulted;
             }
             break;
         case proto::DiskAct::Kind::In:
             for (std::size_t i = 0; i < a.len(); i += proto::DiskAct::kWordBytes) {
                 const auto r = link.read();
                 if (!r)
-                    return false;
-                r->store_le(std::span(s.bytes).subspan(i).first<proto::DiskAct::kWordBytes>());
+                    return Written::Faulted;
+                r->store_le(bytes.subspan(i).first<proto::DiskAct::kWordBytes>());
             }
             break;
         case proto::DiskAct::Kind::Signal: {
             const std::optional<hal::SpiWord> w = a.word();
             if (w.has_value() && !link.word(*w))
-                return false;
+                return Written::Faulted;
             break;
         }
         case proto::DiskAct::Kind::None:
             break;
     }
     link.close();
+    return Written::Whole;
+}
+
+void DiskRelay::write_standing_(proto::link::Link& link) noexcept {
+    if (rt_.standing.kind() != proto::DiskAct::Kind::Signal)
+        return;
+    if (write_(link, rt_.standing, {}) != Written::Whole)
+        rt_.wire_faults.add();
+}
+
+bool DiskRelay::send_attach_() noexcept {
+    Attachment& at = rt_.attach;
+    if (!at.owed)
+        return true;
+    Chan::Loan l = chan_.acquire();
+    if (!l)
+        return false;
+    l->ask = ask_of(Ask::Attach{.servant = at.servant, .order = at.ordered}, rt_.stamp);
+    l->act = {};
+    chan_.send(std::move(l));
+    at.owed = false;
+    at.sent = at.ordered;
+    if (at.servant)
+        at.lent = true;
     return true;
 }
 
 bool DiskRelay::send_orders_() noexcept {
-    if (rt_.release_owed) {
-        Chan::Loan l = chan_.acquire();
-        if (!l)
+    if (!send_attach_())
+        return false;
+    proto::DiskUnits units = row_.units;
+    while (const std::optional<proto::DiskUnit> unit = units.pop_lowest()) {
+        if (!send_order_(*unit))
             return false;
-        l->ask = ask_of(Ask::Release{}, rt_.stamp);
-        l->act = {};
-        chan_.send(std::move(l));
-        rt_.release_owed = false;
-    }
-    for (std::uint8_t i = 0; i < kUnits; ++i) {
-        const proto::DiskUnit unit{i};
-        Order& o = rt_.orders[unit];
-        if (o.seq == 0 || o.sent)
-            continue;
-        if (rt_.command_open)
-            return false;
-        Chan::Loan l = chan_.acquire();
-        if (!l)
-            return false;
-        Ask::Bind b{.unit = unit, .seq = o.seq};
-        (void)b.path.assign(o.path.view());
-        l->ask = ask_of(b, rt_.stamp);
-        l->act = {};
-        l->bound = cores::MountState::Pending;
-        chan_.send(std::move(l));
-        o.sent = true;
     }
     return true;
 }
 
-void DiskRelay::poll_(proto::link::Link& link, const proto::DiskPollDecl& poll) noexcept {
-    if (!proto::well_formed(poll))
-        return;
-    Ask::Command c{};
-    {
-        if (!link.command(proto::LinkSel::Io, hal::SpiWord{poll.opcode})) {
-            rt_.wire_faults.add();
-            return;
-        }
-        for (std::uint8_t i = 0; i < poll.beats; ++i) {
-            const auto r = link.read();
-            if (!r) {
-                rt_.wire_faults.add();
-                return;
-            }
-            r->store_low(std::span(c.state).subspan(i).first<1>());
-        }
-        link.close();
+bool DiskRelay::send_order_(proto::DiskUnit unit) noexcept {
+    Order& o = rt_.orders[unit];
+    if (o.seq == 0 || o.sent)
+        return true;
+    Chan::Loan l = rt_.command_open ? Chan::Loan{} : chan_.acquire();
+    if (!l)
+        return false;
+    Ask::Bind b{.unit = unit, .seq = o.seq};
+    (void)b.path.assign(o.path.view());
+    l->ask = ask_of(b, rt_.stamp);
+    l->act = {};
+    l->bound = cores::MountState::Pending;
+    chan_.send(std::move(l));
+    o.sent = true;
+    return true;
+}
+
+bool DiskRelay::poll_(proto::link::Link& link, const proto::DiskPollProgram& poll) noexcept {
+    using Outcome = proto::link::PollFrameRead::Outcome;
+    const proto::user_io::PollFrameShape& head = poll.head();
+    const proto::link::PollFrameRead first = link.read_poll_frame(head, rt_.last_seen);
+    if (first.outcome == Outcome::Faulted) {
+        rt_.wire_faults.add();
+        return false;
     }
     rt_.polls.add();
-    const auto head = infra::load_native<std::uint8_t>(
-        std::span(c.state).subspan(poll.head_byte).first<1>()
-    );
-    if ((head & poll.head_mask) == 0)
-        return;
+    if (first.outcome == Outcome::Held)
+        return true;
+    Ask::Command c{.block = first.frame};
+    const proto::ReplyWord asked = head.guard_word(first.frame);
+    for (const proto::DiskPollStep& step : poll.gated()) {
+        if (!asked.intersects(step.gate)) {
+            c.block.keep_blank(step.frame.kept());
+            continue;
+        }
+        const proto::link::PollFrameRead more = link.read_poll_frame(step.frame, std::nullopt);
+        if (more.outcome == Outcome::Faulted) {
+            rt_.wire_faults.add();
+            return false;
+        }
+        c.block.keep_all(more.frame);
+    }
     Chan::Loan l = chan_.acquire();
     if (!l) {
         rt_.declines.add();
-        return;
+        return true;
     }
     l->ask = ask_of(c, rt_.stamp);
     l->act = {};
     chan_.send(std::move(l));
     rt_.command_open = true;
+    rt_.last_seen = asked;
     rt_.lent.add();
+    return true;
 }
 
 void DiskRelay::serve() noexcept {
@@ -325,45 +430,33 @@ void DiskRelay::serve() noexcept {
     }
 }
 
-void DiskRelay::pump_on_caller() noexcept {
-
-    if (sealed_) {
-        sealed_pumps_.add();
-        return;
-    }
-    const SeatScope stands_in_for_io{SeatTag::Io};
-    serve();
-}
-
-void DiskRelay::begin_(const RelayStamp& h) noexcept {
-    if (h.same_core(io_.served))
-        return;
-    io_.servant->release();
-    io_.served = h;
+bool DiskRelay::serves_(const RelayStamp& h) const noexcept {
+    return io_.servant.has_value() && h.same_core(io_.served);
 }
 
 void DiskRelay::on(const Ask::Bind& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
-    begin_(h);
-    job->bound = io_.servant->bind(a.unit, a.path.view());
+    job->bound = serves_(h) ? io_.servant->bind(a.unit, a.path.view()) : cores::MountState::Failed;
+    job->act = serves_(h) ? io_.servant->standing() : proto::DiskAct::none();
 }
 
 void DiskRelay::on(const Ask::Command& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
-    begin_(h);
-    job->act = io_.servant->start(a.state, job->bytes);
+    job->act = serves_(h) ? io_.servant->start(a.block, job->bytes) : proto::DiskAct::none();
 }
 
 void DiskRelay::on(const Ask::Resume&, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
-    begin_(h);
-    job->act = io_.servant->resume(job->bytes);
+    job->act = serves_(h) ? io_.servant->resume(job->bytes) : proto::DiskAct::none();
 }
 
-void DiskRelay::on(const Ask::Release&, const RelayStamp& h, Job&) noexcept {
+void DiskRelay::on(const Ask::Attach& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
-    begin_(h);
-    io_.servant->release();
+    if (io_.servant)
+        io_.servant->release();
+    io_.servant = a.servant;
+    io_.served = h;
+    job->act = io_.servant ? io_.servant->standing() : proto::DiskAct::none();
 }
 
 void DiskRelay::misrouted(const Ask&, Job& job) noexcept {

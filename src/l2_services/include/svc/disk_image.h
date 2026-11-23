@@ -6,8 +6,10 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "proto/types.h"
 #include "svc/disk_format_row.h"
@@ -17,6 +19,7 @@
 namespace mister::svc {
 
 class CardWriter;
+class ITrackImage;
 
 class IDiskImage {
 public:
@@ -34,11 +37,15 @@ public:
         std::span<const std::byte> src
     ) = 0;
 
+    [[nodiscard]] virtual infra::OptRef<ITrackImage> track_image() noexcept { return {}; }
+
 protected:
     IDiskImage() = default;
     IDiskImage(const IDiskImage&) = default;
     IDiskImage& operator=(const IDiskImage&) = default;
 };
+
+[[nodiscard]] Ex<std::vector<std::byte>> read_whole(IDiskImage& image);
 
 [[nodiscard]] Ex<std::unique_ptr<IDiskImage>> open_disk_image(
     const Vfs& vfs,

@@ -11,14 +11,22 @@
 #include "hal/phys_region.h"
 #include "hal/spi_words.h"
 #include "proto/mailbox_act.h"
-#include "proto/mailbox_frame.h"
+#include "proto/user_io/poll_frame.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::cores::snes::msu {
 
 inline constexpr std::uint8_t kCdSet = static_cast<std::uint8_t>(proto::UioOp::CdSet);
-inline constexpr std::uint8_t kFrameWords = 4;
+
+inline constexpr proto::ReplyIndex kCounterReply{0};
+inline constexpr proto::ReplyIndex kCommandReply{1};
+inline constexpr proto::ReplyIndex kDataLowReply{2};
+inline constexpr proto::ReplyIndex kDataHighReply{3};
+inline constexpr proto::ReplyCount kPayloadReplies{3};
+inline constexpr proto::ReplyMask kCounterMask{0xFFFF};
+
+inline constexpr proto::ReplyMask kCounterByte{0x00FF};
 
 inline constexpr std::uint16_t kSetEnable = 1;
 inline constexpr std::uint16_t kSetTrackSize = 2;
@@ -31,9 +39,9 @@ enum class Request : std::uint16_t { Next = 0x34, Track = 0x35, Seek = 0x36, Res
 }
 
 [[nodiscard]] constexpr std::optional<Request> request_of(
-    const proto::MailboxFrame& frame
+    const proto::user_io::PollFrame& frame
 ) noexcept {
-    const Request request = request_word(frame.w[1]);
+    const Request request = request_word(frame.replies[kCommandReply]);
     switch (request) {
         case Request::Next:
         case Request::Track:

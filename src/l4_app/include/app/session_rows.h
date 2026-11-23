@@ -110,7 +110,10 @@ public:
 
     void disarm_polls() noexcept;
 
-    void arm_session_polls(bool front_end) noexcept;
+    void arm_session_polls(
+        bool front_end,
+        std::span<const proto::user_io::PollShape> declared = {}
+    ) noexcept;
 
     void bind_block_poll(proto::link::BlockPollRoute route) noexcept {
         block_poll_ = route;
@@ -187,6 +190,28 @@ private:
     input::RumblePlayersCell::Reader rumble_pads_reader_{};
     svc::PlayerMask rumble_pads_{};
     proto::link::DecoderRow<proto::link::PollReader> rumble_row_{rumble_poll_};
+
+    struct DeclaredPoll {
+        TASTY_SEAT_RESIDENT(RT);
+
+        DeclaredPoll(
+            const Wiring& w,
+            proto::user_io::IPollParams& params,
+            proto::user_io::PollShape shape
+        ) noexcept
+            : reader(w.link, w.router, w.live, params, shape) {}
+
+        DeclaredPoll(const DeclaredPoll&) = delete;
+        DeclaredPoll& operator=(const DeclaredPoll&) = delete;
+        proto::link::PollReader reader;
+        proto::link::DecoderRow<proto::link::PollReader> row{reader};
+    };
+
+    static constexpr std::array kDeclarablePolls{
+        proto::user_io::PollShape::KbdController,
+        proto::user_io::PollShape::ChangeCounter
+    };
+    std::array<DeclaredPoll, kDeclarablePolls.size()> declared_polls_;
     proto::link::BlockPollRoute block_poll_ = proto::link::BlockPollRoute::Link;
 
     bool osd_visible_last_ = false;

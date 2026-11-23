@@ -10,6 +10,7 @@
 
 #include "cores/config_slots.h"
 #include "cores/core_support.h"
+#include "cores/disk_port.h"
 #include "cores/mounted_path.h"
 #include "cores/option_row_view.h"
 #include "cores/option_rows.h"
@@ -27,7 +28,6 @@
 #include "infra/indexed_array.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
-#include "proto/disk_poll_decl.h"
 
 namespace mister::cores::st {
 
@@ -71,10 +71,6 @@ public:
 
     static constexpr std::size_t kPathBytes = st_cfg::kPathBytes;
     static constexpr std::size_t kAcsiTargets = StConfig::kAcsiTargets;
-
-    static constexpr proto::DiskPollDecl
-        kAcsiPoll{.opcode = 0x0C, .beats = 16, .head_byte = 10, .head_mask = 0x01};
-    static_assert(proto::well_formed(kAcsiPoll));
 
     void service_kick() noexcept override;
 
@@ -150,6 +146,8 @@ private:
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {
         return stream_.bytes();
     }
+
+    [[nodiscard]] infra::OptRef<IDiskPort> acsi_port_() const noexcept;
 
     [[nodiscard]] Ex<void> push_control_();
     [[nodiscard]] Ex<void> update_sysctrl_(st_ctrl::CtrlWord ctrl);

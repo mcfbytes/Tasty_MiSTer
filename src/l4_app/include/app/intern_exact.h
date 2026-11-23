@@ -26,11 +26,4 @@ template <std::size_t N>
     std::string_view rel
 ) noexcept;
 
-[[nodiscard]] proto::TxSlabId intern_exact(
-    const svc::Vfs& vfs,
-    LinkTxChannel<SeatTag::Main>& inbox,
-    std::string_view rel,
-    std::size_t want
-);
-
 }

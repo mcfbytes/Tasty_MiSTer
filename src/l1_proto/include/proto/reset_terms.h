@@ -13,6 +13,7 @@ namespace mister::proto {
 struct ResetTerms {
     StatusWord held{};
     StatusWord raised{};
+    StatusWord changed{};
     ConfSwitches buttons{};
 
     [[nodiscard]] static constexpr ResetTerms framework() noexcept {
@@ -22,9 +23,21 @@ struct ResetTerms {
         return t;
     }
 
+    [[nodiscard]] constexpr ResetTerms with_held(StatusBit bit) const noexcept {
+        ResetTerms t = *this;
+        t.held = t.held.with(bit, true);
+        return t;
+    }
+
     [[nodiscard]] constexpr ResetTerms with_raised(StatusBit bit) const noexcept {
         ResetTerms t = *this;
         t.raised = t.raised.with(bit, true);
+        return t;
+    }
+
+    [[nodiscard]] constexpr ResetTerms with_changed(StatusBit bit) const noexcept {
+        ResetTerms t = *this;
+        t.changed = t.changed.with(bit, true);
         return t;
     }
 
@@ -37,6 +50,8 @@ struct ResetTerms {
             if (was.with(now).intersects(held.words[i]))
                 return true;
             if (now.without(was).intersects(raised.words[i]))
+                return true;
+            if (now.without(was).with(was.without(now)).intersects(changed.words[i]))
                 return true;
         }
         return false;

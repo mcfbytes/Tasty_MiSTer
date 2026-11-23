@@ -9,6 +9,7 @@
 #include "hal/selected.h"
 #include "infra/endian.h"
 #include "infra/prelude.h"
+#include "proto/link/upload_session.h"
 
 namespace mister::proto::link {
 
@@ -23,8 +24,8 @@ Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Index& i) noexcept {
     return DownloadSession::set_index(frame, latched);
 }
 
-Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Open&) noexcept {
-    auto s = DownloadSession::open(link, latched);
+Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Open& o) noexcept {
+    auto s = DownloadSession::open(link, latched, AuxValue::of(o.address));
     if (!s)
         return std::unexpected(s.error());
     open.emplace(std::move(*s));
@@ -172,7 +173,7 @@ Ex<void> SpiFioQueue::place_(std::span<const Bracket> act) {
     std::size_t at = slab_used_;
     for (const Bracket& b : act) {
         q_[size_++] = infra::make<FioWindow>(FioWindow::Index{b.index});
-        q_[size_++] = infra::make<FioWindow>(FioWindow::Open{});
+        q_[size_++] = infra::make<FioWindow>(FioWindow::Open{b.address.halves()});
         std::size_t off = 0;
         do {
             const std::size_t len = std::min(piece, b.bytes.size() - off);
@@ -189,6 +190,36 @@ Ex<void> SpiFioQueue::place_(std::span<const Bracket> act) {
     slab_used_ = at;
     ++stats_.acts;
     return {};
+}
+
+FioWordCount SpiFioQueue::upload_words(FileSize bytes) const noexcept {
+    return kUploadFramingWords + FioWordCount::carrying(bytes, link_.width());
+}
+
+Ex<FioWordCount> SpiFioQueue::upload(
+    WideIoIndex index,
+    AuxValue address,
+    std::span<std::uint8_t> into
+) noexcept {
+    TASTY_SEAT_BODY(SpiFioQueue);
+    if (!idle() || held_ || wire_.open || (tenant_ && tenant_->holds_fio())) {
+        ++stats_.busy;
+        return std::unexpected(index.refusal(Errc::would_block, ERR_SITE()));
+    }
+    auto session = UploadSession::begin(link_, index, SessionParams{.aux = address});
+    if (!session) {
+        ++stats_.wire_faults;
+        return std::unexpected(session.error());
+    }
+    Ex<void> r = session->read(into);
+    if (r)
+        r = session->end();
+    if (!r) {
+        ++stats_.wire_faults;
+        return std::unexpected(r.error());
+    }
+    ++stats_.acts;
+    return upload_words(FileSize{into.size()});
 }
 
 FioWordCount SpiFioQueue::drain(FioWordCount budget_words) noexcept {

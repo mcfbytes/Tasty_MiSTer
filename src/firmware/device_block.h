@@ -50,7 +50,7 @@
 #include "app/input/raw_key_edge.h"
 #include "app/input/rumble_players_cell.h"
 #include "app/run_policy.h"
-#include "app/disk_relay.h"
+#include "app/disk_relays.h"
 #include "app/save_upload_relay.h"
 #include "app/switch_park.h"
 #include "app/pcm/mailbox_relay.h"
@@ -66,12 +66,15 @@
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "app/session_owner.h"
+#include "app/share_lane.h"
 #include "app/supervisor_parts.h"
 #include "app/recents/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "app/window_job_service.h"
 #include "boot_parts.h"
 #include "cores/save_copy_level.h"
+#include "cores/mount_reads.h"
+#include "cores/remount_asked.h"
 #include "hal/fpga_memory.h"
 #include "hal/hdmi_int_level.h"
 #include "hal/thread_map.h"
@@ -87,6 +90,7 @@
 #include "infra/unique_fd.h"
 #include "infra/xthread/wake_flag.h"
 #include "board_reset.h"
+#include "nic_block.h"
 #include "open_verdict.h"
 #include "os/clock.h"
 #include "os/epoll_set.h"
@@ -275,6 +279,8 @@ public:
     app::SectorRouteCell sector_route_{};
     app::SectorLeaseCell sector_lease_{};
 
+    app::ShareGrantCell share_grant_{};
+
     app::OsdGrantCell osd_grant_{};
     app::OsdRouteCell osd_route_{};
     app::OsdLeaseCell osd_lease_{};
@@ -293,7 +299,7 @@ public:
 
     svc::disc::UnboundDisc unbound_discs_{};
 
-    app::DiskRelay disk_relay_;
+    app::DiskRelays disk_relays_{io_wake_};
 
     hal::PinLevelCell pin_levels_{};
 
@@ -385,6 +391,11 @@ public:
 
     svc::SaveStageOrders save_stage_orders_;
     svc::SaveStageCell save_stage_cell_{};
+
+    cores::RemountCell remount_cell_{};
+    cores::MountReadsCell mount_reads_cell_{};
+
+    svc::MountRefusalCell mount_refusal_cell_{};
     svc::SaveStageKeeper save_stage_keeper_;
     svc::SaveSlotBackends save_backends_;
 
@@ -396,6 +407,8 @@ public:
     app::LwSysEndpoint lw_sys_;
     app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
     app::WindowJobService window_jobs_;
+
+    app::ShareLane share_lane_;
     app::ScreenshotQueue shots_;
     std::optional<app::capture::ScalerFrameSource> frame_src_;
     proto::OsdSurface surface_;
@@ -441,6 +454,8 @@ public:
             && !std::is_same_v<decltype(io_window_map_), decltype(ui_window_map_)>,
         "one window map per mapping seat; no instance is shared between two"
     );
+
+    NicBlock nic_;
     app::SessionOwner owner_;
 
     app::FrameDemandCell frame_demand_{};

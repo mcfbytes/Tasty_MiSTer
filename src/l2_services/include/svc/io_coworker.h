@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/park_timeout.h"
 #include "infra/xthread/coworker.h"
 #include "infra/prelude.h"
 
@@ -21,6 +22,10 @@ public:
     [[nodiscard]] virtual bool idle() const noexcept = 0;
 
     [[nodiscard]] virtual bool quiescent() const noexcept { return idle(); }
+
+    [[nodiscard]] virtual infra::ParkTimeout poll_period() const noexcept {
+        return infra::kForever;
+    }
 
 protected:
     IIoCoworker() = default;

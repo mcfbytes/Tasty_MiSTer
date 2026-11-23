@@ -150,7 +150,8 @@ inline constexpr CoreProfile kPsx{
     .host_bits = kPsxHostBits,
     .no_stream_role = true,
     .host =
-        {.suppress_stick_dpad = true,
+        {.stick_reach = svc::input::StickReach::LowByte,
+         .suppress_stick_dpad = true,
          .image_rows_no_zip = true,
 
          .cheats = {.reset_on_remount = true}},

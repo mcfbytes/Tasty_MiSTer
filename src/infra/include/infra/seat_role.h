@@ -29,6 +29,7 @@ inline constexpr std::array<SeatRoleRow, kSeatTagCount> kSeatRoles{{
     {SeatTag::Launcher, "launcher"},
     {SeatTag::HdOsd, "hdosd"},
     {SeatTag::Connect, "connect"},
+    {SeatTag::Nic, "nic"},
     {SeatTag::Main, "main"},
 }};
 

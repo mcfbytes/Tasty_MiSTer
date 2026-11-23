@@ -106,6 +106,8 @@ constexpr infra::ParkTimeout kLastOrderRetryMs{1};
 
 constexpr infra::ParkTimeout kPieceRetryMs{5};
 
+constexpr int kHoldSamples = 8;
+
 static_assert(
     cores::PayloadPieces::kAhead + InternedFile::kHeldOps + 1 < InternedFile::kMaxLiveFiles
 );
@@ -134,10 +136,21 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .vfs = vfs_,
               .inbox = inbox_,
               .events = link.owner_events,
+              .refusals = link.mount_refusal_cell,
               .clock = clock_,
               .ladder = ladder_,
               .negotiated = negotiated_,
-              .owner_tally = tally_
+              .owner_tally = tally_,
+              .window_map = link.window_map,
+              .aperture = link.aperture
+          }
+      ),
+      servants_(
+          ServantMounts::Wiring{
+              .vfs = vfs_,
+              .clock = clock_,
+              .remount = link.remount_cell,
+              .reads = link.mount_reads_cell
           }
       ),
       launcher_(vfs_),
@@ -209,7 +222,13 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .save_state_facts = save_state_facts_,
               .belt = belt_,
               .config_cell = link.config_cell,
-              .game_id_cell = game_id_cell_
+              .game_id_cell = game_id_cell_,
+              .config_value_cell = link.config_value_cell,
+              .nic = link.nic,
+              .share_grant = link.share_grant,
+              .io_wake = link.io_wake,
+              .vfs = infra::OptRef<const svc::Vfs>{link.storage},
+              .aperture = link.aperture
           }
       ),
       builder_(builder_over(link)),
@@ -243,7 +262,9 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .owner_tally = tally_
           }
       ),
-      exec_handoff_(link.ops.sleeper) {
+      exec_handoff_(link.ops.sleeper),
+      pin_levels_(link.pin_levels),
+      cmos_(clock_) {
     (void)front_end_image_.assign(kFrontEndImage);
     handoff_ = link.boot_handoff;
     if (link.stdout_routing)
@@ -395,6 +416,9 @@ std::optional<unsigned> SessionOwner::run_(MainPassStep::Step step) {
         case S::Belt:
             belt_.step(*this, ladder_host_);
             return 0u;
+        case S::Servants:
+            step_servants_();
+            return 0u;
         case S::SaveStages:
             if (director_) {
                 if (const auto edge = director_->step(save_facts_()))
@@ -421,8 +445,14 @@ std::optional<unsigned> SessionOwner::run_(MainPassStep::Step step) {
         case S::Readiness:
             watch_readiness_();
             return 0u;
+        case S::Clock:
+            refresh_clock_();
+            return 0u;
         case S::Fabric:
             publish_fabric_();
+            return 0u;
+        case S::Upkeep:
+            upkeep_();
             return 0u;
         case S::kCount:
             break;
@@ -633,7 +663,8 @@ std::optional<SessionOwner::ResetBar> SessionOwner::reset_bar_(CoreScope scope) 
         return ResetBar::NoCore;
     if (!negotiated_.in_scope(scope))
         return ResetBar::Stale;
-    if (belt_.any_live(kLoadBelt) || mounts_.save_holds_load())
+
+    if (belt_.any_live(kLoadBelt) || mounts_.save_holds_load() || start_run_.has_value())
         return ResetBar::Loading;
     if (ladder_.live() || mounts_.save_mount_live() || reset_owed_.has_value())
         return ResetBar::Busy;
@@ -746,8 +777,12 @@ void SessionOwner::on(const UiRequest::ResetCore& req, const UiRequest::Head& he
     }
 
     if (row && row->profile.reset.ladders && row->profile.reset.reacts(req.edge)) {
-        if (!ladder_.arm_core(req.edge, {}, *row, ladder_host_, Owed{kKind, head.tag}))
+        if (!ladder_.arm_core(req.edge, {}, *row, ladder_host_, Owed{kKind, head.tag})) {
             publish_refusal(kKind, Errc::core_load, head.tag);
+            return;
+        }
+
+        rtc_.restart();
         return;
     }
     if (order_reset_(op, head.tag) && clears)
@@ -777,7 +812,8 @@ void SessionOwner::misrouted(const UiRequest&) noexcept {
 
 bool SessionOwner::refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept {
     const bool rom_waits = mounts_.save_holds_load();
-    if (!belt_.any_live(kLoadBelt) && !rom_waits)
+    const bool start_files = start_run_.has_value() || sidecars_.live();
+    if (!belt_.any_live(kLoadBelt) && !rom_waits && !start_files)
         return false;
     refuse_busy(kind, tag);
     return true;
@@ -799,6 +835,14 @@ void SessionOwner::watch_start_() noexcept {
         return refuse_rebooting_(phase::Stimulus::BoundExpired);
     }
     give_up_start_(Errc::timeout, phase::Stimulus::BoundExpired);
+}
+
+void SessionOwner::refresh_clock_() noexcept {
+    if (!negotiated_.core_live() || ladder_.live())
+        return;
+    const auto op = rtc_.due(std::chrono::system_clock::now());
+    if (op && push_dropping(inbox_, tally_, *op))
+        rtc_.sent();
 }
 
 void SessionOwner::watch_bridge_() noexcept {
@@ -1077,6 +1121,10 @@ void SessionOwner::step_held(RungSlot slot) {
     TASTY_SEAT_BODY(SessionOwner);
     switch (slot) {
         case RungSlot::BootLadder:
+
+            if (init_after_files_ && belt_.any_live(kLoadBelt))
+                return;
+            init_after_files_ = false;
             step_ladder_();
             return;
         case RungSlot::SavestateHold:
@@ -1093,6 +1141,13 @@ void SessionOwner::step_held(RungSlot slot) {
             return;
         case RungSlot::Watch:
             offer_(content_.step_watch());
+            return;
+        case RungSlot::Sidecars:
+            sidecars_.step(ladder_host_, tally_);
+            return;
+        case RungSlot::StartChain:
+            if (start_burst_due_())
+                step_start_chain_();
             return;
         case RungSlot::Addons:
         case RungSlot::Pieces:
@@ -1113,17 +1168,24 @@ SessionOwner::Wait SessionOwner::held_wait(RungSlot slot) const noexcept {
     const bool room = inbox_.ring().size() < proto::kLinkTxCapacity;
     switch (slot) {
         case RungSlot::BootLadder:
+            if (init_after_files_ && belt_.any_live(kLoadBelt))
+                return each(ladder_.live(), false);
             return each(ladder_.live(), (ladder_.moved() || belt_.walk_answered()) && room);
         case RungSlot::SavestateHold: {
             const auto hold = belt_.savestate_hold();
             return each(hold.has_value(), hold && savestates_answered_(hold->gen));
         }
         case RungSlot::SaveMount:
-            return each(mounts_.save_mount_live(), false);
+
+            return each(mounts_.save_mount_live(), mounts_.mirror_filling());
         case RungSlot::AddonsAfter:
             return each(belt_.addons_after_owed(), content_ordered_());
         case RungSlot::Watch:
             return each(content_.content_watched(), content_.watch_answered() && room);
+        case RungSlot::Sidecars:
+            return each(sidecars_.live(), sidecars_.wants_pass(inbox_));
+        case RungSlot::StartChain:
+            return each(start_run_.has_value(), start_burst_due_());
         case RungSlot::Addons:
         case RungSlot::Pieces:
         case RungSlot::Load:
@@ -1155,7 +1217,7 @@ void SessionOwner::last_piece_sent(FileTxPieces& pieces) {
     content_.watch_last_piece(pieces);
 
     if (pieces.companion_follows())
-        begin_companion(pieces.path());
+        follow_content_(pieces.path(), pieces.wire_index());
 }
 
 void SessionOwner::manifest_failed(Errc why) {
@@ -1236,7 +1298,15 @@ void SessionOwner::begin_companion(std::string_view path) {
 void SessionOwner::after_content_(ContentPick::After&& after) {
     offer_(std::move(after.orders));
     if (after.companion)
-        begin_companion(after.companion->view());
+        follow_content_(after.companion->view(), after.slot);
+}
+
+void SessionOwner::follow_content_(std::string_view path, proto::WideIoIndex index) {
+    if (sidecars_.plan(path, index, vfs_)) {
+        content_.forget_watch();
+        sidecars_.step(ladder_host_, tally_);
+    }
+    begin_companion(path);
 }
 
 void SessionOwner::step_companion_() {
@@ -1317,6 +1387,7 @@ void SessionOwner::finish_ladder_(const OwnerLadder::Ended& end) {
 }
 
 void SessionOwner::drop_ladder_() {
+    rtc_.disarm();
     ladder_.drop();
     mounts_.drop();
     belt_.cancel();
@@ -1324,6 +1395,8 @@ void SessionOwner::drop_ladder_() {
     content_.picked_load().reset();
     made_.reset();
     reset_owed_.reset();
+    start_run_.reset();
+    sidecars_.cancel();
 
     boot_restore_ = BootRestore::None;
     negotiated_.clear_core_name();
@@ -1332,6 +1405,9 @@ void SessionOwner::drop_ladder_() {
 void SessionOwner::forget_core_() noexcept {
     belt_.drop_companion();
     companion_.withdraw();
+    sidecars_.withdraw();
+    start_run_.reset();
+    ladder_host_.close_share();
     negotiated_.forget();
 }
 
@@ -1548,6 +1624,41 @@ void SessionOwner::on(const proto::LinkEvent::StartRefused& e) noexcept {
     refuse_started_switch_(e.err, phase::Stimulus::StartRefused);
 }
 
+void SessionOwner::on(const proto::LinkEvent::PolledWord& w) noexcept {
+    if (w.shape != proto::user_io::PollShape::ChangeCounter) {
+        ++tally_.link_event_misrouted;
+        return;
+    }
+    cmos_.on_change_count(w.word);
+}
+
+void SessionOwner::upkeep_() {
+    if (switch_.switch_standing() || ladder_.live() || !negotiated_.core_live())
+        return;
+    const std::chrono::milliseconds hold = negotiated_.loaded_profile().reset.reload_hold;
+    if (hold > std::chrono::milliseconds::zero()) {
+        hal::PinLevels levels{};
+        const bool sampled = pin_levels_.sample_into(levels) != 0u;
+
+        bool menu_focus = false;
+        if (menu_focus_cell_) {
+            const MenuFocusCell::Sample s = menu_focus_cell_->sample();
+            if (s)
+                menu_focus = s.value;
+        }
+        const bool down = sampled && levels.user_button && !menu_focus;
+        if (reload_hold_.sample(down, hold, clock_.now())) {
+            const auto row = cores::find_core(negotiated_.core_name().view());
+            if (row
+                && ladder_
+                       .arm_core(proto::ResetEdge::user_button(), {}, *row, ladder_host_, Owed{})) {
+                return;
+            }
+        }
+    }
+    cmos_.tick(ladder_host_);
+}
+
 void SessionOwner::misrouted(const proto::LinkEvent&) noexcept {
     TASTY_SEAT_BODY(SessionOwner);
     ++tally_.link_event_misrouted;
@@ -1572,6 +1683,7 @@ void SessionOwner::on(const proto::LinkEvent::CoreMade& m) noexcept {
     if (m.made) {
         belt_.drop_companion();
         companion_.make();
+        sidecars_.make(negotiated_);
     }
     if (!m.made) {
 
@@ -1615,6 +1727,8 @@ void SessionOwner::finish_core_made_() noexcept {
     const MadeFacts made = std::exchange(made_, std::nullopt).value_or(MadeFacts{});
     cheat_catalog_cell_.publish(made.cheat_records ? negotiated_.cheats() : kNoCheats);
     boot_restore_ = BootRestore::None;
+    cmos_.bind(negotiated_.loaded_profile().cmos);
+    reload_hold_ = ReloadHold{};
     if (made.restore_owed) {
 
         const auto row = cores::find_core(negotiated_.core_name().view());
@@ -1668,6 +1782,10 @@ void SessionOwner::order_session_up_() noexcept {
     }
 
     (void)push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(up));
+    {
+        const auto started = cores::find_core(negotiated_.core_name().view());
+        rtc_.arm(started ? started->profile.rtc_refresh : std::chrono::seconds{});
+    }
 
     builder_.sector().raise(builder_.generation());
 
@@ -1682,25 +1800,83 @@ void SessionOwner::order_session_up_() noexcept {
     }
 
     const bool ladder = ladder_.arm_start(negotiated_.core_name(), index0_taken, ladder_host_);
+    const auto started = cores::find_core(negotiated_.core_name().view());
+    init_after_files_ = ladder && started && started->profile.reset.reinits;
     const std::string rbf = start_rbf_();
 
     const bool slot0_held = mounts_.read_remembered_mounts(remembered_files_);
+
+    std::vector<std::string_view> remembered_exts;
+    for (const RememberedFile& f : remembered) {
+        std::string_view ext = infra::suffix_from_last_dot(f.path);
+        if (!ext.empty())
+            ext.remove_prefix(1);
+        remembered_exts.push_back(ext);
+    }
     const SessionUpFacts session_up{
         .index0_taken = index0_taken,
         .slot0_held = slot0_held,
         .remembered = !remembered.empty(),
-        .ladder = ladder
+        .ladder = ladder,
+        .status = negotiated_.saved_status(),
+        .remembered_exts = remembered_exts
     };
-    const StartChain chain = StartChain::plan(start_facts_(rbf, session_up), vfs_);
+    StartChain chain = StartChain::plan(start_facts_(rbf, session_up), vfs_);
 
     const bool held = chain.holds_reset() && bind_.reset_level(true);
     order_remembered_files_(remembered);
-    order_start_chain_(chain);
-    if (held)
+    start_run_.emplace(StartRun{.chain = std::move(chain), .held = held});
+    step_start_chain_();
+    if (start_run_)
+        tally_.start_chains_stepped.add();
+}
+
+bool SessionOwner::start_burst_due_() const noexcept {
+    return start_run_.has_value()
+        && inbox_.ring().size() == 0
+        && !sidecars_.live()
+        && !belt_.any_live(kLoadBelt);
+}
+
+void SessionOwner::step_start_chain_() {
+    if (!start_run_)
+        return;
+    StartRun& run = *start_run_;
+    const std::span<const StartFile> files = run.chain.files();
+    const std::span<const StartFile> burst = run.next.burst(files);
+    run.next = run.next.past(files);
+    const bool ends = run.next.ends(files);
+    order_start_chain_(burst, ends);
+    if (!ends)
+        return;
+    if (run.held)
         (void)bind_.reset_level(false);
 
-    mounts_.queue_boot_images(chain);
+    servants_.begin_session();
+    mounts_.queue_boot_images(run.chain);
+    start_run_.reset();
     mounts_.arm_next_mount(*this);
+}
+
+void SessionOwner::step_servants_() {
+    if (!negotiated_.core_live())
+        return;
+    const svc::ConfigSnapshot& cfg = ini_.cell().sample().value;
+    servants_.step(
+        ServantMounts::Facts{
+            .profile = negotiated_.loaded_profile(),
+            .core = negotiated_.core_name(),
+            .shared_folder = cfg.shared_folder
+        },
+        mounts_,
+        *this
+    );
+
+    if (const infra::Tally refused = servants_.refused_names(); refused != refused_names_logged_) {
+        refused_names_logged_ = refused;
+        if (log_)
+            (void)log_->push(LogRec::Refusal{Errc::not_found, ERR_SITE()}, log_now_());
+    }
 }
 
 std::vector<SessionOwner::RememberedFile> SessionOwner::read_remembered_files_() const {
@@ -1767,7 +1943,10 @@ StartChain::Facts SessionOwner::start_facts_(std::string_view rbf, const Session
         .index0_taken = up.index0_taken,
         .remembered = up.remembered,
         .ladder = up.ladder,
-        .slot0_held = up.slot0_held
+        .slot0_held = up.slot0_held,
+        .host_bits = p.host_bits,
+        .status = up.status,
+        .remembered_exts = up.remembered_exts
     };
 }
 
@@ -1779,8 +1958,8 @@ std::string SessionOwner::start_rbf_() const {
     return rel ? std::move(*rel) : std::string{};
 }
 
-void SessionOwner::order_start_chain_(const StartChain& chain) {
-    const auto files = chain.files();
+void SessionOwner::order_start_chain_(std::span<const StartFile> files, bool ends) {
+    const bool whole = start_run_.has_value() && start_run_->chain.holds_reset();
     for (std::size_t i = 0; i < files.size(); ++i) {
         const StartFile& f = files[i];
         const std::uint32_t failed = tally_.files_failed;
@@ -1791,9 +1970,9 @@ void SessionOwner::order_start_chain_(const StartChain& chain) {
             ContentRequest cr{};
             cr.path = f.path;
             cr.slot = f.dest;
-            cr.whole = chain.holds_reset();
+            cr.whole = whole;
 
-            cr.edge = i + 1 == files.size() ? ContentEdge::ChainEnd : ContentEdge::Silent;
+            cr.edge = ends && i + 1 == files.size() ? ContentEdge::ChainEnd : ContentEdge::Silent;
             after_content_(content_.perform_content(cr));
         }
         if (tally_.files_failed == failed && tally_.op_drops == drops)
@@ -2121,6 +2300,15 @@ infra::ParkTimeout SessionOwner::wake_hint_ms(infra::ParkTimeout floor_ms) const
     }
     if (const auto due = director_ ? director_->next_due() : std::nullopt)
         floor_ms = std::min(floor_ms, *due);
+
+    if (const auto due = cmos_.next_due())
+        floor_ms = until(*due, floor_ms);
+    if (negotiated_.core_live()) {
+        const std::chrono::milliseconds hold = negotiated_.loaded_profile().reset.reload_hold;
+        const auto sample_ms = std::chrono::duration_cast<infra::ParkTimeout>(hold / kHoldSamples);
+        if (hold > std::chrono::milliseconds::zero())
+            floor_ms = std::min(floor_ms, sample_ms);
+    }
     const bool owed = switch_.load_held() || (phase_.front_end_owed() && !before_seats_);
     const bool ask_due = owed && !switch_.switch_standing() && !readiness_.recovering();
     if (switch_.last_order_owed() || ask_due)

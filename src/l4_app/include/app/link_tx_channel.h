@@ -17,6 +17,7 @@
 #include "infra/prelude.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "proto/link_op.h"
 
 namespace mister::app {
@@ -131,6 +132,8 @@ public:
         TASTY_SEAT_BODY_MEDIATOR(LinkTxChannel, B);
         return files_.get(id);
     }
+
+    [[nodiscard]] infra::Tally pushes() const noexcept { return infra::Tally{tx_.pushed()}; }
 
     [[nodiscard]] const proto::LinkTxRing& ring() const noexcept { return tx_; }
 

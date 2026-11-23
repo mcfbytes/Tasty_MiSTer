@@ -36,6 +36,12 @@ public:
 
     [[nodiscard]] static Ex<DownloadSession> open(hal::ISpiTransport& link, WideIoIndex index);
 
+    [[nodiscard]] static Ex<DownloadSession> open(
+        hal::ISpiTransport& link,
+        WideIoIndex index,
+        AuxValue address
+    );
+
     ~DownloadSession();
 
     DownloadSession(DownloadSession&& o) noexcept

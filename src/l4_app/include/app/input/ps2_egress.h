@@ -16,6 +16,10 @@ template <SeatTag Seat>
 class LinkTxChannel;
 }
 
+namespace mister::cores {
+class IInputSink;
+}
+
 namespace mister::app::input {
 
 class Ps2Egress {
@@ -48,6 +52,8 @@ public:
         const svc::InputGates& gates,
         InputKeyCounts& keys
     );
+
+    [[nodiscard]] bool flush_sink_frames(cores::IInputSink& sink) noexcept;
 
     [[nodiscard]] svc::InputGates sweep_dropped_keys_(
         const svc::InputGates& gates,

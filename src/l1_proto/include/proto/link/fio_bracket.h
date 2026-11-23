@@ -25,10 +25,12 @@ public:
         hal::SpiWord mode,
         const SessionParams& params
     );
+
     [[nodiscard]] static Ex<FioBracket> window(
         hal::ISpiTransport& link,
         WideIoIndex index,
-        hal::SpiWord mode
+        hal::SpiWord mode,
+        AuxValue address = {}
     );
 
     [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, FioIndexByte index);

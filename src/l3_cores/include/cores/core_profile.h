@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include "svc/blank_region.h"
 #include "svc/blank_save.h"
+#include "cores/repulse_rule.h"
 #include "cores/boot_asset.h"
 #include "cores/config_codec.h"
 #include "cores/core_init_step.h"
@@ -17,6 +20,7 @@
 #include "cores/host_policy.h"
 #include "cores/option_row.h"
 #include "cores/reset_row.h"
+#include "cores/share_row.h"
 #include "cores/signature_row.h"
 #include "cores/staging_policy.h"
 #include "cores/start_rule.h"
@@ -36,7 +40,15 @@ class ISectorProgram;
 class IDiscRules;
 }
 
+namespace mister::proto::user_io {
+enum class PollShape : std::uint8_t;
+}
+
 namespace mister::cores {
+
+struct ControlSlot;
+struct LbaWindowRow;
+struct CmosLayout;
 
 using reactor::RoundClaim;
 using reactor::LinkDecoderDecl;
@@ -67,6 +79,19 @@ enum class CoreKind : std::uint8_t {
     Uneon,
     Saturn,
     Cdi,
+    Archie,
+    Tk2000,
+    Oric,
+    MacLc,
+    Atari800,
+    Atari5200,
+    Minimig,
+    C64,
+    Zx81,
+    Amstrad,
+    C128,
+    AppleII,
+    AppleIIgs,
     Count,
 };
 
@@ -156,7 +181,27 @@ struct CoreProfile {
 
     infra::OptRef<const IConfigCodec> config_codec{};
 
+    bool settings_in_startup_slot = false;
+
     GrantSet grants{};
+
+    std::span<const proto::user_io::PollShape> polls{};
+
+    infra::OptRef<const CmosLayout> cmos{};
+
+    std::span<const LbaWindowRow> lba_windows{};
+
+    std::span<const ControlSlot> control_slots{};
+
+    RepulseRule repulse{};
+
+    std::string_view home_dir{};
+
+    std::chrono::seconds rtc_refresh{};
+
+    proto::FileSize largest_save{};
+
+    std::optional<ShareRow> share{};
 };
 
 [[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {
@@ -165,6 +210,13 @@ struct CoreProfile {
 
 [[nodiscard]] constexpr SlotRole role_of(const CoreProfile& p, IoIndex index) {
     return role_of(p.slots, index, p.undeclared_role);
+}
+
+[[nodiscard]] constexpr std::span<const svc::DiskFormatRow> disk_formats_of(
+    const CoreProfile& p,
+    IoIndex index
+) {
+    return disk_formats_of(p.slots, index, p.disk_formats);
 }
 
 [[nodiscard]] Ex<void> assert_services_match_census(

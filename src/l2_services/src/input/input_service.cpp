@@ -138,6 +138,29 @@ void InputService::note_report(InputDevice& dev) {
         recompute_joy_masks();
     if (!r.dials.empty())
         fold_dials(dev);
+    if (r.stick_changed[kLeftStick] || r.stick_changed[kRightStick])
+        fold_sticks(dev);
+}
+
+void InputService::fold_sticks(const InputDevice& dev) {
+
+    if (dev.is_mouse())
+        return;
+    const auto slot = players_.slot_of(dev.identity());
+    if (!slot)
+        return;
+    const DeviceReport& r = dev.report();
+    for (const StickIndex s : kSticks)
+        if (r.stick_changed[s])
+            sticks_[*slot].level[s] = r.stick[s];
+}
+
+AnalogXy InputService::stick(PlayerIndex player, StickIndex which) const noexcept {
+    const auto sticks = sticks_.find(player);
+    if (!sticks)
+        return AnalogXy{};
+    const auto level = sticks->level.find(which);
+    return level ? *level : AnalogXy{};
 }
 
 void InputService::fold_dials(const InputDevice& dev) {

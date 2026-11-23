@@ -27,6 +27,7 @@ concept LinkEventMainSink = requires(S& s, const proto::LinkEvent& m) {
     s.on(std::declval<const proto::LinkEvent::CoreMade&>());
     s.on(std::declval<const proto::LinkEvent::StartRefused&>());
     s.on(std::declval<const proto::LinkEvent::RebootQuiesced&>());
+    s.on(std::declval<const proto::LinkEvent::PolledWord&>());
     s.misrouted(m);
 };
 

@@ -108,6 +108,22 @@ Ex<void> BlockSlots::announce(SlotIndex slot, FileSize size_bytes, bool writable
     return frame.end();
 }
 
+Ex<void> BlockSlots::announce_bare(SlotIndex slot) {
+    if (slot > kLastAnnounceableSlot) {
+        ++diag_.unencodable_announce;
+        return std::unexpected(slot.refusal(Errc::negotiation, ERR_SITE()));
+    }
+
+    constexpr SlotAttributes kControl{.writable = true, .mount = MountClass::Image};
+    mount_row_(slot, kControl, MountSizes{}, PathId{});
+    SpiFrame frame{link_};
+    if (auto r = frame.begin(UioOp::SetSdStat); !r)
+        return r;
+    if (auto r = frame.word(SdStatParameter::of(slot, false).wire_word()); !r)
+        return r;
+    return frame.end();
+}
+
 void BlockSlots::mount_row_(
     SlotIndex slot,
     const SlotAttributes& attr,
@@ -124,6 +140,7 @@ void BlockSlots::mount_row_(
     s.growable = attr.growable;
     s.deferred_create = attr.deferred_create;
     s.mount = attr.mount;
+    s.track = attr.track;
 }
 
 Ex<void> BlockSlots::mount(
@@ -296,13 +313,14 @@ bool BlockSlots::submit_fetch(
     Lba base,
     BlockSize block_size,
     bool answer_owed,
-    const BlockBacking& backing
+    const BlockBacking& backing,
+    WindowPolicy policy
 ) noexcept {
     const Slot& s = records_[slot].slot;
     if (s.state != Slot::State::Mounted)
         return false;
 
-    if (s.size_bytes.empty() && !s.deferred_create)
+    if (s.size_bytes.empty() && !s.deferred_create && policy != WindowPolicy::Extentless)
         return false;
     if (!storage_live_ || !chan_ || !source_of_(backing))
         return false;
@@ -324,14 +342,7 @@ bool BlockSlots::submit_fetch(
           );
     if (!seq)
         return false;
-    records_[slot].data = SlotRecord::Credit{
-        .kind = kind,
-        .epoch = records_[slot].epoch,
-        .due = due_after(now_at_(), bound_of(kind)),
-        .phase = SlotRecord::Credit::Phase::Live
-    };
-    if (lamp_)
-        lamp_->note();
+    credit_data_(slot, kind);
     return true;
 }
 
@@ -360,14 +371,7 @@ bool BlockSlots::submit_create(
     );
     if (!seq)
         return false;
-    records_[slot].data = SlotRecord::Credit{
-        .kind = StorageRequest::Kind::Create,
-        .epoch = records_[slot].epoch,
-        .due = due_after(now_at_(), bound_of(StorageRequest::Kind::Create)),
-        .phase = SlotRecord::Credit::Phase::Live
-    };
-    if (lamp_)
-        lamp_->note();
+    credit_data_(slot, StorageRequest::Kind::Create);
     return true;
 }
 
@@ -386,14 +390,69 @@ bool BlockSlots::submit_write(
     );
     if (!seq)
         return false;
+    credit_data_(slot, StorageRequest::Kind::Write);
+    return true;
+}
+
+void BlockSlots::credit_data_(SlotIndex slot, StorageRequest::Kind kind) noexcept {
     records_[slot].data = SlotRecord::Credit{
-        .kind = StorageRequest::Kind::Write,
+        .kind = kind,
         .epoch = records_[slot].epoch,
-        .due = due_after(now_at_(), bound_of(StorageRequest::Kind::Write)),
+        .due = due_after(now_at_(), bound_of(kind)),
         .phase = SlotRecord::Credit::Phase::Live
     };
     if (lamp_)
         lamp_->note();
+}
+
+bool BlockSlots::submit_track_fetch_(
+    SlotIndex slot,
+    const TrackShape::Ask& ask,
+    const BlockBacking& backing
+) noexcept {
+    const Slot& s = records_[slot].slot;
+    if (s.state != Slot::State::Mounted)
+        return false;
+    if (!storage_live_ || !chan_ || !source_of_(backing))
+        return false;
+    const std::optional<StorageSeq> seq = submit_(
+        infra::make<StorageRequest>(
+            StorageRequest::Fetch{
+                .base = ask.word,
+                .block_size = s.track.unit,
+                .units = ask.units,
+                .space = ImageSpace::Track
+            },
+            request_head_(slot, backing)
+        )
+    );
+    if (!seq)
+        return false;
+    credit_data_(slot, StorageRequest::Kind::Fetch);
+    return true;
+}
+
+bool BlockSlots::submit_track_write_(
+    SlotIndex slot,
+    const TrackShape::Ask& ask,
+    const BlockBacking& backing
+) noexcept {
+    if (!storage_live_ || !chan_)
+        return false;
+    const TrackShape& shape = records_[slot].slot.track;
+    const std::optional<StorageSeq> seq = submit_(
+        infra::make<StorageRequest>(
+            StorageRequest::Write{
+                .offset = TrackShape::written_word(ask),
+                .bytes = shape.unit.window_bytes(ask.units),
+                .space = ImageSpace::Track
+            },
+            request_head_(slot, backing)
+        )
+    );
+    if (!seq)
+        return false;
+    credit_data_(slot, StorageRequest::Kind::Write);
     return true;
 }
 
@@ -571,6 +630,7 @@ void BlockSlots::on(
     const SlotIndex slot = *at;
     if (const auto src = source_of_(backing_(roles, slot))) {
         const bool ok = h.status == StorageStatus::Ok;
+        src->note_track_shape(slot, ok ? a.track : TrackShape{});
         src->note_attached(slot, ok, ok ? a.size : FileSize{});
     }
     if (records_[slot].ctl.stale(records_[slot].epoch))
@@ -704,13 +764,15 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     const SdRequest& req,
     BlockSize block_size,
     SectorAck ack,
-    const BlockBacking& backing
+    const BlockBacking& backing,
+    WindowPolicy policy
 ) {
     const SlotIndex slot = req.slot;
     const BlockCount blks = req.block_count;
     const ResidentWindow::Ask ask{infra::affine::Run<Lba>{req.lba, blks}, block_size};
 
-    const ReadPass pass{slot, req.lba, blks, block_size, block_size.bytes_of(blks), ack, backing};
+    const ReadPass
+        pass{slot, req.lba, blks, block_size, block_size.bytes_of(blks), ack, backing, policy};
 
     if (records_[slot].slot.state == Slot::State::Changing) {
         const os::RawMonotonicClock::time_point now = now_at_();
@@ -743,14 +805,17 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     }
 
     const Slot& s = records_[slot].slot;
+    const bool no_extent = s.size_bytes.empty()
+        && !s.deferred_create
+        && policy != WindowPolicy::Extentless;
     if (s.state != Slot::State::Mounted
-        || (s.size_bytes.empty() && !s.deferred_create)
+        || no_extent
         || !storage_live_
         || !chan_
         || !source_of_(backing)) {
         return answer_read_substitute_(pass, false);
     }
-    if (submit_fetch(slot, req.lba, block_size, true, backing)) {
+    if (submit_fetch(slot, req.lba, block_size, true, backing, policy)) {
 
         ++diag_.deferred_passes;
         return Pass::Deferred;
@@ -774,7 +839,7 @@ Ex<BlockSlots::Pass> BlockSlots::answer_read_image_(
         return Pass::Answered;
     }
     if (image.read_ahead)
-        (void)submit_fetch(p.slot, *image.read_ahead, p.block_size, false, p.backing);
+        (void)submit_fetch(p.slot, *image.read_ahead, p.block_size, false, p.backing, p.policy);
     return Pass::Answered;
 }
 
@@ -795,41 +860,63 @@ Ex<BlockSlots::Pass> BlockSlots::answer_read_substitute_(const ReadPass& p, bool
     return Pass::Answered;
 }
 
+Ex<std::span<std::uint8_t>> BlockSlots::drain_write_(
+    SlotIndex slot,
+    infra::ByteCount payload,
+    SectorAck ack
+) {
+    hal::ISpiTransport& link = link_;
+
+    if (!chan_) {
+        return std::unexpected(slot.refusal(Errc::io, ERR_SITE()));
+    }
+
+    const std::span<std::uint8_t> drain = chan_->claim(slot);
+    const std::span<std::uint8_t> part = payload.first_in(drain);
+
+    if (payload.fits_in(drain))
+        std::memset(part.data(), 0, part.size());
+    hal::Selected cs(link, hal::ChipSelect::Io);
+
+    if (auto r = link.transfer(ack.with_opcode(UioOp::SectorWr)); !r) {
+        return std::unexpected(r.error());
+    }
+    if (!payload.fits_in(drain)) {
+        return std::unexpected(slot.refusal(Errc::io, ERR_SITE()));
+    }
+    if (auto r = link.block_read(part); !r) {
+        return std::unexpected(r.error());
+    }
+    return part;
+}
+
 Ex<BlockSlots::Pass> BlockSlots::serve_write(
     const SdRequest& req,
     BlockSize block_size,
     SectorAck ack,
-    const BlockBacking& backing
+    const BlockBacking& backing,
+    WindowPolicy policy
 ) {
-    hal::ISpiTransport& link = link_;
-    const std::size_t sz = block_size.window_bytes(req.block_count);
-
-    if (!chan_) {
-        return std::unexpected(req.slot.refusal(Errc::io, ERR_SITE()));
-    }
-
-    const std::span<std::uint8_t> drain = chan_->claim(req.slot);
-
-    if (drain.size() >= sz)
-        std::memset(drain.data(), 0, sz);
-    {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-
-        if (auto r = link.transfer(ack.with_opcode(UioOp::SectorWr)); !r) {
-            return std::unexpected(r.error());
-        }
-        if (drain.size() < sz) {
-            return std::unexpected(req.slot.refusal(Errc::io, ERR_SITE()));
-        }
-        if (auto r = link.block_read(drain.first(sz)); !r) {
-            return std::unexpected(r.error());
-        }
+    if (auto drained = drain_write_(req.slot, block_size.window_count(req.block_count), ack);
+        !drained) {
+        return std::unexpected(drained.error());
     }
 
     Slot& s = records_[req.slot].slot;
     const infra::OptRef<IImageSource> src = source_of_(backing);
     if (!src || s.state != Slot::State::Mounted) {
         ++diag_.write_failures;
+        return Pass::Answered;
+    }
+
+    if (policy == WindowPolicy::Extentless) {
+        const SaveSlotRule::Plan whole{
+            .act = SaveSlotRule::Act::Write,
+            .offset = block_size.position_of(req.lba),
+            .len = block_size.window_bytes(req.block_count)
+        };
+        if (whole.len == 0 || !submit_write(req.slot, whole, backing))
+            ++diag_.write_failures;
         return Pass::Answered;
     }
 
@@ -854,6 +941,76 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     return Pass::Answered;
 }
 
+Ex<BlockSlots::Pass> BlockSlots::serve_track_read_(
+    const SdRequest& req,
+    const TrackShape::Ask& ask,
+    SectorAck ack,
+    const BlockBacking& backing
+) {
+    const SlotIndex slot = req.slot;
+    const TrackShape& shape = records_[slot].slot.track;
+    const ReadPass pass{
+        slot,
+        req.lba,
+        ask.units,
+        shape.unit,
+        shape.payload_bytes(ask),
+        ack,
+        backing,
+        WindowPolicy::Image
+    };
+    const std::optional<IStorageChannel::HomeWindow> home = chan_ ? chan_->window(slot)
+                                                                  : std::nullopt;
+    const ResidentWindow::Hit hit = home ? home->window.track_hit(ask, home->bytes)
+                                         : ResidentWindow::Hit{};
+    if (hit.is == ResidentWindow::Hit::Is::Image) {
+        if (auto r = emit_read_data_phase_(
+                slot,
+                hit.bytes,
+                0,
+                FileSize::of(hit.bytes),
+                ack,
+                ask.units,
+                true
+            );
+            !r) {
+            return std::unexpected(r.error());
+        }
+        chan_->install(slot, ResidentWindow{});
+        return Pass::Answered;
+    }
+    if (hit.is == ResidentWindow::Hit::Is::Substitute) {
+        chan_->install(slot, ResidentWindow{});
+        return answer_read_substitute_(pass, false);
+    }
+    if (submit_track_fetch_(slot, ask, backing)) {
+
+        ++diag_.deferred_passes;
+        return Pass::Deferred;
+    }
+    return answer_read_substitute_(pass, false);
+}
+
+Ex<BlockSlots::Pass> BlockSlots::serve_track_write_(
+    const SdRequest& req,
+    const TrackShape::Ask& ask,
+    SectorAck ack,
+    const BlockBacking& backing
+) {
+    const SlotIndex slot = req.slot;
+    const Slot& s = records_[slot].slot;
+    if (auto drained = drain_write_(slot, s.track.unit.window_count(ask.units), ack); !drained) {
+        return std::unexpected(drained.error());
+    }
+
+    if (!source_of_(backing)
+        || s.state != Slot::State::Mounted
+        || !submit_track_write_(slot, ask, backing)) {
+        ++diag_.write_failures;
+    }
+    return Pass::Answered;
+}
+
 Ex<BlockSlots::Pass> BlockSlots::serve(const SpiBlockPoll::Decode& d, IBlockRoles& roles) {
 
     const os::RawMonotonicClock::time_point now = now_at_();
@@ -865,6 +1022,9 @@ Ex<BlockSlots::Pass> BlockSlots::serve(const SpiBlockPoll::Decode& d, IBlockRole
     }
 
     const BlockBacking backing = backing_(roles, d.req.slot);
+
+    const TrackShape& shape = records_[d.req.slot].slot.track;
+    const std::optional<TrackShape::Ask> track = shape.ask(d.req.lba, d.req.block_count);
     if (gate == Gate::Substitute) {
         SlotRecord::Credit& c = records_[d.req.slot].data;
         const bool rearmed = c.phase == SlotRecord::Credit::Phase::Rearmed;
@@ -875,14 +1035,19 @@ Ex<BlockSlots::Pass> BlockSlots::serve(const SpiBlockPoll::Decode& d, IBlockRole
             d.req.lba,
             d.req.block_count,
             d.block_size,
-            d.block_size.bytes_of(d.req.block_count),
+            track ? shape.payload_bytes(*track) : d.block_size.bytes_of(d.req.block_count),
             d.ack,
-            backing
+            backing,
+            d.policy
         };
         return answer_read_substitute_(pass, rearmed);
     }
-    return d.req.write ? serve_write(d.req, d.block_size, d.ack, backing)
-                       : serve_read(d.req, d.block_size, d.ack, backing);
+    if (track) {
+        return d.req.write ? serve_track_write_(d.req, *track, d.ack, backing)
+                           : serve_track_read_(d.req, *track, d.ack, backing);
+    }
+    return d.req.write ? serve_write(d.req, d.block_size, d.ack, backing, d.policy)
+                       : serve_read(d.req, d.block_size, d.ack, backing, d.policy);
 }
 
 Ex<SpiBlockPoll::Decode> BlockSlots::poll_block(

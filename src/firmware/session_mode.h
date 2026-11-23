@@ -68,6 +68,8 @@ public:
             infra::OptRef<app::MglPump> mgl{};
             infra::OptRef<app::HpsFramebuffer> fb{};
             infra::OptRef<app::launcher::LauncherScreen> launcher_screen{};
+
+            infra::OptRef<xthread::ICoworker> terminal{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};
 

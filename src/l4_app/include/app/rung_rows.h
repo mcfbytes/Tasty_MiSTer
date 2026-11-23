@@ -19,6 +19,8 @@ enum class RungSlot : std::uint8_t {
     Manifest,
     Walk,
     Companion,
+    Sidecars,
+    StartChain,
     kCount
 };
 
@@ -41,6 +43,8 @@ inline constexpr auto kRungRows = std::to_array<RungRow>({
     {RungSlot::Manifest, RungSource::Role},
     {RungSlot::Walk, RungSource::Role},
     {RungSlot::Companion, RungSource::Role},
+    {RungSlot::Sidecars, RungSource::Held},
+    {RungSlot::StartChain, RungSource::Held},
 });
 
 consteval bool rung_rows_cover_each_slot_once() {

@@ -91,6 +91,8 @@ inline constexpr StackBytes kHdOsdStackBytes = StackBytes::mib(2);
 
 inline constexpr StackBytes kConnectStackBytes = StackBytes::kib(512);
 
+inline constexpr StackBytes kNicStackBytes = StackBytes::kib(256);
+
 inline constexpr SeatPolicyTable kSeatPolicyTable{{
     {.seat = SeatTag::RT,
      .policy = SchedPolicy::Fifo,
@@ -166,6 +168,11 @@ inline constexpr SeatPolicyTable kSeatPolicyTable{{
      .prio = 0,
      .stack_bytes = kConnectStackBytes,
      .spawn = SpawnKind::Create},
+    {.seat = SeatTag::Nic,
+     .policy = SchedPolicy::Other,
+     .prio = 0,
+     .stack_bytes = kNicStackBytes,
+     .spawn = SpawnKind::Create},
 }};
 
 inline constexpr PlacementTable kDe10Placement{{
@@ -183,6 +190,7 @@ inline constexpr PlacementTable kDe10Placement{{
     {.seat = SeatTag::Launcher, .cpu = os::CpuId{0}},
     {.seat = SeatTag::HdOsd, .cpu = os::CpuId{0}},
     {.seat = SeatTag::Connect, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Nic, .cpu = os::CpuId{0}},
 }};
 
 constexpr bool has_row(SeatTag tag) noexcept {

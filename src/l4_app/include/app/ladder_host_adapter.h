@@ -17,16 +17,25 @@
 #include "app/load_belt.h"
 #include "app/mount_status_cell.h"
 #include "app/option_cell.h"
+#include "app/config_value_cell.h"
 #include "app/owner_tally.h"
 #include "app/path_text.h"
 #include "app/save_extent_cell.h"
 #include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
+#include "app/share_grant.h"
 #include "cores/ladder_host.h"
+#include "hal/fpga_aperture.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/status_cell.h"
+#include "svc/nic_control.h"
+#include "svc/nic_link.h"
+
+namespace mister::svc {
+class Vfs;
+}
 
 namespace mister::app {
 
@@ -57,6 +66,15 @@ public:
         const LoadBelt& belt;
         const ConfigCell& config_cell;
         GameIdCell& game_id_cell;
+
+        infra::OptRef<const ConfigValueCell> config_value_cell{};
+
+        infra::OptRef<svc::NicControlInbox> nic{};
+
+        infra::OptRef<ShareGrantCell> share_grant{};
+        infra::OptRef<xthread::WakeFlag> io_wake{};
+        infra::OptRef<const svc::Vfs> vfs{};
+        hal::FpgaAperture aperture{};
     };
 
     explicit LadderHostAdapter(const Edges& edges) noexcept : edges_(edges) {}
@@ -108,12 +126,25 @@ public:
     [[nodiscard]] cores::SaveExtent save_extent() override;
     [[nodiscard]] proto::StatusWord status_word() override;
     [[nodiscard]] std::optional<proto::FieldValue> option_choice(cores::OptionTag tag) override;
+    [[nodiscard]] std::span<const std::byte> config_value(std::span<std::byte> dst) override;
+    [[nodiscard]] bool boot_screen() override;
+
+    [[nodiscard]] bool start_nic(svc::NicLink link) override;
 
     void game_identified(std::string_view image, const svc::disc::DiscIdText& serial) override;
 
+    void reset_share() override;
+
+    void close_share() noexcept;
+
 private:
+    void publish_closed_() noexcept;
+
     const Edges edges_;
     std::optional<WalkAsk> walk_{};
+
+    std::optional<ShareGrant::Open> share_{};
+    bool open_live_ = false;
 };
 
 }

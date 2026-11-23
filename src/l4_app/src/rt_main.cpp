@@ -9,7 +9,7 @@
 #include "app/link_session.h"
 #include "app/link_op_facts.h"
 #include "app/core_frame_counter.h"
-#include "app/disk_relay.h"
+#include "app/disk_relays.h"
 #include "app/replay/replay_gate.h"
 #include "app/round_budget.h"
 #include "app/save_upload_relay.h"
@@ -99,13 +99,17 @@ bool RtMain::drain_fio_(RoundBudget& budget) noexcept {
 
     budget.debit(RoundAct::Saves, session_->saves().take_round_words());
     proto::link::SpiFioQueue& q = session_->binder().fio_queue();
-    if (session_->park().engaged()) {
+
+    const bool parked = session_->park().engaged();
+    if (parked && !session_->saves().holds_fio()) {
         q.abandon();
         return false;
     }
 
     session_->service_saves(budget.remaining());
     budget.debit(RoundAct::Saves, session_->saves().take_round_words());
+    if (parked)
+        return false;
     return q.drain(budget.remaining()) != proto::FioWordCount{};
 }
 

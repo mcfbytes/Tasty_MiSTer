@@ -9,7 +9,7 @@
 #include "cores/stream_load_host.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
-#include "proto/mailbox_frame_decl.h"
+#include "proto/mailbox_programme.h"
 
 namespace mister::cores::snes {
 
@@ -17,9 +17,9 @@ class SgbCore final : public Core {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SgbCore(const CoreProfile& p, const HostServices& h, proto::MailboxFrameDecl frame)
+    SgbCore(const CoreProfile& p, const HostServices& h, proto::MailboxProgramme mailbox)
         : Core(p, h),
-          mailbox_(MailboxCarriage::granted(h, frame)) {}
+          mailbox_(MailboxCarriage::granted(h, mailbox)) {}
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt&) override { return {}; }

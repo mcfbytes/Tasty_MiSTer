@@ -13,6 +13,7 @@
 namespace mister::ui {
 
 struct BrowserEntry;
+struct SessionFacts;
 class IBrowseSource;
 struct ScriptLaunch;
 struct PageLaunches;
@@ -24,6 +25,8 @@ public:
     struct Borrows {
         infra::OptRef<PageLaunches> launches{};
         infra::OptRef<const IBrowseSource> storage{};
+
+        infra::OptRef<const SessionFacts> session{};
     };
 
     void bind(Borrows b) noexcept;

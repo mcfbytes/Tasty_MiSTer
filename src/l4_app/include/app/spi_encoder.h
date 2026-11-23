@@ -60,6 +60,7 @@ public:
     Outcome on(const proto::LinkOp::BlockAnswer& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::BindJoy& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::JoyRelease& a, const LinkOpCtx& ctx) noexcept;
+    Outcome on(const proto::LinkOp::JoyStick& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SaveUpload& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::Ps2Frame& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetOsdVisible& a, const LinkOpCtx& ctx) noexcept;

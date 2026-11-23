@@ -23,7 +23,9 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/deadline.h"
+#include "proto/mailbox_words.h"
 #include "proto/types.h"
+#include "proto/uio_opcodes.h"
 #include "svc/card_writer.h"
 #include "svc/vfs.h"
 
@@ -129,6 +131,10 @@ protected:
     [[nodiscard]] bool order_disc_payload(const proto::LinkOp::StageDiscPayload& facts = {});
 
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
+
+    [[nodiscard]] bool order_register_write(proto::UioOp opcode, const proto::MailboxWords& words);
+
+    [[nodiscard]] Ex<bool> order_bind_mount(proto::IoIndex slot, std::string_view image);
     [[nodiscard]] os::RawMonotonicClock::time_point now() const;
 
     [[nodiscard]] proto::ActKey next_gen() noexcept { return host_.next_act(); }

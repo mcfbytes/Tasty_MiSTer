@@ -97,6 +97,11 @@ const cores::CoreProfile& NegotiatedCore::loaded_profile() const {
     return cores::profile_for(core_name().view(), hint);
 }
 
+const cores::CoreProfile& NegotiatedCore::named_profile() const {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    return cores::profile_for(core_name().view());
+}
+
 bool NegotiatedCore::owns_loader() const {
     TASTY_SEAT_BODY(NegotiatedCore);
     const auto row = load_row();
@@ -146,10 +151,18 @@ void NegotiatedCore::elect_defmra_(std::string_view text, const UiRequest::LoadC
 }
 
 proto::TxSlabId NegotiatedCore::intern_saved_cfg_(std::string_view core_name) {
+    saved_status_ = {};
     const auto rel = core_cfg_rel(core_name);
     if (!rel)
         return {};
-    return intern_exact(vfs_, inbox_, rel->view(), sizeof(proto::StatusWord::Bytes));
+    const auto image = read_exact<sizeof(proto::StatusWord::Bytes)>(vfs_, rel->view());
+    if (!image)
+        return {};
+    const auto id = inbox_.intern(std::span<const std::uint8_t>(*image));
+    if (!id)
+        return {};
+    saved_status_ = proto::StatusWord::from_bytes(*image);
+    return *id;
 }
 
 }

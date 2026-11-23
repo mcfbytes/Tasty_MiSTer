@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -8,11 +9,14 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
-#include "app/path_text.h"
+#include "app/start_file.h"
 #include "cores/boot_asset.h"
+#include "cores/host_bit_row.h"
 #include "cores/start_rule.h"
 #include "infra/seat.h"
+#include "proto/status_word.h"
 #include "proto/types.h"
 
 namespace mister::svc {
@@ -20,12 +24,6 @@ class Vfs;
 }
 
 namespace mister::app {
-
-struct StartFile {
-    PathText path{};
-    proto::WideIoIndex dest{};
-    proto::FileOffset at{};
-};
 
 class StartChain {
     TASTY_SEAT_RESIDENT(Main);
@@ -42,13 +40,34 @@ public:
         bool remembered = false;
         bool ladder = false;
         bool slot0_held = false;
+        std::span<const cores::HostBitRow> host_bits{};
+        proto::StatusWord status{};
+
+        std::span<const std::string_view> remembered_exts{};
+    };
+
+    struct Place {
+        std::size_t v = 0;
+
+        [[nodiscard]] constexpr std::span<const StartFile> burst(
+            std::span<const StartFile> files
+        ) const noexcept {
+            const std::span<const StartFile> rest = files.subspan(std::min(v, files.size()));
+            return rest.first(std::min(rest.size(), cores::kMaxStartAssets));
+        }
+
+        [[nodiscard]] constexpr Place past(std::span<const StartFile> files) const noexcept {
+            return Place{v + burst(files).size()};
+        }
+
+        [[nodiscard]] constexpr bool ends(std::span<const StartFile> files) const noexcept {
+            return v >= files.size();
+        }
     };
 
     [[nodiscard]] static StartChain plan(const Facts& f, const svc::Vfs& vfs);
 
-    [[nodiscard]] std::span<const StartFile> files() const noexcept {
-        return {files_.data(), count_};
-    }
+    [[nodiscard]] std::span<const StartFile> files() const noexcept { return files_; }
 
     [[nodiscard]] bool holds_reset() const noexcept { return hold_; }
 
@@ -68,6 +87,8 @@ private:
         proto::WideIoIndex dest,
         proto::FileOffset at = proto::kFileStart
     );
+
+    [[nodiscard]] static bool sends_(const cores::BootAsset& row, const Facts& f) noexcept;
     [[nodiscard]] static std::optional<StartFile> file_(
         std::string_view path,
         proto::WideIoIndex dest,
@@ -77,8 +98,8 @@ private:
     static constexpr std::size_t kBootImages = 5;
 
     static constexpr std::uint8_t kNumberedBootImages = 4;
-    std::array<StartFile, cores::kMaxStartAssets> files_{};
-    std::size_t count_ = 0;
+
+    std::vector<StartFile> files_{};
     std::array<StartFile, kBootImages> images_{};
     std::size_t image_count_ = 0;
     bool hold_ = false;

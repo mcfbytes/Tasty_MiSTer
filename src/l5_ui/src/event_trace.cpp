@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <utility>
 #include <ctime>
 #include <iterator>
 
@@ -90,10 +91,11 @@ constexpr auto kErrcNames = std::to_array<ErrcName>({
     {Errc::busy, "busy"},
     {Errc::seat_absent, "seat_absent"},
     {Errc::contract, "contract"},
+    {Errc::choice_needed, "choice_needed"},
 });
 
 consteval bool errc_names_are_ordinal() {
-    if (std::size(kErrcNames) != infra::ordinal(Errc::contract) + 1)
+    if (std::size(kErrcNames) != infra::ordinal(Errc::choice_needed) + 1)
         return false;
     for (std::size_t i = 0; i < std::size(kErrcNames); ++i) {
         if (infra::ordinal(kErrcNames[i].errc) != i)
@@ -250,6 +252,20 @@ void EventTrace::record(const app::Event::SessionEnded&, const app::Event::Head&
     if (!admit_())
         return;
     write_("SessionEnded", "\"errc\":null,", app::Event::SessionEnded::kKind, h);
+}
+
+void EventTrace::record(const app::Event::MountRefused& a, const app::Event::Head& h) noexcept {
+    if (!admit_())
+        return;
+    char f[kEventFieldBytes];
+    std::snprintf(
+        f,
+        sizeof f,
+        "\"slot\":%s,\"reason\":%u,",
+        a.slot.text().c_str(),
+        unsigned{std::to_underlying(a.reason)}
+    );
+    write_("MountRefused", f, app::Event::MountRefused::kKind, h);
 }
 
 void EventTrace::record(const app::Event::RamImageDeclined& a, const app::Event::Head& h) noexcept {

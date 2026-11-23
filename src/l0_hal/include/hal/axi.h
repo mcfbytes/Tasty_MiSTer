@@ -38,13 +38,13 @@ inline constexpr PhysRegion kX86Share{os::PhysAddr{0x300C'E000u}, 0x0000'2000u, 
 
 inline constexpr PhysRegion kX86Mem{os::PhysAddr{0x3000'0000u}, kLenUnsourced, "x86-mem"};
 
-inline constexpr PhysRegion kA2065Flat{os::PhysAddr{0x1FF0'0000u}, 0x0001'0000u, "a2065-flat"};
+inline constexpr PhysRegion kNicMailbox{os::PhysAddr{0x1FF0'0000u}, 0x0001'0000u, "nic-mailbox"};
 
 inline constexpr std::array<PhysRegion, kRegionCount> kCatalog{
     kMinimigShare,
     kX86Share,
     kX86Mem,
-    kA2065Flat,
+    kNicMailbox,
     kVideoFb,
     kScalerOut,
 };

@@ -34,6 +34,7 @@
 #include "app/capture/rec_write_main.h"
 #include "app/rt_main.h"
 #include "app/video_pump.h"
+#include "svc/nic_main.h"
 #include "infra/prelude.h"
 #include "os/clock.h"
 #include "os/delay.h"

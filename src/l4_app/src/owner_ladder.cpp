@@ -166,7 +166,8 @@ bool OwnerLadder::arm_start(
         return false;
     const cores::StagingPolicy& sp = row->profile.staging;
     const bool start_save = sp.save && !sp.save->start_dir.empty();
-    if (!start_save && row->profile.start_assets.empty())
+
+    if (!start_save && row->profile.start_assets.empty() && !row->profile.reset.reinits)
         return false;
     const cores::LadderContext ctx{
         .vfs = vfs_,

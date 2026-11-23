@@ -24,6 +24,8 @@
 #include "proto/rotation_dir.h"
 #include "proto/rtc_image.h"
 #include "proto/save_kind.h"
+#include "proto/stick_pos.h"
+#include "proto/stick_side.h"
 #include "proto/types.h"
 #include "proto/uio_opcodes.h"
 
@@ -79,12 +81,14 @@ struct LinkOp {
         DetachSave,
         MenuCtl,
         PlainDownload,
+        JoyStick,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
 
     enum class OsdShow : std::uint8_t { Off = 0, Menu = 1, Overlay = 2 };
-    enum class SlotBind : std::uint8_t { Mount = 0, Unmount = 1, MountCd = 2 };
+
+    enum class SlotBind : std::uint8_t { Mount = 0, Unmount = 1, MountCd = 2, Announce = 3 };
     enum class DecoderTable : std::uint8_t { Census = 0, PreSession = 1 };
 
     [[nodiscard]] static constexpr std::uint32_t detail(SlotBind kind) noexcept {
@@ -261,6 +265,13 @@ struct LinkOp {
         PlayerIndex player{};
         std::uint8_t pad_[3]{};
         JoyMask mask{};
+    };
+
+    struct JoyStick {
+        static constexpr Kind kKind = Kind::JoyStick;
+        PlayerIndex player{};
+        StickSide side = StickSide::Left;
+        StickPos pos{};
     };
 
     struct SaveUpload {
@@ -488,7 +499,8 @@ struct LinkOp {
         AttachSave,
         DetachSave,
         MenuCtl,
-        PlainDownload>;
+        PlainDownload,
+        JoyStick>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(std::uint32_t) std::array<std::byte, kStore> store{};
@@ -496,7 +508,7 @@ struct LinkOp {
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
 static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == alignof(std::uint32_t));
-static_assert(infra::ordinal(LinkOp::Kind::kCount) == 47);
+static_assert(infra::ordinal(LinkOp::Kind::kCount) == 48);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
     return a.region != RegionCode::kNone;

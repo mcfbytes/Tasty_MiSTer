@@ -62,6 +62,17 @@ Ex<void> JoystickPort::push_analog_r(ILinkPadEncoder& pads, std::uint8_t index, 
     return push_analog(pads, UioOp::Astick2, index, pos);
 }
 
+Ex<void> JoystickPort::push_stick(
+    ILinkPadEncoder& pads,
+    PlayerIndex player,
+    StickSide side,
+    StickPos pos
+) {
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
+    return push_analog(pads, stick_opcode(side), stick_index(player), pos);
+}
+
 Ex<void> JoystickPort::push_paddle(ILinkPadEncoder& pads, PlayerIndex player, std::uint8_t value) {
     if (!prev_.find(player))
         return bad_player(player, ERR_SITE());

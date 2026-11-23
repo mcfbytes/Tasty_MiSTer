@@ -6,8 +6,11 @@
 
 #include "hal/types.h"
 #include "infra/affine.h"
+#include "proto/disk_address.h"
+#include "proto/link_sel.h"
 #include "proto/types.h"
 #include "proto/user_io/condition.h"
+#include "proto/user_io/head_lengths.h"
 #include "proto/user_io/poll_frame.h"
 
 namespace mister::proto::user_io {
@@ -42,10 +45,15 @@ public:
     struct Row {
         hal::SpiWord opcode{};
         bool keeps_command_reply = false;
+        std::optional<DiskAddress> address{};
         TransferKind kind = TransferKind::AckedWord;
         ReplyCount leading{};
         ReplyCount guarded{};
         Guard guard{};
+        hal::SpiWord exchanged{};
+        LinkSel select = LinkSel::Io;
+
+        std::optional<HeadLengths> head_lengths{};
     };
 
     consteval explicit PollFrameShape(Row row) : row_(row) {
@@ -54,7 +62,8 @@ public:
     }
 
     [[nodiscard]] static constexpr bool well_formed(const Row& r) noexcept {
-        if (r.opcode == hal::SpiWord{} || !r.guard.mask.any())
+
+        if (r.opcode == hal::SpiWord{} && (r.select == LinkSel::Io || !r.keeps_command_reply))
             return false;
         if (r.kind == TransferKind::kCount || r.guard.condition == Condition::kCount)
             return false;
@@ -62,6 +71,15 @@ public:
             return false;
         if (kept_of(r) > kMaxPollFrameReplies)
             return false;
+
+        if (r.head_lengths
+            && (r.guard.mask.any()
+                || r.guarded != ReplyCount{}
+                || !infra::affine::in_bounds(kept_before_guard_of(r), r.head_lengths->head)))
+            return false;
+
+        if (!r.guard.mask.any())
+            return r.guarded == ReplyCount{} && kept_of(r) > ReplyCount{};
         if (!infra::affine::in_bounds(kept_before_guard_of(r), r.guard.reply))
             return false;
         const bool reads_command_reply = r.keeps_command_reply && r.guard.reply == ReplyIndex{};
@@ -78,8 +96,13 @@ public:
         return kept_before_guard_of(row_);
     }
 
+    [[nodiscard]] constexpr bool unguarded() const noexcept { return !row_.guard.mask.any(); }
+
     [[nodiscard]] constexpr FioWordCount held_words() const noexcept {
-        return kCommandBeatWords + row_.leading.link_words();
+        return kCommandBeatWords
+            + (row_.address ? DiskAddress::kWords : FioWordCount{})
+            + row_.leading.link_words()
+            + widest_more_of(row_).link_words();
     }
 
     [[nodiscard]] constexpr FioWordCount max_words() const noexcept {
@@ -90,6 +113,8 @@ public:
         const PollFrame& in_hand,
         std::optional<ReplyWord> last_seen
     ) const noexcept {
+        if (unguarded())
+            return true;
         return condition_holds(
             row_.guard.condition,
             row_.guard.mask,
@@ -107,8 +132,12 @@ private:
         return (r.keeps_command_reply ? ReplyCount{1} : ReplyCount{}) + r.leading;
     }
 
+    [[nodiscard]] static constexpr ReplyCount widest_more_of(const Row& r) noexcept {
+        return r.head_lengths ? r.head_lengths->widest() : ReplyCount{};
+    }
+
     [[nodiscard]] static constexpr ReplyCount kept_of(const Row& r) noexcept {
-        return kept_before_guard_of(r) + r.guarded;
+        return kept_before_guard_of(r) + widest_more_of(r) + r.guarded;
     }
 
     Row row_;

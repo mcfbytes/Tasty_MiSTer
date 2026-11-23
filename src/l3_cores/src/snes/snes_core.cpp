@@ -9,7 +9,7 @@ namespace mister::cores::snes {
 
 SnesCore::SnesCore(const CoreProfile& p, const HostServices& h)
     : Core(p, h),
-      mailbox_(MailboxCarriage::granted(h, kSnesMailboxFrame)) {}
+      mailbox_(MailboxCarriage::granted(h, kSnesMailbox)) {}
 
 Ex<void> SnesCore::do_adopt(const CoreAdopt&) {
 

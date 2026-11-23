@@ -77,7 +77,7 @@ void JoyMenuChords::publish_joy_menu(
     InputDecode& lane,
     MenuEdgeSink sink
 ) {
-    const bool osd_visible = focus != KeyFocus::Core;
+    const bool osd_visible = raises_osd_gate(focus);
     const svc::JoyMask now = r.menu_buttons;
     const svc::JoyMask prev = prev_menu;
     prev_menu = now;

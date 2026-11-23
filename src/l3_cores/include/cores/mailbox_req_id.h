@@ -13,6 +13,10 @@ public:
 
     explicit constexpr MailboxReqId(std::uint16_t wire) noexcept : wire_(wire) {}
 
+    [[nodiscard]] constexpr MailboxReqId next() const noexcept {
+        return MailboxReqId{static_cast<std::uint16_t>((wire_ + 1u) % kNone)};
+    }
+
     friend bool operator==(const MailboxReqId&, const MailboxReqId&) = default;
 
 private:

@@ -152,6 +152,13 @@ public:
         return std::nullopt;
     }
 
+    [[nodiscard]] constexpr std::optional<Index> pop_lowest() noexcept {
+        const std::optional<Index> index = lowest();
+        if (index)
+            erase(ordinal_of(*index));
+        return index;
+    }
+
     template <class Each>
     constexpr void drain(Each&& each) {
         for (std::size_t w = 0; w < kWordCount; ++w) {

@@ -205,7 +205,7 @@ LoadLadder::Pass LoadLadder::fill_(Host& h) {
     }
     const proto::FileSize piece = (extent - fill_off_).min(proto::FileSize{buf_.size()});
     const std::span<std::uint8_t> tail = infra::affine::first(std::span<std::uint8_t>{buf_}, piece);
-    std::ranges::fill(tail, job_.row.fill);
+    std::ranges::fill(std::as_writable_bytes(tail), job_.row.fill);
     if (!window_.write(fill_off_.file_word<std::size_t>(), std::as_bytes(tail)))
         return cut_(h);
     if (job_.mirror

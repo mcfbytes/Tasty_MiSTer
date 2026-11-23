@@ -159,7 +159,8 @@ Ex<void> InputEnumerator::load_maps_for(
     std::string_view core_in,
     bool front_end,
     infra::OptRef<const IAnalogReshape> reshape,
-    const JoyPlan& joy
+    const JoyPlan& joy,
+    StickReach reach
 ) {
 
     const std::string_view core = front_end ? std::string_view{} : core_in;
@@ -181,6 +182,7 @@ Ex<void> InputEnumerator::load_maps_for(
         d.install_sys_map(*sys);
 
         d.set_reshape(reshape);
+        d.set_stick_reach(reach);
 
         WireWords sys_as_wire = as_wire_words(*sys);
         const WireWords* wire = &sys_as_wire;

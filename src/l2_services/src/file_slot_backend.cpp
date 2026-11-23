@@ -2,6 +2,7 @@
 #include "svc/file_slot_backend.h"
 
 #include <cerrno>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -20,9 +21,10 @@ template <std::size_t... I>
 SaveSlotBackends make_backends(
     std::index_sequence<I...>,
     const Vfs& vfs,
-    SaveStageKeeper& keeper
+    SaveStageKeeper& keeper,
+    MountRefusalCell& refusals
 ) noexcept {
-    return SaveSlotBackends{((void)I, FileSlotBackend{vfs, keeper})...};
+    return SaveSlotBackends{((void)I, FileSlotBackend{vfs, keeper, refusals})...};
 }
 
 std::unexpected<Error> no_file(infra::ErrorSite at) noexcept {
@@ -35,13 +37,28 @@ std::unexpected<Error> absent(infra::ErrorSite at) noexcept {
 
 }
 
-SaveSlotBackends make_save_slot_backends(const Vfs& vfs, SaveStageKeeper& keeper) noexcept {
-    return make_backends(std::make_index_sequence<proto::kAnnounceableSlots>{}, vfs, keeper);
+SaveSlotBackends make_save_slot_backends(
+    const Vfs& vfs,
+    SaveStageKeeper& keeper,
+    MountRefusalCell& refusals
+) noexcept {
+    return make_backends(
+        std::make_index_sequence<proto::kAnnounceableSlots>{},
+        vfs,
+        keeper,
+        refusals
+    );
 }
 
-FileSlotBackend::FileSlotBackend(const Vfs& vfs, SaveStageKeeper& keeper) noexcept
+FileSlotBackend::FileSlotBackend(
+    const Vfs& vfs,
+    SaveStageKeeper& keeper,
+    MountRefusalCell& refusals
+) noexcept
     : keeper_(keeper),
+      refusals_(refusals),
       in_place_(vfs),
+      coded_(vfs),
       staged_(keeper),
       file_(in_place_) {}
 
@@ -51,7 +68,7 @@ void FileSlotBackend::close_() noexcept {
 }
 
 Ex<proto::FileSize> FileSlotBackend::open_extent(
-    proto::SlotIndex,
+    proto::SlotIndex slot,
     const BlockCtl::StorageOrder& order
 ) {
     TASTY_SEAT_BODY(FileSlotBackend);
@@ -59,7 +76,17 @@ Ex<proto::FileSize> FileSlotBackend::open_extent(
     if (!in_place_.take_path(order))
         return no_file(ERR_SITE());
     in_place_.make_parent();
-    return in_place_.open_file();
+
+    if (order.formats().empty())
+        return in_place_.open_file();
+    auto extent = coded_.open(in_place_.path(), order.formats());
+    if (extent) {
+        file_ = coded_;
+    } else if (const std::optional<MountRefusal> why = refusal_in(extent.error())) {
+
+        refusals_.publish(MountRefusalNote{.slot = slot, .reason = *why});
+    }
+    return extent;
 }
 
 Ex<proto::FileSize> FileSlotBackend::open_save_extent(
@@ -231,6 +258,67 @@ void FileSlotBackend::InPlace::close() noexcept {
     if (counted_by_)
         counted_by_->note_in_place_closed();
     counted_by_ = {};
+}
+
+Ex<proto::FileSize> FileSlotBackend::Coded::open(
+    std::string_view path,
+    std::span<const DiskFormatRow> rows
+) {
+    TASTY_SEAT_BODY(Coded);
+    image_.reset();
+    auto image = open_disk_image(card_, path, rows);
+
+    if (!image) {
+        auto read_only = open_disk_image(vfs_, path, rows, OpenMode::Read);
+        if (!read_only)
+            return std::unexpected(image.error());
+        image = std::move(read_only);
+    }
+    image_ = std::move(*image);
+    return image_->size();
+}
+
+Ex<infra::ByteCount> FileSlotBackend::Coded::read_at(
+    proto::FileOffset at,
+    std::span<std::byte> dst
+) {
+    TASTY_SEAT_BODY(Coded);
+    if (image_ == nullptr)
+        return no_file(ERR_SITE());
+    auto n = image_->read_at(at, dst);
+    if (!n)
+        return std::unexpected(n.error());
+    return infra::ByteCount{*n};
+}
+
+Ex<infra::ByteCount> FileSlotBackend::Coded::write_at(
+    proto::FileOffset at,
+    std::span<const std::byte> src
+) {
+    TASTY_SEAT_BODY(Coded);
+    if (image_ == nullptr)
+        return no_file(ERR_SITE());
+
+    auto n = image_->write_at(at, src);
+    if (!n)
+        return std::unexpected(n.error());
+    return infra::ByteCount{*n};
+}
+
+Ex<proto::FileSize> FileSlotBackend::Coded::create(std::span<const std::byte>) {
+    TASTY_SEAT_BODY(Coded);
+
+    return no_file(ERR_SITE());
+}
+
+Ex<void> FileSlotBackend::Coded::flush() {
+    TASTY_SEAT_BODY(Coded);
+    return {};
+}
+
+void FileSlotBackend::Coded::close() noexcept {
+    TASTY_SEAT_BODY(Coded);
+    image_.reset();
 }
 
 void FileSlotBackend::Staged::hold(proto::StageKey key) noexcept {

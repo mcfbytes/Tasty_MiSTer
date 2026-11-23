@@ -178,6 +178,17 @@ ILinkEncoder::Outcome SpiEncoder::on(
     return ILinkEncoder::Outcome::Encoded;
 }
 
+ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyStick& a, const LinkOpCtx&) noexcept {
+    TASTY_SEAT_BODY(SpiEncoder);
+    if (a.player >= kPlayerLimit) {
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    if (!em_.push_stick(frame_, a.player, a.side, a.pos)) {
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    return ILinkEncoder::Outcome::Encoded;
+}
+
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::Ps2Frame& a, const LinkOpCtx&) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     const proto::Ps2Frame& frame = a.frame;

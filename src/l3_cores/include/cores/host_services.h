@@ -2,7 +2,9 @@
 #pragma once
 
 #include "cores/core_window_grant.h"
+#include "cores/disk_ports.h"
 #include "cores/save_copy_level.h"
+#include "cores/slot_servant_grant.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/xthread/wake_flag.h"
@@ -38,7 +40,6 @@ class DiskLamp;
 
 namespace mister::cores {
 
-class IDiskPort;
 class IMailboxPort;
 
 struct HostServices {
@@ -59,12 +60,14 @@ struct HostServices {
 
     infra::OptRef<const SaveCopyCell> save_copy{};
 
-    infra::OptRef<IDiskPort> disk{};
+    DiskPorts disk{};
 
     infra::OptRef<hal::DiskLamp> lamp{};
     infra::OptRef<xthread::WakeFlag> disk_activity{};
 
     infra::OptRef<svc::IStorageBackend> save_store{};
+
+    SlotServantGrant slot_servants{};
 };
 
 }

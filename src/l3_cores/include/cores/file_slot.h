@@ -8,14 +8,21 @@
 #include <span>
 #include <string_view>
 
+#include "cores/disk_mirror.h"
+#include "cores/mount_index_form.h"
 #include "cores/types.h"
 #include "infra/seat.h"
+#include "svc/disk_format_row.h"
 
 namespace mister::cores {
 
 class IRomsetAliasSource;
 
-enum class SlotRole : std::uint8_t { Image, Disc, Save, Ladder };
+enum class SlotRole : std::uint8_t { Image, Disc, Save, Ladder, Drive };
+
+[[nodiscard]] constexpr bool slot_service_serves(SlotRole role) {
+    return role == SlotRole::Save || role == SlotRole::Drive;
+}
 
 enum class StartMount : std::uint8_t { Generic, AsPick, Unmodelled };
 
@@ -36,6 +43,14 @@ struct FileSlot {
     bool opens_zip = false;
 
     StartMount start_mount = StartMount::Generic;
+
+    std::span<const svc::DiskFormatRow> disk_formats{};
+
+    bool via_slot_service = false;
+
+    MountIndexForm mount_index_form = MountIndexForm::ExtOrdinal;
+
+    std::optional<DiskMirror> mirror{};
 };
 
 [[nodiscard]] constexpr bool walks_romset(std::span<const FileSlot> slots, IoIndex index) {
@@ -50,6 +65,16 @@ struct FileSlot {
     return s.romset_browse.has_value();
 }
 
+[[nodiscard]] constexpr std::optional<DiskMirror> mirror_of(
+    std::span<const FileSlot> slots,
+    IoIndex index
+) {
+    for (const FileSlot& s : slots)
+        if (s.index == index && !is_load_row(s))
+            return s.mirror;
+    return std::nullopt;
+}
+
 [[nodiscard]] constexpr SlotRole role_of(
     std::span<const FileSlot> slots,
     IoIndex index,
@@ -61,6 +86,16 @@ struct FileSlot {
     return undeclared;
 }
 
+[[nodiscard]] constexpr MountIndexForm mount_index_form_of(
+    std::span<const FileSlot> slots,
+    IoIndex index
+) {
+    for (const FileSlot& s : slots)
+        if (s.index == index && !is_load_row(s))
+            return s.mount_index_form;
+    return MountIndexForm::ExtOrdinal;
+}
+
 [[nodiscard]] constexpr StartMount start_mount_of(
     std::span<const FileSlot> slots,
     IoIndex index,
@@ -70,6 +105,27 @@ struct FileSlot {
         if (s.index == index && !is_load_row(s))
             return s.start_mount;
     return undeclared;
+}
+
+[[nodiscard]] constexpr std::span<const svc::DiskFormatRow> disk_formats_of(
+    std::span<const FileSlot> slots,
+    IoIndex index,
+    std::span<const svc::DiskFormatRow> fallback
+) {
+    for (const FileSlot& s : slots)
+        if (s.index == index && !is_load_row(s) && !s.disk_formats.empty())
+            return s.disk_formats;
+    return fallback;
+}
+
+[[nodiscard]] constexpr bool mounts_via_slot_service(
+    std::span<const FileSlot> slots,
+    IoIndex index
+) {
+    for (const FileSlot& s : slots)
+        if (s.index == index && !is_load_row(s))
+            return s.via_slot_service;
+    return false;
 }
 
 [[nodiscard]] constexpr std::size_t disc_rows(std::span<const FileSlot> slots) {

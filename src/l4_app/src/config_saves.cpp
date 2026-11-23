@@ -230,6 +230,19 @@ bool ConfigSaves::write_durably_(std::string_view rel, std::span<const std::byte
 void ConfigSaves::on(const UiRequest::SaveConfig&, const UiRequest::Head& head) {
     TASTY_SEAT_BODY(ConfigSaves);
     const CorrelationTag tag = head.tag;
+    const auto row = cores::find_core(negotiated_.core_name().view());
+
+    if (row && row->profile.config_codec && row->profile.settings_in_startup_slot) {
+        slot_save_slot_ = cores::kStartupSlot;
+        if (!order_save_ask(proto::SaveKind::Slot, tag))
+            publish_save_verdict_(false, tag);
+        return;
+    }
+
+    if (row && row->profile.suppress_reset_status_write) {
+        publish_save_verdict_(false, tag);
+        return;
+    }
     const auto rel = core_cfg_rel(negotiated_.saved_cfg_stem().view());
     if (!rel) {
         publish_save_verdict_(false, tag);

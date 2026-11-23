@@ -70,6 +70,8 @@ public:
 
     infra::OptRef<const Page> focus_top() const noexcept;
 
+    PageKeys key_owner() const noexcept;
+
 private:
     [[nodiscard]] Page* top_() noexcept { return pages_.empty() ? nullptr : pages_.back().get(); }
 

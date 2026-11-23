@@ -48,6 +48,7 @@ public:
 
     bool fill_blank(proto::SlotIndex slot, proto::Lba lba, std::span<std::uint8_t> window) override;
 
+    void note_track_shape(proto::SlotIndex slot, proto::TrackShape shape) noexcept override;
     void note_attached(proto::SlotIndex slot, bool exists, proto::FileSize size) noexcept override;
     void note_detached(proto::SlotIndex slot) noexcept override;
 
@@ -66,6 +67,7 @@ private:
         svc::SlotPathText path{};
         bool exists = false;
         proto::FileSize size{};
+        proto::TrackShape track{};
         Attach attach = Attach::Detached;
         bool manual = false;
         bool close_owed = false;

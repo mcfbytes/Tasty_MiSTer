@@ -23,6 +23,7 @@
 #include "infra/xthread/wake_flag.h"
 #include "infra/seat.h"
 #include "proto/disk_act.h"
+#include "proto/user_io/poll_frame.h"
 #include "svc/card_writer.h"
 #include "svc/disk_format_row.h"
 #include "svc/disk_image.h"
@@ -55,7 +56,7 @@ public:
 
     [[nodiscard]] MountState bind(proto::DiskUnit unit, std::string_view path) noexcept override;
     [[nodiscard]] proto::DiskAct start(
-        std::span<const std::byte, proto::kDiskStateBytes> state,
+        const proto::user_io::PollFrame& block,
         std::span<std::byte, proto::kDiskActBytes> bytes
     ) noexcept override;
     [[nodiscard]] proto::DiskAct resume(

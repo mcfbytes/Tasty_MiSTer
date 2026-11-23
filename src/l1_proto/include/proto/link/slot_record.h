@@ -38,6 +38,7 @@ struct SlotRecord {
         bool growable = false;
         bool deferred_create = false;
         MountClass mount = MountClass::Image;
+        TrackShape track{};
     };
 
     struct Credit {

@@ -22,7 +22,7 @@ enum class RoundClass : std::uint8_t { Steady, Lifecycle, kCount };
 
 enum class RefusedAnswer : std::uint8_t { None, FtxLevel, PayloadEcho, kCount };
 
-enum class Pad : std::uint8_t { None, Emit, Release, kCount };
+enum class Pad : std::uint8_t { None, Emit, Release, Stick, kCount };
 
 enum class DatHold : std::uint8_t { Release, Arm, kCount };
 
@@ -147,6 +147,14 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
      RefusedAnswer::None,
      Pad::None,
      DatHold::Arm},
+    {proto::LinkOp::Kind::JoyStick,
+     OpTarget::Wire,
+     Window::Framed,
+     {},
+     RoundCost::Free,
+     RoundClass::Steady,
+     RefusedAnswer::None,
+     Pad::Stick},
 });
 static_assert(
     infra::rows_are_ordinal(kLinkOpFacts),

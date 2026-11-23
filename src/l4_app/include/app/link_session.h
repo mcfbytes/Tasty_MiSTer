@@ -102,7 +102,7 @@ namespace mister::app {
 class VideoWire;
 class ICheatApply;
 class OsdWire;
-class DiskRelay;
+class DiskRelays;
 class SaveUploadRelay;
 class WindowJobService;
 template <SeatTag Consumer>
@@ -256,7 +256,7 @@ public:
 
     void seal_boot_pump() noexcept;
 
-    [[nodiscard]] DiskRelay& disks() noexcept { return disks_; }
+    [[nodiscard]] DiskRelays& disks() noexcept { return disks_; }
 
     [[nodiscard]] SaveUploadRelay& saves() noexcept { return saves_; }
 
@@ -291,6 +291,10 @@ public:
     }
 
     [[nodiscard]] const OptionCell& option_cell() const noexcept { return options_.option_cell(); }
+
+    [[nodiscard]] const ConfigValueCell& config_value_cell() const noexcept {
+        return options_.config_value_cell();
+    }
 
     [[nodiscard]] const MountStatusCell& mount_status_cell() const noexcept {
         return slot_bindings_.mount_status_cell();
@@ -436,7 +440,7 @@ private:
     svc::disc::DiscReadService& discs_;
     svc::disc::DiscReadService& unbound_discs_;
     pcm::MailboxRelay& mailbox_;
-    DiskRelay& disks_;
+    DiskRelays& disks_;
     SaveUploadRelay& saves_;
     NvramUpload nvram_;
     WindowJobService& window_jobs_;

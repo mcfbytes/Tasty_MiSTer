@@ -89,6 +89,7 @@ public:
             mgl,
             video,
             launcher,
+            terminal,
             shots,
             replay,
             recorder,
@@ -124,6 +125,8 @@ public:
         app::replay::ReplayFeeder& replay;
         app::RecorderControl& recorder;
         infra::OptRef<app::launcher::LauncherScreen> launcher_screen{};
+
+        infra::OptRef<xthread::ICoworker> terminal{};
         infra::OptRef<app::IUiRoundPort> ui_round{};
 
         infra::OptRef<app::input::MenuKeyInbox> menu_keys{};

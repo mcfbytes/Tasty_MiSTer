@@ -66,7 +66,12 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return kIoBlockForever; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept {
+        infra::ParkTimeout period = kIoBlockForever;
+        for (std::uint8_t i = 0; i < n_coworkers_; ++i)
+            period = infra::sooner_of(period, lanes_[i].lane->poll_period());
+        return period;
+    }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 

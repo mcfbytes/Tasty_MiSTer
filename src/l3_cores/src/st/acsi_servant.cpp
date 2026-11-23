@@ -7,10 +7,12 @@
 #include <optional>
 #include <utility>
 
+#include "cores/st/acsi_poll.h"
 #include "cores/st/st_config.h"
 #include "infra/endian.h"
 #include "infra/path_parts.h"
 #include "infra/prelude.h"
+#include "proto/user_io/poll_frame_decoder.h"
 #include "svc/vfs.h"
 
 namespace mister::cores::st {
@@ -43,9 +45,7 @@ constexpr std::size_t kModeBlockCountAt = 5;
 constexpr std::size_t kModeBlockCountBytes = 3;
 constexpr std::size_t kModeBlockSizeAt = 10;
 constexpr std::size_t kDiskWordBytes = sizeof(std::uint32_t);
-constexpr std::size_t kTargetSelectAt = 10;
 constexpr unsigned kTargetShift = 5;
-constexpr std::uint8_t kUnitSelectBit = 0x01;
 
 constexpr std::string_view kVendor = "MISTer  ";
 constexpr std::string_view kRevision = "ATH ";
@@ -55,18 +55,31 @@ constexpr std::uint8_t u8(std::byte b) noexcept {
 }
 
 struct AcsiState {
+    using Request = AcsiState;
+
+    static constexpr const proto::user_io::PollFrameShape& kFrame = kAcsiPoll.head();
+
     AcsiTarget target{};
     std::optional<Cdb> cdb{};
 
     [[nodiscard]] static std::optional<AcsiState> decode(
-        std::span<const std::byte, proto::kDiskStateBytes> block
+        const proto::user_io::PollFrame& block
     ) noexcept {
-        const std::byte select = block[kTargetSelectAt];
-        if ((u8(select) & kUnitSelectBit) == 0)
+        if (block.kept != kAcsiStateReplies)
             return std::nullopt;
-        return AcsiState{AcsiTarget{u8(select >> kTargetShift)}, Cdb::decode(block)};
+        if (!block.reply(kAcsiSelectReply).intersects(kAcsiPendingBit))
+            return std::nullopt;
+
+        std::array<std::byte, kAcsiStateReplies.size()> bytes{};
+        std::ranges::transform(block.replies, bytes.begin(), [](hal::SpiWord reply) noexcept {
+            return reply.low_lane();
+        });
+        const std::byte select = infra::at_index(bytes, kAcsiSelectReply);
+        return AcsiState{AcsiTarget{u8(select >> kTargetShift)}, Cdb::decode(bytes)};
     }
 };
+
+static_assert(proto::user_io::PollFrameDecoder<AcsiState>);
 
 constexpr hal::SpiWord wire_opcode(DmaOp op) noexcept {
     return hal::SpiWord{static_cast<std::uint16_t>(op)};
@@ -158,12 +171,12 @@ void AcsiServant::release() noexcept {
 }
 
 proto::DiskAct AcsiServant::start(
-    std::span<const std::byte, proto::kDiskStateBytes> state,
+    const proto::user_io::PollFrame& block,
     std::span<std::byte, proto::kDiskActBytes> bytes
 ) noexcept {
     TASTY_SEAT_BODY(AcsiServant);
     forget_command_();
-    const auto command = AcsiState::decode(state);
+    const auto command = AcsiState::decode(block);
     if (!command)
         return proto::DiskAct::none();
     ++commands_;
