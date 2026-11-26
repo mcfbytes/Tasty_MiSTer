@@ -109,7 +109,7 @@ inline constexpr AudioTimeout AudioTimeout::kLastPlayingPass{1};
 struct SectorCounter {
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr SectorCounter of(hal::SpiWord word) noexcept {
+    [[nodiscard]] static constexpr SectorCounter of(hal::LinkWord word) noexcept {
         return SectorCounter{std::to_integer<std::uint8_t>(word.low_lane())};
     }
 

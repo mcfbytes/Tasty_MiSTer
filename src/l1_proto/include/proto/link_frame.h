@@ -23,7 +23,7 @@ class ILinkFrame {
 public:
     virtual ~ILinkFrame() = default;
 
-    [[nodiscard]] virtual Ex<void> begin(LinkSel sel, hal::SpiWord op) = 0;
+    [[nodiscard]] virtual Ex<void> begin(LinkSel sel, hal::LinkWord op) = 0;
 
     [[nodiscard]] Ex<void> begin(UioOp op) { return begin(LinkSel::Io, proto::word(op)); }
 
@@ -31,11 +31,11 @@ public:
 
     [[nodiscard]] Ex<void> begin(OsdOp op) { return begin(LinkSel::Osd, proto::word(op)); }
 
-    [[nodiscard]] virtual Ex<void> word(hal::SpiWord w) = 0;
+    [[nodiscard]] virtual Ex<void> word(hal::LinkWord w) = 0;
 
     [[nodiscard]] virtual Ex<void> end() = 0;
 
-    [[nodiscard]] virtual std::optional<hal::SpiWord> opcode_reply() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<hal::LinkWord> opcode_reply() const noexcept = 0;
 
 protected:
     ILinkFrame() = default;
@@ -46,12 +46,12 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     LinkSel sel,
-    hal::SpiWord op,
-    std::span<const hal::SpiWord> words
+    hal::LinkWord op,
+    std::span<const hal::LinkWord> words
 ) {
     if (auto r = frame.begin(sel, op); !r)
         return r;
-    for (const hal::SpiWord w : words) {
+    for (const hal::LinkWord w : words) {
         if (auto r = frame.word(w); !r)
             return r;
     }
@@ -61,7 +61,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     UioOp op,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 ) {
     return send_frame(frame, LinkSel::Io, proto::word(op), words);
 }
@@ -69,7 +69,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     FioOp op,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 ) {
     return send_frame(frame, LinkSel::Fpga, proto::word(op), words);
 }
@@ -77,7 +77,7 @@ protected:
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
     OsdOp op,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 ) {
     return send_frame(frame, LinkSel::Osd, proto::word(op), words);
 }
@@ -85,7 +85,7 @@ protected:
 [[nodiscard]] inline Ex<void> emit_u32(ILinkFrame& frame, std::uint32_t v, hal::Width framing) {
     std::array<std::uint8_t, sizeof(std::uint32_t)> bytes{};
     infra::store_le<std::uint32_t>(std::span<std::uint8_t, sizeof(std::uint32_t)>(bytes), v);
-    auto walk = for_each_word(framing, bytes, [&frame](hal::SpiWord word) {
+    auto walk = for_each_word(framing, bytes, [&frame](hal::LinkWord word) {
         if (auto r = frame.word(word); !r)
             return Ex<bool>{std::unexpected(r.error())};
         return Ex<bool>{true};

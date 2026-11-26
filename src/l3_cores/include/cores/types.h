@@ -28,7 +28,7 @@ struct Msf;
 }
 
 namespace mister::hal {
-struct SpiHalves;
+struct LinkHalves;
 }
 
 namespace mister::cores {
@@ -165,7 +165,7 @@ struct JoyBit {
 struct BaudRate {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept;
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept;
 
     [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
         return infra::DecimalText{v};

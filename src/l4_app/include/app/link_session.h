@@ -17,6 +17,7 @@
 #include "app/link_encoder.h"
 #include "app/core_terms.h"
 #include "infra/xthread/wake_flag.h"
+#include "hal/ocram_run.h"
 #include "hal/pin_levels.h"
 #include "proto/link_event.h"
 #include "proto/link_op.h"
@@ -32,6 +33,7 @@
 #include "app/core_option_cells.h"
 #include "app/session_rows.h"
 #include "app/held_transfer.h"
+#include "app/ocram_frame_lane.h"
 #include "app/ladder_cell.h"
 #include "app/session_tally.h"
 #include "app/diag_counters.h"
@@ -54,7 +56,7 @@
 #include "proto/osd_focus.h"
 #include "proto/session_live.h"
 #include "proto/link/spi_osd_mask_decoder.h"
-#include "proto/link/spi_sampler.h"
+#include "proto/link/pin_sampler.h"
 #include "proto/link/poll_reader.h"
 #include "app/save_image_source.h"
 #include "app/ui_request.h"
@@ -77,6 +79,7 @@
 #include "reactor/link_decoder.h"
 #include "hal/spi_transport.h"
 #include "proto/link/core_session.h"
+#include "proto/link/frame_route.h"
 #include "proto/types.h"
 #include "svc/input/joy_plan.h"
 
@@ -112,7 +115,7 @@ namespace pcm {
 class MailboxRelay;
 }
 
-struct SupervisorParts;
+struct LinkSessionParts;
 
 class LinkSession : private cores::ICoreInitHost,
                     private RebootAnswer::Host,
@@ -125,10 +128,10 @@ public:
     LinkSession(
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
-        hal::ISpiSampleSource& samples,
+        hal::IPinSampleSource& samples,
         hal::PhysRegion aperture,
         EventQueue<SeatTag::RT>& events,
-        const SupervisorParts& parts
+        const LinkSessionParts& parts
     ) noexcept;
     ~LinkSession();
 
@@ -205,15 +208,23 @@ public:
         return slot_bindings_.slots().take_late_answers();
     }
 
-    enum class WireHold : std::uint8_t { None, Session, Transfer };
+    enum class WireHold : std::uint8_t { None, Session, Transfer, Frames };
 
     [[nodiscard]] WireHold wire_hold() const noexcept {
         if (session_.configure_posted())
             return WireHold::Session;
-        return held_.wire_held() ? WireHold::Transfer : WireHold::None;
+        if (held_.wire_held())
+            return WireHold::Transfer;
+        return frames_.busy() ? WireHold::Frames : WireHold::None;
     }
 
     [[nodiscard]] bool wire_held() const noexcept { return wire_hold() != WireHold::None; }
+
+    void settle_frames() noexcept { frames_.settle(park_.asked()); }
+
+    [[nodiscard]] const proto::link::FrameRoute& frames() const noexcept { return frames_; }
+
+    [[nodiscard]] const OcramFrameLane& frame_lane() const noexcept { return frame_lane_; }
 
     [[nodiscard]] bool prelude_settled() noexcept;
 
@@ -236,6 +247,7 @@ public:
     Result on(const proto::LinkOp::CoreReset& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::LoadFacts& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::MailboxWrite& a, const LinkOpCtx& ctx) noexcept;
+    Result on(const proto::LinkOp::OcramRun& a, const LinkOpCtx& ctx) noexcept;
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
     [[nodiscard]] bool declares_turbo() const noexcept;
@@ -384,7 +396,8 @@ private:
     void bind_routes_(
         infra::OptRef<const SessionRoutes> routes,
         proto::BuildGeneration gen,
-        bool made
+        bool made,
+        const OcramFrameGrant& frame_lane
     ) noexcept;
 
     void drop_routes_() noexcept;
@@ -430,9 +443,14 @@ private:
 
     hal::ISpiTransport& link_;
 
+    infra::OptRef<hal::IOcramRun> ocram_run_;
+
     LinkBinder binder_;
 
     FencedCoreSignals fenced_signals_;
+
+    OcramFrameLane frame_lane_;
+    proto::link::FrameRoute frames_;
 
     SessionMachine machine_;
 
@@ -450,7 +468,7 @@ private:
     LinkRxChannel<SeatTag::Main>& link_rx_;
     LinkRouter& router_;
     Port out_;
-    proto::link::SpiSampler sampler_;
+    proto::link::PinSampler sampler_;
 
     IdentityRecordCell& identity_record_cell_;
 

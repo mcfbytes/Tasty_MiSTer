@@ -112,6 +112,15 @@ public:
         (void)serial;
     }
 
+    [[nodiscard]] virtual bool off_link() const noexcept { return false; }
+
+    [[nodiscard]] virtual Ex<proto::FileSize> send_off_link(std::span<const std::uint8_t> bytes) {
+        (void)bytes;
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    }
+
+    [[nodiscard]] virtual bool end_off_link() { return true; }
+
 protected:
     ILadderHost() = default;
     ILadderHost(const ILadderHost&) = default;

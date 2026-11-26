@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 
 namespace mister::proto {
 
@@ -12,9 +12,11 @@ struct AuxValue {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept {
+        return hal::LinkHalves::of(v);
+    }
 
-    [[nodiscard]] static constexpr AuxValue of(hal::SpiHalves h) noexcept {
+    [[nodiscard]] static constexpr AuxValue of(hal::LinkHalves h) noexcept {
         return h.joined([](std::uint32_t d) { return AuxValue{d}; });
     }
 

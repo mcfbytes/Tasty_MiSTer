@@ -10,12 +10,14 @@
 #include "app/file_intern.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
+#include "app/ocram_lane_writer.h"
 #include "app/load_key.h"
 #include "app/path_text.h"
 #include "app/rung.h"
 #include "cores/file_tx.h"
 #include "cores/loader.h"
 #include "cores/payload_pieces.h"
+#include "cores/progress.h"
 #include "cores/wire_chunk.h"
 #include "hal/types.h"
 #include "infra/prelude.h"
@@ -143,6 +145,15 @@ private:
     [[nodiscard]] Pass fail_(LinkTxChannel<SeatTag::Main>& inbox);
     [[nodiscard]] Pass cut_(LinkTxChannel<SeatTag::Main>& inbox);
 
+    [[nodiscard]] Pass step_off_link_(const RungEdges& edges, cores::ILadderHost& owner);
+    [[nodiscard]] Pass off_link_data_(const RungEdges& edges, OcramLaneWriter& lane);
+    [[nodiscard]] Pass off_link_close_acts_(const RungEdges& edges, cores::ILadderHost& owner);
+    [[nodiscard]] Pass off_link_cut_(const RungEdges& edges, OcramLaneWriter& lane);
+
+    [[nodiscard]] std::optional<bool> off_link_answer_(const FileTxLevelCell& level) const noexcept;
+
+    void off_link_progress_(const RungEdges& edges) noexcept;
+
     std::unique_ptr<svc::IFile> file_;
     std::unique_ptr<cores::ILoader> loader_;
     cores::TransferRow row_;
@@ -163,6 +174,26 @@ private:
     LastOp last_{};
     std::optional<std::uint32_t> slab_full_at_{};
     PathText path_{};
+
+    enum class OffLink : std::uint8_t {
+        Open,
+        Opening,
+        Data,
+        Acts,
+        Before,
+        Answering,
+        End,
+        Close,
+        Cut
+    };
+    std::optional<bool> off_link_{};
+    OffLink off_step_ = OffLink::Open;
+    proto::ActKey off_act_{};
+    proto::FileOffset staged_at_{};
+    bool lane_waiting_ = false;
+    bool cut_ended_ = false;
+    bool framed_ = false;
+    cores::Progress bar_{};
 };
 
 }

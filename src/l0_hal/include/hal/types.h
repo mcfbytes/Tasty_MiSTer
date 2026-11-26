@@ -25,6 +25,10 @@ struct MapLength;
 
 namespace mister::hal {
 
+namespace ocram {
+class RecordHeader;
+}
+
 using ::mister::infra::affine::operator+;
 using ::mister::infra::affine::operator-;
 using ::mister::infra::affine::operator*;
@@ -32,11 +36,11 @@ using ::mister::infra::affine::operator/;
 using ::mister::infra::affine::operator+=;
 using ::mister::infra::affine::operator-=;
 
-struct SpiWord {
+struct LinkWord {
     std::uint16_t v = 0;
 
-    [[nodiscard]] constexpr SpiWord with_high_byte(std::uint8_t byte) const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(
+    [[nodiscard]] constexpr LinkWord with_high_byte(std::uint8_t byte) const noexcept {
+        return LinkWord{static_cast<std::uint16_t>(
             v | (static_cast<std::uint16_t>(byte) << std::numeric_limits<std::uint8_t>::digits)
         )};
     }
@@ -47,8 +51,8 @@ struct SpiWord {
 
     [[nodiscard]] constexpr std::byte low_lane() const noexcept { return std::byte{low_byte()}; }
 
-    [[nodiscard]] static constexpr SpiWord of_byte(std::byte b) noexcept {
-        return SpiWord{std::to_integer<std::uint16_t>(b)};
+    [[nodiscard]] static constexpr LinkWord of_byte(std::byte b) noexcept {
+        return LinkWord{std::to_integer<std::uint16_t>(b)};
     }
 
     [[nodiscard]] constexpr std::uint8_t high_byte() const noexcept {
@@ -56,36 +60,36 @@ struct SpiWord {
         return static_cast<std::uint8_t>(v >> kHighByteShift);
     }
 
-    [[nodiscard]] constexpr bool intersects(SpiWord mask) const noexcept {
+    [[nodiscard]] constexpr bool intersects(LinkWord mask) const noexcept {
         return (v & mask.v) != 0u;
     }
 
-    [[nodiscard]] constexpr bool contains(SpiWord mask) const noexcept {
+    [[nodiscard]] constexpr bool contains(LinkWord mask) const noexcept {
         return (v & mask.v) == mask.v;
     }
 
-    [[nodiscard]] constexpr SpiWord masked(SpiWord mask) const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(v & mask.v)};
+    [[nodiscard]] constexpr LinkWord masked(LinkWord mask) const noexcept {
+        return LinkWord{static_cast<std::uint16_t>(v & mask.v)};
     }
 
-    [[nodiscard]] constexpr SpiWord with(SpiWord bits) const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(v | bits.v)};
+    [[nodiscard]] constexpr LinkWord with(LinkWord bits) const noexcept {
+        return LinkWord{static_cast<std::uint16_t>(v | bits.v)};
     }
 
-    [[nodiscard]] constexpr SpiWord without(SpiWord bits) const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(v & ~bits.v)};
+    [[nodiscard]] constexpr LinkWord without(LinkWord bits) const noexcept {
+        return LinkWord{static_cast<std::uint16_t>(v & ~bits.v)};
     }
 
-    [[nodiscard]] static constexpr SpiWord all_ones() noexcept {
-        return SpiWord{std::numeric_limits<std::uint16_t>::max()};
+    [[nodiscard]] static constexpr LinkWord all_ones() noexcept {
+        return LinkWord{std::numeric_limits<std::uint16_t>::max()};
     }
 
-    [[nodiscard]] static constexpr SpiWord load_le(std::span<const std::uint8_t, 2> b) noexcept {
-        return SpiWord{infra::load_le<std::uint16_t>(b)};
+    [[nodiscard]] static constexpr LinkWord load_le(std::span<const std::uint8_t, 2> b) noexcept {
+        return LinkWord{infra::load_le<std::uint16_t>(b)};
     }
 
-    [[nodiscard]] static constexpr SpiWord load_le(std::span<const std::byte, 2> b) noexcept {
-        return SpiWord{infra::load_le<std::uint16_t>(b)};
+    [[nodiscard]] static constexpr LinkWord load_le(std::span<const std::byte, 2> b) noexcept {
+        return LinkWord{infra::load_le<std::uint16_t>(b)};
     }
 
     template <class Decode>
@@ -119,28 +123,29 @@ struct SpiWord {
         return Error{why, at, v};
     }
 
-    friend constexpr bool operator==(SpiWord, SpiWord) = default;
+    friend constexpr bool operator==(LinkWord, LinkWord) = default;
 
 private:
-    friend struct SpiHalves;
+    friend struct LinkHalves;
+    friend class ocram::RecordHeader;
     template <std::size_t N>
-    friend struct SpiWords;
+    friend struct LinkWords;
 
-    [[nodiscard]] static constexpr SpiWord from_half(
+    [[nodiscard]] static constexpr LinkWord from_half(
         std::uint64_t dword,
         std::size_t shift
     ) noexcept {
-        return SpiWord{static_cast<std::uint16_t>(dword >> shift)};
+        return LinkWord{static_cast<std::uint16_t>(dword >> shift)};
     }
 
-    [[nodiscard]] static constexpr std::uint32_t joined(SpiWord low, SpiWord high) noexcept {
+    [[nodiscard]] static constexpr std::uint32_t joined(LinkWord low, LinkWord high) noexcept {
         constexpr unsigned kHalfBits = std::numeric_limits<std::uint16_t>::digits;
         return static_cast<std::uint32_t>(low.v)
             | (static_cast<std::uint32_t>(high.v) << kHalfBits);
     }
 };
 
-static_assert(sizeof(SpiWord) == 2);
+static_assert(sizeof(LinkWord) == 2);
 
 struct ButtonMask {
     std::uint16_t v = 0;
@@ -168,8 +173,8 @@ struct GpiWord {
 
     [[nodiscard]] constexpr bool test(GpiField f) const noexcept { return f.test(v); }
 
-    [[nodiscard]] constexpr SpiWord data() const noexcept {
-        return SpiWord{static_cast<std::uint16_t>(field(kGpiDataField))};
+    [[nodiscard]] constexpr LinkWord data() const noexcept {
+        return LinkWord{static_cast<std::uint16_t>(field(kGpiDataField))};
     }
 
     [[nodiscard]] constexpr ButtonMask buttons() const noexcept {
@@ -346,7 +351,7 @@ inline constexpr CoreTypeByte kUnnegotiatedType{0x55};
 enum class Width : std::uint8_t { Byte = 0, Word = 1 };
 
 [[nodiscard]] constexpr std::size_t word_bytes(Width w) noexcept {
-    return w == Width::Word ? sizeof(SpiWord::v) : 1u;
+    return w == Width::Word ? sizeof(LinkWord::v) : 1u;
 }
 
 [[nodiscard]] constexpr std::size_t words(Width w, std::size_t bytes) noexcept {

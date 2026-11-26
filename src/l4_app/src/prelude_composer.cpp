@@ -28,6 +28,7 @@ void PreludeComposer::arm(bool front_end) noexcept {
     release_ = Release::None;
     mode_gen_ = proto::StageGen{};
     mode_edge_ = ModeEdge::None;
+    caps_.reset();
     mode_in_block_done_ = shadow_done_ = tail_done_ = false;
     deadline_.reset();
     bare_ = false;
@@ -61,7 +62,7 @@ void PreludeComposer::take_filters(std::unique_ptr<svc::video::FilterSet> set) n
     filter_owed_ = set_ != nullptr;
 }
 
-Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const hal::SpiWord> w) {
+Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const hal::LinkWord> w) {
     TASTY_SEAT_BODY(PreludeComposer);
     const Publish words{w};
     if (!words.fits_block()) {
@@ -77,8 +78,8 @@ Ex<void> PreludeComposer::publish(proto::UioOp op, std::span<const hal::SpiWord>
         StagedFrame::Mode m{};
         m.m.opcode = op;
         m.m.count = words.count();
-        const std::span<const hal::SpiWord> from = words.words();
-        std::memcpy(m.m.w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
+        const std::span<const hal::LinkWord> from = words.words();
+        std::memcpy(m.m.w.data(), from.data(), from.size() * sizeof(hal::LinkWord));
         const bool burst = op == proto::UioOp::SetVideo;
         auto r = stage_(
             infra::make<StagedFrame>(m),
@@ -146,10 +147,11 @@ void PreludeComposer::on_reply(const proto::LinkEvent::FrameReply& r) noexcept {
         case StagedFrame::Kind::Mode:
         case StagedFrame::Kind::ModeInBlock:
 
-            if (r.window == proto::LinkEvent::ReplyWindow::ModeEmitted
-                && r.fails == kFailsNone
-                && r.gen == mode_gen_) {
-                mode_edge_ = ModeEdge::Emitted;
+            if (r.window == proto::LinkEvent::ReplyWindow::ModeEmitted && r.fails == kFailsNone) {
+
+                caps_ = svc::ScalerCaps::of(r.word);
+                if (r.gen == mode_gen_)
+                    mode_edge_ = ModeEdge::Emitted;
             }
             break;
         case StagedFrame::Kind::CoeffChunk:
@@ -459,8 +461,8 @@ void PreludeComposer::release_step_() noexcept {
                 StagedFrame::ModeInBlock m{};
                 m.m.opcode = h->op;
                 m.m.count = h->n;
-                const std::span<const hal::SpiWord> words = h->words();
-                std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::SpiWord));
+                const std::span<const hal::LinkWord> words = h->words();
+                std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::LinkWord));
                 if (!stage_(
                         infra::make<StagedFrame>(m),
                         StagedFrame::Kind::ModeInBlock,
@@ -510,8 +512,8 @@ void PreludeComposer::release_step_() noexcept {
             StagedFrame::Mode m{};
             m.m.opcode = h.op;
             m.m.count = h.n;
-            const std::span<const hal::SpiWord> words = h.words();
-            std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::SpiWord));
+            const std::span<const hal::LinkWord> words = h.words();
+            std::memcpy(m.m.w.data(), words.data(), words.size() * sizeof(hal::LinkWord));
             const bool burst = h.op == proto::UioOp::SetVideo;
             if (!stage_(
                     infra::make<StagedFrame>(m),
@@ -597,10 +599,10 @@ void PreludeComposer::note_mode_staged_() noexcept {
 }
 
 void PreludeComposer::hold_(proto::UioOp op, Publish words) noexcept {
-    const std::span<const hal::SpiWord> from = words.words();
+    const std::span<const hal::LinkWord> from = words.words();
     if (Held* h = find_held_(op)) {
         h->n = words.count();
-        std::memcpy(h->w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
+        std::memcpy(h->w.data(), from.data(), from.size() * sizeof(hal::LinkWord));
         return;
     }
     for (Held& h : held_) {
@@ -609,7 +611,7 @@ void PreludeComposer::hold_(proto::UioOp op, Publish words) noexcept {
         h.live = true;
         h.op = op;
         h.n = words.count();
-        std::memcpy(h.w.data(), from.data(), from.size() * sizeof(hal::SpiWord));
+        std::memcpy(h.w.data(), from.data(), from.size() * sizeof(hal::LinkWord));
         ++stats_.parked;
         return;
     }

@@ -3,26 +3,23 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstring>
 #include <utility>
 
-#include "svc/blank_save.h"
 #include "infra/prelude.h"
-#include "infra/byte_view.h"
 #include "infra/seat_owner_io.h"
 #include "proto/sd_stat.h"
 
 namespace mister::app {
 
-svc::disc::ISectorProgram::Source LwSectorEndpoint::answer_(proto::Lba lba) const noexcept {
-    return grant_.body.program->answer(*disc_, lba);
-}
-
 void LwSectorEndpoint::write_lba_(Port& port, hal::SectorBlock::Reg reg, proto::Lba lba) noexcept {
     port.write(reg, lba.register_word());
 }
 
-LwSectorEndpoint::LwSectorEndpoint(const Wiring& w) noexcept : Base(w.grant, w.lease), w_(w) {}
+LwSectorEndpoint::LwSectorEndpoint(const Wiring& w) noexcept
+    : Base(w.grant, w.lease),
+      w_(w),
+      source_({.geometry = w.geometry, .discs = w.discs}),
+      blocks_(w.saves) {}
 
 void LwSectorEndpoint::serve() noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
@@ -49,11 +46,16 @@ void LwSectorEndpoint::on_resume() noexcept {
     Base::on_resume();
 }
 
+bool LwSectorEndpoint::accepts_hook_(const SectorGrant& g) const noexcept {
+    return g.block.lent();
+}
+
 void LwSectorEndpoint::publish_hook_(const SectorRoute& r) noexcept {
     w_.route.publish(r);
 }
 
 void LwSectorEndpoint::prepare_hook_(const SectorGrant& g) noexcept {
+    source_.bind(g.body);
     bind_cards_(g);
     if (!w_.port)
         block_.emplace(hal::reg::Block::redeem(g.block));
@@ -84,24 +86,12 @@ void LwSectorEndpoint::unbind_hook_() noexcept {
     block_.reset();
     cards_ = {};
     recheck_ = false;
-    for (Ahead& a : ahead_)
-        a.live = false;
-    ahead_done_ = kReadAhead;
+    source_.unbind();
     tally_.cards_on_lw = {};
 }
 
 bool LwSectorEndpoint::idle_bound_hook_() const noexcept {
-    return !recheck_ && ahead_done_ >= kReadAhead;
-}
-
-void LwSectorEndpoint::take_geometry_() noexcept {
-    const auto g = geom_rd_.take_if_changed(w_.geometry);
-    if (!g)
-        return;
-    disc_.emplace(*g);
-    for (Ahead& a : ahead_)
-        a.live = false;
-    ahead_done_ = kReadAhead;
+    return !recheck_ && source_.ahead_idle();
 }
 
 void LwSectorEndpoint::bind_cards_(const SectorGrant& g) noexcept {
@@ -185,7 +175,7 @@ std::optional<LwSectorEndpoint::Request> LwSectorEndpoint::read_request_() noexc
 }
 
 void LwSectorEndpoint::serve_bound_() noexcept {
-    take_geometry_();
+    (void)source_.mount_changed();
     const bool rang = line_.rang();
     if (!rang && !recheck_) {
         read_ahead_one_();
@@ -212,19 +202,17 @@ void LwSectorEndpoint::serve_bound_() noexcept {
         return;
     }
     const proto::Lba lba = q->lba;
-    fill_frame_(lba);
+    const std::span<const std::byte> frame = source_.frame_for(lba);
     if (!lease_())
         return;
-    if (store_frame_(q->slot, lba, std::span<const std::byte>(frame_.data, frame_bytes_()))) {
+    if (store_frame_(q->slot, lba, frame))
         ++tally_.served;
-    }
     peek_more_();
     release_();
     const auto us = std::chrono::duration_cast<std::chrono::microseconds>(clock_.now() - t0);
     tally_.lat_max_us = std::max(tally_.lat_max_us, static_cast<std::uint32_t>(us.count()));
     publish_();
-    ahead_from_ = lba + proto::BlockCount{1u};
-    ahead_done_ = 0;
+    source_.read_ahead_from(lba);
 }
 
 void LwSectorEndpoint::peek_more_() noexcept {
@@ -232,74 +220,11 @@ void LwSectorEndpoint::peek_more_() noexcept {
         recheck_ = true;
 }
 
-std::uint32_t LwSectorEndpoint::frame_bytes_() const noexcept {
-    constexpr std::uint32_t kWordBytes = hal::SectorBlock::kWordBytes;
-    return std::min<std::uint32_t>(
-        static_cast<std::uint32_t>(grant_.body.frame_words) * kWordBytes,
-        static_cast<std::uint32_t>(svc::disc::kDiscSlotBytes)
-    );
-}
-
-void LwSectorEndpoint::fill_frame_(proto::Lba lba) noexcept {
-    const std::uint32_t n = frame_bytes_();
-    const svc::disc::ISectorProgram::Source src = answer_(lba);
-    if (!src.engine) {
-        std::memset(frame_.data, src.fill, n);
-        return;
-    }
-    if (take_ahead_(lba))
-        return;
-    read_engine_(frame_, lba);
-    if (frame_.ok == 0 || frame_.got < n) {
-        const std::size_t got = frame_.ok != 0 ? frame_.got : 0u;
-        std::memset(frame_.data + got, src.fill, n - got);
-    }
-}
-
-void LwSectorEndpoint::read_engine_(svc::disc::DiscReadSlot& s, proto::Lba lba) noexcept {
-    s.gen = svc::DiscMountGen{};
-    s.lba = lba;
-    s.form = grant_.body.program->form();
-    s.want = static_cast<std::uint16_t>(svc::disc::disc_form_bytes(s.form));
-    s.got = 0;
-    s.ok = false;
-    w_.discs.serve_on_io(s);
-}
-
-bool LwSectorEndpoint::take_ahead_(proto::Lba lba) noexcept {
-    for (Ahead& a : ahead_) {
-        if (!a.live || a.slot.lba != lba)
-            continue;
-        a.live = false;
-        if (!a.slot.ok)
-            return false;
-        std::memcpy(frame_.data, a.slot.data, a.slot.got);
-        frame_.got = a.slot.got;
-        frame_.ok = true;
-        return frame_.got >= frame_bytes_();
-    }
-    return false;
-}
-
 void LwSectorEndpoint::read_ahead_one_() noexcept {
-    while (ahead_done_ < kReadAhead) {
-        const proto::BlockCount n{static_cast<std::uint32_t>(ahead_done_++)};
-        const proto::Lba lba = ahead_from_ + n;
-        if (!answer_(lba).engine)
-            continue;
-        const bool held = std::ranges::any_of(ahead_, [lba](const Ahead& a) noexcept {
-            return a.live && a.slot.lba == lba;
-        });
-        if (held)
-            continue;
-        Ahead& a = ahead_[ahead_next_];
-        ahead_next_ = (ahead_next_ + 1u) % kReadAhead;
-        read_engine_(a.slot, lba);
-        a.live = true;
-        ++tally_.read_ahead;
-        publish_();
+    if (!source_.read_ahead_one())
         return;
-    }
+    ++tally_.read_ahead;
+    publish_();
 }
 
 bool LwSectorEndpoint::store_frame_(
@@ -412,40 +337,10 @@ void LwSectorEndpoint::note_card_latency_(os::RawMonotonicClock::time_point t0) 
     publish_();
 }
 
-svc::ISaveFilesOnIo::Save LwSectorEndpoint::save_of_(const Card& c) noexcept {
-    const svc::ISaveFilesOnIo::Save f = w_.saves->save_on_io(c.save_slot());
-    SaveState& s = saves_[c.save_slot()];
-    if (s.gen != f.gen) {
-        s.gen = f.gen;
-        const bool exists = f.extent.has_value();
-        s.rule = proto::SaveSlotRule::at_mount(
-            exists,
-            f.extent.value_or(proto::FileSize{}),
-            f.mount
-        );
-    }
-    return f;
-}
-
 void LwSectorEndpoint::fill_card_(const Card& c, proto::Lba lba) noexcept {
-    const std::span<std::uint8_t> out = infra::byte_cast<std::uint8_t>(
-        c.bytes.block_of(std::span<std::byte>{card_buf_})
-    );
-    const svc::ISaveFilesOnIo::Save f = save_of_(c);
-    const proto::SaveSlotRule& rule = saves_[c.save_slot()].rule;
-    if (f.file && !rule.deferred_create) {
-        const auto n = f.file->read_at(c.bytes.position_of(lba), infra::byte_cast<std::byte>(out));
-        if (n && !n->empty()) {
-            n->zero_past_in(out);
-            return;
-        }
-    }
-    ++tally_.card_blanks;
-    if (!rule.deferred_create) {
-        std::memset(out.data(), 0, out.size());
-    } else {
-        svc::fill_absent(f.blank, lba, out);
-    }
+    const std::span<std::byte> out = c.bytes.block_of(std::span<std::byte>{card_buf_});
+    if (blocks_.read_block(c.save_slot(), c.bytes, lba, out) == SaveSlotBlocks::Read::Blank)
+        ++tally_.card_blanks;
 }
 
 bool LwSectorEndpoint::copy_image_(const Card& c, proto::Lba lba) noexcept {
@@ -476,47 +371,28 @@ bool LwSectorEndpoint::store_wack_(const Card& c, proto::Lba lba) noexcept {
 }
 
 void LwSectorEndpoint::persist_card_(const Card& c, proto::Lba lba) noexcept {
-    const svc::ISaveFilesOnIo::Save f = save_of_(c);
-    proto::SaveSlotRule& rule = saves_[c.save_slot()].rule;
-    const std::span<const std::uint8_t> src = infra::byte_cast<const std::uint8_t>(
-        c.bytes.block_of(std::span<const std::byte>{card_buf_})
+    const std::span<const std::byte> block = c.bytes.block_of(
+        std::span<const std::byte>{card_buf_}
     );
-    const proto::SaveSlotRule::Plan plan = rule.plan_write(lba, c.bytes, proto::BlockCount{1});
-    if (!f.file) {
-        ++tally_.card_fails;
-        publish_();
-        return;
-    }
 
-    switch (plan.act) {
-        case proto::SaveSlotRule::Act::Discard:
+    switch (blocks_.write_block(c.save_slot(), c.bytes, lba, block)) {
+        case SaveSlotBlocks::Write::Wrote:
+            break;
+        case SaveSlotBlocks::Write::Created:
+            ++tally_.card_creates;
+            break;
+        case SaveSlotBlocks::Write::Discarded:
             ++tally_.card_discards;
             break;
-        case proto::SaveSlotRule::Act::Create:
-            if (auto e = f.file->create(infra::byte_cast<const std::byte>(src.first(plan.len)));
-                e) {
-                rule.created(*e);
-                ++tally_.card_creates;
-            } else {
-                ++tally_.card_fails;
-            }
-            break;
-        case proto::SaveSlotRule::Act::Write:
-            if (auto n = f.file->write_at(
-                    plan.offset,
-                    infra::byte_cast<const std::byte>(src.first(plan.len))
-                );
-                n && *n == infra::ByteCount{plan.len}) {
-                rule.wrote(plan.offset, plan.len);
-            } else {
-                ++tally_.card_fails;
-            }
+        case SaveSlotBlocks::Write::Failed:
+        case SaveSlotBlocks::Write::NoFile:
+            ++tally_.card_fails;
             break;
     }
     publish_();
 }
 
-template class LwBlockEndpoint<SectorGrant, SectorRoute, seat_owner::Io>;
+template class GrantEndpoint<SectorGrant, SectorRoute, seat_owner::Io>;
 
 }
 

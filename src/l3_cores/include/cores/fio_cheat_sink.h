@@ -6,7 +6,6 @@
 
 #include "cores/cheat_sink.h"
 #include "infra/error.h"
-#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/prelude.h"
 #include "hal/spi_transport.h"
@@ -21,12 +20,9 @@ class FioCheatSink final : public ICheatSink {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit FioCheatSink(
-        hal::ISpiTransport& link,
-        infra::OptRef<proto::link::SpiFioQueue> queue = {}
-    ) noexcept
+    FioCheatSink(hal::ISpiTransport& link, proto::link::SpiFioQueue& queue) noexcept
         : link_(&link),
-          queue_(queue) {}
+          queue_(&queue) {}
 
     [[nodiscard]] Ex<void> apply(std::span<const std::uint8_t> table, CheatUnit unit) override;
 
@@ -42,7 +38,7 @@ public:
 
 private:
     hal::ISpiTransport* link_;
-    infra::OptRef<proto::link::SpiFioQueue> queue_;
+    proto::link::SpiFioQueue* queue_;
     std::uint32_t sends_ = 0;
     std::uint64_t bytes_ = 0;
 };

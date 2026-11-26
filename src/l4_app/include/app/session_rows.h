@@ -17,13 +17,13 @@
 #include "infra/xthread/rt_stats.h"
 #include "infra/seat.h"
 #include "infra/xthread/telemetry.h"
-#include "proto/link/axi_status_decoder.h"
+#include "proto/link/snapshot_status_source.h"
 #include "proto/link/block_poll_route.h"
 #include "proto/link/decoder_row.h"
 #include "proto/link/spi_block_decoder.h"
 #include "proto/link/spi_conf_str_decoder.h"
 #include "proto/link/spi_identify_decoder.h"
-#include "proto/link/spi_status_decoder.h"
+#include "proto/link/spi_status_source.h"
 #include "proto/status_cell.h"
 #include "proto/link/status_decoder.h"
 #include "proto/link/status_snapshot.h"
@@ -78,7 +78,7 @@ public:
         OsdWire& osd;
         const input::RumblePlayersCell& rumble_players;
 
-        infra::OptRef<const proto::link::StatusSnapshotCell> status_lw{};
+        infra::OptRef<const proto::link::StatusSnapshotCell> status_snapshots{};
     };
 
     explicit SessionRows(const Wiring& w) noexcept;
@@ -96,6 +96,8 @@ public:
     );
 
     void bind_status_route(Carrier route, proto::BuildGeneration gen) noexcept;
+
+    void bind_events_route(Carrier route) noexcept;
 
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows(
         std::array<reactor::LinkDecoderDecl, kMaxServices>& out,
@@ -130,11 +132,13 @@ public:
         return status_decoder_;
     }
 
-    [[nodiscard]] const proto::link::AxiStatusSource& axi_status_source() const noexcept {
-        return axi_status_source_;
+    [[nodiscard]] const proto::link::SnapshotStatusSource& snapshot_status_source() const noexcept {
+        return snapshot_status_source_;
     }
 
     [[nodiscard]] Carrier status_route() const noexcept { return status_route_; }
+
+    [[nodiscard]] Carrier events_route() const noexcept { return events_route_; }
 
     [[nodiscard]] const proto::link::SpiConfStrDecoder& conf_str_decoder() const noexcept {
         return conf_str_decoder_;
@@ -175,9 +179,10 @@ private:
     proto::link::StatusDecoder status_decoder_;
     proto::link::DecoderRow<proto::link::StatusDecoder> status_row_{status_decoder_};
     proto::link::SpiStatusSource spi_status_source_;
-    proto::link::AxiStatusSource axi_status_source_;
-    infra::OptRef<const proto::link::StatusSnapshotCell> status_lw_{};
-    Carrier status_route_ = Carrier::Link;
+    proto::link::SnapshotStatusSource snapshot_status_source_;
+    infra::OptRef<const proto::link::StatusSnapshotCell> status_snapshots_{};
+    Carrier status_route_ = Carrier::Spi;
+    Carrier events_route_ = Carrier::Spi;
     proto::link::SpiConfStrDecoder conf_str_decoder_;
     proto::link::DecoderRow<proto::link::SpiConfStrDecoder> conf_str_row_{conf_str_decoder_};
     proto::link::SpiBlockDecoder block_decoder_;
@@ -212,7 +217,7 @@ private:
         proto::user_io::PollShape::ChangeCounter
     };
     std::array<DeclaredPoll, kDeclarablePolls.size()> declared_polls_;
-    proto::link::BlockPollRoute block_poll_ = proto::link::BlockPollRoute::Link;
+    proto::link::BlockPollRoute block_poll_ = proto::link::BlockPollRoute::Spi;
 
     bool osd_visible_last_ = false;
     Tally tally_{};

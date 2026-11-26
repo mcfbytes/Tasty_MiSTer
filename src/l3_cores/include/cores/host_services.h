@@ -46,15 +46,15 @@ struct HostServices {
     hal::ISpiTransport& link;
 
     const os::IClock& clock;
-    infra::OptRef<svc::disc::ChdPrefetch> prefetch{};
 
-    infra::OptRef<proto::IImageSink> bulk{};
+    proto::IImageSink& bulk;
+
+    proto::link::SpiFioQueue& fio_queue;
+    infra::OptRef<svc::disc::ChdPrefetch> prefetch{};
 
     CoreWindowGrant windows{};
 
     infra::OptRef<svc::disc::DiscReadService> discs{};
-
-    infra::OptRef<proto::link::SpiFioQueue> fio_queue{};
 
     infra::OptRef<IMailboxPort> mailbox{};
 

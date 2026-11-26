@@ -16,6 +16,7 @@ struct ScalingPolicy {
     std::uint8_t vscale_border = 0;
     ScalerSlotMode filter_mode{};
     bool front_end = false;
+    ScalerCaps scaler{};
 
     [[nodiscard]] constexpr bool steps_height() const noexcept {
         return vscale_mode != VscaleMode::Fit;

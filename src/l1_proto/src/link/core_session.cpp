@@ -123,6 +123,8 @@ Ex<bool> CoreSession::settle_configure() {
 Ex<void> CoreSession::flush_status() {
     if (suppress_status_wire_)
         return {};
+    if (frames_ && frames_->off_link())
+        return status_.flush(frames_->frame());
     SpiFrame frame{*link_};
     return status_.flush(frame);
 }
@@ -219,10 +221,16 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
 
+    if (frames_ && frames_->off_link())
+        return send_rtc_frames_(frames_->frame(), image);
     SpiFrame frame{*link_};
+    return send_rtc_frames_(frame, image);
+}
+
+Ex<void> CoreSession::send_rtc_frames_(ILinkFrame& frame, const RtcImage& image) {
     if (auto r = frame.begin(UioOp::Rtc); !r)
         return fail(r.error());
-    for (const hal::SpiWord w : image.rtc_words()) {
+    for (const hal::LinkWord w : image.rtc_words()) {
         if (auto r = frame.word(w); !r)
             return fail(r.error());
     }
@@ -231,7 +239,7 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
 
     if (auto r = frame.begin(UioOp::Timestamp); !r)
         return fail(r.error());
-    for (const hal::SpiWord w : image.stamp_words()) {
+    for (const hal::LinkWord w : image.stamp_words()) {
         if (auto r = frame.word(w); !r)
             return fail(r.error());
     }

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mailbox_carriage.h"
 #include "cores/stream_load_host.h"
 #include "infra/prelude.h"

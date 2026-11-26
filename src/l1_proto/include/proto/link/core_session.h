@@ -9,12 +9,14 @@
 #include "infra/error.h"
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
+#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "proto/reset_fence.h"
 #include "proto/rtc_image.h"
 #include "proto/session_terms.h"
 #include "proto/status_bit.h"
 #include "proto/status_edit.h"
+#include "proto/link/frame_route.h"
 #include "proto/link/status_register.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
@@ -40,18 +42,20 @@ public:
     [[nodiscard]] static CoreSession detached(
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
-        IResetFence* fence = nullptr
+        IResetFence* fence = nullptr,
+        infra::OptRef<FrameRoute> frames = {}
     ) {
-        return CoreSession(link, signals, fence);
+        return CoreSession(link, signals, fence, frames);
     }
 
     [[nodiscard]] static CoreSession adopted(
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
         MemSizeCookie cookie,
-        IResetFence* fence = nullptr
+        IResetFence* fence = nullptr,
+        infra::OptRef<FrameRoute> frames = {}
     ) {
-        return CoreSession(link, signals, cookie, fence);
+        return CoreSession(link, signals, cookie, fence, frames);
     }
 
     SessionPhase phase() const noexcept { return phase_; }
@@ -124,9 +128,15 @@ public:
 private:
     enum class MemSizePost : std::uint8_t { None, Opcode, Cookie };
 
-    CoreSession(hal::ISpiTransport& link, hal::ICoreSignals& signals, IResetFence* fence)
+    CoreSession(
+        hal::ISpiTransport& link,
+        hal::ICoreSignals& signals,
+        IResetFence* fence,
+        infra::OptRef<FrameRoute> frames
+    )
         : link_(&link),
-          signals_(&signals) {
+          signals_(&signals),
+          frames_(frames) {
         status_.fence_with(fence);
     }
 
@@ -134,20 +144,26 @@ private:
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
         MemSizeCookie cookie,
-        IResetFence* fence
+        IResetFence* fence,
+        infra::OptRef<FrameRoute> frames
     )
         : link_(&link),
           signals_(&signals),
+          frames_(frames),
           phase_(SessionPhase::Start),
           cookie_(cookie) {
         status_.fence_with(fence);
     }
 
     [[nodiscard]] Ex<void> fail(Error e);
+
+    [[nodiscard]] Ex<void> send_rtc_frames_(ILinkFrame& frame, const RtcImage& image);
     [[nodiscard]] bool ladder_window_() const noexcept;
 
     hal::ISpiTransport* link_;
     hal::ICoreSignals* signals_;
+
+    infra::OptRef<FrameRoute> frames_{};
     SessionPhase phase_ = SessionPhase::Detached;
     MemSizeCookie cookie_{};
     CoreType type_ = CoreType::Unknown;

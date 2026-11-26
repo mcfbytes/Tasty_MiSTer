@@ -29,7 +29,7 @@ static_assert(
         && de10_row_matches(Window::SysMgr, "sysmgr", kSysMgrBase)
         && de10_row_matches(Window::Nic301, "nic301", kNic301Base)
         && de10_row_matches(Window::LwBridge, "lw-bridge", hal::kLwBridgeBase)
-        && hal::kDe10Profile.mailbox_window == cyclone_v::id(Window::FpgaMgr)
+        && hal::kDe10Profile.gpo_gpi_window == cyclone_v::id(Window::FpgaMgr)
         && hal::kDe10Profile.lw_window == cyclone_v::id(Window::LwBridge),
     "the DE10 board row disagrees with the Cyclone V window names or bases"
 );

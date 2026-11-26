@@ -9,7 +9,9 @@
 
 #include "app/all_leases_home.h"
 #include "app/park_receipt.h"
+#include "app/program_guard.h"
 #include "infra/ascii.h"
+#include "infra/opt_ref.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -72,17 +74,22 @@ public:
     [[nodiscard]] Ex<void> program(
         const ParkReceipt& park,
         AllLeasesHome home,
-        std::string_view rel
+        std::string_view rel,
+        infra::OptRef<IProgramGuard> guard = {}
     );
 
-    [[nodiscard]] Ex<void> program_at_boot(AllLeasesHome home, std::string_view rel);
+    [[nodiscard]] Ex<void> program_at_boot(
+        AllLeasesHome home,
+        std::string_view rel,
+        infra::OptRef<IProgramGuard> guard = {}
+    );
 
     [[nodiscard]] bool bridges_down() const noexcept { return bridges_down_; }
 
     [[nodiscard]] bool programmed() const;
 
 private:
-    [[nodiscard]] Ex<void> run_(std::string_view rel);
+    [[nodiscard]] Ex<void> run_(std::string_view rel, infra::OptRef<IProgramGuard> guard);
 
     hal::IFpgaProgrammer* programmer_;
     hal::IBridgeSequencer* bridges_;

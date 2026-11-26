@@ -28,7 +28,7 @@ public:
 
     virtual void set_core_reset(bool asserted) = 0;
 
-    virtual void clear_gpo() {}
+    virtual void clear_signals() {}
 };
 
 }

@@ -51,7 +51,7 @@ public:
 
     [[nodiscard]] proto::DiskUnit unit() const noexcept { return unit_; }
 
-    void take(std::span<const hal::SpiWord> words, svc::IDiskImage& image) noexcept;
+    void take(std::span<const hal::LinkWord> words, svc::IDiskImage& image) noexcept;
 
     void end(End how) noexcept;
 
@@ -76,18 +76,18 @@ private:
 
     void consume_(proto::FioWordCount words) noexcept { held_from_ += words; }
 
-    [[nodiscard]] std::span<const hal::SpiWord> live_() const noexcept;
+    [[nodiscard]] std::span<const hal::LinkWord> live_() const noexcept;
 
     bool open_ = false;
     proto::DiskUnit unit_{};
     svc::AdfCodec::Track track_{};
     Stage stage_ = Stage::Scan;
     svc::AdfCodec::Sector sector_{};
-    std::array<hal::SpiWord, kHeldWords> held_words_{};
+    std::array<hal::LinkWord, kHeldWords> held_words_{};
     proto::FioWordCount held_from_{};
     proto::FioWordCount held_end_{};
 
-    std::array<hal::SpiWord, svc::AdfCodec::kHeaderWords> header_words_{};
+    std::array<hal::LinkWord, svc::AdfCodec::kHeaderWords> header_words_{};
 
     Error last_error_ = Error::None;
     infra::Tally errors_{};

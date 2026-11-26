@@ -9,7 +9,7 @@
 #include <memory>
 
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "svc/disc/cue_policy.h"
 
 namespace mister::cores::manifests {

@@ -48,7 +48,7 @@ void InputEmit::relay(bool gated) noexcept {
     relay_tally_.publishes.add();
     if (relay_owed_)
         relay_tally_.superseded.add();
-    const bool bound = relay_ends_.route && relay_ends_.route->sample().value.on_lw;
+    const bool bound = relay_ends_.route && relay_ends_.route->sample().value.bound;
     if (bound) {
 
         const bool held_gated = relay_tally_.input_gated && (!relay_owed_ || relay_owed_->gated);
@@ -74,7 +74,7 @@ void InputEmit::answer_relay_() noexcept {
         relay_tally_.acked.add();
         relay_tally_.lag_last = us_between(relay_owed_->at, r.value.relay_read.at);
         relay_tally_.lag_max = std::max(relay_tally_.lag_max, relay_tally_.lag_last);
-    } else if (r.value.on_lw) {
+    } else if (r.value.bound) {
         return;
     }
 

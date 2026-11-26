@@ -171,7 +171,8 @@ infra::OptRef<const InternedFile> FileBytes<P>::get(proto::FileId fid) const noe
     if (!slot)
         return {};
     const infra::OptRef<const InternedFile> s = slab_.consumer().held(*slot);
-    if (!s || (s->bytes.empty() && s->path.empty()))
+
+    if (!s || (s->bytes.empty() && s->path.empty() && s->size_bytes.empty()))
         return {};
     return s;
 }

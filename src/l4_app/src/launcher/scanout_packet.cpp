@@ -14,19 +14,19 @@ void put16(std::span<std::byte, kMaxPacketBytes> b, std::size_t at, std::uint16_
     infra::store_le(b.subspan(at).first<sizeof v>(), v);
 }
 
-[[nodiscard]] hal::SpiWord word_at(std::span<const std::byte> packet, std::size_t at) noexcept {
-    return hal::SpiWord::load_le(packet.subspan(at).first<sizeof(hal::SpiWord)>());
+[[nodiscard]] hal::LinkWord word_at(std::span<const std::byte> packet, std::size_t at) noexcept {
+    return hal::LinkWord::load_le(packet.subspan(at).first<sizeof(hal::LinkWord)>());
 }
 
-void put_word(std::span<std::byte, kMaxPacketBytes> out, std::size_t at, hal::SpiWord w) noexcept {
-    w.store_le(out.subspan(at).first<sizeof(hal::SpiWord)>());
+void put_word(std::span<std::byte, kMaxPacketBytes> out, std::size_t at, hal::LinkWord w) noexcept {
+    w.store_le(out.subspan(at).first<sizeof(hal::LinkWord)>());
 }
 
 [[nodiscard]] std::size_t payload_at(std::size_t i) noexcept {
-    return kHeaderBytes + i * sizeof(hal::SpiWord);
+    return kHeaderBytes + i * sizeof(hal::LinkWord);
 }
 
-bool admitted(hal::SpiWord opcode, std::uint16_t count) noexcept {
+bool admitted(hal::LinkWord opcode, std::uint16_t count) noexcept {
     for (const Command& c : kCommands)
         if (c.opcode == opcode && c.words == count)
             return true;
@@ -43,7 +43,7 @@ std::optional<UioBurst> decode(std::span<const std::byte> packet) noexcept {
     const std::uint16_t count = le16(packet, kCountAt);
     if (packet.size() != payload_at(count))
         return std::nullopt;
-    const hal::SpiWord opcode = word_at(packet, kOpcodeAt);
+    const hal::LinkWord opcode = word_at(packet, kOpcodeAt);
     if (!admitted(opcode, count))
         return std::nullopt;
     UioBurst b{};

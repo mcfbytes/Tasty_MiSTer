@@ -14,7 +14,7 @@
 #include "cores/atari8/atari8_status3.h"
 #include "cores/atari8/cas_types.h"
 #include "cores/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/endian.h"
 #include "infra/seat.h"
 #include "proto/mailbox_act.h"
@@ -33,7 +33,7 @@ public:
     using NotBefore = proto::MailboxAct::NotBefore;
 
     struct Pulse {
-        hal::SpiHalves entry{};
+        hal::LinkHalves entry{};
         friend constexpr bool operator==(const Pulse&, const Pulse&) = default;
     };
 

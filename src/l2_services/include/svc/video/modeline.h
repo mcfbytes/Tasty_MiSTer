@@ -57,7 +57,7 @@ struct Modeline {
         bool direct_video = false;
     };
 
-    std::array<hal::SpiWord, 26> to_wire(const PllBlock& pll, const WireOptions& opt) const;
+    std::array<hal::LinkWord, 26> to_wire(const PllBlock& pll, const WireOptions& opt) const;
 
     Modeline direct_video_fix() const;
 };

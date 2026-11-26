@@ -23,12 +23,12 @@ enum class SioPort : std::uint8_t {
     Error = 0x07,
 };
 
-[[nodiscard]] constexpr hal::SpiWord port_word(SioPort p) noexcept {
-    return hal::SpiWord{std::to_underlying(p)};
+[[nodiscard]] constexpr hal::LinkWord port_word(SioPort p) noexcept {
+    return hal::LinkWord{std::to_underlying(p)};
 }
 
 [[nodiscard]] constexpr proto::MailboxRunCommand read(SioPort p) noexcept {
-    return {.opcode = port_word(p), .word = hal::SpiWord{}};
+    return {.opcode = port_word(p), .word = hal::LinkWord{}};
 }
 
 [[nodiscard]] constexpr proto::MailboxRunCommand transmit(std::byte byte) noexcept {

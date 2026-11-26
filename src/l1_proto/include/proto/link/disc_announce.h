@@ -18,8 +18,8 @@ namespace mister::proto::link {
 struct DiscAnnounce {
     TASTY_SEAT_RESIDENT(RT);
 
-    static constexpr hal::SpiWord kLoadedFlag{1};
-    static constexpr hal::SpiWord kUnloadedFlag{0};
+    static constexpr hal::LinkWord kLoadedFlag{1};
+    static constexpr hal::LinkWord kUnloadedFlag{0};
 
     [[nodiscard]] Ex<void> two_word_form(
         ILinkFrame& frame,
@@ -53,7 +53,7 @@ struct DiscAnnounce {
             return r;
         if (auto r = frame.begin(UioOp::SetSdStat); !r)
             return r;
-        if (auto r = frame.word(hal::SpiWord{1}); !r)
+        if (auto r = frame.word(hal::LinkWord{1}); !r)
             return r;
         return frame.end();
     }

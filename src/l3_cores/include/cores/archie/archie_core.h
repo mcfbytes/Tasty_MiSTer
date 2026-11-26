@@ -14,7 +14,7 @@
 #include "cores/config_blob.h"
 #include "cores/config_slots.h"
 #include "cores/core_adopt.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/host_services.h"
 #include "cores/mounted_path.h"
 #include "cores/nvram_save.h"

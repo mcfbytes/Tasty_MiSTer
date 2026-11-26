@@ -28,8 +28,8 @@ jobs:
         id: sdk
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/slint-sdk-1.19.0
-          key: slint-sdk-1.19.0-host-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
+          path: ~/slint-sdk-1.19.1
+          key: slint-sdk-1.19.1-host-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
       - name: Slint SDK (build)
         if: steps.sdk.outputs.cache-hit != 'true'
         env:
@@ -37,10 +37,10 @@ jobs:
           SLINT_SDK_TRIPLES: x86_64-linux-gnu
         run: |
           src/tools/build-slint-sdk.sh "$RUNNER_TEMP/slint-sdk-out"
-          mkdir -p "$HOME/slint-sdk-1.19.0"
-          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.0"
+          mkdir -p "$HOME/slint-sdk-1.19.1"
+          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.1"
       - name: Slint SDK (path)
-        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.0" >> "$GITHUB_ENV"
+        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.1" >> "$GITHUB_ENV"
       - name: Configure
         run: cmake --preset host -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_C_COMPILER=gcc-15
       - name: Build
@@ -70,8 +70,8 @@ jobs:
         id: sdk
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/slint-sdk-1.19.0
-          key: slint-sdk-1.19.0-armhf-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
+          path: ~/slint-sdk-1.19.1
+          key: slint-sdk-1.19.1-armhf-${{ hashFiles('src/tools/build-slint-sdk.sh', 'src/tools/slint/*.patch') }}
       - name: Slint SDK (build)
         if: steps.sdk.outputs.cache-hit != 'true'
         env:
@@ -80,10 +80,10 @@ jobs:
           SLINT_TOOLCHAIN_ROOT: ${{ env.TASTY_TOOLCHAIN_ROOT }}
         run: |
           src/tools/build-slint-sdk.sh "$RUNNER_TEMP/slint-sdk-out"
-          mkdir -p "$HOME/slint-sdk-1.19.0"
-          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.0"
+          mkdir -p "$HOME/slint-sdk-1.19.1"
+          tar --zstd -xf "$RUNNER_TEMP"/slint-sdk-out/slint-sdk-*.tar.zst -C "$HOME/slint-sdk-1.19.1"
       - name: Slint SDK (path)
-        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.0" >> "$GITHUB_ENV"
+        run: echo "TASTY_SLINT_SDK=$HOME/slint-sdk-1.19.1" >> "$GITHUB_ENV"
       - name: Configure
         run: cmake --preset armhf-static -DTASTY_TOOLCHAIN_ROOT="$TASTY_TOOLCHAIN_ROOT" -DTASTY_STATIC_DEPS="$TASTY_TOOLCHAIN_ROOT/opt"
       - name: Build

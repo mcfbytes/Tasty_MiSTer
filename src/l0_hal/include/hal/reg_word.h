@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "hal/reg_field.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "infra/error.h"
 
@@ -35,7 +35,7 @@ struct RegWord {
         store(v);
     }
 
-    [[nodiscard]] constexpr SpiHalves halves() const noexcept { return SpiHalves::of(v); }
+    [[nodiscard]] constexpr LinkHalves halves() const noexcept { return LinkHalves::of(v); }
 
     [[nodiscard]] constexpr Error refusal(Errc why, infra::ErrorSite at) const noexcept {
         return Error{why, at, v};

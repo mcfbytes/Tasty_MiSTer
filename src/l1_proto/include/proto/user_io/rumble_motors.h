@@ -14,7 +14,7 @@ struct RumbleMotors {
     friend constexpr bool operator==(const RumbleMotors&, const RumbleMotors&) = default;
 };
 
-[[nodiscard]] constexpr RumbleMotors rumble_motors(hal::SpiWord w) noexcept {
+[[nodiscard]] constexpr RumbleMotors rumble_motors(hal::LinkWord w) noexcept {
     constexpr auto level = [](std::uint8_t b) {
         return static_cast<std::uint16_t>(
             (std::uint16_t{b} << std::numeric_limits<std::uint8_t>::digits) | b
@@ -24,10 +24,10 @@ struct RumbleMotors {
 }
 
 static_assert(
-    rumble_motors(hal::SpiWord{0x0080}) == RumbleMotors{.strong = 0x0000, .weak = 0x8080}
+    rumble_motors(hal::LinkWord{0x0080}) == RumbleMotors{.strong = 0x0000, .weak = 0x8080}
 );
 static_assert(
-    rumble_motors(hal::SpiWord{0xFFFF}) == RumbleMotors{.strong = 0xFFFF, .weak = 0xFFFF}
+    rumble_motors(hal::LinkWord{0xFFFF}) == RumbleMotors{.strong = 0xFFFF, .weak = 0xFFFF}
 );
 
 }

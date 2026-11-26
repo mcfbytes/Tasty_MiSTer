@@ -45,7 +45,7 @@
 #include "hal/boards_table.h"
 #include "reactor/executive.h"
 #include "hal/irq_pin.h"
-#include "hal/link_port.h"
+#include "hal/board_link.h"
 #include "hal/link_timing.h"
 #include "hal/program_geometry.h"
 #include "os/epoll_floor.h"
@@ -390,7 +390,7 @@ ProcessStandup::Exit ProcessStandup::open_platform() {
     }
     parts_.emplace(std::move(*parts));
 
-    hal::ILinkPort& link = parts_->link();
+    hal::IBoardLink& link = parts_->link();
     exit_ = ExitPath{link};
 
     auto exec = reactor::Executive::create(
@@ -410,7 +410,7 @@ ProcessStandup::Exit ProcessStandup::open_platform() {
 
 ProcessStandup::Exit ProcessStandup::gate_fabric() {
     const hal::BoardProfile& board = *board_;
-    hal::ILinkPort& link = parts_->link();
+    hal::IBoardLink& link = parts_->link();
 
     const bool fabric_ready = [&link] {
         const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
@@ -440,7 +440,7 @@ ProcessStandup::Exit ProcessStandup::open_storage() {
 
 ProcessStandup::Exit ProcessStandup::assemble_hub() {
     const hal::BoardProfile& board = *board_;
-    hal::ILinkPort& link = parts_->link();
+    hal::IBoardLink& link = parts_->link();
 
     const auto link_timing = hal::LinkTimingValues::resolve(board.timing, ERR_SITE());
     if (!link_timing) {
@@ -460,6 +460,9 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
             .programmer = parts_->programmer(),
             .fpga_mem = board.fpga_mem,
             .lw_window = hal::lw_region(board),
+            .ocram_window = hal::ocram_region(board),
+            .ocram_platform = parts_->ocram_platform(),
+            .ocram_run = parts_->ocram_run(),
             .regions = board.regions,
             .doorbells = board.doorbells,
             .doorbell_nodes = hal::doorbell_nodes(board),

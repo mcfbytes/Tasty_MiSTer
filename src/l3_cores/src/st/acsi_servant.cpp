@@ -71,7 +71,7 @@ struct AcsiState {
             return std::nullopt;
 
         std::array<std::byte, kAcsiStateReplies.size()> bytes{};
-        std::ranges::transform(block.replies, bytes.begin(), [](hal::SpiWord reply) noexcept {
+        std::ranges::transform(block.replies, bytes.begin(), [](hal::LinkWord reply) noexcept {
             return reply.low_lane();
         });
         const std::byte select = infra::at_index(bytes, kAcsiSelectReply);
@@ -81,12 +81,12 @@ struct AcsiState {
 
 static_assert(proto::user_io::PollFrameDecoder<AcsiState>);
 
-constexpr hal::SpiWord wire_opcode(DmaOp op) noexcept {
-    return hal::SpiWord{static_cast<std::uint16_t>(op)};
+constexpr hal::LinkWord wire_opcode(DmaOp op) noexcept {
+    return hal::LinkWord{static_cast<std::uint16_t>(op)};
 }
 
-constexpr hal::SpiWord signal_word(ScsiStatus status) noexcept {
-    return hal::SpiWord{static_cast<std::uint16_t>(status)};
+constexpr hal::LinkWord signal_word(ScsiStatus status) noexcept {
+    return hal::LinkWord{static_cast<std::uint16_t>(status)};
 }
 
 constexpr std::uint16_t wire_len(std::size_t n) noexcept {

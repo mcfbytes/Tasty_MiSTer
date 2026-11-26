@@ -161,6 +161,8 @@ private:
     [[nodiscard]] bool session_live_() const noexcept;
     [[nodiscard]] bool wire_held_() const noexcept;
 
+    [[nodiscard]] bool off_link_sole_hold_() const noexcept;
+
     [[nodiscard]] bool dat_window_held_() const noexcept;
 
     [[nodiscard]] bool transfer_holds_() const noexcept;

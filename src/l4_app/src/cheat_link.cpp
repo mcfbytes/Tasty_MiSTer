@@ -2,7 +2,7 @@
 #include "app/cheat_link.h"
 
 #include "cores/cheat_sink.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 
 namespace mister::app {
 

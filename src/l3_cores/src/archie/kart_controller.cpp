@@ -133,7 +133,7 @@ void KartController::tick(Instant now) noexcept {
     run_timers_(now);
 }
 
-void KartController::controller_word(hal::SpiWord word, Instant now) noexcept {
+void KartController::controller_word(hal::LinkWord word, Instant now) noexcept {
     TASTY_SEAT_BODY(KartController);
     run_timers_(now);
     dispatch_(KartByte::of(word), now);

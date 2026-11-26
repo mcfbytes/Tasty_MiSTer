@@ -94,7 +94,7 @@ public:
 
     [[nodiscard]] Ex<void> append(std::span<const Bracket> act);
 
-    [[nodiscard]] Ex<void> append_command(std::span<const hal::SpiWord> words);
+    [[nodiscard]] Ex<void> append_command(std::span<const hal::LinkWord> words);
 
     [[nodiscard]] Ex<FioWordCount> upload(
         WideIoIndex index,

@@ -3,7 +3,7 @@
 
 #include <chrono>
 
-#include "hal/spi_bus.h"
+#include "hal/gpo_gpi_port.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/xthread/wake_flag.h"
@@ -18,7 +18,7 @@ public:
 
     static constexpr std::chrono::milliseconds kTick{1};
 
-    explicit DiskLamp(SpiBus& bus) noexcept : bus_(bus) {}
+    explicit DiskLamp(GpoGpiPort& bus) noexcept : bus_(bus) {}
 
     void note() noexcept { left_ = kHold; }
 
@@ -33,7 +33,7 @@ public:
     }
 
 private:
-    SpiBus& bus_;
+    GpoGpiPort& bus_;
     xthread::WakeFlag::Cursor seen_{};
     std::chrono::milliseconds left_{};
 };

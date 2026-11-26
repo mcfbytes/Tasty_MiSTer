@@ -31,7 +31,7 @@ public:
         return wire_.send_data(io_index, payload, sink_);
     }
 
-    [[nodiscard]] Ex<void> send_status(std::span<const hal::SpiWord> words) override {
+    [[nodiscard]] Ex<void> send_status(std::span<const hal::LinkWord> words) override {
         TASTY_SEAT_BODY(CdWireLink);
         return wire_.send_status(words);
     }
@@ -43,7 +43,7 @@ public:
 
     [[nodiscard]] bool egress_bound() const noexcept override {
         TASTY_SEAT_BODY(CdWireLink);
-        return wire_.queued();
+        return true;
     }
 
     [[nodiscard]] bool egress_idle() const noexcept override {

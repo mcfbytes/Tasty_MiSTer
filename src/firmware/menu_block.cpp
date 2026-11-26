@@ -2,6 +2,7 @@
 #include "menu_block.h"
 
 #include "app/hd/hd_look_ini.h"
+#include "app/info_notice.h"
 #include "hal/axi.h"
 #include "hal/board_regions.h"
 #include "infra/opt_ref.h"
@@ -137,6 +138,7 @@ MenuBlock::MenuBlock(
               .autosave = infra::opt_ref_of(&parts.session.owner.autosave_cell()),
               .save_director = infra::opt_ref_of(&parts.session.owner.save_director_cell()),
               .menu_focus = infra::OptRef<app::MenuFocusCell>{parts.cells.menu_focus},
+              .info_notices = infra::opt_ref_of(&parts.cells.info_notices),
           }
       },
       save_states_{app::SaveStateAttach::Wiring{

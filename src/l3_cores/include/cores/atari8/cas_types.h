@@ -10,7 +10,7 @@
 
 #include "cores/types.h"
 #include "hal/reg_field.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/affine.h"
 
 namespace mister::cores::atari8 {
@@ -59,8 +59,8 @@ struct TapeTicks {
         return TapeTicks{v / kHalves};
     }
 
-    [[nodiscard]] constexpr hal::SpiHalves entry(TapeLevel level) const noexcept {
-        return hal::SpiHalves::of(std::to_underlying(level) | (v << 1));
+    [[nodiscard]] constexpr hal::LinkHalves entry(TapeLevel level) const noexcept {
+        return hal::LinkHalves::of(std::to_underlying(level) | (v << 1));
     }
 
     friend constexpr bool operator==(TapeTicks, TapeTicks) = default;

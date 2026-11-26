@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "process_main.h"
 
-#include "supervisor_verdict.h"
+#include "main_verdict.h"
 #include "thread_assembly.h"
 #include "app/link_event_dispatch.h"
 #include "app/link_rx_channel.h"
@@ -15,12 +15,13 @@ namespace mister::fw {
 ProcessMain::ProcessMain(
     app::SessionOwner& owner,
     const ThreadAssembly& assembly,
-    xthread::ParkFds fds
+    xthread::ParkFds fds,
+    infra::OptRef<const os::EpollSet> doorbells
 ) noexcept
     : owner_(owner),
       assembly_(assembly),
       stop_(fds.stop_wire()),
-      park_(fds.wake(), stop_) {}
+      park_(fds.wake(), stop_, doorbells ? doorbells->fd() : -1) {}
 
 void ProcessMain::start() noexcept {
     TASTY_SEAT_BODY(ProcessMain);
@@ -56,12 +57,11 @@ bool ProcessMain::idle() const noexcept {
 }
 
 infra::ParkTimeout ProcessMain::park_ms() const noexcept {
-    return owner_.wake_hint_ms(kSupervisorWakeMs);
+    return owner_.wake_hint_ms(kMainWakeMs);
 }
 
 bool ProcessMain::stopping() const noexcept {
-    return supervisor_verdict(stop_.ever_requested(), assembly_.rt_exited())
-        == SupervisorVerdict::Exit;
+    return main_verdict(stop_.ever_requested(), assembly_.rt_exited()) == MainVerdict::Exit;
 }
 
 }

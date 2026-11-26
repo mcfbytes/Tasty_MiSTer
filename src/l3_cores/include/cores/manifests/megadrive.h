@@ -6,7 +6,7 @@
 
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/megadrive/megadrive_windows.h"
 #include "cores/pcm_census_rows.h"
 

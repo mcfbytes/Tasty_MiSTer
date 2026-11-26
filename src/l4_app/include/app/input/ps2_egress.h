@@ -4,6 +4,7 @@
 #include "app/input/input_key_counts.h"
 #include "infra/xthread/counter.h"
 #include "infra/xthread/diag_log.h"
+#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "proto/frame_drops.h"
@@ -22,6 +23,8 @@ class IInputSink;
 
 namespace mister::app::input {
 
+class LwPadEndpoint;
+
 class Ps2Egress {
     TASTY_SEAT_RESIDENT(Input);
 
@@ -36,13 +39,15 @@ public:
         proto::Ps2Mouse& mouse,
         LinkTxChannel<SeatTag::Input>& inbox,
         xthread::Counter& activity,
-        xthread::DiagLog& diag
+        xthread::DiagLog& diag,
+        infra::OptRef<LwPadEndpoint> lw = {}
     ) noexcept
         : kbd_(kbd),
           mouse_(mouse),
           inbox_(inbox),
           activity_(activity),
-          diag_(diag) {}
+          diag_(diag),
+          lw_(lw) {}
 
     Ps2Egress(const Ps2Egress&) = delete;
     Ps2Egress& operator=(const Ps2Egress&) = delete;
@@ -63,11 +68,14 @@ public:
     void note_dropped_mouse_() noexcept;
 
 private:
+    [[nodiscard]] bool has_room_(bool lw) const noexcept;
+
     proto::Ps2Keyboard& kbd_;
     proto::Ps2Mouse& mouse_;
     LinkTxChannel<SeatTag::Input>& inbox_;
     xthread::Counter& activity_;
     xthread::DiagLog& diag_;
+    infra::OptRef<LwPadEndpoint> lw_;
     proto::FrameDrops wm_frame_drops_{};
     proto::FrameDrops wm_mouse_drops_{};
     bool sweep_owed_ = false;

@@ -7,7 +7,7 @@
 #include "cores/cd/cd_drive.h"
 #include "cores/cd/cd_profile.h"
 #include "cores/cd_service_rows.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/staging_core.h"
 #include "cores/stream_load_host.h"
 #include "infra/fixed_str.h"

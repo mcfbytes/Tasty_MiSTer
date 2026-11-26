@@ -23,14 +23,14 @@ public:
     SpiFrame& operator=(const SpiFrame&) = delete;
 
     using ILinkFrame::begin;
-    [[nodiscard]] Ex<void> begin(LinkSel sel, hal::SpiWord op) override;
-    [[nodiscard]] Ex<void> word(hal::SpiWord w) override;
+    [[nodiscard]] Ex<void> begin(LinkSel sel, hal::LinkWord op) override;
+    [[nodiscard]] Ex<void> word(hal::LinkWord w) override;
     [[nodiscard]] Ex<void> end() override;
-    [[nodiscard]] std::optional<hal::SpiWord> opcode_reply() const noexcept override;
+    [[nodiscard]] std::optional<hal::LinkWord> opcode_reply() const noexcept override;
 
-    [[nodiscard]] Ex<hal::SpiWord> open(LinkSel sel, hal::SpiWord op);
+    [[nodiscard]] Ex<hal::LinkWord> open(LinkSel sel, hal::LinkWord op);
 
-    [[nodiscard]] Ex<hal::SpiWord> beat(hal::SpiWord w);
+    [[nodiscard]] Ex<hal::LinkWord> beat(hal::LinkWord w);
 
     void abandon() noexcept { close_(); }
 
@@ -39,12 +39,12 @@ public:
     [[nodiscard]] hal::Width width() const noexcept { return link_.width(); }
 
 private:
-    [[nodiscard]] Ex<hal::SpiWord> open_raw_(hal::ChipSelect cs, hal::SpiWord op);
+    [[nodiscard]] Ex<hal::LinkWord> open_raw_(hal::ChipSelect cs, hal::LinkWord op);
     void close_() noexcept;
 
     hal::ISpiTransport& link_;
     bool open_ = false;
-    std::optional<hal::SpiWord> reply_{};
+    std::optional<hal::LinkWord> reply_{};
 };
 
 }

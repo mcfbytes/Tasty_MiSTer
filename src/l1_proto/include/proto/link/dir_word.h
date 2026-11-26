@@ -65,6 +65,12 @@ struct DirWord {
 
     enum HpsSlotBits : std::uint32_t { kHpsSlotShift = 16, kHpsSlotMask = 0xF };
 
+    [[nodiscard]] constexpr bool pad_link_arm_absent() const noexcept {
+        return (v & kPadLinkArmAbsent) != 0u;
+    }
+
+    enum PadFlagBits : std::uint32_t { kPadLinkArmAbsent = 1 };
+
     [[nodiscard]] constexpr LaneCaps caps() const noexcept { return LaneCaps{v}; }
 
     [[nodiscard]] constexpr OsdShape osd_shape() const noexcept { return OsdShape{v}; }

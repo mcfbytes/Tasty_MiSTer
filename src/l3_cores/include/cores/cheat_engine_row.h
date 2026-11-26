@@ -3,7 +3,7 @@
 
 #include "cores/cheat_engine.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/role_row.h"
 #include "infra/seat.h"
 

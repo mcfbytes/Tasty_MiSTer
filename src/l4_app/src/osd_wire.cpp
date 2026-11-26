@@ -7,7 +7,8 @@
 namespace mister::app {
 
 Ex<void> OsdWire::show_as(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdTarget t) noexcept {
-    proto::link::SpiFrame frame{*link_};
+    proto::link::SpiFrame link_frame{*link_};
+    proto::ILinkFrame& frame = control_frame_(link_frame);
 
     asleep_ = false;
     const bool drop_hdmi = proto::includes_hdmi(target_) && !proto::includes_hdmi(t);
@@ -101,7 +102,8 @@ Ex<void> OsdWire::reassert_show() noexcept {
 }
 
 Ex<void> OsdWire::menu_ctl(bool enable) noexcept {
-    proto::link::SpiFrame frame{*link_};
+    proto::link::SpiFrame link_frame{*link_};
+    proto::ILinkFrame& frame = control_frame_(link_frame);
     if (auto e = osd_.set_target(target_); !e)
         return e;
     if (auto e = osd_.menu_ctl(frame, enable); !e)

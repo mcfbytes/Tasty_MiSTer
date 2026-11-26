@@ -352,14 +352,14 @@ struct VresLink final : mister::testing::RecordingTransport {
     }
 
 protected:
-    hal::SpiWord answer(hal::SpiWord w) override {
+    hal::LinkWord answer(hal::LinkWord w) override {
         if (!open_)
-            return hal::SpiWord{0};
+            return hal::LinkWord{0};
         if (first_) {
             first_ = false;
             op_ = static_cast<std::uint8_t>(w.v & 0xFFu);
             cursor_ = 0;
-            return hal::SpiWord{0};
+            return hal::LinkWord{0};
         }
         const std::uint16_t words[9] = {
             0x0001,
@@ -376,7 +376,7 @@ protected:
         if (op_ == proto::byte(proto::UioOp::GetVres) && cursor_ < 9)
             in = words[cursor_];
         ++cursor_;
-        return hal::SpiWord{in};
+        return hal::LinkWord{in};
     }
 
 private:

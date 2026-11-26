@@ -19,7 +19,7 @@
 #include "hal/reg_field.h"
 #include "hal/reg_word.h"
 #include "hal/sdram_cfg.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/affine.h"
 #include "infra/ascii.h"
 #include "infra/byte_count.h"
@@ -29,6 +29,7 @@
 #include "infra/index_set.h"
 #include "infra/indexed_array.h"
 #include "infra/json_out.h"
+#include "hal/ocram_row_arg.h"
 #include "hal/types.h"
 #include "infra/xthread/pause_gen.h"
 #include "infra/prelude.h"
@@ -37,6 +38,10 @@
 #include "os/map_length.h"
 #include "os/types.h"
 #include "proto/uio_opcodes.h"
+
+namespace mister::hal::ocram {
+struct ImageRows;
+}
 
 namespace mister::proto {
 
@@ -267,7 +272,7 @@ public:
         return WideSub{static_cast<std::uint8_t>(v >> kSubShift)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept { return hal::LinkWord{v}; }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
@@ -297,7 +302,7 @@ struct WideIoIndex {
         return FioIndexByte{static_cast<std::uint8_t>(v)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept { return hal::LinkWord{v}; }
 
     [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
         return Error{code, at, v};
@@ -527,12 +532,12 @@ struct BlockCount {
     std::uint32_t v = 0;
     using affine_count = BlockCount;
 
-    [[nodiscard]] static constexpr BlockCount of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr BlockCount of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t b) { return BlockCount{b}; });
     }
 
-    [[nodiscard]] constexpr hal::SpiWord low_word() const noexcept {
-        return hal::SpiWord{static_cast<std::uint16_t>(v)};
+    [[nodiscard]] constexpr hal::LinkWord low_word() const noexcept {
+        return hal::LinkWord{static_cast<std::uint16_t>(v)};
     }
 
     [[nodiscard]] constexpr std::byte low_byte() const noexcept {
@@ -584,7 +589,7 @@ struct Lba {
 
     [[nodiscard]] static constexpr Lba of(hal::RegWord w) noexcept { return Lba{w.bits()}; }
 
-    [[nodiscard]] static constexpr Lba of(hal::SpiHalves h) noexcept {
+    [[nodiscard]] static constexpr Lba of(hal::LinkHalves h) noexcept {
         return h.joined([](std::uint32_t d) { return Lba{d}; });
     }
 
@@ -630,7 +635,7 @@ struct SdStatusWord {
         return SdStatusWord{static_cast<std::uint16_t>(w.bits())};
     }
 
-    [[nodiscard]] static constexpr SdStatusWord of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr SdStatusWord of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t b) { return SdStatusWord{b}; });
     }
 
@@ -665,7 +670,7 @@ struct SdStatParameter {
 
     [[nodiscard]] constexpr bool read_only() const noexcept { return (v & kReadOnly) != 0u; }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept { return hal::LinkWord{v}; }
 
     friend constexpr bool operator==(SdStatParameter, SdStatParameter) = default;
 };
@@ -722,7 +727,7 @@ struct MemSizeCookie {
         return cfg ? MemSizeCookie{cfg->cookie()} : MemSizeCookie{};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord word() const noexcept { return hal::LinkWord{v}; }
 
     [[nodiscard]] constexpr bool is_measured() const noexcept {
         return (v & hal::SdramCfg::kCookiePresent) != 0;
@@ -757,11 +762,13 @@ struct OsdRowCount {
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{
             static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max())
         };
     }
+
+    [[nodiscard]] static OsdRowCount from(hal::ocram::ImageRows rows) noexcept;
 
     [[nodiscard]] constexpr bool covers(OsdRow row) const noexcept;
 
@@ -782,8 +789,12 @@ struct OsdRow {
         return OsdRow{static_cast<std::uint32_t>(i)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{
+    [[nodiscard]] constexpr std::optional<hal::ocram::RowArg> record_arg() const noexcept {
+        return hal::ocram::RowArg::of(v);
+    }
+
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{
             static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max())
         };
     }
@@ -827,8 +838,8 @@ struct OsdColCount {
         return OsdColCount{static_cast<std::uint32_t>(n)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{
             static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max())
         };
     }
@@ -852,8 +863,8 @@ struct OsdCol {
         return OsdCol{static_cast<std::uint32_t>(i)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{
             static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max())
         };
     }
@@ -966,7 +977,9 @@ struct JoyMask {
 
     [[nodiscard]] constexpr JoyMask lowest() const noexcept { return JoyMask{v & (~v + 1u)}; }
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept {
+        return hal::LinkHalves::of(v);
+    }
 
     friend constexpr bool operator==(JoyMask, JoyMask) = default;
 };
@@ -986,7 +999,7 @@ struct OsdMask {
         return OsdMask{static_cast<std::uint16_t>(v | bits.v)};
     }
 
-    [[nodiscard]] static constexpr OsdMask of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr OsdMask of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t b) { return OsdMask{b}; });
     }
 
@@ -1093,7 +1106,7 @@ struct MountEpoch {
 struct ReplyMask {
     std::uint16_t v = 0;
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept { return hal::LinkWord{v}; }
 
     [[nodiscard]] constexpr bool any() const noexcept { return v != 0; }
 
@@ -1120,7 +1133,7 @@ struct ReplyWord {
         return v & kHeadNibble;
     }
 
-    [[nodiscard]] static constexpr ReplyWord of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr ReplyWord of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t b) { return ReplyWord{b}; });
     }
 
@@ -1398,6 +1411,10 @@ private:
 struct BlockSize {
     std::uint32_t v = 0;
 
+    [[nodiscard]] static constexpr BlockSize of(infra::ByteCount bytes) noexcept {
+        return BlockSize{static_cast<std::uint32_t>(bytes.v)};
+    }
+
     [[nodiscard]] constexpr FileOffset position_of(Lba lba) const noexcept {
         return FileOffset{static_cast<std::uint64_t>(lba.v) * v};
     }
@@ -1667,8 +1684,8 @@ struct SectorAck {
         return SectorAck{static_cast<std::uint16_t>((unit.v + 1u) << kShift)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord with_opcode(UioOp op) const noexcept {
-        return hal::SpiWord{static_cast<std::uint16_t>(std::to_underlying(op) | v)};
+    [[nodiscard]] constexpr hal::LinkWord with_opcode(UioOp op) const noexcept {
+        return hal::LinkWord{static_cast<std::uint16_t>(std::to_underlying(op) | v)};
     }
 
     friend constexpr bool operator==(SectorAck, SectorAck) = default;

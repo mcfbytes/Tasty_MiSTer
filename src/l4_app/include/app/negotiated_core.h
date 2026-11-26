@@ -28,6 +28,7 @@
 #include "cores/tas/ram_image_recipe.h"
 #include "cores/save_probe_rows.h"
 #include "hal/lw_presence.h"
+#include "hal/ocram_presence.h"
 #include "hal/phys_region.h"
 #include "infra/byte_view.h"
 #include "infra/error.h"
@@ -173,6 +174,11 @@ public:
         lw_presence_ = lw;
     }
 
+    void note_ocram_presence(hal::OcramPresence ocram) noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        ocram_presence_ = ocram;
+    }
+
     void facts_sent() noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         facts_pending_ = false;
@@ -255,6 +261,11 @@ public:
         return lw_presence_;
     }
 
+    [[nodiscard]] hal::OcramPresence ocram_presence() const noexcept {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        return ocram_presence_;
+    }
+
     [[nodiscard]] bool core_live() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return core_live_;
@@ -319,6 +330,7 @@ private:
     bool core_live_ = false;
     hal::Width link_width_ = hal::Width::Byte;
     hal::LwPresence lw_presence_{};
+    hal::OcramPresence ocram_presence_{};
 
     cores::tas::RamImageRecipe pending_ram_image_{};
     bool made_with_manifest_ = false;

@@ -160,9 +160,9 @@ static_assert(
 );
 static_assert(kMinimig.grants.has(Grant::Mailbox));
 static_assert(
-    cdb::kStatus == hal::SpiWord{0x63}
-        && cdb::kRead == hal::SpiWord{0x62}
-        && proto::word(cdb::kWriteOp) == hal::SpiWord{0x61},
+    cdb::kStatus == hal::LinkWord{0x63}
+        && cdb::kRead == hal::LinkWord{0x62}
+        && proto::word(cdb::kWriteOp) == hal::LinkWord{0x61},
     "user_io.h:87-89: UIO_DMA_WRITE, UIO_DMA_READ, UIO_DMA_SDIO"
 );
 static_assert(

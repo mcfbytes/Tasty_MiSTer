@@ -8,7 +8,9 @@
 #include "hal/bridge_sequencer.h"
 #include "infra/opt_ref.h"
 #include "hal/fpga_programmer.h"
-#include "hal/link_port.h"
+#include "hal/board_link.h"
+#include "hal/ocram_platform.h"
+#include "hal/ocram_run.h"
 #include "infra/prelude.h"
 
 namespace mister::hal {
@@ -26,7 +28,7 @@ class DiskLamp;
 
 namespace mister::fw {
 
-void release_link(hal::ILinkPort& link);
+void release_link(hal::IBoardLink& link);
 
 class BoardParts {
 public:
@@ -47,7 +49,7 @@ public:
     BoardParts(const BoardParts&) = delete;
     BoardParts& operator=(const BoardParts&) = delete;
 
-    hal::ILinkPort& link() const noexcept { return *link_; }
+    hal::IBoardLink& link() const noexcept { return *link_; }
 
     [[nodiscard]] infra::OptRef<hal::DiskLamp> disk_lamp() const noexcept {
         return infra::opt_ref_of(lamp_.get());
@@ -57,17 +59,27 @@ public:
 
     hal::IBridgeSequencer& bridges() const noexcept { return *bridges_; }
 
+    [[nodiscard]] infra::OptRef<hal::IOcramPlatform> ocram_platform() const noexcept {
+        return infra::opt_ref_of(ocram_.get());
+    }
+
+    [[nodiscard]] infra::OptRef<hal::IOcramRun> ocram_run() const noexcept { return ocram_run_; }
+
 private:
     BoardParts(
-        std::unique_ptr<hal::ILinkPort> link,
+        std::unique_ptr<hal::IBoardLink> link,
         std::unique_ptr<hal::IFpgaProgrammer> programmer,
         std::unique_ptr<hal::IBridgeSequencer> bridges,
+        std::unique_ptr<hal::IOcramPlatform> ocram,
+        hal::IOcramRun* run,
         std::unique_ptr<hal::DiskLamp> lamp
     ) noexcept;
 
-    std::unique_ptr<hal::ILinkPort> link_;
+    std::unique_ptr<hal::IBoardLink> link_;
     std::unique_ptr<hal::IFpgaProgrammer> programmer_;
     std::unique_ptr<hal::IBridgeSequencer> bridges_;
+    std::unique_ptr<hal::IOcramPlatform> ocram_;
+    infra::OptRef<hal::IOcramRun> ocram_run_;
     std::unique_ptr<hal::DiskLamp> lamp_;
 };
 

@@ -37,7 +37,7 @@ public:
 
     bool dirty() const noexcept { return dirty_; }
 
-    hal::SpiWord word(unsigned i) const { return shadow_.words[i]; }
+    hal::LinkWord word(unsigned i) const { return shadow_.words[i]; }
 
     [[nodiscard]] StatusWord value() const noexcept;
 

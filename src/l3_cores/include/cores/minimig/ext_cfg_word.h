@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "hal/reg_field.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 
 namespace mister::cores::minimig {
 
@@ -27,11 +27,13 @@ struct ExtCfgWord {
 
     std::uint32_t v = 0;
 
-    [[nodiscard]] static constexpr ExtCfgWord of(hal::SpiHalves halves) noexcept {
+    [[nodiscard]] static constexpr ExtCfgWord of(hal::LinkHalves halves) noexcept {
         return halves.joined([](std::uint32_t whole) { return ExtCfgWord{whole}; });
     }
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept {
+        return hal::LinkHalves::of(v);
+    }
 
     [[nodiscard]] constexpr bool pixel_adaptive() const noexcept { return has_(kPixelAdaptive); }
 

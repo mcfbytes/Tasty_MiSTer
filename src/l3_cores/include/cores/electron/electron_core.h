@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/stream_load_host.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"

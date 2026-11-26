@@ -19,8 +19,8 @@ inline constexpr infra::ByteCount kAtapiIdentifyBytes{512};
 
 namespace detail {
 
-inline constexpr infra::ByteOffset kAtapiIdentifyModelAt{27 * sizeof(hal::SpiWord)};
-inline constexpr infra::ByteCount kAtapiIdentifyModelBytes{20 * sizeof(hal::SpiWord)};
+inline constexpr infra::ByteOffset kAtapiIdentifyModelAt{27 * sizeof(hal::LinkWord)};
+inline constexpr infra::ByteCount kAtapiIdentifyModelBytes{20 * sizeof(hal::LinkWord)};
 
 constexpr void identify_text(std::span<std::byte> field, std::string_view text) noexcept {
     std::ranges::fill(field, std::byte{' '});
@@ -28,39 +28,39 @@ constexpr void identify_text(std::span<std::byte> field, std::string_view text) 
         field[i ^ 1] = std::bit_cast<std::byte>(text[i]);
 }
 
-constexpr void identify_words(std::span<std::byte> field, hal::SpiWord value) noexcept {
-    const std::size_t words = field.size() / sizeof(hal::SpiWord);
+constexpr void identify_words(std::span<std::byte> field, hal::LinkWord value) noexcept {
+    const std::size_t words = field.size() / sizeof(hal::LinkWord);
     for (std::size_t i = 0; i < words; ++i)
-        value.store_le(field.subspan(i * sizeof(hal::SpiWord)).first<sizeof(hal::SpiWord)>());
+        value.store_le(field.subspan(i * sizeof(hal::LinkWord)).first<sizeof(hal::LinkWord)>());
 }
 
 inline constexpr std::array<std::byte, kAtapiIdentifyBytes.size()> kAtapiIdentifyBase = [] {
-    constexpr std::size_t kWord = sizeof(hal::SpiWord);
+    constexpr std::size_t kWord = sizeof(hal::LinkWord);
     constexpr infra::ByteCount kOneWord{kWord};
-    constexpr hal::SpiWord kPacketCdRom{0x8580};
+    constexpr hal::LinkWord kPacketCdRom{0x8580};
     constexpr infra::ByteOffset kSerialAt{10 * kWord};
     constexpr infra::ByteCount kSerialBytes{10 * kWord};
     constexpr std::string_view kSerial = "AOCD00000";
     constexpr infra::ByteOffset kCapabilitiesAt{49 * kWord};
-    constexpr hal::SpiWord kLbaSupported{1u << 9};
+    constexpr hal::LinkWord kLbaSupported{1u << 9};
     constexpr infra::ByteOffset kValidFieldsAt{53 * kWord};
-    constexpr hal::SpiWord kValidFields{0x0007};
+    constexpr hal::LinkWord kValidFields{0x0007};
     constexpr infra::ByteOffset kCycleTimesAt{65 * kWord};
     constexpr infra::ByteCount kCycleTimesBytes{4 * kWord};
-    constexpr hal::SpiWord kCycleNanoseconds{120};
+    constexpr hal::LinkWord kCycleNanoseconds{120};
     constexpr infra::ByteOffset kAtaVersionsAt{80 * kWord};
-    constexpr hal::SpiWord kAtaVersions{0x007E};
+    constexpr hal::LinkWord kAtaVersions{0x007E};
     constexpr infra::ByteOffset kCommandSetsAt{82 * kWord};
     constexpr std::array kCommandSets{
-        hal::SpiWord{(1u << 9) | (1u << 4)},
-        hal::SpiWord{1u << 14},
-        hal::SpiWord{1u << 14},
-        hal::SpiWord{(1u << 14) | (1u << 9) | (1u << 4)},
-        hal::SpiWord{0},
-        hal::SpiWord{1u << 14}
+        hal::LinkWord{(1u << 9) | (1u << 4)},
+        hal::LinkWord{1u << 14},
+        hal::LinkWord{1u << 14},
+        hal::LinkWord{(1u << 14) | (1u << 9) | (1u << 4)},
+        hal::LinkWord{0},
+        hal::LinkWord{1u << 14}
     };
     constexpr infra::ByteOffset kHardwareResetAt{93 * kWord};
-    constexpr hal::SpiWord kHardwareReset{0x630B};
+    constexpr hal::LinkWord kHardwareReset{0x630B};
 
     std::array<std::byte, kAtapiIdentifyBytes.size()> block{};
     const std::span<std::byte> bytes{block};
@@ -93,7 +93,7 @@ inline constexpr std::array<std::byte, kAtapiIdentifyBytes.size()> kAtapiIdentif
         kAtaVersions
     );
     std::span<std::byte> sets = infra::affine::from(bytes, kCommandSetsAt);
-    for (const hal::SpiWord set : kCommandSets) {
+    for (const hal::LinkWord set : kCommandSets) {
         identify_words(infra::affine::first(sets, kOneWord), set);
         sets = sets.subspan(kWord);
     }

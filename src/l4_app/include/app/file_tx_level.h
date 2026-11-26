@@ -6,6 +6,7 @@
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/xthread/telemetry.h"
+#include "proto/link/fio_open.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -20,6 +21,8 @@ struct FileTxLevel {
     proto::ActKey stream_act{};
     proto::ActKey held_act{};
     std::uint32_t held_bytes = 0;
+
+    proto::link::FioOpen params{};
 
     [[nodiscard]] constexpr bool answers(proto::ActKey key) const noexcept {
         if (held_act == key)

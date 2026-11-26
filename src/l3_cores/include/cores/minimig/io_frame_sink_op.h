@@ -24,8 +24,8 @@ enum class FrameOp : std::uint8_t {
     Joy = 0xF9,
 };
 
-[[nodiscard]] constexpr hal::SpiWord word(FrameOp op) noexcept {
-    return hal::SpiWord{std::to_underlying(op)};
+[[nodiscard]] constexpr hal::LinkWord word(FrameOp op) noexcept {
+    return hal::LinkWord{std::to_underlying(op)};
 }
 
 inline constexpr std::array kFrameOps{
@@ -42,20 +42,20 @@ inline constexpr std::array kFrameOps{
     FrameOp::Joy
 };
 
-[[nodiscard]] constexpr bool opens_frame(hal::SpiWord head) noexcept {
+[[nodiscard]] constexpr bool opens_frame(hal::LinkWord head) noexcept {
     return std::ranges::any_of(kFrameOps, [head](FrameOp op) { return head == word(op); });
 }
 
 static_assert(
-    opens_frame(hal::SpiWord{0xF0})
-    && opens_frame(hal::SpiWord{0xF9})
-    && opens_frame(hal::SpiWord{0x1E})
+    opens_frame(hal::LinkWord{0xF0})
+    && opens_frame(hal::LinkWord{0xF9})
+    && opens_frame(hal::LinkWord{0x1E})
 );
 static_assert(
-    !opens_frame(hal::SpiWord{0xFA})
-    && !opens_frame(hal::SpiWord{0xEF})
-    && !opens_frame(hal::SpiWord{0x54})
-    && !opens_frame(hal::SpiWord{0x01F0})
+    !opens_frame(hal::LinkWord{0xFA})
+    && !opens_frame(hal::LinkWord{0xEF})
+    && !opens_frame(hal::LinkWord{0x54})
+    && !opens_frame(hal::LinkWord{0x01F0})
 );
 
 }

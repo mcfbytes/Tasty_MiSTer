@@ -147,7 +147,7 @@ void PsxCore::service_kick() noexcept {
         return;
     }
     hal::Selected cs(host().link, hal::ChipSelect::Io);
-    if (auto r = host().link.transfer(hal::SpiWord{cd::cdwire::kUioCdGet}); !r)
+    if (auto r = host().link.transfer(hal::LinkWord{cd::cdwire::kUioCdGet}); !r)
         ++wire_faults_;
     ++kicks_;
 }

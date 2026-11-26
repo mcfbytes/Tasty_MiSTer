@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 
 namespace mister::cores {
@@ -12,12 +12,12 @@ namespace mister::cores {
 struct PcmRingPoint {
     std::uint32_t v = 0;
 
-    [[nodiscard]] static constexpr PcmRingPoint of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr PcmRingPoint of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t d) { return PcmRingPoint{d}; });
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiHalves::of(v).low;
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkHalves::of(v).low;
     }
 
     [[nodiscard]] constexpr std::size_t index() const noexcept { return v; }
@@ -60,7 +60,7 @@ private:
     std::uint32_t len_ = 0;
 };
 
-static_assert(PcmRingPoint{0x0001'2345u}.wire_word() == hal::SpiWord{0x2345});
-static_assert(PcmRingPoint::of(hal::SpiWord{0xBEEF}) == PcmRingPoint{0xBEEFu});
+static_assert(PcmRingPoint{0x0001'2345u}.wire_word() == hal::LinkWord{0x2345});
+static_assert(PcmRingPoint::of(hal::LinkWord{0xBEEF}) == PcmRingPoint{0xBEEFu});
 
 }

@@ -52,6 +52,9 @@ public:
     public:
         virtual void switch_minted(const UiRequest::LoadCore& req) noexcept = 0;
         virtual void drop_core_acts() = 0;
+
+        [[nodiscard]] virtual bool drop_pushes_op() const noexcept { return false; }
+
         virtual void forget_core() noexcept = 0;
 
         virtual void programmed(bool ok) = 0;
@@ -102,6 +105,8 @@ public:
 
     static constexpr std::size_t kTeardownOps = 3;
     static_assert(proto::kLinkTxCapacity >= kTeardownOps);
+
+    [[nodiscard]] bool teardown_fits(const Host& host) const noexcept;
 
     struct Wiring {
         SwitchPark& park;
@@ -302,7 +307,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
         return Asked::Invalid;
     }
 
-    if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps) {
+    if (!teardown_fits(host)) {
         ++owner_tally_.order_refusals;
         return Asked::NoRoom;
     }

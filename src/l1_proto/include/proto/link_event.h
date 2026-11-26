@@ -10,6 +10,7 @@
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "hal/lw_presence.h"
+#include "hal/ocram_presence.h"
 #include "infra/prelude.h"
 #include "hal/types.h"
 #include "infra/xthread/spsc_ring.h"
@@ -105,6 +106,8 @@ struct LinkEvent {
         BindGeneration bind_gen{};
         hal::Width width = hal::Width::Byte;
         hal::LwPresence lw{};
+        hal::OcramPresence ocram{};
+        std::byte pad_{};
     };
 
     struct IdentityMismatch {
@@ -164,7 +167,7 @@ struct LinkEvent {
         static constexpr Kind kKind = Kind::PolledWord;
         user_io::PollShape shape{};
         std::uint8_t param = 0;
-        hal::SpiWord word{};
+        hal::LinkWord word{};
         BindGeneration bind_gen{};
         std::uint8_t pad_[2]{};
     };
@@ -198,8 +201,8 @@ static_assert(
     "FrameReply: window@0 fails@1 word@2 bind_gen@4 pad_@6 gen@8, no hole"
 );
 static_assert(
-    sizeof(LinkEvent::IdentityMatched) == 6 && alignof(LinkEvent::IdentityMatched) == 2,
-    "IdentityMatched: dual@0 type@1 bind_gen@2 width@4 lw@5, one byte, no hole"
+    sizeof(LinkEvent::IdentityMatched) == 8 && alignof(LinkEvent::IdentityMatched) == 2,
+    "IdentityMatched: dual@0 type@1 bind_gen@2 width@4 lw@5 ocram@6, one pad byte"
 );
 
 inline constexpr std::size_t kLinkRxCapacity = 64;

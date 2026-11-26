@@ -51,7 +51,7 @@ Ex<void> SpiFioQueue::Emitter::on(const FioWindow::IoCommand& c) noexcept {
     for (std::size_t i = 0; i < c.words; ++i) {
         const std::size_t at = c.offset + 2u * i;
         const auto w = infra::load_le<std::uint16_t>(slab.subspan(at).first<kPairBytes>());
-        if (auto r = link.transfer(hal::SpiWord{w}); !r)
+        if (auto r = link.transfer(hal::LinkWord{w}); !r)
             return std::unexpected(r.error());
     }
     return {};
@@ -124,10 +124,10 @@ Ex<void> SpiFioQueue::append(std::span<const Bracket> act) {
     return place_(act);
 }
 
-Ex<void> SpiFioQueue::append_command(std::span<const hal::SpiWord> words) {
+Ex<void> SpiFioQueue::append_command(std::span<const hal::LinkWord> words) {
     TASTY_SEAT_BODY(SpiFioQueue);
     restart_if_idle_();
-    const std::size_t bytes = sizeof(hal::SpiWord) * words.size();
+    const std::size_t bytes = sizeof(hal::LinkWord) * words.size();
     if (words.empty()
         || words.size() > kMaxCommandWords
         || size_ + 1u > kWindows
@@ -140,9 +140,9 @@ Ex<void> SpiFioQueue::append_command(std::span<const hal::SpiWord> words) {
     const std::size_t at = slab_used_;
     for (std::size_t i = 0; i < words.size(); ++i) {
         words[i].store_le(
-            std::span<std::uint8_t, sizeof(hal::SpiWord)>(
-                slab_.data() + at + sizeof(hal::SpiWord) * i,
-                sizeof(hal::SpiWord)
+            std::span<std::uint8_t, sizeof(hal::LinkWord)>(
+                slab_.data() + at + sizeof(hal::LinkWord) * i,
+                sizeof(hal::LinkWord)
             )
         );
     }

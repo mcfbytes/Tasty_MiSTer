@@ -148,10 +148,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
 
 void SpiEncoder::bind_pads(Carrier pads, proto::BuildGeneration gen) noexcept {
 
-    if (pads == Carrier::Lw) {
-        em_.bind_relay(gen);
-    } else {
+    if (link_carries(pads)) {
         em_.bind_pads(frame_);
+    } else {
+        em_.bind_relay(gen);
     }
 }
 

@@ -50,7 +50,7 @@ private:
         Op op = Op::Refused;
         HeadLba target{};
         SectorCount blocks{};
-        static constexpr std::size_t kBytes = kWords * sizeof(hal::SpiWord);
+        static constexpr std::size_t kBytes = kWords * sizeof(hal::LinkWord);
         [[nodiscard]] static CddCommand of(std::span<const std::uint8_t, kBytes> bytes) noexcept;
     };
 

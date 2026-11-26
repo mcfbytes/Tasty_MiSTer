@@ -8,7 +8,7 @@
 #include "cores/boot_ladder.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/disk_servant_row.h"
 #include "cores/option_row.h"
 #include "cores/sector_kick_row.h"

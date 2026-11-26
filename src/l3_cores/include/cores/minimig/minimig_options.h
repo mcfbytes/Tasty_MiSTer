@@ -103,7 +103,7 @@ private:
         IoFrameSink& frames
     );
     [[nodiscard]] Ex<void> apply_preset_(MinimigOption o, MinimigConfig& cfg);
-    [[nodiscard]] Ex<void> send_(IoFrameSink& frames, FrameOp op, hal::SpiWord parm);
+    [[nodiscard]] Ex<void> send_(IoFrameSink& frames, FrameOp op, hal::LinkWord parm);
     [[nodiscard]] Ex<void> set_ext_(ExtCfgWord next, MinimigConfig& cfg, IoFrameSink& frames);
     [[nodiscard]] Ex<void> send_ext_(const MinimigConfig& cfg, IoFrameSink& frames);
 

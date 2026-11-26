@@ -132,7 +132,7 @@ protected:
 
     template <std::size_t N>
     [[nodiscard]] Ex<void> send_status_words_(
-        const std::array<hal::SpiWord, N>& words,
+        const std::array<hal::LinkWord, N>& words,
         ICdLink& link
     ) {
         static_assert(N <= kMaxStatusWords, "a status frame is at most kMaxStatusWords");

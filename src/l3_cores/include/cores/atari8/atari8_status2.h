@@ -15,7 +15,7 @@
 namespace mister::cores::atari8 {
 
 struct Atari8Status2 {
-    hal::SpiWord v{};
+    hal::LinkWord v{};
 
     struct BootDrive {
         std::uint8_t v = 0;
@@ -39,12 +39,12 @@ struct Atari8Status2 {
     static constexpr std::array<hal::RegField<std::uint8_t>, kModedDrives.v> kModeFields = {
         {{0, 0x3}, {2, 0x3}, {4, 0x3}, {6, 0x3}}
     };
-    static constexpr hal::SpiWord kBootDrive{0x0700};
-    static constexpr hal::SpiWord kSplash{0x0800};
-    static constexpr hal::SpiWord kTapeFull{0x8000};
-    static constexpr hal::SpiWord kTapeEmpty{0x4000};
-    static constexpr hal::SpiWord kTapeActive{0x2000};
-    static constexpr hal::SpiWord kTapeSlow{0x1000};
+    static constexpr hal::LinkWord kBootDrive{0x0700};
+    static constexpr hal::LinkWord kSplash{0x0800};
+    static constexpr hal::LinkWord kTapeFull{0x8000};
+    static constexpr hal::LinkWord kTapeEmpty{0x4000};
+    static constexpr hal::LinkWord kTapeActive{0x2000};
+    static constexpr hal::LinkWord kTapeSlow{0x1000};
 
     [[nodiscard]] constexpr std::optional<PbiDriveMode> mode_of(SioUnit unit) const noexcept {
         if (!infra::affine::in_bounds(kModedDrives, unit))

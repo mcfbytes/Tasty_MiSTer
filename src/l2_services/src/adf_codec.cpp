@@ -36,8 +36,8 @@ struct WordBytes {
     std::byte hi{};
     std::byte lo{};
 
-    [[nodiscard]] static constexpr WordBytes of(hal::SpiWord w) noexcept {
-        std::array<std::byte, sizeof(hal::SpiWord)> le{};
+    [[nodiscard]] static constexpr WordBytes of(hal::LinkWord w) noexcept {
+        std::array<std::byte, sizeof(hal::LinkWord)> le{};
         w.store_le(le);
         return WordBytes{.hi = le[1], .lo = le[0]};
     }
@@ -79,7 +79,7 @@ constexpr std::size_t kSumWords = kLongWords + kLongWords;
 constexpr std::size_t kLabelWords = 16;
 
 constexpr std::size_t kHalfWords = AdfCodec::kSectorFileBytes.file_word<std::size_t>()
-    / sizeof(hal::SpiWord);
+    / sizeof(hal::LinkWord);
 static_assert(kSumWords + kHalfWords + kHalfWords == AdfCodec::kDataWords);
 
 constexpr Long kFillLong{WordBytes::of(AdfCodec::kFillWord), WordBytes::of(AdfCodec::kFillWord)};
@@ -91,10 +91,10 @@ public:
     void put(WordBytes b) noexcept {
         rest_[0] = b.hi;
         rest_[1] = b.lo;
-        rest_ = rest_.subspan(sizeof(hal::SpiWord));
+        rest_ = rest_.subspan(sizeof(hal::LinkWord));
     }
 
-    void put(hal::SpiWord w) noexcept { put(WordBytes::of(w)); }
+    void put(hal::LinkWord w) noexcept { put(WordBytes::of(w)); }
 
     void put(const Long& l) noexcept {
         for (const WordBytes b : l)
@@ -111,7 +111,7 @@ void put_checksum(WordWriter& w, const Long& sum) noexcept {
         w.put(b.clocked());
 }
 
-[[nodiscard]] Long read_long(std::span<const hal::SpiWord, kSumWords> words) noexcept {
+[[nodiscard]] Long read_long(std::span<const hal::LinkWord, kSumWords> words) noexcept {
     const auto odd = words.first<kLongWords>();
     const auto even = words.last<kLongWords>();
     Long l{};
@@ -120,7 +120,7 @@ void put_checksum(WordWriter& w, const Long& sum) noexcept {
     return l;
 }
 
-void fold(Long& sum, std::span<const hal::SpiWord> words) noexcept {
+void fold(Long& sum, std::span<const hal::LinkWord> words) noexcept {
     for (std::size_t i = 0; i < words.size(); ++i)
         sum[i % kLongWords] = sum[i % kLongWords] ^ WordBytes::of(words[i]);
 }
@@ -186,8 +186,8 @@ AdfCodec::EncodedSector AdfCodec::encode(Track t, Sector s, const SectorFile& da
     std::array<WordBytes, kHalfWords> words{};
     for (std::size_t i = 0; i < kHalfWords; ++i)
         words[i] = WordBytes{
-            .hi = data[i * sizeof(hal::SpiWord)],
-            .lo = data[i * sizeof(hal::SpiWord) + 1]
+            .hi = data[i * sizeof(hal::LinkWord)],
+            .lo = data[i * sizeof(hal::LinkWord) + 1]
         };
     Long sum{};
     for (std::size_t i = 0; i < kHalfWords; ++i)
@@ -246,8 +246,8 @@ bool AdfCodec::read_data(DataWords words, SectorFile& out) noexcept {
     fold(sum, even);
     for (std::size_t i = 0; i < kHalfWords; ++i) {
         const WordBytes d = WordBytes::of(odd[i]).odd_back() | WordBytes::of(even[i]).data();
-        out[i * sizeof(hal::SpiWord)] = d.hi;
-        out[i * sizeof(hal::SpiWord) + 1] = d.lo;
+        out[i * sizeof(hal::LinkWord)] = d.hi;
+        out[i * sizeof(hal::LinkWord) + 1] = d.lo;
     }
     return stored == data_of(sum);
 }
@@ -309,10 +309,10 @@ Ex<infra::ByteCount> AdfCodec::write_at(proto::FileOffset at, std::span<const st
         return std::unexpected(FileSize::of(src).refusal(Errc::bad_format, ERR_SITE()));
     }
     const Sector s = *sector;
-    std::array<hal::SpiWord, kDataWords> words{};
+    std::array<hal::LinkWord, kDataWords> words{};
     const Bytes field = src.subspan(kDataFieldAt.file_word<std::size_t>());
     for (std::size_t i = 0; i < words.size(); ++i)
-        words[i] = hal::SpiWord{infra::load_be<std::uint16_t>(
+        words[i] = hal::LinkWord{infra::load_be<std::uint16_t>(
             field.subspan(i * sizeof(std::uint16_t)).first<sizeof(std::uint16_t)>()
         )};
     SectorFile data{};

@@ -118,7 +118,7 @@ static_assert(
     "(INVARIANT 1), so this join rejects every other seat. Seating "
     "it elsewhere would mean the emitter runs on a thread that is "
     "not the executive's, and every SPI write input makes would be "
-    "a SECOND writer of the GPO shadow word hal::SpiBus exists "
+    "a SECOND writer of the GPO shadow word hal::GpoGpiPort exists "
     "to solely own (a CORRECTNESS requirement, not tuning)."
 );
 static_assert(

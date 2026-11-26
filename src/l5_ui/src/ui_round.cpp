@@ -325,6 +325,9 @@ app::UiRoundEdge UiRound::compose_(app::UiPassWork work) {
             drained = true;
     }
 
+    if (info_notices_ && info_notice_reader_.take_if_changed(*info_notices_, info_notice_))
+        (void)info_.decode(info_notice_);
+
     if (host_board_(clock_.now()))
         drained = true;
 

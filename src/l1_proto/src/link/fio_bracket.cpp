@@ -14,6 +14,7 @@
 #include "infra/prelude.h"
 #include "proto/fio_opcodes.h"
 #include "proto/link_frame.h"
+#include "proto/link/fio_bracket_words.h"
 #include "proto/link/spi_frame.h"
 
 namespace mister::proto::link {
@@ -24,53 +25,28 @@ using detail::kModeEnd;
 
 namespace {
 
-constexpr bool taken(hal::SpiWord) noexcept {
+constexpr bool taken(hal::LinkWord) noexcept {
     return true;
-}
-
-constexpr std::size_t kExtChars = 4;
-
-constexpr std::uint8_t ascii_upper(std::uint8_t c) noexcept {
-    return (c >= 'a' && c <= 'z') ? static_cast<std::uint8_t>(c - 0x20u) : c;
-}
-
-[[nodiscard]] Ex<void> write_index_register(ILinkFrame& frame, hal::SpiWord index) {
-    if (auto r = frame.begin(FioOp::FileIndex); !r)
-        return r;
-    if (auto r = frame.word(index); !r)
-        return r;
-    return frame.end();
 }
 
 }
 
 Ex<void> FioBracket::set_index(ILinkFrame& frame, FioIndexByte index) {
-    return write_index_register(frame, index.wire_word());
+    return FioBracketWords::set_index(frame, index);
 }
 
 Ex<void> FioBracket::set_index(ILinkFrame& frame, WideIoIndex index) {
-    return write_index_register(frame, index.wire_word());
+    return FioBracketWords::set_index(frame, index);
 }
 
 Ex<void> FioBracket::send_file_info(ILinkFrame& frame, std::string_view ext) {
-    std::array<std::uint8_t, kExtChars> c{};
-    for (std::size_t i = 0; i < kExtChars && i < ext.size(); ++i) {
-        const auto raw = static_cast<std::uint8_t>(ext[i]);
-        if (raw == 0)
-            break;
-        c[i] = ascii_upper(raw);
-    }
-    const auto w0 = static_cast<std::uint16_t>((c[0] << 8) | c[1]);
-    const auto w1 = static_cast<std::uint16_t>((c[2] << 8) | c[3]);
-
-    const std::array<hal::SpiWord, 2> words{hal::SpiWord{w0}, hal::SpiWord{w1}};
-    return send_frame(frame, FioOp::FileInfo, words);
+    return FioBracketWords::send_file_info(frame, ext);
 }
 
 Ex<FioBracket> FioBracket::begin(
     hal::ISpiTransport& link,
     WideIoIndex index,
-    hal::SpiWord mode,
+    hal::LinkWord mode,
     const SessionParams& params
 ) {
 
@@ -90,23 +66,22 @@ Ex<FioBracket> FioBracket::begin(
             return std::unexpected(r.error());
 
         const bool guarded = mode == kModeDownload && params.aux.empty();
-        if (auto r = guarded ? link.transfer_or_post(mode) : beat(link, mode).transform(taken);
-            !r) {
-            return std::unexpected(r.error());
-        }
 
-        bracket.emplace(FioBracket{link, index});
-
-        if (!params.aux.empty()) {
-            const hal::SpiHalves halves = params.aux.halves();
-            auto r = beat(link, halves.low);
-            if (r)
-                r = beat(link, halves.high);
-            if (!r) {
+        const auto put = [&](hal::LinkWord w) -> Ex<void> {
+            if (bracket)
+                return beat(link, w).transform([](hal::LinkWord) noexcept {});
+            auto r = guarded ? link.transfer_or_post(w) : beat(link, w).transform(taken);
+            if (!r)
+                return std::unexpected(r.error());
+            bracket.emplace(FioBracket{link, index});
+            return {};
+        };
+        if (auto r = FioBracketWords::for_window_words(mode, params.aux, put); !r) {
+            if (bracket) {
                 cs.release();
                 (void)bracket->end();
-                return std::unexpected(r.error());
             }
+            return std::unexpected(r.error());
         }
     }
     return std::move(*bracket);
@@ -115,20 +90,23 @@ Ex<FioBracket> FioBracket::begin(
 Ex<FioBracket> FioBracket::window(
     hal::ISpiTransport& link,
     WideIoIndex index,
-    hal::SpiWord mode,
+    hal::LinkWord mode,
     AuxValue address
 ) {
     hal::Selected cs(link, hal::ChipSelect::Fpga);
     if (auto r = link.transfer(word(FioOp::FileTx)); !r)
         return std::unexpected(r.error());
-    if (auto r = link.transfer(mode); !r)
+    if (auto r = FioBracketWords::for_window_words(
+            mode,
+            address,
+            [&link](hal::LinkWord w) -> Ex<void> {
+                if (auto t = link.transfer(w); !t)
+                    return std::unexpected(t.error());
+                return {};
+            }
+        );
+        !r) {
         return std::unexpected(r.error());
-    if (!address.empty()) {
-        const hal::SpiHalves halves = address.halves();
-        if (auto r = link.transfer(halves.low); !r)
-            return std::unexpected(r.error());
-        if (auto r = link.transfer(halves.high); !r)
-            return std::unexpected(r.error());
     }
     return FioBracket{link, index};
 }

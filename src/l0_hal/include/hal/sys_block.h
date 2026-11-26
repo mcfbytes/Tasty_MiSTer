@@ -44,6 +44,14 @@ struct SysBlock {
     struct Stflg {
         std::uint16_t seq;
         std::uint8_t flag;
+
+        [[nodiscard]] constexpr Stflg next() const noexcept {
+            return Stflg{
+                static_cast<std::uint16_t>((seq + 1u) & kSeqField.mask),
+                static_cast<std::uint8_t>((flag + 1u) & kFlagField.mask)
+            };
+        }
+
         friend constexpr bool operator==(const Stflg&, const Stflg&) = default;
     };
 
@@ -64,5 +72,9 @@ static_assert(
 );
 static_assert(SysBlock::decode(0x0001'00A1u) == SysBlock::Stflg{1, 1}, "STFLG {seq 1, A, flag 1}");
 static_assert(!SysBlock::decode(0xDEADBEEFu), "the unmarked word decodes to nothing");
+static_assert(
+    SysBlock::Stflg{0xFFFF, 0x0F}.next() == SysBlock::Stflg{0, 0},
+    "seq and flag wrap in their own fields"
+);
 
 }

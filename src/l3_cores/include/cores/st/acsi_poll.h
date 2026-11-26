@@ -20,7 +20,7 @@ inline constexpr proto::ReplyMask kAcsiPendingBit{0x0001};
 
 inline constexpr auto kAcsiPollSteps = std::to_array<proto::DiskPollStep>({
     {.frame = proto::user_io::PollFrameShape{
-         {.opcode = hal::SpiWord{0x0C},
+         {.opcode = hal::LinkWord{0x0C},
           .kind = proto::user_io::TransferKind::AckedByte,
           .leading = kAcsiStateReplies,
           .guard =

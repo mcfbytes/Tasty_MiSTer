@@ -25,7 +25,7 @@ struct InfoWindow {
         return width == OsdColCount{} || height == OsdRowCount{};
     }
 
-    [[nodiscard]] constexpr std::array<hal::SpiWord, 4> wire_words() const noexcept {
+    [[nodiscard]] constexpr std::array<hal::LinkWord, 4> wire_words() const noexcept {
         return {x.wire_word(), y.wire_word(), width.wire_word(), height.wire_word()};
     }
 

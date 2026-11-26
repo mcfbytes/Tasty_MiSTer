@@ -54,7 +54,7 @@ public:
     void write_task_file(const IdeTaskFile& regs) noexcept override;
     void send_data(std::span<const std::byte> data) noexcept override;
     void receive_data(std::span<std::byte> into) noexcept override;
-    void write_reg(IdeRegister reg, hal::SpiWord value) noexcept override;
+    void write_reg(IdeRegister reg, hal::LinkWord value) noexcept override;
 
 private:
     struct Send {
@@ -71,7 +71,7 @@ private:
 
     struct WriteReg {
         IdeRegister reg;
-        hal::SpiWord word;
+        hal::LinkWord word;
     };
 
     enum class VerbKind : std::uint8_t { Send, Receive, TaskFile, WriteReg, kCount };

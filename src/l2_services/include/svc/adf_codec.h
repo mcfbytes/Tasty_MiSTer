@@ -46,7 +46,7 @@ public:
         using affine_count = TrackCount;
         using affine_index = Track;
 
-        [[nodiscard]] static constexpr Track of(hal::SpiWord word) noexcept {
+        [[nodiscard]] static constexpr Track of(hal::LinkWord word) noexcept {
             return Track{word.low_byte()};
         }
 
@@ -103,8 +103,8 @@ public:
     static constexpr TrackCount kMostTracks{166};
     static constexpr proto::FileSize kTrackFileBytes{5632};
 
-    static constexpr hal::SpiWord kFillWord{0xAAAA};
-    static constexpr hal::SpiWord kSyncWord{0x4489};
+    static constexpr hal::LinkWord kFillWord{0xAAAA};
+    static constexpr hal::LinkWord kSyncWord{0x4489};
 
     static constexpr proto::FileSize kSyncAt{4};
     static constexpr proto::FileSize kSyncBytes{4};
@@ -115,8 +115,8 @@ public:
 
     using SectorFile = std::array<std::byte, kSectorFileBytes.file_word<std::size_t>()>;
     using EncodedSector = std::array<std::byte, kSectorBytes.file_word<std::size_t>()>;
-    using HeaderWords = std::span<const hal::SpiWord, kHeaderWords>;
-    using DataWords = std::span<const hal::SpiWord, kDataWords>;
+    using HeaderWords = std::span<const hal::LinkWord, kHeaderWords>;
+    using DataWords = std::span<const hal::LinkWord, kDataWords>;
 
     enum class HeaderFault : std::uint8_t {
         None,

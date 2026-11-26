@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <format>
 #include <iterator>
 #include <string_view>
@@ -24,7 +25,7 @@
 #include "hal/fpga_memory.h"
 #include "hal/lw_sys_window.h"
 #include "hal/osd_block.h"
-#include "hal/pad_block.h"
+#include "hal/pad_ident.h"
 #include "hal/sector_block.h"
 #include "hal/irq_pin.h"
 #include "hal/sys_block.h"
@@ -67,12 +68,26 @@ CoreBuilder::CoreBuilder(Wiring wiring, infra::OptRef<hal::IDoorbellSource> seam
       terms_(wiring.terms),
       seam_(seam),
       lends_(
-          std::move(wiring.sectors),
-          std::move(wiring.osds),
+          wiring.sectors,
+          wiring.sectors,
+          wiring.osds,
+          wiring.osds,
           std::move(wiring.sys),
           std::move(wiring.pads)
       ),
-      enable_(counts_, counts_cell_, terms_.clock) {}
+      enable_(counts_, counts_cell_, terms_.clock),
+      ocram_(
+          counts_,
+          counts_cell_,
+          terms_.clock,
+          OcramHostEnable::Wiring{
+              .window = wiring.ocram_window,
+              .platform = wiring.ocram_platform,
+              .mapped = wiring.ocram_mapped,
+              .delay = wiring.ocram_delay
+          }
+      ),
+      download_lane_(wiring.download_lane) {}
 
 CoreBuilder::~CoreBuilder() {
 
@@ -95,6 +110,7 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
     const bool claimed = std::exchange(claimed_, false);
 
     enable_.clear_masks();
+
     if (!claimed) {
         enable_.drop();
         enable_header_.reset();
@@ -177,11 +193,11 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
     const cores::HostServices services{
         .link = terms_.link,
         .clock = terms_.clock,
+        .bulk = terms_.bulk,
+        .fio_queue = terms_.fio_queue,
         .prefetch = terms_.prefetch,
-        .bulk = infra::OptRef<proto::IImageSink>{terms_.bulk},
         .windows = adopt_windows(slot, grant_windows(profile)),
         .discs = discs,
-        .fio_queue = infra::OptRef<proto::link::SpiFioQueue>{terms_.fio_queue},
         .mailbox = grants.has(cores::Grant::Mailbox) ? terms_.mailbox
                                                      : infra::OptRef<cores::IMailboxPort>{},
         .save_copy = grants.has(cores::Grant::SaveCopy)
@@ -206,22 +222,51 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
 
     if (!(slot.core && sector().adopt_claim(LwLendKey{}, gen_)))
         drop_unbuilt_sector_();
+
+    if (slot.core)
+        grant_ocram_sector_(ask.irqs, profile, ask.fabric_gen, gen_, ask.conf_gen);
     if (slot.core)
         grant_pad_(ask.lw, profile, ask.terms, ask.fabric_gen, gen_, ask.lw_presence);
-    if (slot.core)
-        grant_osd_(ask.lw, profile, ask.fabric_gen, gen_, ask.lw_presence);
+
+    if (slot.core) {
+        if (ocram_.has_osd()) {
+            grant_ocram_osd_(ask.fabric_gen, gen_);
+        } else {
+            grant_osd_(ask.lw, profile, ask.fabric_gen, gen_, ask.lw_presence);
+        }
+    }
     if (slot.core)
         grant_sys_(ask.irqs, ask.lw, ask.fabric_gen, gen_, ask.lw_presence);
+
+    if (slot.core)
+        grant_ocram_lane_(ask.irqs);
     lane_ = slot.core ? find_lane_(ask.lw, ask.lw_presence) : std::nullopt;
 
-    slot.routes.osd = slot.core && osd().built_as(gen_) ? Carrier::Lw : Carrier::Link;
+    slot.routes.osd = slot.core && ocram_osd().built_as(gen_)
+        ? Carrier::Ocram
+        : (slot.core && osd().built_as(gen_) ? Carrier::Lw : Carrier::Spi);
 
-    slot.routes.pads = slot.core && pad().built_as(gen_) ? Carrier::Lw : Carrier::Link;
+    slot.routes.pads = slot.core && pad().built_as(gen_) ? Carrier::Lw : Carrier::Spi;
 
-    slot.routes.lw_slots = slot.core && sector().built_as(gen_) ? sector().held()->bridge_slots()
-                                                                : proto::BlockSlotMask{};
+    slot.routes.off_link_slots = slot.core && sector().built_as(gen_)
+        ? sector().held()->bridge_slots()
+        : proto::BlockSlotMask{};
 
-    slot.routes.status = slot.core && sys().built_as(gen_) ? Carrier::Lw : Carrier::Link;
+    if (slot.core && ocram_sector().built_as(gen_))
+        slot.routes.off_link_slots = ocram_sector().held()->bridge_slots();
+
+    const bool events = slot.core && ocram_sector().built_as(gen_) && ocram_sector().held()->events;
+    slot.routes.events = events ? Carrier::Ocram : Carrier::Spi;
+    slot.routes.status = slot.core && sys().built_as(gen_)
+        ? Carrier::Lw
+        : (events ? Carrier::Ocram : Carrier::Spi);
+
+    slot.routes.downloads = slot.core && download_lane_ && download_lane_->granted()
+        ? Carrier::Ocram
+        : Carrier::Spi;
+
+    slot.frame_lane = slot.core ? grant_frame_lane_() : OcramFrameGrant{};
+    slot.routes.frames = slot.frame_lane.granted() ? Carrier::Ocram : Carrier::Spi;
 
     slot.routes.declared_slots = ask.mount_slots.united(profile_slot_mask(profile));
     if (slot.routes.block_poll() == proto::link::BlockPollRoute::UntilIdle)
@@ -271,6 +316,7 @@ std::optional<AllLeasesHome> CoreBuilder::nothing_lent() const noexcept {
 void CoreBuilder::drop_windows(const ParkReceipt&) noexcept {
 
     enable_.drop();
+    ocram_.drop();
     enable_header_.reset();
     for (CoreBay::Lease& l : held_) {
         if (!l)
@@ -281,6 +327,7 @@ void CoreBuilder::drop_windows(const ParkReceipt&) noexcept {
     }
     dir_reads_ = {};
     lane_.reset();
+    drop_ocram_lane_();
 }
 
 Ex<CoreBuilder::Directory> CoreBuilder::directory_(
@@ -398,11 +445,15 @@ void CoreBuilder::grant_pad_(
         ++counts_.pad_refusals;
         return;
     }
+    bool arm_absent = false;
     for (auto hit = next_directory_(lw, lw_presence); hit;
          hit = next_directory_(hit->rest, lw_presence)) {
         auto got = grant_pads(hit->dir, hit->decl);
-        if (!got)
+        if (!got) {
+            arm_absent = arm_absent
+                || proto::link::pad_link_arm_absent(hit->dir.image, hit->decl.size);
             continue;
+        }
 
         got->wire.analog_capable = terms.analog_capable;
         got->wire.suppress_analog_followup = profile.host.suppress_analog_followup;
@@ -412,6 +463,15 @@ void CoreBuilder::grant_pad_(
         return;
     }
     ++counts_.pad_refusals;
+
+    if (arm_absent) {
+        counts_.pad_no_arm.add();
+        std::fprintf(
+            stderr,
+            "mister: LW PAD grant refused on a core built without the link's pad arm "
+            "(PAD K9 bit 0): no pad input this session\n"
+        );
+    }
 }
 
 namespace {
@@ -522,6 +582,11 @@ void CoreBuilder::grant_sector_(
     const infra::OptRef<const svc::disc::ISectorProgram> program = profile.sector_program;
     if (!program || !sector().wired())
         return;
+
+    if (sector_on_mailbox_(profile)) {
+        (void)sector().retire();
+        return;
+    }
     if (!std::ranges::any_of(lw, may_carry_pads))
         return;
 
@@ -658,13 +723,28 @@ bool CoreBuilder::bridge_refused() noexcept {
     if (const auto a = sector().answered()) {
 
         const auto held = sector().held();
-        refused = !a->on_lw
+        refused = !a->bound
             || !held.has_value()
             || !held->card_slots().minus(a->cards_on_lw).empty();
     }
 
     if (const auto a = sys().answered())
-        refused = refused || !a->on_lw;
+        refused = refused || !a->bound;
+
+    if (const auto a = ocram_sector().answered()) {
+        const auto held = ocram_sector().held();
+        refused = refused
+            || !a->on_ocram
+            || !held.has_value()
+            || !held->mount_slot_mask().minus(a->cards_on_lw).empty()
+            || (held->events && !a->notices);
+    }
+
+    if ((ocram_osd().built_as(gen_)
+         || ocram_sector().built_as(gen_)
+         || (download_lane_ && download_lane_->granted()))
+        && ocram_.session_lost())
+        refused = true;
     if (!refused)
         return false;
     ++counts_.bridge_refusals;
@@ -682,6 +762,194 @@ proto::BlockSlotMask CoreBuilder::profile_slot_mask(const cores::CoreProfile& pr
 bool CoreBuilder::fabric_route(std::string_view name, bool manifest) noexcept {
     const cores::LoadHint hint = manifest ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
     return cores::profile_for(name, hint).sector_program.has_value();
+}
+
+void CoreBuilder::grant_ocram_osd_(
+    FabricGeneration fabric_gen,
+    proto::BuildGeneration gen
+) noexcept {
+    if (!ocram_osd().wired())
+        return;
+    if (!ocram_osd().retire()) {
+        ++counts_.osd_refusals;
+        return;
+    }
+    const std::optional<hal::ocram::RingLend> ring = ocram_.lend_osd();
+    const std::optional<proto::OsdRowCount> rows = ocram_.osd_rows();
+    if (!ring || !rows) {
+        ++counts_.osd_refusals;
+        return;
+    }
+    ocram_osd().install(
+        LwLendKey{},
+        OcramOsd{.ring = *ring, .rows = *rows},
+        LwGrantStamp::built_as(gen, fabric_gen)
+    );
+    ++counts_.osd_grants;
+    ocram_.bind_osd();
+}
+
+void CoreBuilder::grant_ocram_lane_(std::span<const proto::IrqBinding> irqs) noexcept {
+    drop_ocram_lane_();
+    if (!download_lane_)
+        return;
+    const std::optional<hal::ocram::RingDesc> ring = ocram_.lane_ring();
+    const std::optional<hal::ocram::RingLend> lend = ocram_.lend_lane();
+    if (!ring || !lend)
+        return;
+    std::optional<os::UioLineRef> line{};
+    const std::optional<os::UioLine> ordinal = ring->line();
+    const auto claims = [&ordinal](const proto::IrqBinding& b) {
+        return b.line == *ordinal;
+    };
+    const bool free_line = ordinal
+        && terms_.doorbells.line_in_pool(*ordinal)
+        && std::ranges::none_of(irqs, claims);
+    if (free_line) {
+        if (auto opened = source_().open_line(*ordinal)) {
+            download_line_.emplace(std::move(*opened));
+            line = download_line_->borrow();
+        }
+    }
+    if (!download_lane_->bind(*lend, line)) {
+        download_line_.reset();
+        counts_.lane_refusals.add();
+        return;
+    }
+    counts_.lane_grants.add();
+}
+
+OcramFrameGrant CoreBuilder::grant_frame_lane_() const noexcept {
+    using Sel = hal::ocram::LaneArg::Sel;
+    if (!download_lane_ || !download_lane_->granted())
+        return OcramFrameGrant{};
+    const std::optional<hal::ocram::LaneShape> shape = ocram_.lane_shape();
+    if (!shape || !shape->serves(Sel::Uio) || !shape->serves(Sel::OsdVga))
+        return OcramFrameGrant{};
+    const std::optional<hal::ocram::RingLend> lend = ocram_.lend_lane();
+    if (!lend)
+        return OcramFrameGrant{};
+    return OcramFrameGrant{.lend = *lend, .shape = shape};
+}
+
+void CoreBuilder::drop_ocram_lane_() noexcept {
+    if (download_lane_)
+        download_lane_->unbind();
+    download_line_.reset();
+}
+
+bool CoreBuilder::sector_on_mailbox_(const cores::CoreProfile& profile) const noexcept {
+    return profile.sector_program.has_value()
+        && ocram_sector().wired()
+        && ocram_.sector_rings().has_value();
+}
+
+void CoreBuilder::grant_ocram_sector_(
+    std::span<const proto::IrqBinding> irqs,
+    const cores::CoreProfile& profile,
+    FabricGeneration fabric_gen,
+    proto::BuildGeneration gen,
+    proto::BindGeneration conf_gen
+) noexcept {
+    if (!ocram_sector().wired())
+        return;
+    if (!ocram_sector().retire()) {
+        ++counts_.sector_refusals;
+        return;
+    }
+    if (!sector_on_mailbox_(profile))
+        return;
+    const svc::disc::ISectorProgram& program = *profile.sector_program;
+    const std::optional<OcramHostEnable::SectorRings> rings = ocram_.sector_rings();
+    const std::optional<OcramHostEnable::SectorLends> lends = ocram_.lend_sector();
+    const std::optional<os::UioLine> line = rings ? rings->evt.line() : std::nullopt;
+    const bool fits = rings
+        && lends
+        && line
+        && rings->shape.names(program.slot())
+        && rings->shape.frame().bytes()
+            == program.frame_bytes().window_count(proto::BlockCount{1u});
+    const bool free_line = line
+        && terms_.doorbells.line_in_pool(*line)
+        && std::ranges::none_of(irqs, [&line](const proto::IrqBinding& b) {
+                               return b.line == *line;
+                           });
+    if (!fits || !free_line) {
+        ++counts_.sector_refusals;
+        return;
+    }
+    auto opened = source_().open_line(*line);
+    if (!opened) {
+        ++counts_.sector_refusals;
+        return;
+    }
+
+    const std::array<MountSlot, SectorGrantBody::kCards> mounts = rings->mounts
+            && lends->mount.lent()
+        ? grant_mounts_(*rings->mounts, profile)
+        : std::array<MountSlot, SectorGrantBody::kCards>{};
+    const bool any_mount = std::ranges::any_of(mounts, &MountSlot::granted);
+    ocram_sector().install(
+        LwLendKey{},
+        OcramSector{
+            .ring = lends->ring,
+            .evt = lends->evt,
+            .line = std::move(*opened),
+            .program = profile.sector_program,
+            .frame = rings->shape.frame(),
+            .mount = any_mount ? lends->mount : hal::ocram::RingLend{},
+            .mounts = mounts,
+            .bind_records = rings->bind_records,
+            .events = rings->events,
+            .conf_gen = conf_gen
+        },
+        LwGrantStamp::built_as(gen, fabric_gen)
+    );
+
+    if (rings->events)
+        ocram_.bind_events();
+    ++counts_.sector_grants;
+}
+
+std::array<MountSlot, SectorGrantBody::kCards> CoreBuilder::grant_mounts_(
+    const OcramHostEnable::MountRings& rings,
+    const cores::CoreProfile& profile
+) noexcept {
+    std::array<MountSlot, SectorGrantBody::kCards> got{};
+    const hal::ocram::Words room = rings.ring.words();
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        const std::optional<hal::ocram::SectorShape>& shape = rings.slots[i];
+        if (!shape)
+            continue;
+        const auto save = std::ranges::find_if(profile.slots, [&](const auto& s) noexcept {
+            return shape->names(s.index.block_slot());
+        });
+        const bool admitted = !profile.saves_by_channel
+            && save != profile.slots.end()
+            && save->writable
+            && save->role == cores::SlotRole::Save
+            && !(profile.sector_program && shape->names(profile.sector_program->slot()))
+            && hal::ocram::RecordHeader::frame(
+                   hal::ocram::SlotArg::of(hal::ocram::kMountSlots[i]),
+                   shape->frame()
+               )
+                    .extent()
+                <= room;
+        const bool slot_taken = std::ranges::any_of(got, [&](const MountSlot& g) noexcept {
+            return g.granted() && save != profile.slots.end() && g.slot == save->index.block_slot();
+        });
+        if (!admitted || slot_taken) {
+            ++counts_.card_refusals;
+            continue;
+        }
+        got[i] = MountSlot{
+            .arg = hal::ocram::SlotArg::of(hal::ocram::kMountSlots[i]),
+            .slot = save->index.block_slot(),
+            .frame = shape->frame()
+        };
+        ++counts_.card_grants;
+    }
+    return got;
 }
 
 void CoreBuilder::grant_osd_(
@@ -915,6 +1183,8 @@ void CoreBuilder::free_(proto::CoreBaySlot slot) noexcept {
 }
 
 void CoreBuilder::publish_counts_() noexcept {
+    if (download_lane_)
+        counts_.lane_busy = download_lane_->counts().busy;
     counts_cell_.publish(counts_);
 }
 

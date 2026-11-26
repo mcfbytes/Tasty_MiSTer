@@ -20,29 +20,29 @@ using Adf = svc::AdfCodec;
 constexpr unsigned kDriveShift = 6;
 constexpr std::byte kDriveMask{0x03};
 
-constexpr hal::SpiWord kFifoWords{0x3FFF};
+constexpr hal::LinkWord kFifoWords{0x3FFF};
 constexpr proto::ReplyMask kDmaActive{0x8000};
 
-constexpr auto kRemappedSyncs = std::to_array<hal::SpiWord>(
-    {hal::SpiWord{0x0000}, hal::SpiWord{0x8914}, hal::SpiWord{0xA144}}
+constexpr auto kRemappedSyncs = std::to_array<hal::LinkWord>(
+    {hal::LinkWord{0x0000}, hal::LinkWord{0x8914}, hal::LinkWord{0xA144}}
 );
 
-constexpr hal::SpiWord kStatusOpcode{0x1000};
+constexpr hal::LinkWord kStatusOpcode{0x1000};
 
 struct DriveBits {
-    hal::SpiWord disk;
-    hal::SpiWord writable;
+    hal::LinkWord disk;
+    hal::LinkWord writable;
 };
 
 constexpr std::array<DriveBits, FloppyServant::kDrives> kDriveBits{{
-    {.disk = hal::SpiWord{0x0001}, .writable = hal::SpiWord{0x0010}},
-    {.disk = hal::SpiWord{0x0002}, .writable = hal::SpiWord{0x0020}},
-    {.disk = hal::SpiWord{0x0004}, .writable = hal::SpiWord{0x0040}},
-    {.disk = hal::SpiWord{0x0008}, .writable = hal::SpiWord{0x0080}},
+    {.disk = hal::LinkWord{0x0001}, .writable = hal::LinkWord{0x0010}},
+    {.disk = hal::LinkWord{0x0002}, .writable = hal::LinkWord{0x0020}},
+    {.disk = hal::LinkWord{0x0004}, .writable = hal::LinkWord{0x0040}},
+    {.disk = hal::LinkWord{0x0008}, .writable = hal::LinkWord{0x0080}},
 }};
 
 constexpr proto::FioWordCount kMostInWords{proto::kDiskActBytes / proto::DiskAct::kWordBytes};
-constexpr std::size_t kWord = sizeof(hal::SpiWord);
+constexpr std::size_t kWord = sizeof(hal::LinkWord);
 
 struct FloppyRequest {
     using Request = FloppyRequest;
@@ -52,7 +52,7 @@ struct FloppyRequest {
     Verb verb = Verb::Read;
     proto::DiskUnit drive{};
     Adf::Track track{};
-    hal::SpiWord sync{};
+    hal::LinkWord sync{};
     proto::FioWordCount fifo_words{};
     bool dma_active = false;
     proto::DiskStatusTag tag{};
@@ -63,7 +63,7 @@ struct FloppyRequest {
         if (block.kept != kFloppyReplies)
             return std::nullopt;
         const proto::ReplyWord asked = block.reply(kFloppyRequestReply);
-        const hal::SpiWord head = block.replies[kFloppyRequestReply];
+        const hal::LinkWord head = block.replies[kFloppyRequestReply];
         FloppyRequest r{};
         if (asked.intersects(kFloppyReadBit)) {
             r.verb = Verb::Read;
@@ -79,13 +79,13 @@ struct FloppyRequest {
         };
         r.track = Adf::Track::of(head);
         r.sync = block.replies[kFloppySyncReply];
-        const hal::SpiWord count = block.replies[kFloppyCountReply];
+        const hal::LinkWord count = block.replies[kFloppyCountReply];
         r.fifo_words = proto::FioWordCount{count.masked(kFifoWords).bits()};
         r.dma_active = proto::ReplyWord::of(count).intersects(kDmaActive);
         return r;
     }
 
-    [[nodiscard]] hal::SpiWord stream_sync() const noexcept {
+    [[nodiscard]] hal::LinkWord stream_sync() const noexcept {
         return std::ranges::find(kRemappedSyncs, sync) != kRemappedSyncs.end() ? Adf::kSyncWord
                                                                                : sync;
     }
@@ -96,7 +96,7 @@ static_assert(proto::user_io::PollFrameDecoder<FloppyRequest>);
 void to_wire(std::span<const std::byte> stream, std::span<std::byte> wire) noexcept {
     for (std::size_t i = 0; i + kWord <= stream.size(); i += kWord) {
         const std::uint16_t w = infra::load_be<std::uint16_t>(stream.subspan(i).first<kWord>());
-        hal::SpiWord{w}.store_le(wire.subspan(i).first<kWord>());
+        hal::LinkWord{w}.store_le(wire.subspan(i).first<kWord>());
     }
 }
 
@@ -149,7 +149,7 @@ void FloppyServant::release() noexcept {
 
 proto::DiskAct FloppyServant::standing() const noexcept {
     TASTY_SEAT_BODY(FloppyServant);
-    hal::SpiWord word = kStatusOpcode;
+    hal::LinkWord word = kStatusOpcode;
     for (const auto& [drive, bits] : std::views::zip(drives_, kDriveBits)) {
         if (!drive.image)
             continue;
@@ -215,7 +215,7 @@ proto::DiskAct FloppyServant::start(
     }
     in_owed_ = std::min(req->fifo_words, kMostInWords);
     return proto::DiskAct::in(
-               hal::SpiWord{},
+               hal::LinkWord{},
                static_cast<std::uint16_t>(in_owed_.bytes_at(hal::Width::Word))
     )
         .tagged(req->tag)
@@ -225,17 +225,17 @@ proto::DiskAct FloppyServant::start(
 proto::DiskAct FloppyServant::resume(std::span<std::byte, proto::kDiskActBytes> bytes) noexcept {
     TASTY_SEAT_BODY(FloppyServant);
     if (in_owed_ != proto::FioWordCount{}) {
-        std::array<hal::SpiWord, proto::kDiskActBytes / kWord> words{};
+        std::array<hal::LinkWord, proto::kDiskActBytes / kWord> words{};
         const std::span<const std::byte> in = std::span<const std::byte>(bytes).first(
             in_owed_.bytes_at(hal::Width::Word)
         );
         std::size_t taken = 0;
         for (; taken * kWord < in.size(); ++taken)
-            words[taken] = hal::SpiWord::load_le(in.subspan(taken * kWord).first<kWord>());
+            words[taken] = hal::LinkWord::load_le(in.subspan(taken * kWord).first<kWord>());
         in_owed_ = proto::FioWordCount{};
         Drive& drive = drives_[capture_.unit()];
         if (capture_.open() && drive.image)
-            capture_.take(std::span<const hal::SpiWord>(words).first(taken), *drive.image);
+            capture_.take(std::span<const hal::LinkWord>(words).first(taken), *drive.image);
         return proto::DiskAct::none();
     }
     if (!reading_)
@@ -303,7 +303,7 @@ proto::DiskAct FloppyServant::piece_(
         r.sync.store_le(sync.subspan<kWord, kWord>());
     }
     r.sent += len;
-    const auto act = proto::DiskAct::out(hal::SpiWord{}, static_cast<std::uint16_t>(piece.size()));
+    const auto act = proto::DiskAct::out(hal::LinkWord{}, static_cast<std::uint16_t>(piece.size()));
     return opens ? act.tagged(r.tag) : act;
 }
 

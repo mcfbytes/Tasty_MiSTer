@@ -15,8 +15,8 @@ namespace mister::cores::x86 {
 
 namespace {
 
-constexpr hal::SpiWord kDataOut = proto::word(proto::UioOp::DmaWrite);
-constexpr hal::SpiWord kDataIn = proto::word(proto::UioOp::DmaRead);
+constexpr hal::LinkWord kDataOut = proto::word(proto::UioOp::DmaWrite);
+constexpr hal::LinkWord kDataIn = proto::word(proto::UioOp::DmaRead);
 
 static_assert(
     FloppyServant::kSector.window_count(proto::BlockCount{1})

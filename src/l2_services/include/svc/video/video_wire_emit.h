@@ -18,19 +18,19 @@ inline constexpr std::size_t kVideoWireWords = 26;
 [[nodiscard]] Ex<void> emit_video_words(
     proto::ILinkFrame& frame,
     proto::UioOp opcode,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 );
 
-[[nodiscard]] Ex<hal::SpiWord> emit_fbuf(proto::ILinkFrame& frame, hal::SpiWord word);
+[[nodiscard]] Ex<hal::LinkWord> emit_fbuf(proto::ILinkFrame& frame, hal::LinkWord word);
 
 [[nodiscard]] Ex<void> emit_ar_custom(
     proto::ILinkFrame& frame,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 );
 
 [[nodiscard]] Ex<void> emit_filter_coeff_chunk(
     proto::ILinkFrame& frame,
-    std::span<const hal::SpiWord> chunk
+    std::span<const hal::LinkWord> chunk
 );
 
 }

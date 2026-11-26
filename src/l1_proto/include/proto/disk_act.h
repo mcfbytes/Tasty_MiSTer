@@ -26,7 +26,7 @@ struct DiskAct {
 
     [[nodiscard]] static constexpr DiskAct none() noexcept { return DiskAct{}; }
 
-    [[nodiscard]] static constexpr DiskAct out(hal::SpiWord opcode, std::uint16_t len) noexcept {
+    [[nodiscard]] static constexpr DiskAct out(hal::LinkWord opcode, std::uint16_t len) noexcept {
         DiskAct act;
         act.kind_ = Kind::Out;
         act.last_ = false;
@@ -35,7 +35,7 @@ struct DiskAct {
         return act;
     }
 
-    [[nodiscard]] static constexpr DiskAct in(hal::SpiWord opcode, std::uint16_t len) noexcept {
+    [[nodiscard]] static constexpr DiskAct in(hal::LinkWord opcode, std::uint16_t len) noexcept {
         DiskAct act;
         act.kind_ = Kind::In;
         act.last_ = false;
@@ -45,9 +45,9 @@ struct DiskAct {
     }
 
     [[nodiscard]] static constexpr DiskAct signal(
-        hal::SpiWord opcode,
+        hal::LinkWord opcode,
         bool last,
-        std::optional<hal::SpiWord> word
+        std::optional<hal::LinkWord> word
     ) noexcept {
         DiskAct act;
         act.kind_ = Kind::Signal;
@@ -64,7 +64,7 @@ struct DiskAct {
 
     [[nodiscard]] constexpr bool last() const noexcept { return last_; }
 
-    [[nodiscard]] constexpr hal::SpiWord opcode() const noexcept { return opcode_; }
+    [[nodiscard]] constexpr hal::LinkWord opcode() const noexcept { return opcode_; }
 
     [[nodiscard]] constexpr std::uint16_t len() const noexcept { return len_; }
 
@@ -113,7 +113,7 @@ struct DiskAct {
         return tag_;
     }
 
-    [[nodiscard]] constexpr std::optional<hal::SpiWord> word() const noexcept {
+    [[nodiscard]] constexpr std::optional<hal::LinkWord> word() const noexcept {
         if (!has_word_)
             return std::nullopt;
         return word_;
@@ -143,9 +143,9 @@ private:
     bool addressed_ = false;
     DiskUnit unit_ = kNoUnit_;
     bool tagged_ = false;
-    hal::SpiWord opcode_{};
+    hal::LinkWord opcode_{};
     std::uint16_t len_ = 0;
-    hal::SpiWord word_{};
+    hal::LinkWord word_{};
     DiskAddress address_{};
     DiskStatusTag tag_{};
 };

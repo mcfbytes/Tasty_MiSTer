@@ -51,10 +51,10 @@ Ex<void> HpsFramebuffer::publish_(const FbView& picture, FbScanWindow window) no
     if (picture.red_blue_swap)
         sc |= kFmtRxB;
     const auto [hmin, hmax, vmin, vmax] = fb_scan_words(window);
-    const std::array<hal::SpiWord, 10> words{
-        hal::SpiWord{static_cast<std::uint16_t>(kFbEn | sc)},
-        hal::SpiWord{addr_lo},
-        hal::SpiWord{addr_hi},
+    const std::array<hal::LinkWord, 10> words{
+        hal::LinkWord{static_cast<std::uint16_t>(kFbEn | sc)},
+        hal::LinkWord{addr_lo},
+        hal::LinkWord{addr_hi},
         picture.size.pixels().wire_word(),
         picture.size.lines().wire_word(),
         hmin,
@@ -140,7 +140,7 @@ Ex<void> HpsFramebuffer::drop(const FbLease& lease) noexcept {
         tenancy_.release(lease);
         return {};
     }
-    const std::array<hal::SpiWord, 1> off{hal::SpiWord{}};
+    const std::array<hal::LinkWord, 1> off{hal::LinkWord{}};
     const auto published = wire_.publish(proto::UioOp::SetFbuf, off);
     if (published)
         tenancy_.release(lease);

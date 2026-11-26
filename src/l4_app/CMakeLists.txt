@@ -192,6 +192,8 @@ add_library(mister_app STATIC
   src/core_tenancy.cpp
   src/block_line.cpp
   src/lw_host_enable.cpp
+  src/disc_frame_source.cpp
+  src/save_slot_blocks.cpp
   src/lw_sector_endpoint.cpp
   src/lw_osd_endpoint.cpp
   src/lw_sys_endpoint.cpp
@@ -231,6 +233,12 @@ add_library(mister_app STATIC
   src/servant_mounts.cpp
   src/name_config.cpp
   src/negotiated_core.cpp
+  src/ocram_host_enable.cpp
+  src/ocram_lane_writer.cpp
+  src/ocram_event_relay.cpp
+  src/ocram_frame_lane.cpp
+  src/ocram_osd_endpoint.cpp
+  src/ocram_sector_endpoint.cpp
   src/osd_wire.cpp
   src/owner_ladder.cpp
   src/rtc_cadence.cpp
@@ -380,6 +388,7 @@ tasty_add_header_checks(tasty_app_channels_header_checks LIB mister_app_channels
   app/frame_demand.h
   app/game_id_pump.h
   app/identity_latch.h
+  app/info_notice.h
   app/interned_file.h
   app/launcher_state.h
   app/link_bytes.h
@@ -393,11 +402,12 @@ tasty_add_header_checks(tasty_app_channels_header_checks LIB mister_app_channels
   app/link_rx_channel.h
   app/link_tx_channel.h
   app/link_tx_reader.h
-  app/lw_block_endpoint.h
+  app/grant_endpoint.h
   app/pad_grant.h
   app/pad_relay_cell.h
   app/pad_relay_tally.h
   app/pad_route.h
+  app/rumble_levels.h
   app/screen_gen.h
   app/screenshot_pump.h
   app/screenshot_queue.h
@@ -639,6 +649,15 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/osd_row_tally.h
   app/spi_osd_rows.h
   app/osd_wire.h
+  app/program_guard.h
+  app/ocram_host_enable.h
+  app/ocram_lane_writer.h
+  app/ocram_frame_grant.h
+  app/ocram_frame_lane.h
+  app/ocram_osd.h
+  app/ocram_osd_endpoint.h
+  app/ocram_sector.h
+  app/ocram_event_relay.h
   app/ui_page_record.h
   app/page_label.h
   app/disk_slot.h
@@ -709,11 +728,14 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/lw_sector.h
   app/lw_sector_endpoint.h
   app/sector_grant.h
+  app/mount_slot.h
+  app/save_slot_blocks.h
   app/sector_route.h
   app/lw_osd.h
   app/lw_osd_endpoint.h
   app/osd_grant.h
   app/osd_route.h
+  app/osd_endpoint.h
   app/lw_sys.h
   app/lw_sys_endpoint.h
   app/sys_grant.h
@@ -726,7 +748,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/log_rec_dispatch.h
   app/session_rows.h
   app/run_policy.h
-  app/supervisor_parts.h
+  app/link_session_parts.h
   app/stream_io.h
   app/session_owner.h
   app/mirror_fill.h

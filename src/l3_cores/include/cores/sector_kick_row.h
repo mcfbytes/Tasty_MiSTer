@@ -2,7 +2,7 @@
 #pragma once
 
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/role_row.h"
 #include "cores/sector_kick.h"
 #include "infra/seat.h"

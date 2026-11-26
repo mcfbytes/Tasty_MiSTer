@@ -6,9 +6,10 @@ add_library(mister_hal STATIC
   src/irq_pin.cpp
   src/link_timing.cpp
   src/lw_extent.cpp
+  src/ocram.cpp
   src/scaler_buffers.cpp
   src/scaler_probe.cpp
-  src/spi_bus.cpp
+  src/gpo_gpi_port.cpp
   src/thread_map.cpp
 )
 target_include_directories(mister_hal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -49,14 +50,45 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/hps_ddr_region.h
   hal/irq_pin.h
   hal/kernel_contract.h
-  hal/link_port.h
+  hal/board_link.h
   hal/link_timing.h
   hal/lw_presence.h
-  hal/mailbox.h
+  hal/ocram.h
+  hal/ocram_control_page.h
+  hal/ocram_hello_state.h
+  hal/ocram_info_arg.h
+  hal/ocram_lane_arg.h
+  hal/ocram_lane_shape.h
+  hal/ocram_nonce.h
+  hal/ocram_platform.h
+  hal/ocram_line_set.h
+  hal/ocram_mark_word.h
+  hal/ocram_mailbox_slot.h
+  hal/ocram_record.h
+  hal/ocram_presence.h
+  hal/ocram_ring_desc.h
+  hal/ocram_ring_lend.h
+  hal/ocram_ring_reader.h
+  hal/ocram_ring_writer.h
+  hal/ocram_row_arg.h
+  hal/ocram_rumble_arg.h
+  hal/ocram_run.h
+  hal/ocram_run_edge.h
+  hal/ocram_sector_ask.h
+  hal/ocram_sector_shape.h
+  hal/ocram_slot_arg.h
+  hal/ocram_slot_binds.h
+  hal/ocram_types.h
+  hal/ocram_upload_arg.h
+  hal/ocram_window.h
+  hal/gpo_gpi_pair.h
   hal/memory_model.h
   hal/observer_view.h
   hal/phys_region.h
   hal/pad_block.h
+  hal/pad_ident.h
+  hal/pad_entries.h
+  hal/pad_stat.h
   hal/pin_levels.h
   hal/program_geometry.h
   hal/reboot_flag.h
@@ -72,11 +104,11 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/scaler_probe.h
   hal/sdram_cfg.h
   hal/selected.h
-  hal/spi_bus.h
-  hal/spi_output.h
-  hal/spi_output_observer.h
-  hal/spi_sample.h
-  hal/spi_sample_source.h
+  hal/gpo_gpi_port.h
+  hal/gpo_word.h
+  hal/gpo_observer.h
+  hal/pin_sample.h
+  hal/pin_sample_source.h
   hal/spi_transport.h
   hal/sector_block.h
   hal/osd_block.h
@@ -93,7 +125,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/thread_map.h
   hal/types.h
   hal/unmeasured.h
-  hal/uio_doorbell_source.h
+  hal/board_doorbell_source.h
   hal/uio_frame_lane.h
   hal/uio_reg_file.h
   hal/video_out_decl.h
@@ -102,7 +134,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/disk_lamp.h
   hal/lw_sys_window.h
   hal/reg_lend.h
-  hal/spi_halves.h
-  hal/spi_words.h
+  hal/link_halves.h
+  hal/link_words.h
 )
 

@@ -23,6 +23,8 @@ struct BayCounts {
     std::uint32_t pad_refusals = 0;
     std::uint32_t lw_undiscovered_refusals = 0;
     std::uint32_t lw_firewall_held_refusals = 0;
+
+    infra::Tally pad_no_arm = {};
     std::uint32_t sector_grants = 0;
     std::uint32_t sector_refusals = 0;
     std::uint32_t lease_holds = 0;
@@ -42,6 +44,21 @@ struct BayCounts {
     infra::Tally enable_lost = {};
     hal::EntryMask owned_last{};
     hal::ResetCounts resets_last{};
+
+    infra::Tally ocram_hellos = {};
+    infra::Tally ocram_armed = {};
+    infra::Tally ocram_echoes = {};
+    infra::Tally ocram_sessions = {};
+    infra::Tally ocram_no_ring = {};
+    infra::Tally ocram_refusals = {};
+    infra::Tally ocram_drops = {};
+    infra::Tally ocram_stopped = {};
+    infra::Tally ocram_stop_misses = {};
+
+    infra::Tally lane_grants = {};
+    infra::Tally lane_refusals = {};
+    infra::Tally lane_busy = {};
+    infra::Tally ocram_lost = {};
 };
 
 static_assert(std::is_trivially_copyable_v<BayCounts>);

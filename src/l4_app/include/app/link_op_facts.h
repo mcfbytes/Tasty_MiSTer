@@ -155,6 +155,7 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
      RoundClass::Steady,
      RefusedAnswer::None,
      Pad::Stick},
+    {proto::LinkOp::Kind::OcramRun, OpTarget::Session, Window::None, {}},
 });
 static_assert(
     infra::rows_are_ordinal(kLinkOpFacts),

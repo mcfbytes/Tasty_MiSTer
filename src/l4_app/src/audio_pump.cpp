@@ -209,7 +209,7 @@ void AudioPump::stage_filter_push_() noexcept {
     frame.push = push_;
     frame.lead.if_set = model_.lead_with_boost();
     frame.lead.if_clear = model_.lead_without_boost();
-    const std::span<const hal::SpiWord> words = words_.words();
+    const std::span<const hal::LinkWord> words = words_.words();
     frame.count = words_.count;
     for (std::size_t i = 0; i < words.size(); ++i)
         frame.words[i] = words[i];
@@ -254,7 +254,7 @@ StagedFrame::AudioTail AudioPump::tail(bool front_end) const noexcept {
     t.lead.if_clear = model_.lead_without_boost();
     t.audvol.if_set = model_.audvol_with_filter();
     t.audvol.if_clear = model_.audvol_without_filter();
-    const std::span<const hal::SpiWord> words = words_.words();
+    const std::span<const hal::LinkWord> words = words_.words();
     t.count = words_.count;
     for (std::size_t i = 0; i < words.size(); ++i)
         t.words[i] = words[i];

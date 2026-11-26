@@ -23,7 +23,7 @@ class TastySplash {
 public:
     static constexpr std::uint32_t kDefaultW = 1280;
     static constexpr std::uint32_t kDefaultH = 720;
-    static constexpr hal::SpiWord kFbEnWord{0x8016};
+    static constexpr hal::LinkWord kFbEnWord{0x8016};
     static constexpr std::chrono::nanoseconds kShowNs{std::chrono::seconds{2}};
 
     [[nodiscard]] Ex<void> map(const hal::ApertureRegion& fb) noexcept;

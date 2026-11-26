@@ -26,6 +26,7 @@
 #include "infra/xthread/wake_flag.h"
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
+#include "proto/link/frame_route.h"
 #include "proto/link/link.h"
 #include "proto/link_event.h"
 #include "proto/link_port.h"
@@ -166,6 +167,8 @@ public:
         infra::OptRef<proto::IResetFence> fence = {}
     ) noexcept;
 
+    void bind_frames(infra::OptRef<proto::link::FrameRoute> frames) noexcept { frames_ = frames; }
+
     std::uint32_t but_sw_writes() const noexcept { return but_sw_writes_; }
 
     std::uint32_t but_sw_errors() const noexcept { return but_sw_errors_; }
@@ -221,6 +224,8 @@ private:
             proto::ReplyWord word
         ) noexcept;
 
+        void answer_mode_(proto::link::Link& l) noexcept;
+
         [[nodiscard]] Delivered on(const StagedFrame::Mode& m) noexcept;
         [[nodiscard]] Delivered on(const StagedFrame::ModeInBlock& m) noexcept;
         [[nodiscard]] Delivered on(const StagedFrame::FbufProbes& f) noexcept;
@@ -272,6 +277,7 @@ private:
 
     proto::ConfSwitches tail_but_sw_{};
     proto::ConfSwitches but_sw_sent_{};
+    infra::OptRef<proto::link::FrameRoute> frames_{};
     [[nodiscard]] Ex<void> emit_but_sw_(
         proto::link::Link& link,
         proto::ConfSwitches word,

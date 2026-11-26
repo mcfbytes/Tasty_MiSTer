@@ -16,7 +16,7 @@
 #include "proto/link/spi_identify_decoder.h"
 #include "proto/link/spi_osd_mask_decoder.h"
 #include "proto/link/spi_ps2_decoder.h"
-#include "proto/link/spi_sampler.h"
+#include "proto/link/pin_sampler.h"
 #include "proto/link/poll_reader.h"
 
 namespace mister::app {
@@ -32,7 +32,7 @@ using LinkEventProducers = std::tuple<
     VideoWire,
     proto::link::SpiIdentifyDecoder,
     proto::link::SpiConfStrDecoder,
-    proto::link::SpiSampler,
+    proto::link::PinSampler,
     proto::link::SpiBlockDecoder,
     proto::link::SpiPs2Decoder,
     proto::link::SpiOsdMaskDecoder,

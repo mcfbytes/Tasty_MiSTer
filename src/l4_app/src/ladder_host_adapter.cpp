@@ -8,6 +8,7 @@
 #include "app/negotiated_core.h"
 #include "app/owner_push.h"
 #include "app/start_chain.h"
+#include "app/types.h"
 #include "cores/registry.h"
 #include "cores/share_root.h"
 #include "infra/message_sum.h"
@@ -23,7 +24,79 @@ proto::ActKey LadderHostAdapter::next_act() noexcept {
 
 bool LadderHostAdapter::order(const proto::LinkOp& op) {
     TASTY_SEAT_BODY(LadderHostAdapter);
+    if (edges_.lane && edges_.lane->granted() && edges_.lane->unplayed())
+        return false;
     return push_dropping(edges_.inbox, edges_.tally, op);
+}
+
+bool LadderHostAdapter::off_link() const noexcept {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    return edges_.lane && edges_.lane->granted();
+}
+
+Ex<proto::FileSize> LadderHostAdapter::send_off_link(std::span<const std::uint8_t> bytes) {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!off_link() || edges_.lane->lost()) {
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    }
+    OcramLaneWriter& lane = *edges_.lane;
+    const FileTxLevel level = edges_.ftx_level_cell.sample().value;
+    if (framed_ != level.act) {
+        if (!lane.open(level.params)) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            return proto::FileSize{};
+        }
+        framed_ = level.act;
+    }
+    const proto::FileSize taken = lane.data(bytes, link_width());
+    if (taken.empty())
+        lane.wait(OcramLaneWriter::Wait::Room);
+    window_sent_ = window_sent_ + taken;
+    progress_(false);
+    return taken;
+}
+
+void LadderHostAdapter::progress_(bool edge) noexcept {
+    if (!events_ || window_total_.empty())
+        return;
+    cores::Progress now{};
+    if (!edge) {
+        now = cores::Progress::of_bytes({.done = window_sent_, .total = window_total_});
+        if (now.done == bar_.done)
+            return;
+    }
+    bar_ = now;
+    events_->push(Event::ProgressUpdate{.progress = now}, Event::Head{ERR_SITE(), {}, kUncaused});
+}
+
+bool LadderHostAdapter::end_off_link() {
+    TASTY_SEAT_BODY(LadderHostAdapter);
+    if (!off_link() || edges_.lane->lost())
+        return true;
+    OcramLaneWriter& lane = *edges_.lane;
+    const FileTxLevel level = edges_.ftx_level_cell.sample().value;
+    if (framed_ != level.act) {
+        if (!lane.open(level.params)) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            return false;
+        }
+        framed_ = level.act;
+    }
+    if (ended_ != level.act) {
+        if (!lane.end()) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            return false;
+        }
+        ended_ = level.act;
+    }
+    if (!lane.played()) {
+        lane.wait(OcramLaneWriter::Wait::Played);
+        return false;
+    }
+    lane.close_window();
+    progress_(true);
+    window_total_ = {};
+    return true;
 }
 
 Ex<proto::FileId> LadderHostAdapter::intern_bytes(
@@ -48,6 +121,12 @@ Ex<proto::FileId> LadderHostAdapter::intern_piece(
     proto::FileOffset at
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
+
+    if (off_link() && bytes.empty() && !whole.empty()) {
+        window_total_ = whole;
+        window_sent_ = {};
+        progress_(true);
+    }
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
     return edges_.inbox.intern_file(
         FileIntern{.bytes = std::move(buf), .ext = ext, .piece = {.whole = whole, .offset = at}}

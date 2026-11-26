@@ -24,7 +24,7 @@ struct Selector {
 
     [[nodiscard]] static constexpr Selector send_data_query(svc::disc::TrackType type) noexcept;
 
-    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord word() const noexcept { return hal::LinkWord{v}; }
 
     friend constexpr bool operator==(Selector, Selector) = default;
 };
@@ -50,11 +50,11 @@ constexpr std::uint8_t bcd(svc::TrackNumber n) noexcept {
     return n.bcd_byte();
 }
 
-std::uint64_t sega_compose(std::span<const hal::SpiWord, 3> words) noexcept;
+std::uint64_t sega_compose(std::span<const hal::LinkWord, 3> words) noexcept;
 
-inline constexpr hal::SpiWord kSegaResetWord{0x00FF};
+inline constexpr hal::LinkWord kSegaResetWord{0x00FF};
 
-[[nodiscard]] CdSpeedIndex sega_speed_index(hal::SpiWord w2) noexcept;
+[[nodiscard]] CdSpeedIndex sega_speed_index(hal::LinkWord w2) noexcept;
 
 std::uint8_t sega_crc(std::span<const std::uint8_t, 9> nibbles, std::uint8_t crc_start) noexcept;
 
@@ -67,11 +67,11 @@ std::uint64_t sega_pack_status(
     bool carries_is_data
 ) noexcept;
 
-std::array<hal::SpiWord, 3> sega_set_words(std::uint64_t frame) noexcept;
+std::array<hal::LinkWord, 3> sega_set_words(std::uint64_t frame) noexcept;
 
 std::optional<Selector> sega_send_data_query(svc::disc::TrackType type, bool skip_mode1) noexcept;
 
-std::array<hal::SpiWord, 2> pce_set_words(
+std::array<hal::LinkWord, 2> pce_set_words(
     std::uint16_t status,
     bool region,
     bool data_request

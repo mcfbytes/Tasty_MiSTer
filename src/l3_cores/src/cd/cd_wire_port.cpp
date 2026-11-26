@@ -137,18 +137,18 @@ Ex<void> CdWirePort::send_data(
     proto::IImageSink& sink
 ) {
     TASTY_SEAT_BODY(CdWirePort);
-    const auto q = fio_queue_;
-    if (q && (!q->idle() || payload.size() > kInlineFrameBytes)) {
+    proto::link::SpiFioQueue& q = fio_queue_;
+    if (!q.idle() || payload.size() > kInlineFrameBytes) {
         const proto::link::SpiFioQueue::Bracket b{
             proto::WideIoIndex::of(io_index),
             infra::byte_cast<const std::uint8_t>(payload)
         };
-        if (q->append(std::span(&b, 1))) {
+        if (q.append(std::span(&b, 1))) {
             if (cdda_cap_ && cd_.io.cdda == io_index)
                 cdda_cap_->append(payload);
             return {};
         }
-        (void)q->flush();
+        (void)q.flush();
     }
     return bracket_inline(io_index, payload, sink);
 }
@@ -173,18 +173,15 @@ Ex<void> CdWirePort::bracket_inline(
 
 bool CdWirePort::egress_idle() const noexcept {
     TASTY_SEAT_BODY(CdWirePort);
-    return !fio_queue_ || fio_queue_->idle();
+    return fio_queue_.idle();
 }
 
 std::uint32_t CdWirePort::egress_abandons() const noexcept {
-    return fio_queue_ ? fio_queue_->stats().abandons : 0u;
+    return fio_queue_.stats().abandons;
 }
 
 Ex<void> CdWirePort::submit_sector(const CdSectorAct& act) {
     TASTY_SEAT_BODY(CdWirePort);
-    const auto q = fio_queue_;
-    if (!q)
-        return std::unexpected(act.index.refusal(Errc::negotiation, ERR_SITE()));
     if (cdda_cap_ && cd_.io.cdda == act.index)
         cdda_cap_->append(std::as_bytes(act.sector));
     std::array<proto::link::SpiFioQueue::Bracket, 2> b{};
@@ -192,14 +189,14 @@ Ex<void> CdWirePort::submit_sector(const CdSectorAct& act) {
     if (!act.subcode.empty())
         b[n++] = {proto::WideIoIndex::of(act.sub_index), act.subcode};
     b[n++] = {proto::WideIoIndex::of(act.index), act.sector};
-    return q->submit(std::span(b.data(), n));
+    return fio_queue_.submit(std::span(b.data(), n));
 }
 
 bool CdWirePort::can_send_data(cdwire::Selector selector) {
     TASTY_SEAT_BODY(CdWirePort);
     hal::ISpiTransport& link = link_;
     hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{cdwire::kUioCdGet}); !r) {
+    if (auto r = link.transfer(hal::LinkWord{cdwire::kUioCdGet}); !r) {
         ++wire_faults_;
         return false;
     }
@@ -207,33 +204,33 @@ bool CdWirePort::can_send_data(cdwire::Selector selector) {
         ++wire_faults_;
         return false;
     }
-    const auto answer = link.transfer(hal::SpiWord{0});
+    const auto answer = link.transfer(hal::LinkWord{0});
     if (!answer) {
         ++wire_faults_;
         return false;
     }
-    constexpr hal::SpiWord kDataReady{1};
+    constexpr hal::LinkWord kDataReady{1};
     return *answer == kDataReady;
 }
 
-Ex<void> CdWirePort::send_status(std::span<const hal::SpiWord> words) {
+Ex<void> CdWirePort::send_status(std::span<const hal::LinkWord> words) {
     TASTY_SEAT_BODY(CdWirePort);
     const std::size_t n = words.size();
 
     if (n > CdEngine::kMaxStatusWords)
         return std::unexpected(Error{Errc::contract, ERR_SITE(), 0});
 
-    if (const auto q = fio_queue_; q && !q->idle()) {
-        hal::SpiWord cmd[kStatusCommandWords] = {hal::SpiWord{cdwire::kUioCdSet}};
+    if (proto::link::SpiFioQueue& q = fio_queue_; !q.idle()) {
+        hal::LinkWord cmd[kStatusCommandWords] = {hal::LinkWord{cdwire::kUioCdSet}};
         for (std::size_t i = 0; i < n; ++i)
             cmd[1 + i] = words[i];
-        if (q->append_command(std::span<const hal::SpiWord>(cmd, 1 + n)))
+        if (q.append_command(std::span<const hal::LinkWord>(cmd, 1 + n)))
             return {};
-        (void)q->flush();
+        (void)q.flush();
     }
     hal::ISpiTransport& link = link_;
     hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{cdwire::kUioCdSet}); !r) {
+    if (auto r = link.transfer(hal::LinkWord{cdwire::kUioCdSet}); !r) {
         return std::unexpected(r.error());
     }
     for (std::size_t i = 0; i < n; ++i) {
@@ -254,7 +251,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
     {
         hal::ISpiTransport& link = link_;
         hal::Selected cs(link, hal::ChipSelect::Io);
-        auto first = link.transfer(hal::SpiWord{cdwire::kUioCdGet});
+        auto first = link.transfer(hal::LinkWord{cdwire::kUioCdGet});
         if (!first) {
             ++wire_faults_;
             failed = true;
@@ -270,7 +267,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
             }
             if (wanted && !failed) {
                 for (std::size_t i = 0; i < nwords; ++i) {
-                    auto r = link.transfer(hal::SpiWord{0});
+                    auto r = link.transfer(hal::LinkWord{0});
                     if (!r) {
                         ++wire_faults_;
                         failed = true;
@@ -289,8 +286,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
 }
 
 void CdWirePort::declare_resets(const proto::ResetTerms& terms) noexcept {
-    if (fio_queue_)
-        fio_queue_->declare_resets(terms);
+    fio_queue_.declare_resets(terms);
 }
 
 }

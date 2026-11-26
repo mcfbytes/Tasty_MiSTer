@@ -6,7 +6,7 @@
 
 #include "cores/atari8/atari8_machine.h"
 #include "cores/atari8/cart_stream_load.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mailbox_carriage.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"

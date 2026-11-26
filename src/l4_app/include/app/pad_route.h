@@ -20,7 +20,7 @@ struct PadRoute {
         constexpr Stamp() noexcept : at() {}
     };
 
-    bool on_lw = false;
+    bool bound = false;
     infra::Tally stores{};
     infra::Tally binds{};
     infra::Tally revoked{};
@@ -29,6 +29,8 @@ struct PadRoute {
     infra::Tally relay_seq{};
     Stamp relay_read{};
     infra::Tally events_refused{};
+    infra::Tally events_held{};
+    infra::Tally events_lost{};
 };
 
 static_assert(std::is_trivially_copyable_v<PadRoute>);

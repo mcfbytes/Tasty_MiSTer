@@ -24,7 +24,7 @@ namespace {
     std::span<std::uint8_t> data,
     hal::Width w
 ) {
-    return fill_from_words(w, data, [&link] { return beat(link, hal::SpiWord{0}); });
+    return fill_from_words(w, data, [&link] { return beat(link, hal::LinkWord{0}); });
 }
 
 }

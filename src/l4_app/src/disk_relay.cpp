@@ -5,7 +5,7 @@
 #include <span>
 #include <utility>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/spi_transport.h"
 #include "infra/message_sum.h"
 #include "infra/prelude.h"
@@ -287,7 +287,7 @@ DiskRelay::Written DiskRelay::write_(
     if (!beat)
         return Written::Faulted;
     if (const std::optional<proto::DiskAddress> address = a.address()) {
-        const hal::SpiHalves at = address->halves();
+        const hal::LinkHalves at = address->halves();
         if (!link.word(at.low) || !link.word(at.high))
             return Written::Faulted;
     }
@@ -303,7 +303,7 @@ DiskRelay::Written DiskRelay::write_(
     switch (a.kind()) {
         case proto::DiskAct::Kind::Out:
             for (std::size_t i = 0; i < a.len(); i += proto::DiskAct::kWordBytes) {
-                const auto word = hal::SpiWord::load_le(
+                const auto word = hal::LinkWord::load_le(
                     std::span<const std::byte>(bytes).subspan(i).first<proto::DiskAct::kWordBytes>()
                 );
                 if (!link.word(word))
@@ -319,7 +319,7 @@ DiskRelay::Written DiskRelay::write_(
             }
             break;
         case proto::DiskAct::Kind::Signal: {
-            const std::optional<hal::SpiWord> w = a.word();
+            const std::optional<hal::LinkWord> w = a.word();
             if (w.has_value() && !link.word(*w))
                 return Written::Faulted;
             break;

@@ -12,7 +12,7 @@
 #include "boot_parts.h"
 #include "rt_evidence.h"
 #include "hal/board_profile.h"
-#include "hal/link_port.h"
+#include "hal/board_link.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
 #include "infra/opt_ref.h"
@@ -89,10 +89,10 @@ public:
 
         ExitPath() noexcept = default;
 
-        explicit ExitPath(hal::ILinkPort& link) noexcept : link_(link) {}
+        explicit ExitPath(hal::IBoardLink& link) noexcept : link_(link) {}
 
         ExitPath(
-            hal::ILinkPort& link,
+            hal::IBoardLink& link,
             app::LinkSession& sup,
             app::BoardReboot& reboot,
             app::BootHandoff& handoff,
@@ -106,7 +106,7 @@ public:
         [[nodiscard]] const SessionStage& session() const;
 
     private:
-        infra::OptRef<hal::ILinkPort> link_{};
+        infra::OptRef<hal::IBoardLink> link_{};
         std::optional<SessionStage> session_{};
     };
 

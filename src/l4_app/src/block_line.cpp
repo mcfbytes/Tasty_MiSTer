@@ -5,6 +5,7 @@
 #include <poll.h>
 
 #include "infra/prelude.h"
+#include "infra/seat_owner_main.h"
 
 namespace mister::app {
 
@@ -47,5 +48,6 @@ bool BlockLine<Owner>::rang() const noexcept {
 }
 
 template class BlockLine<seat_owner::Io>;
+template class BlockLine<seat_owner::Main>;
 
 }

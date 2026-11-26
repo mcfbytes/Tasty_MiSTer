@@ -11,7 +11,7 @@
 #include "cores/mailbox_servant.h"
 #include "cores/snes/msu_wire.h"
 #include "cores/snes/sector_read_ahead.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
 #include "svc/file.h"
@@ -68,7 +68,7 @@ private:
     struct AudioTrack {
         std::uint32_t v = 0;
 
-        [[nodiscard]] static constexpr AudioTrack of(hal::SpiHalves h) noexcept {
+        [[nodiscard]] static constexpr AudioTrack of(hal::LinkHalves h) noexcept {
             return h.joined([](std::uint32_t d) { return AudioTrack{d}; });
         }
 
@@ -83,7 +83,7 @@ private:
     struct SectorLba {
         std::uint32_t v = 0;
 
-        [[nodiscard]] static constexpr SectorLba of(hal::SpiHalves h) noexcept {
+        [[nodiscard]] static constexpr SectorLba of(hal::LinkHalves h) noexcept {
             return h.joined([](std::uint32_t d) { return SectorLba{d}; });
         }
 

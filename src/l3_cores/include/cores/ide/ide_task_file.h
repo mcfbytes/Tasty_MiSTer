@@ -27,10 +27,10 @@ struct PacketWords {
     }
 
     [[nodiscard]] constexpr infra::ByteCount bytes() const noexcept {
-        return infra::ByteCount{static_cast<std::size_t>(v) * sizeof(hal::SpiWord)};
+        return infra::ByteCount{static_cast<std::size_t>(v) * sizeof(hal::LinkWord)};
     }
 
-    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord word() const noexcept { return hal::LinkWord{v}; }
 
     friend constexpr bool operator==(PacketWords, PacketWords) = default;
 };
@@ -64,7 +64,7 @@ struct IdeTaskFile {
     static constexpr std::byte kTransferMode{0x03};
     static constexpr std::byte kDmaFeature{0x01};
 
-    static constexpr proto::ReplyCount kWords{std::tuple_size_v<Image> / sizeof(hal::SpiWord)};
+    static constexpr proto::ReplyCount kWords{std::tuple_size_v<Image> / sizeof(hal::LinkWord)};
 
     bool fast_read = false;
     std::byte features{};
@@ -107,8 +107,8 @@ struct IdeTaskFile {
         Image raw{};
         std::span<std::byte> rest{raw};
         for (proto::ReplyCount read{}; read < kWords; read += proto::ReplyCount{1}) {
-            block.replies[at + read].store_le(rest.first<sizeof(hal::SpiWord)>());
-            rest = rest.subspan(sizeof(hal::SpiWord));
+            block.replies[at + read].store_le(rest.first<sizeof(hal::LinkWord)>());
+            rest = rest.subspan(sizeof(hal::LinkWord));
         }
         return raw;
     }
@@ -133,7 +133,7 @@ struct IdeTaskFile {
         at(raw, At::FlagsOrBurst) = kPacketMarker;
         if (packet_sense)
             at(raw, At::FeaturesOrFault) = error_register_of(*packet_sense);
-        const hal::SpiWord words = packet ? packet->word() : hal::SpiWord{};
+        const hal::LinkWord words = packet ? packet->word() : hal::LinkWord{};
         at(raw, At::PacketWordsLow) = words.low_lane();
         at(raw, At::PacketWordsHigh) = std::byte{words.high_byte()};
         return raw;
@@ -155,11 +155,11 @@ private:
     }
 
     template <class Byte>
-    [[nodiscard]] static constexpr std::span<Byte, sizeof(hal::SpiWord)> cylinder_of(
+    [[nodiscard]] static constexpr std::span<Byte, sizeof(hal::LinkWord)> cylinder_of(
         std::span<Byte, std::tuple_size_v<Image>> raw
     ) noexcept {
         return raw.subspan(std::to_underlying(At::CylinderLow))
-            .template first<sizeof(hal::SpiWord)>();
+            .template first<sizeof(hal::LinkWord)>();
     }
 };
 

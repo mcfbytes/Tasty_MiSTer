@@ -14,7 +14,7 @@ struct CartMode {
 
     [[nodiscard]] constexpr bool off() const noexcept { return v == 0; }
 
-    [[nodiscard]] constexpr hal::SpiWord value_word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord value_word() const noexcept { return hal::LinkWord{v}; }
 
     friend constexpr bool operator==(CartMode, CartMode) = default;
 };

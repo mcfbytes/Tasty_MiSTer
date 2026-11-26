@@ -5,7 +5,7 @@
 
 #include "cores/baud_halves.h"
 #include "cores/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 
 namespace mister::app {
 
@@ -18,10 +18,10 @@ public:
     }
 
 private:
-    explicit constexpr BaudWords(hal::SpiHalves halves) noexcept : halves_(halves) {}
+    explicit constexpr BaudWords(hal::LinkHalves halves) noexcept : halves_(halves) {}
 
     friend class UartModeController;
-    hal::SpiHalves halves_{};
+    hal::LinkHalves halves_{};
 };
 
 }

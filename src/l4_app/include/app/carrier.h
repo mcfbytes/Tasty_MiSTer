@@ -5,6 +5,10 @@
 
 namespace mister::app {
 
-enum class Carrier : std::uint8_t { Link, Lw };
+enum class Carrier : std::uint8_t { Spi, Lw, Ocram };
+
+[[nodiscard]] constexpr bool link_carries(Carrier c) noexcept {
+    return c == Carrier::Spi;
+}
 
 }

@@ -126,6 +126,24 @@ void regs_write(volatile void* base, std::size_t byte_off, std::uint32_t v) {
     ) = v;
 }
 
+void regs_write64(volatile void* base, std::size_t byte_off, std::uint64_t v) {
+    auto* at = reinterpret_cast<volatile std::uint64_t*>(
+        reinterpret_cast<volatile std::byte*>(base) + byte_off
+    );
+#if defined(__arm__)
+
+    if ((reinterpret_cast<std::uintptr_t>(at) & (alignof(std::uint64_t) - 1u)) != 0u) {
+        fatal(
+            Error{Errc::contract, ERR_SITE(), static_cast<std::uint32_t>(byte_off)},
+            "regs_write64: unaligned OCRAM store"
+        );
+    }
+    __asm__ volatile("strd %Q0, %R0, [%1]" : : "r"(v), "r"(at) : "memory");
+#else
+    *at = v;
+#endif
+}
+
 void regs_fence() noexcept {
     std::atomic_thread_fence(std::memory_order_seq_cst);
 }

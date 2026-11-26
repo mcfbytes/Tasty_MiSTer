@@ -30,7 +30,7 @@ public:
         Instant now
     ) noexcept = 0;
 
-    virtual void controller_word(hal::SpiWord word, Instant now) noexcept = 0;
+    virtual void controller_word(hal::LinkWord word, Instant now) noexcept = 0;
 
     virtual void tick(Instant now) noexcept = 0;
 

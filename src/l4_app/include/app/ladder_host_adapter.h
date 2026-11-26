@@ -10,12 +10,14 @@
 #include <vector>
 
 #include "app/act_keys.h"
+#include "app/event.h"
 #include "app/file_tx_level.h"
 #include "app/game_id.h"
 #include "app/ini_parse.h"
 #include "app/link_tx_channel.h"
 #include "app/load_belt.h"
 #include "app/mount_status_cell.h"
+#include "app/ocram_lane_writer.h"
 #include "app/option_cell.h"
 #include "app/config_value_cell.h"
 #include "app/owner_tally.h"
@@ -25,6 +27,7 @@
 #include "app/save_state_facts.h"
 #include "app/share_grant.h"
 #include "cores/ladder_host.h"
+#include "cores/progress.h"
 #include "hal/fpga_aperture.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
@@ -75,9 +78,15 @@ public:
         infra::OptRef<xthread::WakeFlag> io_wake{};
         infra::OptRef<const svc::Vfs> vfs{};
         hal::FpgaAperture aperture{};
+
+        infra::OptRef<OcramLaneWriter> lane{};
+
+        std::optional<EventQueue<SeatTag::Main>::Producer> events{};
     };
 
-    explicit LadderHostAdapter(const Edges& edges) noexcept : edges_(edges) {}
+    explicit LadderHostAdapter(const Edges& edges) noexcept
+        : edges_(edges),
+          events_(edges.events) {}
 
     LadderHostAdapter(const LadderHostAdapter&) = delete;
     LadderHostAdapter& operator=(const LadderHostAdapter&) = delete;
@@ -137,6 +146,10 @@ public:
 
     void close_share() noexcept;
 
+    [[nodiscard]] bool off_link() const noexcept override;
+    [[nodiscard]] Ex<proto::FileSize> send_off_link(std::span<const std::uint8_t> bytes) override;
+    [[nodiscard]] bool end_off_link() override;
+
 private:
     void publish_closed_() noexcept;
 
@@ -145,6 +158,15 @@ private:
 
     std::optional<ShareGrant::Open> share_{};
     bool open_live_ = false;
+
+    proto::ActKey framed_{};
+    proto::ActKey ended_{};
+
+    std::optional<EventQueue<SeatTag::Main>::Producer> events_{};
+    proto::FileSize window_total_{};
+    proto::FileSize window_sent_{};
+    cores::Progress bar_{};
+    void progress_(bool edge) noexcept;
 };
 
 }

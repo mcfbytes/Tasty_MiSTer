@@ -16,23 +16,23 @@ namespace mister::app {
 
 namespace {
 
-constexpr hal::SpiWord kCountMask = proto::user_io::poll_row(
-                                        proto::user_io::PollShape::ChangeCounter
+constexpr hal::LinkWord kCountMask = proto::user_io::poll_row(
+                                         proto::user_io::PollShape::ChangeCounter
 )
-                                        .mask.wire_word();
+                                         .mask.wire_word();
 
 }
 
 void CmosKeeper::bind(infra::OptRef<const cores::CmosLayout> layout) noexcept {
     TASTY_SEAT_BODY(CmosKeeper);
     layout_ = layout;
-    count_ = pulled_ = hal::SpiWord{};
+    count_ = pulled_ = hal::LinkWord{};
     clock_run_.reset();
     save_due_ = os::Deadline::immediate();
     clock_due_ = os::Deadline::immediate();
 }
 
-void CmosKeeper::on_change_count(hal::SpiWord word) noexcept {
+void CmosKeeper::on_change_count(hal::LinkWord word) noexcept {
     TASTY_SEAT_BODY(CmosKeeper);
     count_ = word.masked(kCountMask);
 }

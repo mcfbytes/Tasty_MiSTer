@@ -2,7 +2,7 @@
 #pragma once
 
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "reactor/core_state.h"

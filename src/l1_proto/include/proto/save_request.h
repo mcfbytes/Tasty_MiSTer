@@ -12,7 +12,7 @@ namespace mister::proto {
 struct SaveRequestWord {
     std::uint16_t v = 0;
 
-    [[nodiscard]] static constexpr SaveRequestWord of(hal::SpiWord reply) noexcept {
+    [[nodiscard]] static constexpr SaveRequestWord of(hal::LinkWord reply) noexcept {
         return SaveRequestWord{reply.decoded(std::identity{})};
     }
 

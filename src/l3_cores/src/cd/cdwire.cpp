@@ -25,8 +25,8 @@ constexpr std::uint16_t lo16(std::uint64_t v) noexcept {
 
 namespace cdwire {
 
-std::uint64_t sega_compose(std::span<const hal::SpiWord, 3> words) noexcept {
-    std::array<hal::SpiWord, 3> triple;
+std::uint64_t sega_compose(std::span<const hal::LinkWord, 3> words) noexcept {
+    std::array<hal::LinkWord, 3> triple;
     std::ranges::copy(words, triple.begin());
     const auto& [w0, w1, w2] = triple;
 
@@ -37,7 +37,7 @@ std::uint64_t sega_compose(std::span<const hal::SpiWord, 3> words) noexcept {
     );
 }
 
-CdSpeedIndex sega_speed_index(hal::SpiWord w2) noexcept {
+CdSpeedIndex sega_speed_index(hal::LinkWord w2) noexcept {
     constexpr std::uint8_t kSegaSpeedMask = 0x3;
     const std::uint8_t index = w2.high_byte() & kSegaSpeedMask;
     return CdSpeedIndex{index};
@@ -86,7 +86,7 @@ std::uint64_t sega_pack_status(
     return v;
 }
 
-std::array<hal::SpiWord, 3> sega_set_words(std::uint64_t frame) noexcept {
+std::array<hal::LinkWord, 3> sega_set_words(std::uint64_t frame) noexcept {
     constexpr unsigned kWordBits = 16;
     constexpr std::uint64_t kByteMask = 0xFF;
     constexpr unsigned kNibbleBits = 4;
@@ -98,9 +98,9 @@ std::array<hal::SpiWord, 3> sega_set_words(std::uint64_t frame) noexcept {
     constexpr unsigned kWord2IsDataShift = 8;
 
     return {
-        hal::SpiWord{lo16(frame)},
-        hal::SpiWord{lo16(frame >> kSegaWord1Shift)},
-        hal::SpiWord{static_cast<std::uint16_t>(
+        hal::LinkWord{lo16(frame)},
+        hal::LinkWord{lo16(frame >> kSegaWord1Shift)},
+        hal::LinkWord{static_cast<std::uint16_t>(
             ((frame >> kSegaWord2Shift) & kByteMask)
             | (((frame >> kSegaIsDataShift) & 1u) << kWord2IsDataShift)
         )}
@@ -114,7 +114,7 @@ std::optional<Selector> sega_send_data_query(TrackType type, bool skip_mode1) no
     return Selector::send_data_query(type);
 }
 
-std::array<hal::SpiWord, 2> pce_set_words(
+std::array<hal::LinkWord, 2> pce_set_words(
     std::uint16_t status,
     bool region,
     bool data_request
@@ -123,8 +123,8 @@ std::array<hal::SpiWord, 2> pce_set_words(
     constexpr std::uint16_t kPceDataRequestBit = 1;
 
     return {
-        hal::SpiWord{status},
-        hal::SpiWord{static_cast<std::uint16_t>(
+        hal::LinkWord{status},
+        hal::LinkWord{static_cast<std::uint16_t>(
             (region ? kPceRegionBit : 0u) | (data_request ? kPceDataRequestBit : 0u)
         )}
     };

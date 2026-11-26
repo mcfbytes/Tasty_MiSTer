@@ -154,15 +154,15 @@ static_assert(
     return kPollShapes[infra::ordinal(s)];
 }
 
-inline constexpr hal::SpiWord kInBandRead{};
+inline constexpr hal::LinkWord kInBandRead{};
 
-[[nodiscard]] constexpr hal::SpiWord command_word(
+[[nodiscard]] constexpr hal::LinkWord command_word(
     const PollShapeRow& r,
     std::uint8_t param
 ) noexcept {
     if (!r.opcode)
         return kInBandRead;
-    const hal::SpiWord opcode = word(*r.opcode);
+    const hal::LinkWord opcode = word(*r.opcode);
     switch (r.form) {
         case CommandForm::Bare:
             return opcode;

@@ -30,15 +30,15 @@ struct FbScanWindow {
     [[nodiscard]] static FbScanWindow centred(const FbView& picture, PictureSize out) noexcept;
 };
 
-[[nodiscard]] constexpr std::array<hal::SpiWord, 4> fb_scan_words(
+[[nodiscard]] constexpr std::array<hal::LinkWord, 4> fb_scan_words(
     const FbScanWindow& window
 ) noexcept {
     const HdRect& b = window.box;
     return {
-        hal::SpiWord{static_cast<std::uint16_t>(b.x)},
-        hal::SpiWord{static_cast<std::uint16_t>(b.x + b.w - 1)},
-        hal::SpiWord{static_cast<std::uint16_t>(b.y)},
-        hal::SpiWord{static_cast<std::uint16_t>(b.y + b.h - 1)}
+        hal::LinkWord{static_cast<std::uint16_t>(b.x)},
+        hal::LinkWord{static_cast<std::uint16_t>(b.x + b.w - 1)},
+        hal::LinkWord{static_cast<std::uint16_t>(b.y)},
+        hal::LinkWord{static_cast<std::uint16_t>(b.y + b.h - 1)}
     };
 }
 

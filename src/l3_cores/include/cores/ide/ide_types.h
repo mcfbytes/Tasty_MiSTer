@@ -75,18 +75,18 @@ enum class IdeDriveSelect : std::uint8_t { Master, Slave };
 
 enum class RemountTarget : std::uint8_t { FloppyA, FloppyB, ThisDrive };
 
-[[nodiscard]] constexpr hal::SpiWord presence_word(IdeDriveSelect drive, bool present) noexcept {
+[[nodiscard]] constexpr hal::LinkWord presence_word(IdeDriveSelect drive, bool present) noexcept {
     constexpr unsigned kSlaveShift = 4;
     constexpr std::uint16_t kWriteEnable = 0x8;
     constexpr std::uint16_t kPresent = 0x1;
     const std::uint16_t nibble = present ? (kWriteEnable | kPresent) : kWriteEnable;
     const unsigned shift = drive == IdeDriveSelect::Slave ? kSlaveShift : 0;
-    return hal::SpiWord{static_cast<std::uint16_t>(nibble << shift)};
+    return hal::LinkWord{static_cast<std::uint16_t>(nibble << shift)};
 }
 
-[[nodiscard]] constexpr hal::SpiWord no_wait_word() noexcept {
+[[nodiscard]] constexpr hal::LinkWord no_wait_word() noexcept {
     constexpr std::uint16_t kWaitWriteEnable = 0x200;
-    return hal::SpiWord{kWaitWriteEnable};
+    return hal::LinkWord{kWaitWriteEnable};
 }
 
 struct IdeSectorCount {
@@ -152,10 +152,10 @@ struct IdeAddress {
 
     [[nodiscard]] static constexpr IdeAddress of(
         std::byte sector,
-        hal::SpiWord cylinder,
+        hal::LinkWord cylinder,
         std::byte head
     ) noexcept {
-        std::array<std::byte, sizeof(hal::SpiWord)> wire{};
+        std::array<std::byte, sizeof(hal::LinkWord)> wire{};
         cylinder.store_le(std::span{wire});
         return of(sector, std::span{wire}, head);
     }
@@ -164,8 +164,8 @@ struct IdeAddress {
         return static_cast<std::byte>(kSectorField.get(v));
     }
 
-    [[nodiscard]] constexpr hal::SpiWord cylinder_word() const noexcept {
-        return hal::SpiWord{static_cast<std::uint16_t>(kCylinderField.get(v))};
+    [[nodiscard]] constexpr hal::LinkWord cylinder_word() const noexcept {
+        return hal::LinkWord{static_cast<std::uint16_t>(kCylinderField.get(v))};
     }
 
     [[nodiscard]] constexpr std::byte head_byte() const noexcept {
@@ -230,12 +230,12 @@ struct IdeAddress {
     }
 
     [[nodiscard]] static constexpr IdeAddress reset_signature(bool present) noexcept {
-        return of(std::byte{1}, present ? hal::SpiWord{} : hal::SpiWord::all_ones(), std::byte{});
+        return of(std::byte{1}, present ? hal::LinkWord{} : hal::LinkWord::all_ones(), std::byte{});
     }
 
     [[nodiscard]] static constexpr IdeAddress packet_signature() noexcept {
         constexpr std::uint16_t kAtapiSignature = 0xEB14;
-        return of(std::byte{1}, hal::SpiWord{kAtapiSignature}, std::byte{});
+        return of(std::byte{1}, hal::LinkWord{kAtapiSignature}, std::byte{});
     }
 
     [[nodiscard]] constexpr svc::DiskGeometry::Heads head_count() const noexcept {

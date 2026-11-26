@@ -53,7 +53,7 @@ public:
         virtual ~IVideoWireSink() = default;
         [[nodiscard]] virtual Ex<void> publish(
             proto::UioOp opcode,
-            std::span<const hal::SpiWord> words
+            std::span<const hal::LinkWord> words
         ) = 0;
 
     protected:

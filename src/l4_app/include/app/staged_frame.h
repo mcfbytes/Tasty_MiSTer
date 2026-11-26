@@ -23,7 +23,7 @@ namespace mister::app {
 
 inline constexpr std::size_t kArCustomWords = 4;
 
-using ArCustomWords = std::array<hal::SpiWord, kArCustomWords>;
+using ArCustomWords = std::array<hal::LinkWord, kArCustomWords>;
 
 inline constexpr std::size_t kCoeffChunkWords = 64;
 
@@ -54,7 +54,7 @@ struct StagedFrame {
         proto::UioOp opcode{};
         FrameWordCount count{};
         std::byte pad_{};
-        std::array<hal::SpiWord, svc::video::kVideoWireWords> w{};
+        std::array<hal::LinkWord, svc::video::kVideoWireWords> w{};
     };
 
     struct Mode {
@@ -81,7 +81,7 @@ struct StagedFrame {
         static constexpr Kind kKind = Kind::CoeffChunk;
         FrameWordCount count{};
         std::byte pad_{};
-        std::array<hal::SpiWord, kCoeffChunkWords> w{};
+        std::array<hal::LinkWord, kCoeffChunkWords> w{};
     };
 
     struct ShadowMask {
@@ -97,7 +97,7 @@ struct StagedFrame {
         proto::user_io::DeclaredSelect<proto::user_io::SelectRow::AudvolByFilter, svc::AudvolByte>
             audvol{};
         svc::FilterWordCount count{};
-        std::array<hal::SpiWord, svc::kFilterWireWords - 1> words{};
+        std::array<hal::LinkWord, svc::kFilterWireWords - 1> words{};
     };
 
     struct ScalingPair {
@@ -116,7 +116,7 @@ struct StagedFrame {
         proto::user_io::DeclaredSelect<proto::user_io::SelectRow::AfilterLead, svc::CoreVolume>
             lead{};
         svc::FilterWordCount count{};
-        std::array<hal::SpiWord, svc::kFilterWireWords - 1> words{};
+        std::array<hal::LinkWord, svc::kFilterWireWords - 1> words{};
     };
 
     using Alternatives = std::tuple<

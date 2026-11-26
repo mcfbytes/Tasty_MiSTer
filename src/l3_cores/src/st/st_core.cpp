@@ -59,10 +59,10 @@ Ex<void> StCore::push_control_() {
     proto::link::SpiFrame frame{host().link};
     if (auto r = frame.begin(proto::UioOp::SetStatus2); !r)
         return r;
-    const hal::SpiHalves sys = cfg_.system_ctrl.wire_halves();
-    const hal::SpiHalves ext = hal::SpiHalves::of(cfg_.ext_ctrl);
-    const std::array<hal::SpiWord, 4> payload = {sys.low, sys.high, ext.low, ext.high};
-    for (const hal::SpiWord w : payload) {
+    const hal::LinkHalves sys = cfg_.system_ctrl.wire_halves();
+    const hal::LinkHalves ext = hal::LinkHalves::of(cfg_.ext_ctrl);
+    const std::array<hal::LinkWord, 4> payload = {sys.low, sys.high, ext.low, ext.high};
+    for (const hal::LinkWord w : payload) {
         if (auto r = frame.word(w); !r)
             return r;
     }

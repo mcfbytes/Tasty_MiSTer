@@ -77,8 +77,8 @@ private:
     static constexpr proto::DiskRegisterCount kHeadsReg{0x5};
     static constexpr proto::DiskRegisterCount kBaseLbaReg{0x6};
     static constexpr proto::DiskRegisterCount kMediaTypeReg{0xC};
-    static constexpr hal::SpiWord kSet{1};
-    static constexpr hal::SpiWord kClear{0};
+    static constexpr hal::LinkWord kSet{1};
+    static constexpr hal::LinkWord kClear{0};
 
     [[nodiscard]] constexpr const FloppyFormat& format_() const noexcept {
         for (const FloppyFormat& format : kFloppyFormats)

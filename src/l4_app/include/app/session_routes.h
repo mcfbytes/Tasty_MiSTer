@@ -8,18 +8,22 @@
 namespace mister::app {
 
 struct SessionRoutes {
-    Carrier pads = Carrier::Link;
-    Carrier osd = Carrier::Link;
-    Carrier status = Carrier::Link;
+    Carrier pads = Carrier::Spi;
+    Carrier osd = Carrier::Spi;
+    Carrier status = Carrier::Spi;
 
-    proto::BlockSlotMask lw_slots{};
+    Carrier downloads = Carrier::Spi;
+    Carrier frames = Carrier::Spi;
+    Carrier events = Carrier::Spi;
+
+    proto::BlockSlotMask off_link_slots{};
 
     proto::BlockSlotMask declared_slots{};
 
     [[nodiscard]] constexpr proto::link::BlockPollRoute block_poll() const noexcept {
-        return !lw_slots.empty() && declared_slots.minus(lw_slots).empty()
+        return !off_link_slots.empty() && declared_slots.minus(off_link_slots).empty()
             ? proto::link::BlockPollRoute::UntilIdle
-            : proto::link::BlockPollRoute::Link;
+            : proto::link::BlockPollRoute::Spi;
     }
 };
 

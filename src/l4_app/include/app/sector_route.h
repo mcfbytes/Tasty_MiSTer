@@ -8,6 +8,7 @@
 #include "infra/cell_gen.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "infra/xthread/telemetry.h"
 #include "proto/build_generation.h"
 #include "proto/types.h"
@@ -15,7 +16,9 @@
 namespace mister::app {
 
 struct SectorRoute {
-    bool on_lw = false;
+    bool bound = false;
+    bool on_ocram = false;
+    bool notices = false;
     std::uint32_t served = 0;
     std::uint32_t resends = 0;
     std::uint32_t corrupted = 0;
@@ -36,6 +39,17 @@ struct SectorRoute {
     std::uint32_t card_fails = 0;
     std::uint32_t card_misses = 0;
     std::uint32_t card_lat_max_us = 0;
+
+    infra::Tally requests{};
+    infra::Tally voided{};
+    infra::Tally rebinds{};
+    infra::Tally full{};
+    infra::Tally ring_lost{};
+    infra::Tally ring_faults{};
+
+    infra::Tally mount_frames{};
+    infra::Tally mount_requests{};
+    infra::Tally mount_lost{};
     proto::BuildGeneration bind_gen{};
 };
 

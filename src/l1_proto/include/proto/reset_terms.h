@@ -46,7 +46,7 @@ struct ResetTerms {
         const StatusWord& next
     ) const noexcept {
         for (unsigned i = 0; i < StatusWord::kWords; ++i) {
-            const hal::SpiWord was = sent.words[i], now = next.words[i];
+            const hal::LinkWord was = sent.words[i], now = next.words[i];
             if (was.with(now).intersects(held.words[i]))
                 return true;
             if (now.without(was).intersects(raised.words[i]))

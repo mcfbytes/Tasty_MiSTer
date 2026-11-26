@@ -175,7 +175,7 @@ void AmigaKeyboard::mouse(proto::MouseDelta delta, proto::MouseButtons buttons, 
     post_(AmigaMouseReport::of(delta, buttons).frame());
 }
 
-void AmigaKeyboard::controller_word(hal::SpiWord, Instant) noexcept {
+void AmigaKeyboard::controller_word(hal::LinkWord, Instant) noexcept {
     TASTY_SEAT_BODY(AmigaKeyboard);
 }
 

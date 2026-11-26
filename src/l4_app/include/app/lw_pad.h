@@ -20,7 +20,9 @@ struct LwPad {
     LwGrantStamp stamp{};
 
     [[nodiscard]] Grant lend() const noexcept {
-        return Grant{{.block = regs.lend(), .gen = stamp.gen(), .body = {.wire = wire}}};
+        return Grant{
+            {.block = regs.lend(), .gen = stamp.gen(), .body = {.wire = wire, .keys = block.keys()}}
+        };
     }
 };
 

@@ -29,6 +29,7 @@ struct BayView {
     std::uint32_t fed_refusals = 0;
     std::uint32_t pad_grants = 0;
     std::uint32_t pad_refusals = 0;
+    infra::Tally pad_no_arm{};
     app::PadRoute pad{};
     infra::CellGen pad_lease{};
     std::uint32_t sector_grants = 0;
@@ -51,9 +52,9 @@ struct BayView {
     std::uint32_t sys_pin_refusals = 0;
     app::SysRoute sys{};
     infra::CellGen sys_lease{};
-    std::uint32_t status_lw = 0;
-    std::uint32_t status_lw_adopts = 0;
-    std::uint32_t status_lw_stale = 0;
+    std::uint32_t status_off_link = 0;
+    std::uint32_t status_snapshot_adopts = 0;
+    std::uint32_t status_snapshot_stale = 0;
     std::uint32_t poll_retirements = 0;
     infra::Tally enables{};
     infra::Tally enable_refusals{};
@@ -64,6 +65,9 @@ struct BayView {
     svc::IoPassMicros io_pass_max{};
     svc::IoPassMicros io_pass_p99{};
     svc::IoPassCount io_pass_bulk_run_max{};
+    infra::Tally lane_grants{};
+    infra::Tally lane_refusals{};
+    infra::Tally lane_busy{};
 };
 
 constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
@@ -74,14 +78,15 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("fedref", v.fed_refusals);
     o.field("padok", v.pad_grants);
     o.field("padref", v.pad_refusals);
-    o.field("padlw", v.pad.on_lw);
+    o.field("padnoarm", v.pad_no_arm);
+    o.field("padlw", v.pad.bound);
     o.field("padlease", v.pad_lease.held());
     o.field("padstores", v.pad.stores);
     o.field("padrevk", v.pad.revoked);
     o.field("padgated", v.pad.gated_stores);
     o.field("cdok", v.sector_grants);
     o.field("cdref", v.sector_refusals);
-    o.field("cdlw", v.cd.on_lw);
+    o.field("cdlw", v.cd.bound);
     o.field("cdlease", v.cd_lease.held());
     o.field("cdsrv", v.cd.served);
     o.field("cdres", v.cd.resends);
@@ -93,11 +98,18 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("cdahead", v.cd.read_ahead);
     o.field("cdlat", v.cd.lat_max_us);
     o.field("cdbref", v.cd.bind_refusals);
+    o.field("cdoc", v.cd.on_ocram);
+    o.field("cdreq", v.cd.requests);
+    o.field("cdvoid", v.cd.voided);
+    o.field("cdrebind", v.cd.rebinds);
+    o.field("cdfull", v.cd.full);
+    o.field("cdlost", v.cd.ring_lost);
+    o.field("cdfault", v.cd.ring_faults);
     o.field("cdhold", v.lease_holds);
     o.field("cdlong", v.lease_long_holds);
     o.field("osdok", v.osd_grants);
     o.field("osdref", v.osd_refusals);
-    o.field("osdlw", v.osd.on_lw);
+    o.field("osdlw", v.osd.bound);
     o.field("osdlease", v.osd_lease.held());
     o.field("osdfrm", v.osd.frames);
     o.field("osdrows", v.osd.rows);
@@ -115,11 +127,14 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("mcfail", v.cd.card_fails);
     o.field("mcmiss", v.cd.card_misses);
     o.field("mclat", v.cd.card_lat_max_us);
+    o.field("mcoc", v.cd.mount_frames);
+    o.field("mcreq", v.cd.mount_requests);
+    o.field("mclost", v.cd.mount_lost);
     o.field("lwbref", v.bridge_refusals);
     o.field("sysok", v.sys_grants);
     o.field("sysref", v.sys_refusals);
     o.field("syspin", v.sys_pin_refusals);
-    o.field("syslw", v.sys.on_lw);
+    o.field("syslw", v.sys.bound);
     o.field("syslease", v.sys_lease.held());
     o.field("sysdrain", v.sys.drains);
     o.field("syssnap", v.sys.snapshots);
@@ -129,9 +144,9 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("sysrevk", v.sys.revoked);
     o.field("sysbref", v.sys.bind_refusals);
     o.field("syslat", v.sys.lat_max_us);
-    o.field("stlw", v.status_lw);
-    o.field("stad", v.status_lw_adopts);
-    o.field("ststale", v.status_lw_stale);
+    o.field("stlw", v.status_off_link);
+    o.field("stad", v.status_snapshot_adopts);
+    o.field("ststale", v.status_snapshot_stale);
     o.field("blkret", v.poll_retirements);
     o.field("lwen", v.enables);
     o.field("lwenref", v.enable_refusals);
@@ -143,6 +158,9 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("iopmax", v.io_pass_max.count());
     o.field("iop99", v.io_pass_p99.count());
     o.field("iobdef", v.io_pass_bulk_run_max);
+    o.field("lnok", v.lane_grants);
+    o.field("lnref", v.lane_refusals);
+    o.field("lnbusy", v.lane_busy);
 }
 
 struct BayRecord {
@@ -182,6 +200,7 @@ struct BayRecord {
             .fed_refusals = ctx.dc.fed_refusals,
             .pad_grants = c.pad_grants,
             .pad_refusals = c.pad_refusals,
+            .pad_no_arm = c.pad_no_arm,
             .pad = pad,
             .pad_lease = pad_lease_gen,
             .sector_grants = c.sector_grants,
@@ -204,9 +223,9 @@ struct BayRecord {
             .sys_pin_refusals = c.sys_pin_refusals,
             .sys = sys,
             .sys_lease = sys_lease_gen,
-            .status_lw = ctx.dc.status_lw,
-            .status_lw_adopts = ctx.dc.status_lw_adopts,
-            .status_lw_stale = ctx.dc.status_lw_stale,
+            .status_off_link = ctx.dc.status_off_link,
+            .status_snapshot_adopts = ctx.dc.status_snapshot_adopts,
+            .status_snapshot_stale = ctx.dc.status_snapshot_stale,
             .poll_retirements = c.poll_retirements,
             .enables = c.enables,
             .enable_refusals = c.enable_refusals,
@@ -216,7 +235,10 @@ struct BayRecord {
             .resets_last = c.resets_last,
             .io_pass_max = io_pass_seen.max_micros(),
             .io_pass_p99 = io_pass_seen.p99(),
-            .io_pass_bulk_run_max = io_pass_seen.bulk_run_max
+            .io_pass_bulk_run_max = io_pass_seen.bulk_run_max,
+            .lane_grants = c.lane_grants,
+            .lane_refusals = c.lane_refusals,
+            .lane_busy = c.lane_busy
         };
     }
 };

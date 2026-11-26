@@ -3,6 +3,8 @@
 
 #include <sys/epoll.h>
 
+#include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -17,6 +19,7 @@
 #include "app/cheat_catalog_cell.h"
 #include "app/cheat_link.h"
 #include "app/cmd_fifo.h"
+#include "app/info_notice.h"
 #include "app/pcm/companion_host.h"
 #include "app/conf_str_cell.h"
 #include "app/core_frame_counter.h"
@@ -44,11 +47,16 @@
 #include "app/input/key_focus.h"
 #include "app/link_tx_channel.h"
 #include "app/lw_osd_endpoint.h"
+#include "app/ocram_osd_endpoint.h"
+#include "app/ocram_event_relay.h"
+#include "app/ocram_sector_endpoint.h"
+#include "app/osd_endpoint.h"
 #include "app/input/lw_pad_endpoint.h"
 #include "app/lw_sector_endpoint.h"
 #include "app/lw_sys_endpoint.h"
 #include "app/input/raw_key_edge.h"
 #include "app/input/rumble_players_cell.h"
+#include "app/rumble_levels.h"
 #include "app/run_policy.h"
 #include "app/disk_relays.h"
 #include "app/save_upload_relay.h"
@@ -67,7 +75,7 @@
 #include "app/sector_route.h"
 #include "app/session_owner.h"
 #include "app/share_lane.h"
-#include "app/supervisor_parts.h"
+#include "app/link_session_parts.h"
 #include "app/recents/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "app/window_job_service.h"
@@ -141,6 +149,8 @@ public:
             app::input::InputEmit& input_emit;
 
             infra::OptRef<const reactor::FrameCell> vsync{};
+
+            infra::OptRef<const os::EpollSet> main_doorbells{};
         };
 
         struct Cells {
@@ -162,6 +172,8 @@ public:
             xthread::WakeFlag& disk_activity;
 
             app::MenuFocusCell& menu_focus;
+
+            const app::InfoNoticeCell& info_notices;
         };
 
         struct SessionFacts {
@@ -240,8 +252,10 @@ private:
     [[nodiscard]] std::optional<svc::IoMain> open_io_main_();
     [[nodiscard]] std::optional<os::EpollSet> open_io_doorbells_();
     [[nodiscard]] infra::OptRef<const os::EpollSet> io_doorbell_set_() noexcept;
+    [[nodiscard]] std::optional<os::EpollSet> open_main_doorbells_();
+    [[nodiscard]] infra::OptRef<const os::EpollSet> main_doorbell_set_() noexcept;
 
-    [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
+    [[nodiscard]] app::LinkSessionParts::Services services_() noexcept;
 
     [[nodiscard]] std::optional<app::capture::ScalerFrameSource> open_frame_source_(
         const BootParts& plat
@@ -275,6 +289,8 @@ public:
 
     std::optional<os::EpollSet> io_doorbells_;
 
+    std::optional<os::EpollSet> main_doorbells_;
+
     app::SectorGrantCell sector_grant_{};
     app::SectorRouteCell sector_route_{};
     app::SectorLeaseCell sector_lease_{};
@@ -289,6 +305,8 @@ public:
     app::SysRouteCell sys_route_{};
     app::SysLeaseCell sys_lease_{};
     proto::link::StatusSnapshotCell status_snapshots_{};
+    app::InfoNoticeCell info_notices_{};
+    app::RumbleLevelsCell rumble_levels_{};
 
     app::PadGrantCell pad_grant_{};
     app::PadRouteCell pad_route_{};
@@ -404,6 +422,8 @@ public:
     svc::disc::DiscStore disc_store_;
     svc::disc::DiscReadService discs_;
     app::LwSectorEndpoint lw_sector_;
+    app::OcramEventRelay ocram_events_;
+    app::OcramSectorEndpoint ocram_sector_;
     app::LwSysEndpoint lw_sys_;
     app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
     app::WindowJobService window_jobs_;
@@ -414,6 +434,12 @@ public:
     proto::OsdSurface surface_;
     app::OsdWire osd_wire_;
     app::LwOsdEndpoint lw_osd_;
+    app::OcramOsdEndpoint ocram_osd_;
+
+    const std::array<std::reference_wrapper<app::OsdEndpoint>, 2> osd_endpoints_{
+        lw_osd_,
+        ocram_osd_
+    };
     app::ConfigCell config_cell_;
 
     app::IdentityRecordCell identity_record_cell_;
@@ -442,7 +468,7 @@ public:
     BoardReset board_reset_;
 
     app::MainLogLane main_log_lane_{};
-    const app::SupervisorParts parts_;
+    const app::LinkSessionParts parts_;
     app::LinkSession session_;
 
     app::BitstreamProgrammer bitstream_;

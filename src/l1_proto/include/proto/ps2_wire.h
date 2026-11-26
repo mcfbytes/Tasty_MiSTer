@@ -44,6 +44,10 @@ static_assert(ps2_stream_facts_are_ordinal(), "kPs2StreamFacts is one row per Ps
     return kPs2StreamFacts[infra::ordinal(s)];
 }
 
+[[nodiscard]] std::size_t ps2_frame_word_count(const Ps2Frame& f) noexcept;
+
+[[nodiscard]] hal::LinkWord ps2_frame_word(const Ps2Frame& f, std::size_t i) noexcept;
+
 [[nodiscard]] Ex<void> write_ps2_frame(ILinkFrame& frame, const Ps2Frame& f);
 
 }

@@ -145,7 +145,7 @@ Ex<void> SaturnCddEngine::do_tick(CdDialectPorts& p) {
         }
     }
     process_(p.geom);
-    std::array<hal::SpiWord, kStatusWords> words{};
+    std::array<hal::LinkWord, kStatusWords> words{};
     for (std::size_t i = 0; i < words.size(); ++i)
         words[i] = stat_.word(i);
     auto status = send_status_words_(words, p.link);

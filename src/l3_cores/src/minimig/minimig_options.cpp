@@ -7,7 +7,7 @@
 #include <span>
 
 #include "cores/minimig/minimig_option_names.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/ascii.h"
 #include "infra/byte_count.h"
 #include "infra/indexed_array.h"
@@ -413,10 +413,10 @@ Ex<void> MinimigOptions::assign_(
     return std::unexpected(tag_of(o).refusal(Errc::slot_range, ERR_SITE()));
 }
 
-Ex<void> MinimigOptions::send_(IoFrameSink& frames, FrameOp op, hal::SpiWord parm) {
-    std::array<std::uint8_t, 2 * sizeof(hal::SpiWord)> bytes{};
-    word(op).store_le(std::span(bytes).first<sizeof(hal::SpiWord)>());
-    parm.store_le(std::span(bytes).last<sizeof(hal::SpiWord)>());
+Ex<void> MinimigOptions::send_(IoFrameSink& frames, FrameOp op, hal::LinkWord parm) {
+    std::array<std::uint8_t, 2 * sizeof(hal::LinkWord)> bytes{};
+    word(op).store_le(std::span(bytes).first<sizeof(hal::LinkWord)>());
+    parm.store_le(std::span(bytes).last<sizeof(hal::LinkWord)>());
     return frames.write(bytes);
 }
 
@@ -426,12 +426,12 @@ Ex<void> MinimigOptions::set_ext_(ExtCfgWord next, MinimigConfig& cfg, IoFrameSi
 }
 
 Ex<void> MinimigOptions::send_ext_(const MinimigConfig& cfg, IoFrameSink& frames) {
-    const hal::SpiHalves halves = cfg.ext_cfg().halves();
-    std::array<std::uint8_t, 5 * sizeof(hal::SpiWord)> bytes{};
+    const hal::LinkHalves halves = cfg.ext_cfg().halves();
+    std::array<std::uint8_t, 5 * sizeof(hal::LinkWord)> bytes{};
     const std::span<std::uint8_t> out{bytes};
-    word(FrameOp::Status).store_le(out.first<sizeof(hal::SpiWord)>());
-    halves.low.store_le(out.subspan<3 * sizeof(hal::SpiWord), sizeof(hal::SpiWord)>());
-    halves.high.store_le(out.subspan<4 * sizeof(hal::SpiWord), sizeof(hal::SpiWord)>());
+    word(FrameOp::Status).store_le(out.first<sizeof(hal::LinkWord)>());
+    halves.low.store_le(out.subspan<3 * sizeof(hal::LinkWord), sizeof(hal::LinkWord)>());
+    halves.high.store_le(out.subspan<4 * sizeof(hal::LinkWord), sizeof(hal::LinkWord)>());
     return frames.write(bytes);
 }
 

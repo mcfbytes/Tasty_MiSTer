@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/input/ps2_egress.h"
 
+#include "app/input/lw_pad_endpoint.h"
 #include "app/link_tx_channel.h"
 #include "cores/input_sink.h"
 #include "proto/link_op.h"
@@ -24,10 +25,16 @@ Ps2Egress::Flushed Ps2Egress::flush_ps2_frames_(
         return out;
     }
 
-    while (inbox_.ring().size() < proto::kLinkTxCapacity) {
+    const bool lw = lw_ && lw_->keys_bound();
+    while (has_room_(lw)) {
         const auto frame = kbd_.next_frame();
         if (!frame)
             break;
+        if (lw && lw_->offer(*frame)) {
+            out.framed = true;
+            activity_.add();
+            continue;
+        }
         if (!inbox_.push(proto::LinkOp::Ps2Frame{*frame})) {
             keys.keys_dropped.add();
             out.gates.keys_lost = true;
@@ -36,15 +43,25 @@ Ps2Egress::Flushed Ps2Egress::flush_ps2_frames_(
         out.framed = true;
         activity_.add();
     }
-    while (inbox_.ring().size() < proto::kLinkTxCapacity) {
+    while (has_room_(lw)) {
         const auto frame = mouse_.next_frame();
         if (!frame)
             break;
+        if (lw && lw_->offer(*frame)) {
+            out.framed = true;
+            continue;
+        }
         if (!inbox_.push(proto::LinkOp::Ps2Frame{*frame}))
-            return out;
+            break;
         out.framed = true;
     }
+    if (lw)
+        lw_->store_events();
     return out;
+}
+
+bool Ps2Egress::has_room_(bool lw) const noexcept {
+    return inbox_.ring().size() < proto::kLinkTxCapacity && (!lw || lw_->takes_event());
 }
 
 bool Ps2Egress::flush_sink_frames(cores::IInputSink& sink) noexcept {

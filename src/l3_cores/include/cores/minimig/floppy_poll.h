@@ -33,7 +33,7 @@ static_assert(
 
 inline constexpr auto kFloppyPollSteps = std::to_array<proto::DiskPollStep>({
     {.frame = proto::user_io::PollFrameShape{
-         {.opcode = hal::SpiWord{},
+         {.opcode = hal::LinkWord{},
           .keeps_command_reply = true,
           .kind = proto::user_io::TransferKind::AckedWord,
           .leading = kFloppyReplies - proto::ReplyCount{1},

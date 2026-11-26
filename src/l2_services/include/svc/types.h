@@ -167,7 +167,7 @@ struct TrackNumber {
 
     constexpr void store_byte(std::span<std::byte, 1> dst) const noexcept { dst[0] = std::byte{v}; }
 
-    [[nodiscard]] constexpr hal::SpiWord in_high_byte(hal::SpiWord base) const noexcept {
+    [[nodiscard]] constexpr hal::LinkWord in_high_byte(hal::LinkWord base) const noexcept {
         return base.with_high_byte(v);
     }
 
@@ -640,13 +640,41 @@ static_assert(
     && infra::serial::Label<DiscMountGen>
 );
 
+struct ScalerCaps {
+    proto::ReplyWord reply{};
+    static constexpr proto::ReplyMask kNoDownscale{0x0004};
+    static constexpr proto::ReplyMask kNoVgaScaler{0x0008};
+
+    [[nodiscard]] static constexpr ScalerCaps of(proto::ReplyWord r) noexcept {
+        return ScalerCaps{r};
+    }
+
+    [[nodiscard]] constexpr bool downscale() const noexcept {
+        return !reply.intersects(kNoDownscale);
+    }
+
+    [[nodiscard]] constexpr bool vga_scaler() const noexcept {
+        return !reply.intersects(kNoVgaScaler);
+    }
+
+    [[nodiscard]] constexpr bool complete() const noexcept { return downscale() && vga_scaler(); }
+
+    [[nodiscard]] constexpr bool same_features(ScalerCaps o) const noexcept {
+        return downscale() == o.downscale() && vga_scaler() == o.vga_scaler();
+    }
+
+    [[nodiscard]] constexpr proto::ReplyWord word() const noexcept { return reply; }
+
+    friend constexpr bool operator==(ScalerCaps, ScalerCaps) = default;
+};
+
 struct FltFlags {
     std::uint16_t v = 0;
     static constexpr std::uint16_t kEncodingMask = 0x0003;
     static constexpr std::uint16_t kFullPrecisionBit = 0x0004;
     static constexpr std::uint16_t kCoreScanlinesMask = 0x0030;
 
-    [[nodiscard]] static constexpr FltFlags of(hal::SpiWord reply) noexcept {
+    [[nodiscard]] static constexpr FltFlags of(hal::LinkWord reply) noexcept {
         return FltFlags{reply.decoded(std::identity{})};
     }
 
@@ -726,7 +754,7 @@ static_assert(sizeof(CoreVolume) == 1, "the core volume is one byte");
 struct AudvolByte {
     std::uint8_t v = 0;
 
-    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{v}; }
+    [[nodiscard]] constexpr hal::LinkWord word() const noexcept { return hal::LinkWord{v}; }
 
     friend constexpr bool operator==(AudvolByte, AudvolByte) = default;
 };

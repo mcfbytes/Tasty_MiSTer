@@ -15,10 +15,10 @@ struct UioBurst {
 
     static constexpr std::uint8_t kMaxWords = 12;
     std::uint16_t tag = 0;
-    hal::SpiWord opcode{};
+    hal::LinkWord opcode{};
     std::uint8_t count = 0;
     bool ok = true;
-    std::array<hal::SpiWord, kMaxWords> words{};
+    std::array<hal::LinkWord, kMaxWords> words{};
 };
 
 static_assert(std::is_trivially_copyable_v<UioBurst>);

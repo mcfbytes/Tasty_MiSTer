@@ -15,7 +15,7 @@ namespace mister::cores::cd {
 
 namespace {
 
-constexpr std::array<hal::SpiWord, 4> kStatusWords{};
+constexpr std::array<hal::LinkWord, 4> kStatusWords{};
 
 constexpr std::uint8_t kDiscDaOrCdrom = 0x00;
 

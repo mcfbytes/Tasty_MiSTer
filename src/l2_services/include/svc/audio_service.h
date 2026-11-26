@@ -151,7 +151,7 @@ private:
 [[nodiscard]] Ex<void> emit_afilter_stream(
     proto::ILinkFrame& frame,
     CoreVolume lead,
-    std::span<const hal::SpiWord> words
+    std::span<const hal::LinkWord> words
 );
 
 [[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, CoreVolume vol);

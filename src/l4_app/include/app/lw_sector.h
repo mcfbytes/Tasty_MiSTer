@@ -53,7 +53,11 @@ struct LwSector {
         Grant g{
             {.block = regs.lend(),
              .gen = stamp.gen(),
-             .body = {.line = line.borrow(), .program = program, .frame_words = block.frame_words}}
+             .body = {
+                 .line = line.borrow(),
+                 .program = program,
+                 .frame_words = hal::ocram::Words{block.frame_words}
+             }}
         };
         for (std::size_t c = 0; c < g.body.cards.size(); ++c) {
             const Card& card = cards[c];

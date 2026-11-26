@@ -41,7 +41,9 @@ public:
         return static_cast<std::uint16_t>(1u << (v_ % kRegisterBits));
     }
 
-    [[nodiscard]] constexpr hal::SpiWord lane_mask() const noexcept { return hal::SpiWord{mask()}; }
+    [[nodiscard]] constexpr hal::LinkWord lane_mask() const noexcept {
+        return hal::LinkWord{mask()};
+    }
 
     friend constexpr bool operator==(StatusBit, StatusBit) = default;
     friend constexpr auto operator<=>(StatusBit, StatusBit) = default;

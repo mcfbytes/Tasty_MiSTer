@@ -395,10 +395,10 @@ Ex<void> VideoService::apply(const Modeline& m, PllBlock pll, Modeline::WireOpti
 
     opt.vsync_align = opt.vsync_align && (m.fpix_mhz > 0.0);
 
-    const std::array<hal::SpiWord, 26> words = m.to_wire(pll, opt);
+    const std::array<hal::LinkWord, 26> words = m.to_wire(pll, opt);
     return sink_->publish(
         proto::UioOp::SetVideo,
-        std::span<const hal::SpiWord>(words.data(), words.size())
+        std::span<const hal::LinkWord>(words.data(), words.size())
     );
 }
 

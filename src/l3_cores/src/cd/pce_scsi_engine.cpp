@@ -47,7 +47,7 @@ static_assert(kStatusCommandWords <= proto::link::SpiFioQueue::kMaxCommandWords)
 constexpr PollTicks::TickLength kPceTick{13.33F};
 constexpr PollTicks kLoadSettleTicks{10};
 constexpr PollTicks kSpinUpTicks = PollTicks::spanning(svc::disc::SeekTime{220}, kPceTick);
-static_assert(PceCommand::kBytes == PceCommand::kWords * sizeof(hal::SpiWord));
+static_assert(PceCommand::kBytes == PceCommand::kWords * sizeof(hal::LinkWord));
 static_assert(kSpinUpTicks == PollTicks{16});
 static_assert(std::is_same_v<PollTicks::Span, svc::disc::SeekTime>);
 

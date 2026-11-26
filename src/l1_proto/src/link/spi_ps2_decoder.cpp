@@ -7,7 +7,7 @@
 namespace mister::proto::link {
 
 namespace {
-constexpr hal::SpiWord kPs2ControlPresent{0x100};
+constexpr hal::LinkWord kPs2ControlPresent{0x100};
 }
 
 void SpiPs2Decoder::probe() noexcept {
@@ -21,7 +21,7 @@ void SpiPs2Decoder::probe() noexcept {
     hal::Selected cs(link_, hal::ChipSelect::Io);
     if (auto r = link_.transfer(word(UioOp::GetKbdLed)); !r)
         return count_error_();
-    auto w = link_.transfer(hal::SpiWord{0});
+    auto w = link_.transfer(hal::LinkWord{0});
     if (!w)
         return count_error_();
     if (w->intersects(kPs2ControlPresent))
@@ -42,10 +42,10 @@ void SpiPs2Decoder::service() noexcept {
     hal::Selected cs(link_, hal::ChipSelect::Io);
     if (auto r = link_.transfer(word(UioOp::Ps2Ctl)); !r)
         return count_error_();
-    auto w0 = link_.transfer(hal::SpiWord{0});
+    auto w0 = link_.transfer(hal::LinkWord{0});
     if (!w0)
         return count_error_();
-    auto w1 = link_.transfer(hal::SpiWord{0});
+    auto w1 = link_.transfer(hal::LinkWord{0});
     if (!w1)
         return count_error_();
 

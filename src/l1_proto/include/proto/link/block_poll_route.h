@@ -5,6 +5,6 @@
 
 namespace mister::proto::link {
 
-enum class BlockPollRoute : std::uint8_t { Link, UntilIdle };
+enum class BlockPollRoute : std::uint8_t { Spi, UntilIdle };
 
 }

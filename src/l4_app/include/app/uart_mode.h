@@ -73,8 +73,8 @@ struct CoreNames {
     return static_cast<UartMode>(static_cast<std::uint8_t>(m) & kModeMask);
 }
 
-[[nodiscard]] constexpr hal::SpiWord wire_mode(UartMode masked) noexcept {
-    return hal::SpiWord{
+[[nodiscard]] constexpr hal::LinkWord wire_mode(UartMode masked) noexcept {
+    return hal::LinkWord{
         static_cast<std::uint16_t>(uart_mode_facts(masked).wire_as.value_or(masked))
     };
 }

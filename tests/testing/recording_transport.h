@@ -21,7 +21,7 @@ class RecordingTransport : public hal::ISpiTransport, public hal::ICoreSignals {
 public:
     WireLog log;
     std::deque<std::uint16_t> replies;
-    hal::SpiWord idle_reply{0};
+    hal::LinkWord idle_reply{0};
     hal::CoreTypeByte identity{0xA4};
     hal::CoreCapabilities caps{};
     hal::Width fio_width = hal::Width::Byte;
@@ -47,14 +47,14 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 
-    [[nodiscard]] Ex<hal::SpiWord> transfer(hal::SpiWord out) override {
+    [[nodiscard]] Ex<hal::LinkWord> transfer(hal::LinkWord out) override {
         ++transfers_;
         if (fail_armed_ && transfers_ == fail_at_ + 1) {
             fail_armed_ = false;
             log.word(WireKind::Word, out, std::nullopt);
             return std::unexpected(Error{fail_code_, ERR_SITE(), out.v});
         }
-        const hal::SpiWord reply = answer(out);
+        const hal::LinkWord reply = answer(out);
         log.word(WireKind::Word, out, reply);
         return reply;
     }
@@ -74,14 +74,14 @@ public:
             const auto lo = static_cast<std::uint16_t>(data[i]);
             const auto hi = static_cast<std::uint16_t>(i + 1 < data.size() ? data[i + 1] : 0);
             const auto word = static_cast<std::uint16_t>(lo | (hi << 8));
-            log.word(kind, hal::SpiWord{word}, std::nullopt);
+            log.word(kind, hal::LinkWord{word}, std::nullopt);
         }
         return {};
     }
 
     [[nodiscard]] Ex<void> block_read(std::span<std::uint8_t>) override { return {}; }
 
-    [[nodiscard]] Ex<void> post(hal::SpiWord out) override {
+    [[nodiscard]] Ex<void> post(hal::LinkWord out) override {
         log.word(WireKind::Post, out, answer(out));
         return {};
     }
@@ -101,16 +101,16 @@ public:
         }
     }
 
-    void clear_gpo() override { ++gpo_clears; }
+    void clear_signals() override { ++gpo_clears; }
 
 protected:
-    virtual hal::SpiWord answer(hal::SpiWord out) {
+    virtual hal::LinkWord answer(hal::LinkWord out) {
         (void)out;
         if (replies.empty())
             return idle_reply;
         const std::uint16_t reply = replies.front();
         replies.pop_front();
-        return hal::SpiWord{reply};
+        return hal::LinkWord{reply};
     }
 
 private:

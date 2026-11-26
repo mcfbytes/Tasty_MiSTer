@@ -150,7 +150,7 @@ struct SegaCddStat {
         return cdwire::sega_pack_status(nibbles(), is_data, crc_start, carries_is_data);
     }
 
-    [[nodiscard]] std::array<hal::SpiWord, 3> wire_words(
+    [[nodiscard]] std::array<hal::LinkWord, 3> wire_words(
         bool is_data,
         std::uint8_t crc_start,
         bool carries_is_data

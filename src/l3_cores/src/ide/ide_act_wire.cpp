@@ -16,11 +16,11 @@ namespace mister::cores::ide {
 
 namespace {
 
-constexpr hal::SpiWord kDataOut = proto::word(proto::UioOp::DmaWrite);
-constexpr hal::SpiWord kDataIn = proto::word(proto::UioOp::DmaRead);
+constexpr hal::LinkWord kDataOut = proto::word(proto::UioOp::DmaWrite);
+constexpr hal::LinkWord kDataIn = proto::word(proto::UioOp::DmaRead);
 
 constexpr infra::ByteCount kMostPerAct{proto::kDiskActBytes};
-constexpr infra::ByteCount kWordBytes{sizeof(hal::SpiWord)};
+constexpr infra::ByteCount kWordBytes{sizeof(hal::LinkWord)};
 
 static_assert(
     proto::kDiskActBytes <= std::numeric_limits<std::uint16_t>::max(),
@@ -84,7 +84,7 @@ void IdeActWire::receive_data(std::span<std::byte> into) noexcept {
     ask_(Receive{.bytes = into});
 }
 
-void IdeActWire::write_reg(IdeRegister reg, hal::SpiWord value) noexcept {
+void IdeActWire::write_reg(IdeRegister reg, hal::LinkWord value) noexcept {
     TASTY_SEAT_BODY(IdeActWire);
     ask_(WriteReg{.reg = reg, .word = value});
 }
@@ -140,7 +140,7 @@ proto::DiskAct IdeActWire::next(std::span<std::byte, proto::kDiskActBytes> bytes
         in_piece_ = infra::affine::first(infra::affine::from(recv->bytes, at_), piece);
         act = proto::DiskAct::in(kDataIn, wire_len(piece)).at(address_(IdeRegister::kData));
     } else if (const auto* reg = std::get_if<WriteReg>(&verb)) {
-        reg->word.store_le(bytes.first<sizeof(hal::SpiWord)>());
+        reg->word.store_le(bytes.first<sizeof(hal::LinkWord)>());
         act = proto::DiskAct::out(kDataOut, wire_len(kWordBytes)).at(address_(reg->reg));
         ++verb_;
     } else {

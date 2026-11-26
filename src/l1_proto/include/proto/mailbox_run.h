@@ -17,9 +17,9 @@ namespace mister::proto {
 inline constexpr std::size_t kMailboxActBytes = 1024;
 
 struct MailboxRunCommand {
-    hal::SpiWord opcode{};
-    hal::SpiWord word{};
-    hal::SpiWord tail{};
+    hal::LinkWord opcode{};
+    hal::LinkWord word{};
+    hal::LinkWord tail{};
     friend constexpr bool operator==(const MailboxRunCommand&, const MailboxRunCommand&) = default;
 };
 
@@ -89,9 +89,9 @@ public:
     [[nodiscard]] constexpr bool empty() const noexcept { return commands_ == ReplyCount{}; }
 
 private:
-    constexpr void put_(hal::SpiWord word) noexcept {
-        word.store_le(rest_.first<sizeof(hal::SpiWord)>());
-        rest_ = rest_.subspan(sizeof(hal::SpiWord));
+    constexpr void put_(hal::LinkWord word) noexcept {
+        word.store_le(rest_.first<sizeof(hal::LinkWord)>());
+        rest_ = rest_.subspan(sizeof(hal::LinkWord));
     }
 
     std::span<std::uint8_t> rest_;
@@ -118,9 +118,9 @@ public:
     }
 
 private:
-    [[nodiscard]] constexpr hal::SpiWord take_() noexcept {
-        const hal::SpiWord word = hal::SpiWord::load_le(rest_.first<sizeof(hal::SpiWord)>());
-        rest_ = rest_.subspan(sizeof(hal::SpiWord));
+    [[nodiscard]] constexpr hal::LinkWord take_() noexcept {
+        const hal::LinkWord word = hal::LinkWord::load_le(rest_.first<sizeof(hal::LinkWord)>());
+        rest_ = rest_.subspan(sizeof(hal::LinkWord));
         return word;
     }
 

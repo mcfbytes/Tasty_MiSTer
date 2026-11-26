@@ -50,4 +50,22 @@ private:
     RegisterWindow<Layout> regs_;
 };
 
+template <class Layout, class Owner>
+    requires(readable(Layout::kAccess) && !writable(Layout::kAccess))
+class WindowPort<Layout, Owner> final : public IRegPort<Layout> {
+    TASTY_SEAT_FROM(Owner);
+
+public:
+    explicit WindowPort(reg::Block lease) noexcept
+        : regs_(RegisterWindow<Layout>::borrow(std::move(lease))) {}
+
+    [[nodiscard]] RegWord read(typename Layout::Reg r) noexcept override {
+        TASTY_SEAT_BODY(SeatOwner);
+        return regs_.read(r);
+    }
+
+private:
+    RegisterWindow<Layout> regs_;
+};
+
 }

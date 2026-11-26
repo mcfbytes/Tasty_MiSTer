@@ -13,7 +13,7 @@
 #include "cores/boot_ladder.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/input_sink_id.h"
 #include "cores/option_row.h"
 #include "proto/types.h"

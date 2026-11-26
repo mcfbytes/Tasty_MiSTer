@@ -38,8 +38,8 @@ struct DiskGeometry {
             return proto::BlockCount{v};
         }
 
-        [[nodiscard]] constexpr hal::SpiWord word() const noexcept {
-            return hal::SpiWord{static_cast<std::uint16_t>(v)};
+        [[nodiscard]] constexpr hal::LinkWord word() const noexcept {
+            return hal::LinkWord{static_cast<std::uint16_t>(v)};
         }
 
         friend constexpr bool operator==(Sectors, Sectors) = default;
@@ -57,8 +57,8 @@ struct DiskGeometry {
 
         [[nodiscard]] constexpr Cylinders next() const noexcept { return Cylinders{v + 1}; }
 
-        [[nodiscard]] constexpr hal::SpiWord word() const noexcept {
-            return hal::SpiWord{static_cast<std::uint16_t>(v)};
+        [[nodiscard]] constexpr hal::LinkWord word() const noexcept {
+            return hal::LinkWord{static_cast<std::uint16_t>(v)};
         }
 
         [[nodiscard]] constexpr proto::BlockCount blocks(proto::BlockCount each) const noexcept {
@@ -82,8 +82,8 @@ struct DiskGeometry {
 
         [[nodiscard]] constexpr bool none() const noexcept { return v == 0; }
 
-        [[nodiscard]] constexpr hal::SpiWord word() const noexcept {
-            return hal::SpiWord{static_cast<std::uint16_t>(v)};
+        [[nodiscard]] constexpr hal::LinkWord word() const noexcept {
+            return hal::LinkWord{static_cast<std::uint16_t>(v)};
         }
 
         [[nodiscard]] constexpr proto::BlockCount cylinder_blocks(

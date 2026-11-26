@@ -61,9 +61,9 @@ public:
 
     [[nodiscard]] Ex<bool> end_or_post();
 
-    [[nodiscard]] Ex<void> post(std::span<const hal::SpiWord> words);
+    [[nodiscard]] Ex<void> post(std::span<const hal::LinkWord> words);
 
-    [[nodiscard]] Ex<bool> settle(std::span<const hal::SpiWord> tail);
+    [[nodiscard]] Ex<bool> settle(std::span<const hal::LinkWord> tail);
 
     void abandon() noexcept;
 

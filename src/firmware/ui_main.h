@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "app/event.h"
+#include "app/osd_endpoint.h"
 #include "app/input/raw_key_edge.h"
 #include "app/uart_mode.h"
 #include "app/uart_performer.h"
@@ -36,7 +37,6 @@ class IUiRoundPort;
 namespace launcher {
 class LauncherScreen;
 }
-class LwOsdEndpoint;
 class GameIdPump;
 class MglPump;
 template <SeatTag Seat>
@@ -142,7 +142,7 @@ public:
 
         infra::OptRef<xthread::ICoworker> owner_tick{};
 
-        infra::OptRef<app::LwOsdEndpoint> lw_osd{};
+        app::OsdEndpoints osd_endpoints{};
     };
 
     UiMain(
@@ -202,7 +202,7 @@ private:
     const infra::OptRef<app::IUiRoundPort> ui_round_;
     const infra::OptRef<app::input::MenuKeyInbox> menu_keys_;
     UiLinkFan fan_;
-    const infra::OptRef<app::LwOsdEndpoint> lw_osd_;
+    const app::OsdEndpoints osd_endpoints_;
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
 
     std::optional<app::SaveStateUiTicker> save_state_ticker_{};

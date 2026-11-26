@@ -20,7 +20,7 @@
 #include "app/session_tally.h"
 #include "app/types.h"
 #include "cores/core_adopt.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "app/log_lane.h"

@@ -21,9 +21,14 @@
 #include "app/lw_host_enable.h"
 #include "app/lw_lend_set.h"
 #include "app/lw_osd.h"
+#include "app/ocram_host_enable.h"
+#include "app/ocram_lane_writer.h"
+#include "app/ocram_osd.h"
+#include "app/ocram_sector.h"
 #include "app/lw_pad.h"
 #include "app/lw_sector.h"
 #include "app/lw_sys.h"
+#include "app/mount_slot.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "app/pad_grant.h"
@@ -38,9 +43,11 @@
 #include "hal/doorbell_policy.h"
 #include "hal/doorbell_source.h"
 #include "hal/lw_presence.h"
+#include "hal/ocram_presence.h"
 #include "hal/lw_sys_window.h"
+#include "hal/ocram_platform.h"
 #include "hal/sys_directory.h"
-#include "hal/uio_doorbell_source.h"
+#include "hal/board_doorbell_source.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
@@ -75,10 +82,14 @@ public:
 
         hal::LwPresence lw_presence{};
 
+        hal::OcramPresence ocram_presence{};
+
         bool fabric = false;
         FabricGeneration fabric_gen{};
         proto::BlockSlotMask mount_slots{};
         proto::SessionTerms terms{};
+
+        proto::BindGeneration conf_gen{};
     };
 
     struct SectorCells {
@@ -108,15 +119,24 @@ public:
 
     using SectorLend = LwBlockLend<LwSector, SectorCells>;
     using OsdLend = LwBlockLend<LwOsd, OsdCells>;
+    using OcramOsdLend = LwBlockLend<OcramOsd, OsdCells>;
+    using OcramSectorLend = LwBlockLend<OcramSector, SectorCells>;
     using SysLend = LwBlockLend<LwSys, SysCells>;
     using PadLend = LwBlockLend<LwPad, PadCells>;
 
-    using LwLends = LwLendSet<SectorLend, OsdLend, SysLend, PadLend>;
+    using LwLends = LwLendSet<SectorLend, OcramSectorLend, OsdLend, OcramOsdLend, SysLend, PadLend>;
 
     struct Wiring {
         CoreBay& bay;
         const BayReleasesCell& releases;
         const CoreTerms& terms;
+
+        hal::PhysRegion ocram_window{};
+        infra::OptRef<hal::IOcramPlatform> ocram_platform{};
+        infra::OptRef<hal::ocram::Window> ocram_mapped{};
+        infra::OptRef<os::IDelay> ocram_delay{};
+
+        infra::OptRef<OcramLaneWriter> download_lane{};
         std::optional<SectorCells> sectors{};
         std::optional<OsdCells> osds{};
         std::optional<SysCells> sys{};
@@ -241,6 +261,22 @@ public:
 
     [[nodiscard]] const OsdLend& osd() const noexcept { return lends_.get<OsdLend>(); }
 
+    [[nodiscard]] OcramOsdLend& ocram_osd() noexcept { return lends_.get<OcramOsdLend>(); }
+
+    [[nodiscard]] const OcramOsdLend& ocram_osd() const noexcept {
+        return lends_.get<OcramOsdLend>();
+    }
+
+    [[nodiscard]] OcramSectorLend& ocram_sector() noexcept { return lends_.get<OcramSectorLend>(); }
+
+    [[nodiscard]] const OcramSectorLend& ocram_sector() const noexcept {
+        return lends_.get<OcramSectorLend>();
+    }
+
+    [[nodiscard]] OcramHostEnable& ocram() noexcept { return ocram_; }
+
+    [[nodiscard]] const OcramHostEnable& ocram() const noexcept { return ocram_; }
+
     [[nodiscard]] static Ex<LwSys> grant_sys(
         const Directory& dir,
         const proto::AxiLwDecl& decl,
@@ -334,6 +370,27 @@ private:
         proto::BuildGeneration gen,
         hal::LwPresence lw_presence
     ) noexcept;
+
+    void grant_ocram_osd_(FabricGeneration fabric_gen, proto::BuildGeneration gen) noexcept;
+
+    void grant_ocram_lane_(std::span<const proto::IrqBinding> irqs) noexcept;
+    void drop_ocram_lane_() noexcept;
+    [[nodiscard]] OcramFrameGrant grant_frame_lane_() const noexcept;
+
+    void grant_ocram_sector_(
+        std::span<const proto::IrqBinding> irqs,
+        const cores::CoreProfile& profile,
+        FabricGeneration fabric_gen,
+        proto::BuildGeneration gen,
+        proto::BindGeneration conf_gen
+    ) noexcept;
+
+    [[nodiscard]] bool sector_on_mailbox_(const cores::CoreProfile& profile) const noexcept;
+
+    [[nodiscard]] std::array<MountSlot, SectorGrantBody::kCards> grant_mounts_(
+        const OcramHostEnable::MountRings& rings,
+        const cores::CoreProfile& profile
+    ) noexcept;
     void grant_sys_(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
@@ -356,7 +413,7 @@ private:
 
     infra::OptRef<hal::IDoorbellSource> seam_{};
 
-    hal::UioDoorbellSource uio_doorbells_{};
+    hal::BoardDoorbellSource uio_doorbells_{};
     BayReleasesCell::Reader released_{};
     BayReleases levels_{};
     infra::IndexedArray<CoreBay::Lease, kCoreBaySlots, proto::CoreBaySlot> held_{};
@@ -385,6 +442,10 @@ private:
 
     std::optional<hal::RegisterWindow<hal::SysDirectory>> enable_header_{};
     LwHostEnable enable_;
+    OcramHostEnable ocram_;
+
+    infra::OptRef<OcramLaneWriter> download_lane_{};
+    std::optional<os::UioHandle> download_line_{};
 };
 
 }

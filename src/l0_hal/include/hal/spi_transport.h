@@ -35,7 +35,7 @@ public:
     virtual void select(ChipSelect cs) = 0;
     virtual void deselect() = 0;
 
-    [[nodiscard]] virtual Ex<SpiWord> transfer(SpiWord out) = 0;
+    [[nodiscard]] virtual Ex<LinkWord> transfer(LinkWord out) = 0;
 
     virtual Width width() const noexcept { return Width::Byte; }
 
@@ -44,16 +44,16 @@ public:
     [[nodiscard]] virtual Ex<void> block_write(std::span<const std::uint8_t> data) = 0;
     [[nodiscard]] virtual Ex<void> block_read(std::span<std::uint8_t> data) = 0;
 
-    [[nodiscard]] virtual Ex<void> post(SpiWord out) {
-        return transfer(out).transform([](SpiWord) noexcept {});
+    [[nodiscard]] virtual Ex<void> post(LinkWord out) {
+        return transfer(out).transform([](LinkWord) noexcept {});
     }
 
     [[nodiscard]] virtual Ex<bool> posted_done() { return true; }
 
     virtual void abandon_post() noexcept {}
 
-    [[nodiscard]] virtual Ex<bool> transfer_or_post(SpiWord out) {
-        return transfer(out).transform([](SpiWord) noexcept { return true; });
+    [[nodiscard]] virtual Ex<bool> transfer_or_post(LinkWord out) {
+        return transfer(out).transform([](LinkWord) noexcept { return true; });
     }
 
     [[nodiscard]] virtual bool posted() const noexcept { return false; }

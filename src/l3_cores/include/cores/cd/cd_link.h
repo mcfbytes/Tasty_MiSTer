@@ -23,7 +23,7 @@ public:
         std::span<const std::byte> payload
     ) = 0;
 
-    [[nodiscard]] virtual Ex<void> send_status(std::span<const hal::SpiWord> words) = 0;
+    [[nodiscard]] virtual Ex<void> send_status(std::span<const hal::LinkWord> words) = 0;
 
     [[nodiscard]] virtual bool can_send_data(cdwire::Selector) { return true; }
 

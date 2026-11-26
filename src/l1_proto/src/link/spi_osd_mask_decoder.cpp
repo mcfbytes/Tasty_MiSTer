@@ -24,7 +24,7 @@ std::optional<OsdMask> SpiOsdMaskDecoder::service() noexcept {
             ++errors_;
             return std::nullopt;
         }
-        auto w = link_.transfer(hal::SpiWord{0});
+        auto w = link_.transfer(hal::LinkWord{0});
         if (!w) {
             ++errors_;
             return std::nullopt;

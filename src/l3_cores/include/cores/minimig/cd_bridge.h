@@ -10,8 +10,8 @@ namespace mister::cores::minimig::cd_bridge {
 inline constexpr proto::UioOp kWriteOp = proto::UioOp::DmaWrite;
 inline constexpr proto::UioOp kReadOp = proto::UioOp::DmaRead;
 
-inline constexpr hal::SpiWord kRead = proto::word(kReadOp);
-inline constexpr hal::SpiWord kStatus = proto::word(proto::UioOp::DmaSdio);
+inline constexpr hal::LinkWord kRead = proto::word(kReadOp);
+inline constexpr hal::LinkWord kStatus = proto::word(proto::UioOp::DmaSdio);
 
 inline constexpr proto::DiskAddress kAkikoCommand{0xF400};
 inline constexpr proto::DiskAddress kAkikoSubcode{0xF410};

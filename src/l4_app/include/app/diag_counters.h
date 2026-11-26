@@ -89,9 +89,9 @@ struct DiagCounters {
     bool cd_drive_is_data = true;
     std::uint32_t status_reply_refusals = 0;
 
-    bool status_lw = false;
-    std::uint32_t status_lw_adopts = 0;
-    std::uint32_t status_lw_stale = 0;
+    bool status_off_link = false;
+    std::uint32_t status_snapshot_adopts = 0;
+    std::uint32_t status_snapshot_stale = 0;
 
     std::uint32_t stale_owner_steps = 0;
     std::uint32_t start_answer_drops = 0;

@@ -9,7 +9,7 @@
 
 #include "cores/config_blob.h"
 #include "cores/config_slots.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mailbox_carriage.h"
 #include "cores/minimig/cd_decl.h"
 #include "cores/disk_port.h"

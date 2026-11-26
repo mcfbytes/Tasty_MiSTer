@@ -95,7 +95,7 @@ std::optional<proto::link::StatusSnapshot> LwSysEndpoint::read_snapshot_() noexc
     const std::optional<SysBlock::Stflg>
         first = port_().read(SysBlock::Reg::Stflg).decoded(SysBlock::decode);
 
-    std::array<hal::SpiHalves, proto::StatusWord::kRegisters> regs{};
+    std::array<hal::LinkHalves, proto::StatusWord::kRegisters> regs{};
     for (std::uint32_t i = 0; i < SysBlock::kSnapshotWords; ++i)
         regs[i] = port_().read(SysBlock::status(i)).halves();
     snapshot.words = proto::StatusWord::of_registers(regs);
@@ -149,7 +149,7 @@ void LwSysEndpoint::serve_status_(bool rang) noexcept {
     publish_();
 }
 
-template class LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
+template class GrantEndpoint<SysGrant, SysRoute, seat_owner::Io>;
 
 }
 

@@ -13,7 +13,7 @@
 namespace mister::app {
 
 struct SysRoute {
-    bool on_lw = false;
+    bool bound = false;
     std::uint32_t drains = 0;
     std::uint32_t snapshots = 0;
     std::uint32_t retries = 0;

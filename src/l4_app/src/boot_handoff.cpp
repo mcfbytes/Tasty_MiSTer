@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <string>
 
 #include "app/config_apply.h"
@@ -24,6 +25,13 @@ ExitReboot BootHandoff::exec_alternate_(const char* exe, const BootArgs& args) {
 
     const char* core = args.core;
     const char* companion = args.companion.value_or(nullptr);
+
+    std::fprintf(
+        stderr,
+        "mister: current exec is %s, core requires exec %s: handing off\n",
+        self_exe_path().c_str(),
+        exe
+    );
 
     const ::pid_t child = ::fork();
     if (child > 0)

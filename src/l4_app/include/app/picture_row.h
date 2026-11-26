@@ -58,8 +58,8 @@ private:
 public:
     [[nodiscard]] constexpr int last_index() const noexcept { return static_cast<int>(v) - 1; }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{count<std::uint16_t>()};
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{count<std::uint16_t>()};
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }

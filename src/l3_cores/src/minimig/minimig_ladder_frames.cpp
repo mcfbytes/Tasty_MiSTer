@@ -11,8 +11,8 @@ namespace mister::cores::minimig {
 
 namespace {
 
-constexpr hal::SpiWord kZero{};
-constexpr hal::SpiWord kOne{1};
+constexpr hal::LinkWord kZero{};
+constexpr hal::LinkWord kOne{1};
 constexpr std::array kDiscardFrame{
     word(FrameOp::Write),
     kZero,
@@ -29,13 +29,13 @@ constexpr std::array kDiscardFrame{
     kOne
 };
 
-constexpr hal::SpiWord byte_word(std::byte b) noexcept {
-    return hal::SpiWord{std::to_integer<std::uint8_t>(b)};
+constexpr hal::LinkWord byte_word(std::byte b) noexcept {
+    return hal::LinkWord{std::to_integer<std::uint8_t>(b)};
 }
 
 }
 
-void FrameQueue::push_(std::span<const hal::SpiWord> frame) {
+void FrameQueue::push_(std::span<const hal::LinkWord> frame) {
     const std::size_t bytes = frame.size_bytes();
 
     const WireChunk frame_chunk = WireChunk::of(bytes);
@@ -46,14 +46,14 @@ void FrameQueue::push_(std::span<const hal::SpiWord> frame) {
     const std::size_t at = out.size();
     out.resize(at + bytes);
     std::span<std::uint8_t> dst = std::span(out).subspan(at);
-    for (const hal::SpiWord w : frame) {
-        w.store_le(dst.first<sizeof(hal::SpiWord)>());
-        dst = dst.subspan(sizeof(hal::SpiWord));
+    for (const hal::LinkWord w : frame) {
+        w.store_le(dst.first<sizeof(hal::LinkWord)>());
+        dst = dst.subspan(sizeof(hal::LinkWord));
     }
 }
 
-void FrameQueue::reg(FrameOp op, hal::SpiWord parm) {
-    const std::array<hal::SpiWord, 2> frame{word(op), parm};
+void FrameQueue::reg(FrameOp op, hal::LinkWord parm) {
+    const std::array<hal::LinkWord, 2> frame{word(op), parm};
     push_(frame);
 }
 
@@ -98,9 +98,9 @@ void FrameQueue::discard_residents() {
     push_(kDiscardFrame);
 }
 
-void FrameQueue::ext_cfg(hal::SpiHalves halves) {
-    const std::array<hal::SpiWord, 5>
-        frame{word(FrameOp::Status), hal::SpiWord{}, hal::SpiWord{}, halves.low, halves.high};
+void FrameQueue::ext_cfg(hal::LinkHalves halves) {
+    const std::array<hal::LinkWord, 5>
+        frame{word(FrameOp::Status), hal::LinkWord{}, hal::LinkWord{}, halves.low, halves.high};
     push_(frame);
 }
 

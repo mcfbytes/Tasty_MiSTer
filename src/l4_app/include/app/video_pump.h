@@ -36,6 +36,7 @@
 #include "infra/xthread/counter.h"
 #include "svc/video/i2c_adapter.h"
 #include "svc/video/pll_params.h"
+#include "svc/video/resolution.h"
 #include "svc/video/stored_mode.h"
 #include "svc/video/video_service.h"
 
@@ -227,6 +228,10 @@ private:
     void service_mode_phase();
 
     void service_idle_blank();
+
+    void service_scaler_caps();
+
+    void note_downscale_overflow();
     void load_spec_from_ini();
 
     void load_filters();
@@ -289,6 +294,10 @@ private:
 
     svc::video::ScalerSlotMode filter_mode_{};
     bool filters_pending_ = false;
+
+    svc::ScalerCaps scaler_caps_{};
+
+    svc::video::Resolution overflow_seen_{};
 
     std::array<FamilyMode, 3> families_{};
     bool families_valid_ = false;

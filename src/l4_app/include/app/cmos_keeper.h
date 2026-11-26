@@ -33,7 +33,7 @@ public:
 
     [[nodiscard]] bool bound() const noexcept { return static_cast<bool>(layout_); }
 
-    void on_change_count(hal::SpiWord word) noexcept;
+    void on_change_count(hal::LinkWord word) noexcept;
 
     void tick(cores::ILadderHost& host);
 
@@ -48,8 +48,8 @@ private:
 
     const os::IClock& clock_;
     infra::OptRef<const cores::CmosLayout> layout_{};
-    hal::SpiWord count_{};
-    hal::SpiWord pulled_{};
+    hal::LinkWord count_{};
+    hal::LinkWord pulled_{};
     os::Deadline save_due_{os::Deadline::immediate()};
     os::Deadline clock_due_{os::Deadline::immediate()};
     std::optional<cores::PayloadPieces> clock_run_{};

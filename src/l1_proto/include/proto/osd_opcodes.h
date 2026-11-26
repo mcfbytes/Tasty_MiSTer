@@ -16,18 +16,18 @@ enum class OsdOp : std::uint16_t {
     EnableInfo = 0x45,
 };
 
-[[nodiscard]] constexpr hal::SpiWord word(OsdOp op) noexcept {
-    return hal::SpiWord{static_cast<std::uint16_t>(op)};
+[[nodiscard]] constexpr hal::LinkWord word(OsdOp op) noexcept {
+    return hal::LinkWord{static_cast<std::uint16_t>(op)};
 }
 
-[[nodiscard]] constexpr hal::SpiWord osd_word(OsdOp op, hal::SpiWord payload) noexcept {
+[[nodiscard]] constexpr hal::LinkWord osd_word(OsdOp op, hal::LinkWord payload) noexcept {
     return word(op).with(payload);
 }
 
-static_assert(word(OsdOp::Write) == hal::SpiWord{0x20});
-static_assert(word(OsdOp::WriteLatch) == hal::SpiWord{0x28});
-static_assert(word(OsdOp::Disable) == hal::SpiWord{0x40});
-static_assert(word(OsdOp::Enable) == hal::SpiWord{0x41});
-static_assert(word(OsdOp::EnableInfo) == hal::SpiWord{0x45});
+static_assert(word(OsdOp::Write) == hal::LinkWord{0x20});
+static_assert(word(OsdOp::WriteLatch) == hal::LinkWord{0x28});
+static_assert(word(OsdOp::Disable) == hal::LinkWord{0x40});
+static_assert(word(OsdOp::Enable) == hal::LinkWord{0x41});
+static_assert(word(OsdOp::EnableInfo) == hal::LinkWord{0x45});
 
 }

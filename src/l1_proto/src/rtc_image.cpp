@@ -14,20 +14,20 @@
 
 namespace mister::proto {
 
-std::array<hal::SpiWord, 4> RtcImage::rtc_words() const noexcept {
-    std::array<hal::SpiWord, 4> words{};
+std::array<hal::LinkWord, 4> RtcImage::rtc_words() const noexcept {
+    std::array<hal::LinkWord, 4> words{};
     for (std::size_t i = 0; i < words.size(); ++i) {
-        words[i] = hal::SpiWord::load_le(
+        words[i] = hal::LinkWord::load_le(
             std::span<const std::uint8_t>(rtc)
-                .subspan(sizeof(hal::SpiWord) * i)
-                .first<sizeof(hal::SpiWord)>()
+                .subspan(sizeof(hal::LinkWord) * i)
+                .first<sizeof(hal::LinkWord)>()
         );
     }
     return words;
 }
 
-std::array<hal::SpiWord, 2> RtcImage::stamp_words() const noexcept {
-    const hal::SpiHalves halves = hal::SpiHalves::of(stamp);
+std::array<hal::LinkWord, 2> RtcImage::stamp_words() const noexcept {
+    const hal::LinkHalves halves = hal::LinkHalves::of(stamp);
     return {halves.low, halves.high};
 }
 

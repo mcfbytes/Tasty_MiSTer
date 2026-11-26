@@ -12,6 +12,7 @@
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/xthread/spsc_ring.h"
+#include "hal/ocram_run_edge.h"
 #include "proto/bit_field.h"
 #include "proto/build_generation.h"
 #include "proto/conf_switches.h"
@@ -82,6 +83,7 @@ struct LinkOp {
         MenuCtl,
         PlainDownload,
         JoyStick,
+        OcramRun,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -173,6 +175,7 @@ struct LinkOp {
         WindowOpen = 4,
         WindowClose = 5,
         Empty = 6,
+        BeforeClose = 7,
     };
 
     struct FileTx {
@@ -452,6 +455,12 @@ struct LinkOp {
         hal::Width framing{};
     };
 
+    struct OcramRun {
+        static constexpr Kind kKind = Kind::OcramRun;
+        hal::OcramRunEdge edge = hal::OcramRunEdge::Drop;
+        std::byte pad_[3]{};
+    };
+
     using Alternatives = std::tuple<
         HoldReset,
         ReleaseReset,
@@ -500,7 +509,8 @@ struct LinkOp {
         DetachSave,
         MenuCtl,
         PlainDownload,
-        JoyStick>;
+        JoyStick,
+        OcramRun>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(std::uint32_t) std::array<std::byte, kStore> store{};
@@ -508,7 +518,7 @@ struct LinkOp {
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
 static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == alignof(std::uint32_t));
-static_assert(infra::ordinal(LinkOp::Kind::kCount) == 48);
+static_assert(infra::ordinal(LinkOp::Kind::kCount) == 49);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
     return a.region != RegionCode::kNone;

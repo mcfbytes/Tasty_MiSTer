@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "proto/disk_register_count.h"
 #include "proto/types.h"
 
@@ -15,7 +15,9 @@ struct DiskAddress {
 
     static constexpr FioWordCount kWords{2};
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept {
+        return hal::LinkHalves::of(v);
+    }
 
     friend constexpr bool operator==(DiskAddress, DiskAddress) = default;
 };

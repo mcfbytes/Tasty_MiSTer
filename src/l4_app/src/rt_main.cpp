@@ -184,7 +184,8 @@ void RtMain::drain_(
     constexpr bool pieces = Producer == SeatTag::Main;
     while (!budget.exhausted() && (pieces || !wire_held_())) {
         const bool dat_held = pieces && dat_window_held_();
-        if (pieces && wire_held_() && !dat_held)
+        const bool admits = dat_held || (pieces && off_link_sole_hold_());
+        if (pieces && wire_held_() && !admits)
             break;
         const auto op = inbox.pop();
         if (!op) {
@@ -298,11 +299,15 @@ Ex<void> RtMain::pump_boot() {
                 Error{Errc::cancelled, ERR_SITE(), static_cast<std::uint32_t>(s.state())}
             );
         }
+
+        s.settle_frames();
         drain_ops();
 
         s.disks().pump_on_caller();
         s.settle_boot_slot_mount();
-        s.binder().service_on_caller();
+
+        if (s.wire_hold() != LinkSession::WireHold::Frames)
+            s.binder().service_on_caller();
         if (s.session_starting()) {
             return std::unexpected(
                 Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(s.state())}
@@ -324,8 +329,15 @@ bool RtMain::dat_window_held_() const noexcept {
     return session_ && session_->held().dat_window_held();
 }
 
+bool RtMain::off_link_sole_hold_() const noexcept {
+    return session_ && session_->held().off_link_sole_hold();
+}
+
 bool RtMain::transfer_holds_() const noexcept {
-    return session_ && session_->wire_hold() == LinkSession::WireHold::Transfer;
+    if (!session_)
+        return false;
+    const LinkSession::WireHold hold = session_->wire_hold();
+    return hold == LinkSession::WireHold::Transfer || hold == LinkSession::WireHold::Frames;
 }
 
 bool RtMain::session_live_() const noexcept {

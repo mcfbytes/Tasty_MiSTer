@@ -32,9 +32,9 @@ public:
         inner_.set_core_reset(asserted);
     }
 
-    void clear_gpo() override {
+    void clear_signals() override {
         TASTY_SEAT_BODY(FencedCoreSignals);
-        inner_.clear_gpo();
+        inner_.clear_signals();
     }
 
 private:

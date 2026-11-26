@@ -27,6 +27,10 @@ constexpr proto::OsdRowCells<ImageRow, hal::OsdBlock::kImageRows> kImageRegs = [
 
 }
 
+bool LwOsdEndpoint::accepts_hook_(const OsdGrant& g) const noexcept {
+    return g.block.lent();
+}
+
 void LwOsdEndpoint::publish_hook_(const OsdRoute& r) noexcept {
     w_.route.publish(r);
 }
@@ -170,7 +174,7 @@ LwOsdEndpoint::Port& LwOsdEndpoint::port_() noexcept {
     return *block_;
 }
 
-template class LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+template class GrantEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
 
 }
 

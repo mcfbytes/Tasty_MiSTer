@@ -28,7 +28,7 @@ class IoMain final : public xthread::SeatMain<IoMain> {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static constexpr std::size_t kMaxCoworkers = 11;
+    static constexpr std::size_t kMaxCoworkers = 12;
 
     static constexpr std::uint32_t kMaxCoworkersDetail = kMaxCoworkers;
 

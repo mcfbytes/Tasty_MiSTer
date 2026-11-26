@@ -4,7 +4,7 @@
 #include "app/config_rel.h"
 #include "app/log_clock.h"
 #include "app/save_upload_relay.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/save_home.h"
 #include "cores/save_upload.h"
 #include "app/log_rec.h"

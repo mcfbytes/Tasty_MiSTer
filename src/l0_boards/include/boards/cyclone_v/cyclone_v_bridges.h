@@ -9,6 +9,8 @@
 #include "hal/bridge_sequencer.h"
 #include "hal/reg_access.h"
 #include "hal/register_window.h"
+#include "boards/cyclone_v/cyclone_v_rstmgr.h"
+#include "boards/cyclone_v/cyclone_v_sysmgr.h"
 #include "hal/taken_window.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
@@ -22,26 +24,6 @@ struct SdrCtl {
     static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
     static constexpr std::uint32_t kAllPortsEnable = 0x3FFF;
     static constexpr std::uint32_t kAllPortsReset = 0x0000;
-};
-
-struct RstMgr {
-    enum class Reg : std::uint32_t {
-        Ctrl = 0x04,
-        BrgModReset = 0x1C,
-    };
-    static constexpr std::size_t kSize = 0x100;
-    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
-    static constexpr std::uint32_t kOutOfReset = 0x0;
-    static constexpr std::uint32_t kInReset = 0x7;
-
-    static constexpr std::uint32_t kResetRequest = 0x1;
-};
-
-struct SysMgr {
-    enum class Reg : std::uint32_t { FpgaIntfGrpModule = 0x28 };
-    static constexpr std::size_t kSize = 0x100;
-    static constexpr hal::RegAccess kAccess = hal::RegAccess::ReadWrite;
-    static constexpr std::uint32_t kAllOff = 0x0;
 };
 
 struct Nic301 {
@@ -87,6 +69,10 @@ public:
     [[nodiscard]] Ex<void> post_program() override;
 
     [[nodiscard]] Ex<void> request_board_reset() override;
+
+    [[nodiscard]] hal::reg::Lend rstmgr_lend() const noexcept { return rst_.regs.lend(); }
+
+    [[nodiscard]] hal::reg::Lend sysmgr_lend() const noexcept { return sys_.regs.lend(); }
 
 private:
     Bridges(

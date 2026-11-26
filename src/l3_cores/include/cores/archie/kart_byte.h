@@ -11,7 +11,7 @@ namespace mister::cores::archie {
 struct KartByte {
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr KartByte of(hal::SpiWord word) noexcept {
+    [[nodiscard]] static constexpr KartByte of(hal::LinkWord word) noexcept {
         return KartByte{word.low_byte()};
     }
 

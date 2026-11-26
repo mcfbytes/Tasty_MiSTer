@@ -22,11 +22,10 @@ Ex<void> FioCheatSink::apply(std::span<const std::uint8_t> table, CheatUnit unit
 
     (void)unit;
 
-    if (queue_ && queue_->tenant_holds_fio()) {
+    if (queue_->tenant_holds_fio()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    if (queue_)
-        (void)queue_->flush();
+    (void)queue_->flush();
     if (auto r = proto::link::DownloadSession::send_cheats(*link_, table); !r)
         return r;
     ++sends_;

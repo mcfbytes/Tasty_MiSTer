@@ -11,8 +11,6 @@
 
 namespace mister::cores {
 
-inline constexpr std::uint16_t kProgressSteps = 168;
-
 [[nodiscard]] constexpr proto::FileSize progress_step_bytes(proto::FileSize total) noexcept {
     const proto::FileSize each{total.file_word<std::uint64_t>() / kProgressSteps};
     return each.empty() ? proto::FileSize{1} : each;

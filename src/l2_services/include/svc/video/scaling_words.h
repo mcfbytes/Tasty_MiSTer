@@ -11,8 +11,8 @@ struct VideoSample;
 struct ScalingPolicy;
 
 struct ScalingWords {
-    hal::SpiWord height{};
-    hal::SpiWord width{};
+    hal::LinkWord height{};
+    hal::LinkWord width{};
 };
 
 [[nodiscard]] ScalingWords scaling_words(const VideoSample& s, const ScalingPolicy& pol) noexcept;

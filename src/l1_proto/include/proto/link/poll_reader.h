@@ -102,8 +102,8 @@ public:
 
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
-    [[nodiscard]] hal::SpiWord mirror(std::uint8_t param) const noexcept {
-        return param < mirror_.size() ? mirror_[param] : hal::SpiWord{};
+    [[nodiscard]] hal::LinkWord mirror(std::uint8_t param) const noexcept {
+        return param < mirror_.size() ? mirror_[param] : hal::LinkWord{};
     }
 
 private:
@@ -117,7 +117,7 @@ private:
     [[nodiscard]] bool push_(
         user_io::PollShape shape,
         std::uint8_t param,
-        hal::SpiWord word
+        hal::LinkWord word
     ) noexcept;
 
     hal::ISpiTransport& link_;
@@ -127,7 +127,7 @@ private:
     Port out_;
     bool armed_ = false;
     BindGeneration gen_{};
-    std::array<hal::SpiWord, kMaxPollParams> mirror_{};
+    std::array<hal::LinkWord, kMaxPollParams> mirror_{};
     std::uint32_t polls_ = 0;
     std::uint32_t pushes_ = 0;
     std::uint32_t declined_ = 0;

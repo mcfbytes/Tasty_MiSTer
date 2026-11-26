@@ -41,7 +41,7 @@
 #include <vector>
 
 #include "app/bitstream_programmer.h"
-#include "app/supervisor_parts.h"
+#include "app/link_session_parts.h"
 #include "app/video_wire.h"
 #include "cores/cd_diagnostics.h"
 #include "cores/config_slots.h"
@@ -68,7 +68,7 @@ namespace mister::app {
 
 namespace {
 
-LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
+LinkBinder::Wiring binder_wiring(const LinkSessionParts& parts) noexcept {
     return LinkBinder::Wiring{
         .exec = parts.exec,
         .state = parts.core_state,
@@ -84,14 +84,16 @@ static constexpr infra::ErrorSite kAdviseSite{ERR_SITE()};
 LinkSession::LinkSession(
     hal::ISpiTransport& link,
     hal::ICoreSignals& signals,
-    hal::ISpiSampleSource& samples,
+    hal::IPinSampleSource& samples,
     [[maybe_unused]] hal::PhysRegion aperture,
     EventQueue<SeatTag::RT>& events,
-    const SupervisorParts& parts
+    const LinkSessionParts& parts
 ) noexcept
     : link_(link),
+      ocram_run_(parts.ocram_run),
       binder_(link, binder_wiring(parts)),
       fenced_signals_(signals, binder_.fio_queue()),
+      frames_(link),
       machine_(events, parts.log_lane),
       vfs_(parts.vfs),
       discs_(parts.services.discs),
@@ -128,7 +130,14 @@ LinkSession::LinkSession(
       fabric_cell_(parts.fabric_cell),
       switch_park_(parts.switch_park),
 
-      session_(proto::link::CoreSession::detached(link, fenced_signals_, &binder_.fio_queue())),
+      session_(
+          proto::link::CoreSession::detached(
+              link,
+              fenced_signals_,
+              &binder_.fio_queue(),
+              infra::OptRef{frames_}
+          )
+      ),
       uart_(parts.uart_handoffs),
       log_lane_(parts.log_lane.producer()),
       diag_ask_(parts.diag_ask),
@@ -194,7 +203,7 @@ LinkSession::LinkSession(
               .slots = slot_bindings_.slots(),
               .osd = osd_,
               .rumble_players = rumble_players_,
-              .status_lw = parts.status_snapshots
+              .status_snapshots = parts.status_snapshots
           }
       ),
       f12_mod_poll_(
@@ -245,7 +254,8 @@ LinkSession::LinkSession(
               .slot_bindings = slot_bindings_,
               .tenancy = tenancy_,
               .session_tally = tally_,
-              .window_jobs = infra::OptRef{parts.services.window_jobs}
+              .window_jobs = infra::OptRef{parts.services.window_jobs},
+              .frames = infra::OptRef{frames_}
           }
       ) {}
 
@@ -311,6 +321,8 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
     video_.take_ui_cells();
     const bool prelude_settled_now = video_.prelude_settled(clock().now());
 
+    settle_frames();
+
     if (held_.wire_held()) {
         if (tick)
             publish_fabric_();
@@ -322,10 +334,17 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
             return RoundEntry{.live = live_at_entry};
     }
 
+    if (frames_.busy()) {
+        if (tick)
+            publish_fabric_();
+        take_park_ask_();
+        return RoundEntry{.live = live_at_entry};
+    }
+
     if (tick && live_at_entry) {
 
         sampler_.service(held_.fio_held() || saves_.holds_fio());
-        const hal::SpiSample& g = sampler_.level();
+        const hal::PinSample& g = sampler_.level();
 
         core_ready_ = g.ready;
         if (core_ready_) {
@@ -354,7 +373,7 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
 }
 
 void LinkSession::tick(RoundEntry entry) {
-    if (held_.wire_held()) {
+    if (held_.wire_held() || frames_.busy()) {
         publish_diag();
         return;
     }
@@ -591,6 +610,13 @@ ILinkEncoder::Outcome LinkSession::on(
     return ILinkEncoder::Outcome::Encoded;
 }
 
+ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::OcramRun& a, const LinkOpCtx&) noexcept {
+    if (!ocram_run_)
+        return ILinkEncoder::Outcome::Dropped;
+    ocram_run_->ocram_run(a.edge);
+    return ILinkEncoder::Outcome::Encoded;
+}
+
 ILinkEncoder::Outcome LinkSession::on(
     const proto::LinkOp::AdoptCore& a,
     const LinkOpCtx&
@@ -607,7 +633,8 @@ ILinkEncoder::Outcome LinkSession::on(
         slot ? infra::OptRef<const SessionRoutes>{slot->routes}
              : infra::OptRef<const SessionRoutes>{},
         slot ? slot->gen : proto::BuildGeneration{},
-        made.has_value()
+        made.has_value(),
+        slot ? slot->frame_lane : OcramFrameGrant{}
     );
     const infra::OptRef<cores::Core> current = tenancy_.core();
 
@@ -646,16 +673,25 @@ bool LinkSession::drops_live_pad(const proto::LinkOp& op) noexcept {
 void LinkSession::bind_routes_(
     infra::OptRef<const SessionRoutes> routes,
     proto::BuildGeneration gen,
-    bool made
+    bool made,
+    const OcramFrameGrant& frame_lane
 ) noexcept {
-    osd_.bind_rows(routes ? routes->osd : Carrier::Link);
-    encoder_.bind_pads(routes ? routes->pads : Carrier::Link, gen);
 
-    rows_.bind_status_route(routes ? routes->status : Carrier::Link, gen);
+    frames_.unbind();
+    if (!(made && routes && !link_carries(routes->frames) && frame_lane_.bind(frame_lane)))
+        frame_lane_.unbind();
+    osd_.bind_frames(infra::OptRef{frames_});
+    video_.bind_frames(infra::OptRef{frames_});
+    osd_.bind_rows(routes ? routes->osd : Carrier::Spi);
+    encoder_.bind_pads(routes ? routes->pads : Carrier::Spi, gen);
 
-    rows_.bind_block_poll(
-        made && routes ? routes->block_poll() : proto::link::BlockPollRoute::Link
-    );
+    rows_.bind_status_route(routes ? routes->status : Carrier::Spi, gen);
+
+    rows_.bind_events_route(routes ? routes->events : Carrier::Spi);
+
+    rows_.bind_block_poll(made && routes ? routes->block_poll() : proto::link::BlockPollRoute::Spi);
+
+    held_.bind_downloads(made && routes ? routes->downloads : Carrier::Spi);
 }
 
 ILinkEncoder::Outcome LinkSession::on(
@@ -899,13 +935,16 @@ void LinkSession::refuse_start_(const Error& e) noexcept {
 
 void LinkSession::adopt_programmed_core_() {
 
-    fenced_signals_.clear_gpo();
+    fenced_signals_.clear_signals();
     fenced_signals_.set_core_reset(false);
+
+    frames_.unbind();
     session_ = proto::link::CoreSession::adopted(
         link_,
         fenced_signals_,
         proto::MemSizeCookie{fabric_.cookie()},
-        &binder_.fio_queue()
+        &binder_.fio_queue(),
+        infra::OptRef{frames_}
     );
 
     rows_.on_fabric_reprogrammed();
@@ -949,6 +988,9 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
         tenancy_.core() ? tenancy_.core()->profile().polls
                         : std::span<const proto::user_io::PollShape>{}
     );
+
+    if (frame_lane_.bound())
+        frames_.bind(frame_lane_);
     machine_.close(
         Event::CoreLoaded{
             .type = session_.type(),
@@ -1025,10 +1067,17 @@ static_assert(
 );
 
 void LinkSession::drop_routes_() noexcept {
+
+    frames_.unbind();
+    frame_lane_.unbind();
+    osd_.bind_frames({});
+    video_.bind_frames({});
     encoder_.drop_pads();
-    osd_.bind_rows(Carrier::Link);
-    rows_.bind_status_route(Carrier::Link, proto::BuildGeneration{});
-    rows_.bind_block_poll(proto::link::BlockPollRoute::Link);
+    osd_.bind_rows(Carrier::Spi);
+    rows_.bind_status_route(Carrier::Spi, proto::BuildGeneration{});
+    rows_.bind_events_route(Carrier::Spi);
+    rows_.bind_block_poll(proto::link::BlockPollRoute::Spi);
+    held_.bind_downloads(Carrier::Spi);
 }
 
 void LinkSession::release_pads_() noexcept {
@@ -1061,7 +1110,12 @@ Ex<void> LinkSession::detach() {
     (void)slot_bindings_.slots().install_completions(none);
     tenancy_.settle_retire(CoreTenancy::RetireEnd::Poll);
 
-    session_ = proto::link::CoreSession::detached(link_, fenced_signals_, &binder_.fio_queue());
+    session_ = proto::link::CoreSession::detached(
+        link_,
+        fenced_signals_,
+        &binder_.fio_queue(),
+        infra::OptRef{frames_}
+    );
     return {};
 }
 
@@ -1104,9 +1158,9 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.core_shutdowns = tenancy_.tally().core_shutdowns;
     out.stage_status_change = rows_.status_decoder().last().nibble();
     out.status_reply_refusals = rows_.status_decoder().flush_refusals();
-    out.status_lw = rows_.status_route() == Carrier::Lw;
-    out.status_lw_adopts = rows_.axi_status_source().adopted();
-    out.status_lw_stale = rows_.axi_status_source().stale();
+    out.status_off_link = !link_carries(rows_.status_route());
+    out.status_snapshot_adopts = rows_.snapshot_status_source().adopted();
+    out.status_snapshot_stale = rows_.snapshot_status_source().stale();
     out.prefetch_park_timeouts = slot_bindings_.tally().prefetch_park_timeouts;
     out.stale_owner_steps = tally_.stale_owner_steps;
     out.start_answer_drops = start_answer_drops();

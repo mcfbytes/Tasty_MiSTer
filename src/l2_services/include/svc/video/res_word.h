@@ -14,7 +14,7 @@ struct ResWord {
     static constexpr std::uint16_t kInterlacedBit = 0x100;
     static constexpr std::uint16_t kRotatedBit = 0x200;
 
-    [[nodiscard]] static constexpr ResWord of(hal::SpiWord reply) noexcept {
+    [[nodiscard]] static constexpr ResWord of(hal::LinkWord reply) noexcept {
         return ResWord{reply.decoded(std::identity{})};
     }
 

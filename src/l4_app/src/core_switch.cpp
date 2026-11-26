@@ -53,11 +53,17 @@ bool CoreSwitch::on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag
     return true;
 }
 
+bool CoreSwitch::teardown_fits(const Host& host) const noexcept {
+    TASTY_SEAT_BODY(CoreSwitch);
+    return proto::kLinkTxCapacity - inbox_.ring().size()
+        >= kTeardownOps + (host.drop_pushes_op() ? 1u : 0u);
+}
+
 bool CoreSwitch::retry_held_load(Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!held_load_ || switch_standing_ || readiness_.recovering())
         return false;
-    if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps)
+    if (!teardown_fits(host))
         return false;
     const HeldLoad h = *held_load_;
     held_load_.reset();
@@ -227,7 +233,12 @@ CoreSwitch::Programmed CoreSwitch::program_(
         return Programmed::Failed;
     }
     ++tally_.programs_run;
-    const Ex<void> took = programmer_.program(receipt, std::move(home), *rel);
+    const Ex<void> took = programmer_.program(
+        receipt,
+        std::move(home),
+        *rel,
+        infra::OptRef<IProgramGuard>{static_cast<IProgramGuard&>(builder_.ocram())}
+    );
     if (!took) {
         tally_.last_program_error = took.error();
         ++tally_.programs_failed;
@@ -253,7 +264,11 @@ CoreSwitch::Programmed CoreSwitch::program_at_boot(Host& host) {
         return Programmed::Failed;
     }
     ++tally_.programs_run;
-    const Ex<void> took = programmer_.program_at_boot(std::move(*home), *rel);
+    const Ex<void> took = programmer_.program_at_boot(
+        std::move(*home),
+        *rel,
+        infra::OptRef<IProgramGuard>{static_cast<IProgramGuard&>(builder_.ocram())}
+    );
     if (!took) {
         tally_.last_program_error = took.error();
         ++tally_.programs_failed;

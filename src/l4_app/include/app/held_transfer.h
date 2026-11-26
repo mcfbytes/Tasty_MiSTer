@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "app/bracket_close.h"
+#include "app/carrier.h"
 #include "app/cheat_apply.h"
 #include "app/core_block_roles.h"
 #include "app/core_tenancy.h"
@@ -33,8 +34,9 @@
 #include "app/types.h"
 #include "app/window_job_service.h"
 #include "infra/endian.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/load_progress.h"
+#include "cores/off_link_window.h"
 #include "cores/progress_ticker.h"
 #include "cores/staging_core.h"
 #include "cores/stream_load.h"
@@ -44,9 +46,11 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/tally.h"
 #include "proto/block_roles.h"
 #include "proto/link/core_session.h"
 #include "proto/link/download_session.h"
+#include "proto/link/frame_route.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
 #include "proto/no_block_roles.h"
@@ -86,6 +90,11 @@ public:
         std::uint32_t stage_cuts = 0;
 
         std::uint32_t link_op_misrouted = 0;
+
+        infra::Tally off_link_windows{};
+        infra::Tally off_link_cuts{};
+        infra::Tally off_link_rounds{};
+        infra::Tally off_link_refusals{};
     };
 
     struct Wiring {
@@ -104,6 +113,8 @@ public:
         const CoreTenancy& tenancy;
         SessionTally& session_tally;
         infra::OptRef<WindowJobService> window_jobs{};
+
+        infra::OptRef<proto::link::FrameRoute> frames{};
     };
 
     static constexpr std::size_t kCopyWordsMax = 8;
@@ -131,7 +142,17 @@ public:
 
     [[nodiscard]] bool wire_held() const noexcept {
         TASTY_SEAT_BODY(HeldTransfer);
-        return copy_ds_.has_value() || dat_window_held() || link_.posted();
+        return copy_ds_.has_value() || dat_window_held() || off_link_holds_ || link_.posted();
+    }
+
+    [[nodiscard]] bool off_link_sole_hold() const noexcept {
+        TASTY_SEAT_BODY(HeldTransfer);
+        return off_link_holds_ && !copy_ds_.has_value() && !link_.posted();
+    }
+
+    void bind_downloads(Carrier route) noexcept {
+        TASTY_SEAT_BODY(HeldTransfer);
+        downloads_ = route;
     }
 
     [[nodiscard]] bool dat_window_held() const noexcept {
@@ -169,7 +190,10 @@ public:
     [[nodiscard]] bool stage_held() const noexcept { return stage_open_.has_value(); }
 
     [[nodiscard]] bool fio_held() const noexcept {
-        return ftx_open_.has_value() || stage_open_.has_value() || plain_ds_.has_value();
+        return ftx_open_.has_value()
+            || stage_open_.has_value()
+            || plain_ds_.has_value()
+            || off_link_open_();
     }
 
     [[nodiscard]] bool copy_posted() const noexcept { return copy_ds_.has_value(); }
@@ -258,6 +282,34 @@ private:
         const ILinkTxReader& inbox
     ) noexcept;
 
+    [[nodiscard]] bool off_link_open_() const noexcept {
+        return off_link_.has_value() || off_link_stage_.has_value();
+    }
+
+    [[nodiscard]] Delivered off_link_file_tx_(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx);
+    [[nodiscard]] Delivered off_link_open_window_(
+        const proto::LinkOp::FileTx& a,
+        infra::OptRef<const InternedFile> file,
+        cores::Core& current
+    );
+
+    [[nodiscard]] Delivered off_link_refuse_(bool window, proto::ActKey act);
+    [[nodiscard]] Delivered off_link_close_(
+        const proto::LinkOp::FileTx& a,
+        infra::OptRef<const InternedFile> file,
+        cores::Core& current
+    );
+    [[nodiscard]] ILinkEncoder::Outcome off_link_stage_payload_(
+        const proto::LinkOp::StagePayload& a,
+        const LinkOpCtx& ctx
+    ) noexcept;
+
+    [[nodiscard]] bool off_link_takes_queue_(infra::OptRef<cores::Core> current) noexcept;
+
+    void end_off_link_(infra::OptRef<cores::Core> current, bool cut) noexcept;
+
+    void hold_off_link_() noexcept;
+
     [[nodiscard]] bool owns_post_() const noexcept {
         return link_.posted() && !session_.configure_posted();
     }
@@ -274,6 +326,7 @@ private:
     const CoreTenancy& tenancy_;
     SessionTally& session_tally_;
     infra::OptRef<WindowJobService> window_jobs_;
+    infra::OptRef<proto::link::FrameRoute> frames_;
     Tally tally_{};
 
     proto::FileSize last_tx_bytes_{};
@@ -289,7 +342,7 @@ private:
     FileTxLevelCell ftx_level_cell_{};
 
     std::optional<proto::link::DownloadSession> copy_ds_{};
-    std::array<hal::SpiWord, kCopyWordsMax> copy_tail_{};
+    std::array<hal::LinkWord, kCopyWordsMax> copy_tail_{};
     std::uint8_t copy_tail_n_ = 0;
     proto::ActKey copy_act_{};
 
@@ -302,6 +355,11 @@ private:
     std::optional<proto::ImageBracket> stage_open_{};
 
     std::optional<proto::link::DownloadSession> plain_ds_{};
+
+    Carrier downloads_ = Carrier::Spi;
+    std::optional<cores::OffLinkWindow> off_link_{};
+    std::optional<proto::WideIoIndex> off_link_stage_{};
+    bool off_link_holds_ = false;
 };
 
 static_assert(LinkOpTransferSink<HeldTransfer>);

@@ -3,7 +3,7 @@
 
 #include <cstddef>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "svc/video/modeline_item.h"
 
 namespace mister::svc::video {
@@ -59,12 +59,12 @@ Modeline Modeline::direct_video_fix() const {
     return f;
 }
 
-std::array<hal::SpiWord, 26> Modeline::to_wire(const PllBlock& pll, const WireOptions& opt) const {
+std::array<hal::LinkWord, 26> Modeline::to_wire(const PllBlock& pll, const WireOptions& opt) const {
 
     const Modeline timing = opt.direct_video ? direct_video_fix() : *this;
     const std::array<std::uint32_t, kModelineItems> fix = timing.to_words(pll);
 
-    std::array<hal::SpiWord, 26> out{};
+    std::array<hal::LinkWord, 26> out{};
     std::size_t n = 0;
     for (std::size_t i = item(ModelineItem::Hact); i <= item(ModelineItem::Vbp); ++i) {
         std::uint32_t word = fix[i];
@@ -81,15 +81,15 @@ std::array<hal::SpiWord, 26> Modeline::to_wire(const PllBlock& pll, const WireOp
             if (vpol)
                 word |= kTimingFlagBit;
         }
-        out[n++] = hal::SpiHalves::of(word).low;
+        out[n++] = hal::LinkHalves::of(word).low;
     }
     for (std::size_t i = 0; i < PllBlock::kWrites; ++i) {
         const PllWrite& pw = pll.writes[i];
         std::uint32_t selector = pll_reg_word(pw.selector) | kWirePllAddressSelector;
         if (i == 0 && opt.vsync_align)
             selector |= kWireVsyncAlign;
-        out[n++] = hal::SpiHalves::of(selector).low;
-        const hal::SpiHalves payload = pw.payload.halves();
+        out[n++] = hal::LinkHalves::of(selector).low;
+        const hal::LinkHalves payload = pw.payload.halves();
         out[n++] = payload.low;
         out[n++] = payload.high;
     }

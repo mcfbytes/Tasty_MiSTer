@@ -181,7 +181,7 @@ ManifestLadder::Pass ManifestLadder::fail_(Errc why) noexcept {
 Rung::Pass ManifestLadder::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(ManifestLadder);
     Host h{
-        .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events},
+        .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events, edges.lane},
         .owner = owner,
         .map = edges.window_map,
         .aperture = edges.aperture,

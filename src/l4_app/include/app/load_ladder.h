@@ -10,6 +10,7 @@
 #include "app/event.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
+#include "app/ocram_lane_writer.h"
 #include "app/load_key.h"
 #include "app/load_window.h"
 #include "app/types.h"
@@ -42,13 +43,20 @@ public:
         Mount,
         Close,
         Cut,
-        Over
+        Over,
+
+        LaneOpen,
+        LaneAct,
+        LaneAnswer,
+        LaneEnd
     };
 
     struct Host {
         LinkTxChannel<SeatTag::Main>& inbox;
         const FileTxLevelCell& level;
         EventQueue<SeatTag::Main>::Producer events;
+
+        infra::OptRef<OcramLaneWriter> lane{};
     };
 
     struct Job {
@@ -110,6 +118,9 @@ private:
     [[nodiscard]] Pass notify_(Host& h);
     [[nodiscard]] Pass cut_(Host& h);
 
+    [[nodiscard]] Pass lane_step_(Host& h);
+    [[nodiscard]] Pc close_pc_() const noexcept;
+
     void progress_(Host& h, bool edge) noexcept;
     [[nodiscard]] proto::FileSize bracket_length_() const noexcept;
 
@@ -122,6 +133,11 @@ private:
     proto::FileSize fill_off_{};
     std::uint64_t extent_ = 0;
     bool facts_pushed_ = false;
+
+    bool off_link_ = false;
+    bool mounted_ = false;
+    bool lane_framed_ = false;
+    bool lane_ended_ = false;
     Pc pc_ = Pc::Open;
 };
 

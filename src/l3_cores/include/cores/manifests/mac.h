@@ -8,7 +8,7 @@
 #include "cores/control_slot.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mac/mac_windows.h"
 #include "cores/repulse_rule.h"
 #include "cores/slot_servant_row.h"

@@ -121,7 +121,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .verdicts = face_parts_.verdicts,
               .game_id = infra::OptRef<app::GameIdPump>{game_id_pump_},
               .owner_tick = tail_->owner_tick(),
-              .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
+              .osd_endpoints = device_.osd_endpoints_
           },
           diag_sources_(plat),
           device_.diag_services()
@@ -141,7 +141,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
     if (auto fds = xthread::ParkFds::create(p.wires.main_wake, p.wires.main_stop); !fds) {
         device_.verdict().refuse("MAIN: ParkFds::create", fds.error());
     } else {
-        process_main_.emplace(p.session.owner, assembly_, std::move(*fds));
+        process_main_.emplace(p.session.owner, assembly_, std::move(*fds), p.wires.main_doorbells);
     }
 
     if (!device_.verdict().ok())

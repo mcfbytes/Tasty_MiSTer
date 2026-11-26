@@ -7,7 +7,7 @@
 #include "cores/c64/easyflash_image.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/core_window_decl.h"
 #include "cores/disk_mirror.h"
 #include "cores/host_bit_row.h"

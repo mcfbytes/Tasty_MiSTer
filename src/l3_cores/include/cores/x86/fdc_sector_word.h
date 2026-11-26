@@ -12,7 +12,7 @@ namespace mister::cores::x86 {
 struct FdcSectorWord {
     std::uint16_t v = 0;
 
-    [[nodiscard]] static constexpr FdcSectorWord of(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr FdcSectorWord of(hal::LinkWord w) noexcept {
         return w.decoded([](std::uint16_t bits) { return FdcSectorWord{bits}; });
     }
 

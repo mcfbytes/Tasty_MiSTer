@@ -36,10 +36,12 @@ public:
 
     void on(const proto::LinkEvent::PolledWord& w) noexcept;
 
-    [[nodiscard]] hal::SpiWord last_applied(proto::PlayerIndex player) const noexcept {
+    void on_level(svc::PlayerIndex player, hal::LinkWord word) noexcept;
+
+    [[nodiscard]] hal::LinkWord last_applied(proto::PlayerIndex player) const noexcept {
         if (const infra::OptRef<const Seen> held = seen_.find(player))
             return held->word;
-        return hal::SpiWord{};
+        return hal::LinkWord{};
     }
 
     [[nodiscard]] std::uint32_t applied() const noexcept { return applied_; }
@@ -55,7 +57,7 @@ public:
     [[nodiscard]] std::uint32_t reapplied() const noexcept { return reapplied_; }
 
 private:
-    void apply_(svc::PlayerIndex player, hal::SpiWord word) noexcept;
+    void apply_(svc::PlayerIndex player, hal::LinkWord word) noexcept;
 
     svc::input::IRumbleOut& out_;
     RumblePlayersCell& pads_;
@@ -63,7 +65,7 @@ private:
 
     struct Seen {
         svc::input::PadSignature pad{};
-        hal::SpiWord word{};
+        hal::LinkWord word{};
     };
 
     infra::IndexedArray<Seen, svc::kMaxPlayers, svc::PlayerIndex> seen_{};

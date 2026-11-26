@@ -125,6 +125,8 @@ struct MappedRegs {
 std::uint32_t regs_read(const volatile void* base, std::size_t byte_off);
 void regs_write(volatile void* base, std::size_t byte_off, std::uint32_t v);
 
+void regs_write64(volatile void* base, std::size_t byte_off, std::uint64_t v);
+
 void regs_fence() noexcept;
 
 inline volatile void* regs_advance(volatile void* p, std::size_t n) noexcept {

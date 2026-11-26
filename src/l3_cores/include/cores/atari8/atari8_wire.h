@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "cores/atari8/cart_mode.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "infra/message_sum.h"
 #include "proto/mailbox_act.h"
@@ -44,8 +44,8 @@ enum class Level : std::uint8_t { Low, High };
 
 enum class Pause : std::uint8_t { Run = 0x00, Hold = 0x01, Halted = 0x04 };
 
-[[nodiscard]] constexpr hal::SpiWord word(Opcode op) noexcept {
-    return hal::SpiWord{std::to_underlying(op)};
+[[nodiscard]] constexpr hal::LinkWord word(Opcode op) noexcept {
+    return hal::LinkWord{std::to_underlying(op)};
 }
 
 namespace detail {
@@ -55,7 +55,7 @@ namespace detail {
 ) noexcept {
     return {
         .opcode = word(Opcode::SetRegister),
-        .word = hal::SpiWord{value}.with_high_byte(std::to_underlying(r))
+        .word = hal::LinkWord{value}.with_high_byte(std::to_underlying(r))
     };
 }
 
@@ -82,12 +82,12 @@ namespace detail {
     return detail::set_byte(WriteRegister::Pause, std::to_underlying(level));
 }
 
-[[nodiscard]] constexpr proto::MailboxRunCommand enqueue(hal::SpiHalves entry) noexcept {
+[[nodiscard]] constexpr proto::MailboxRunCommand enqueue(hal::LinkHalves entry) noexcept {
     return {.opcode = word(Opcode::TapeEnqueue), .word = entry.low, .tail = entry.high};
 }
 
-[[nodiscard]] constexpr hal::SpiWord select_word(ReadRegister r) noexcept {
-    return hal::SpiWord{}.with_high_byte(std::to_underlying(r));
+[[nodiscard]] constexpr hal::LinkWord select_word(ReadRegister r) noexcept {
+    return hal::LinkWord{}.with_high_byte(std::to_underlying(r));
 }
 
 [[nodiscard]] constexpr proto::MailboxRunCommand get(ReadRegister r) noexcept {

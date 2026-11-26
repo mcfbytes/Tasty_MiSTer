@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "app/core_block_roles.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/no_block_roles.h"

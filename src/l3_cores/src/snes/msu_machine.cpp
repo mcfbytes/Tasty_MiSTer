@@ -45,7 +45,7 @@ proto::MailboxAct MsuMachine::serve(
     if (last_req_.has_value() && req == *last_req_)
         return {};
     last_req_ = req;
-    const hal::SpiHalves data{
+    const hal::LinkHalves data{
         .low = frame.replies[msu::kDataLowReply],
         .high = frame.replies[msu::kDataHighReply]
     };

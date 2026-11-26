@@ -65,10 +65,13 @@ private:
             case Pattern::PowerOn:
                 break;
         }
-        static_assert(proto::kMailboxActBytes % sizeof(hal::SpiWord) == 0, "an act is whole words");
+        static_assert(
+            proto::kMailboxActBytes % sizeof(hal::LinkWord) == 0,
+            "an act is whole words"
+        );
         for (std::span<std::uint8_t> rest = bytes; !rest.empty();
-             rest = rest.subspan(sizeof(hal::SpiWord)))
-            kPowerOn.store_le(rest.first<sizeof(hal::SpiWord)>());
+             rest = rest.subspan(sizeof(hal::LinkWord)))
+            kPowerOn.store_le(rest.first<sizeof(hal::LinkWord)>());
     }
 
     static constexpr infra::ByteCount kComputerRamBytes{0x1'0000};
@@ -77,7 +80,7 @@ private:
     static constexpr infra::ByteCount kConsoleCartFrom{0x4000};
     static constexpr infra::ByteCount kConsoleCartEnd{0x8'4000};
 
-    static constexpr hal::SpiWord kPowerOn{0x00FF};
+    static constexpr hal::LinkWord kPowerOn{0x00FF};
 
     Atari8Address at_{};
     Atari8Address end_{};

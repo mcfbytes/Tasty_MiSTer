@@ -20,7 +20,7 @@ public:
 
     virtual void receive_data(std::span<std::byte> into) noexcept = 0;
 
-    virtual void write_reg(IdeRegister reg, hal::SpiWord value) noexcept = 0;
+    virtual void write_reg(IdeRegister reg, hal::LinkWord value) noexcept = 0;
 
 protected:
     IIdeTransport() = default;

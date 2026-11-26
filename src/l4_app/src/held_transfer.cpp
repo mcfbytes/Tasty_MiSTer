@@ -17,7 +17,8 @@ HeldTransfer::HeldTransfer(const Wiring& w) noexcept
       slot_bindings_(w.slot_bindings),
       tenancy_(w.tenancy),
       session_tally_(w.session_tally),
-      window_jobs_(w.window_jobs) {}
+      window_jobs_(w.window_jobs),
+      frames_(w.frames) {}
 
 Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
@@ -26,10 +27,13 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx)
     const bool spends = a.phase != Phase::Whole && a.phase != Phase::Empty;
 
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
+
+    const bool role = a.phase == Phase::BeforeClose
+        ? off_link_.has_value()
+        : ctx.core.has_value() && (window ? ctx.core->window_load() : ctx.core->stream_load());
     if (!ctx.core.has_value()
         || machine_.state() == SessionState::Failed
-        || (!(window ? ctx.core->window_load() : ctx.core->stream_load())
-            && a.phase != Phase::Whole)) {
+        || (!role && a.phase != Phase::Whole)) {
         if (a.phase != Phase::Whole)
             ++tally_.file_tx_piece_drops;
 
@@ -39,6 +43,14 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx)
             publish_stream(a.act, false);
         return Delivered{ILinkEncoder::Outcome::Dropped, spends};
     }
+
+    const bool closes = a.phase == Phase::Close
+        || a.phase == Phase::WindowClose
+        || a.phase == Phase::BeforeClose;
+    const bool opens_off_link = (a.phase == Phase::Open || a.phase == Phase::WindowOpen)
+        && !link_carries(downloads_);
+    if (opens_off_link || (closes && off_link_.has_value()))
+        return off_link_file_tx_(a, ctx);
     const infra::OptRef<const InternedFile> file = ctx.tx.file(a.file);
     cut_stage_();
     if (a.phase == Phase::Whole || a.phase == Phase::Close || a.phase == Phase::Empty)
@@ -59,9 +71,16 @@ Delivered HeldTransfer::on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx)
 
 Delivered HeldTransfer::on(const proto::LinkOp::StagePayload& a, const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    const ILinkEncoder::Outcome r = stage_payload_(a, ctx);
+    using Phase = proto::LinkOp::StagePhase;
+
+    const bool off_link = !link_carries(downloads_)
+        && a.copy_word == 0
+        && (a.phase == Phase::Open || a.phase == Phase::Close);
+    const ILinkEncoder::Outcome r = off_link ? off_link_stage_payload_(a, ctx)
+                                             : stage_payload_(a, ctx);
     echo_payload_act_(a, r != ILinkEncoder::Outcome::Dropped);
-    return Delivered{r, a.payload != proto::FileId{} && a.copy_word == 0};
+
+    return Delivered{r, !off_link && a.payload != proto::FileId{} && a.copy_word == 0};
 }
 
 Delivered HeldTransfer::on(const proto::LinkOp::PlainDownload& a, const LinkOpCtx& ctx) noexcept {
@@ -495,6 +514,11 @@ void HeldTransfer::publish_window_level(proto::ActKey act, bool open) noexcept {
     ftx_level_scratch_.act = act;
     ftx_level_scratch_.open = open;
     ftx_level_scratch_.payload = false;
+
+    if (open && off_link_) {
+        ftx_level_scratch_.params = off_link_->params();
+        hold_off_link_();
+    }
     ftx_level_cell_.publish(ftx_level_scratch_);
 }
 
@@ -525,8 +549,10 @@ void HeldTransfer::publish_stream(
 
 bool HeldTransfer::save_pull_fenced(infra::OptRef<cores::Core> current) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    if ((!ftx_open_ && !stage_open_ && !plain_ds_) || !current->save_upload())
+    if ((!ftx_open_ && !stage_open_ && !plain_ds_ && !off_link_open_())
+        || !current->save_upload()) {
         return false;
+    }
     ++tally_.save_pulls_fenced;
     return true;
 }
@@ -549,20 +575,191 @@ void HeldTransfer::cut_file_tx_(infra::OptRef<cores::Core> current) noexcept {
     binder_.file_progress().disarm();
 }
 
+Delivered HeldTransfer::off_link_file_tx_(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx) {
+    using Phase = proto::LinkOp::FileTxPhase;
+    const infra::OptRef<const InternedFile> file = ctx.tx.file(a.file);
+    if (a.phase == Phase::Open || a.phase == Phase::WindowOpen)
+        return off_link_open_window_(a, file, *ctx.core);
+    if (a.phase != Phase::BeforeClose)
+        return off_link_close_(a, file, *ctx.core);
+
+    arm_open_save_(file, ctx.tx);
+    before_close(file.has_value() && file->remounts_saves);
+    open_save_.reset();
+    publish_stream(a.act, true);
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
+}
+
+bool HeldTransfer::off_link_takes_queue_(infra::OptRef<cores::Core> current) noexcept {
+    cut_stage_();
+    cut_file_tx_(current);
+    end_plain_();
+    end_off_link_(current, true);
+
+    if (binder_.fio_queue().held() || binder_.fio_queue().tenant_holds_fio())
+        return false;
+    (void)binder_.fio_queue().flush();
+    return true;
+}
+
+Delivered HeldTransfer::off_link_open_window_(
+    const proto::LinkOp::FileTx& a,
+    infra::OptRef<const InternedFile> file,
+    cores::Core& current
+) {
+    using Phase = proto::LinkOp::FileTxPhase;
+    const bool window = a.phase == Phase::WindowOpen;
+    const infra::OptRef<cores::Core> here{current};
+    if (!file || !off_link_takes_queue_(here))
+        return off_link_refuse_(window, a.act);
+    const auto load = window ? current.window_load() : current.stream_load();
+    if (!load)
+        return off_link_refuse_(window, a.act);
+    const cores::StreamAsk ask{.index = a.wire_index, .path = file->path.view()};
+    auto w = cores::OffLinkWindow::open(
+        *load,
+        ask,
+        window ? cores::StreamLoadKind::Window : cores::StreamLoadKind::Stream,
+        window ? proto::AuxValue{a.total} : proto::AuxValue{}
+    );
+    if (!w)
+        return off_link_refuse_(window, a.act);
+    binder_.fio_queue().hold();
+    off_link_.emplace(std::move(*w));
+    tally_.off_link_windows.add();
+    if (window) {
+
+        const auto role = current.window_save();
+        if (!(role && window_jobs_ && window_jobs_->hold_open(*role, a.wire_index.io(), a.act))) {
+            publish_window_level(a.act, true);
+        }
+        return Delivered{ILinkEncoder::Outcome::Encoded, false};
+    }
+    ftx_level_scratch_.params = off_link_->params();
+    hold_off_link_();
+    publish_stream(a.act, true);
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
+}
+
+Delivered HeldTransfer::off_link_refuse_(bool window, proto::ActKey act) {
+    ++tally_.file_tx_piece_drops;
+    tally_.off_link_refusals.add();
+    if (window) {
+        publish_window_level(act, false);
+    } else {
+        publish_stream(act, false);
+    }
+    return Delivered{ILinkEncoder::Outcome::Dropped, false};
+}
+
+Delivered HeldTransfer::off_link_close_(
+    const proto::LinkOp::FileTx& a,
+    infra::OptRef<const InternedFile> file,
+    cores::Core& current
+) {
+    using Phase = proto::LinkOp::FileTxPhase;
+    const bool window = a.phase == Phase::WindowClose;
+    const infra::OptRef<cores::Core> here{current};
+    if (!off_link_) {
+        ++tally_.file_tx_piece_drops;
+        if (!window)
+            publish_stream(a.act, false);
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
+    }
+
+    if (!file) {
+        end_off_link_(here, true);
+        ++tally_.file_tx_cuts;
+        if (!window)
+            publish_stream(a.act, true);
+        return Delivered{ILinkEncoder::Outcome::Encoded, false};
+    }
+    off_link_->close(live_load_(current, off_link_->kind()), proto::FileSize{a.total}, file->crc);
+    end_off_link_(here, false);
+
+    const Delivered::Edge edge = file->edge != ContentEdge::Companion
+        ? after_file_tx(a.wire_index, file->path.view(), file->edge, current)
+        : Delivered::Edge::None;
+    if (!window)
+        publish_stream(a.act, true);
+    return Delivered{ILinkEncoder::Outcome::Encoded, false, edge};
+}
+
+ILinkEncoder::Outcome HeldTransfer::off_link_stage_payload_(
+    const proto::LinkOp::StagePayload& a,
+    const LinkOpCtx& ctx
+) noexcept {
+    using Phase = proto::LinkOp::StagePhase;
+    const bool has_staging = ctx.core.has_value() && ctx.core->staging_core();
+    if (!ctx.core.has_value() || (!has_staging && proto::sets_region(a)))
+        return drop_stage_();
+    if (a.phase == Phase::Open) {
+
+        const infra::OptRef<const InternedFile> file = ctx.tx.file(a.payload);
+        if (!file || !off_link_takes_queue_(ctx.core)) {
+            tally_.off_link_refusals.add();
+            return drop_stage_();
+        }
+        binder_.fio_queue().hold();
+        const proto::SessionParams own{.aux = proto::AuxValue{file->aux}, .ext = file->ext.view()};
+        ftx_level_scratch_.params = proto::link::FioOpen::of(a.dest, own);
+        off_link_stage_ = a.dest;
+        hold_off_link_();
+        tally_.off_link_windows.add();
+        return ILinkEncoder::Outcome::Encoded;
+    }
+    if (!off_link_stage_)
+        return drop_stage_();
+
+    const bool cut = a.payload == proto::FileId{};
+    end_off_link_(ctx.core, cut);
+    if (cut) {
+        ++tally_.stage_cuts;
+        return ILinkEncoder::Outcome::Encoded;
+    }
+    if (proto::sets_region(a)) {
+        if (const auto cd = ctx.core->staging_core())
+            cd->set_region(a.region);
+    }
+    return ILinkEncoder::Outcome::Encoded;
+}
+
+void HeldTransfer::end_off_link_(infra::OptRef<cores::Core> current, bool cut) noexcept {
+    if (!off_link_open_())
+        return;
+    if (cut && off_link_ && current)
+        off_link_->cut(live_load_(*current, off_link_->kind()));
+    if (cut)
+        tally_.off_link_cuts.add();
+    off_link_.reset();
+    off_link_stage_.reset();
+    off_link_holds_ = false;
+
+    if (frames_)
+        frames_->resume();
+    binder_.fio_queue().release();
+}
+
+void HeldTransfer::hold_off_link_() noexcept {
+    off_link_holds_ = true;
+    if (frames_)
+        frames_->suspend();
+}
+
 ILinkEncoder::Outcome HeldTransfer::stage_copy_(
     const proto::LinkOp::StagePayload& a,
     std::span<const std::uint8_t> bytes
 ) noexcept {
     cut_stage_();
-    const std::size_t n = bytes.size() / sizeof(hal::SpiWord);
+    const std::size_t n = bytes.size() / sizeof(hal::LinkWord);
     if (copy_ds_ || proto::sets_region(a) || a.copy_word > n || n > kCopyWordsMax) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    std::array<hal::SpiWord, kCopyWordsMax> w{};
+    std::array<hal::LinkWord, kCopyWordsMax> w{};
 
     for (std::size_t i = 0; i < n; ++i) {
-        w[i] = hal::SpiWord::load_le(
-            bytes.subspan(i * sizeof(hal::SpiWord)).first<sizeof(hal::SpiWord)>()
+        w[i] = hal::LinkWord::load_le(
+            bytes.subspan(i * sizeof(hal::LinkWord)).first<sizeof(hal::LinkWord)>()
         );
     }
     (void)binder_.fio_queue().flush();
@@ -627,13 +824,18 @@ bool HeldTransfer::hold_wire(bool park_asked) noexcept {
         ++tally_.file_tx_held_rounds;
         return true;
     }
+
+    if (!copy_ds_ && !link_.posted()) {
+        tally_.off_link_rounds.add();
+        return true;
+    }
     if (!copy_ds_) {
 
         if (park_asked) {
             link_.abandon_post();
             ++tally_.file_tx_hold_abandons;
             end_length_(false);
-            return false;
+            return off_link_holds_;
         }
         const auto done = link_.posted_done();
         if (done && !*done) {
@@ -641,7 +843,7 @@ bool HeldTransfer::hold_wire(bool park_asked) noexcept {
             return true;
         }
         end_length_(done.has_value());
-        return false;
+        return off_link_holds_;
     }
     if (park_asked) {
         copy_ds_->abandon();
@@ -684,6 +886,7 @@ void HeldTransfer::cut_all() noexcept {
     cut_file_tx_(tenancy_.core());
     cut_stage_();
     end_plain_();
+    end_off_link_(tenancy_.core(), true);
     if (window_jobs_)
         window_jobs_->forget_held();
 }

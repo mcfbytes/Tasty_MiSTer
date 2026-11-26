@@ -23,6 +23,7 @@
 #include "app/file_tx_pieces.h"
 #include "app/interned_file.h"
 #include "app/link_tx_channel.h"
+#include "app/ocram_lane_writer.h"
 #include "app/load_key.h"
 #include "app/load_ladder.h"
 #include "app/load_walk.h"
@@ -150,6 +151,8 @@ public:
         const BootRestore& boot_restore;
         hal::FpgaAperture aperture;
         WindowTally& windows;
+
+        infra::OptRef<const OcramLaneWriter> lane{};
     };
 
     explicit ContentPick(const Wiring& w) noexcept;
@@ -290,6 +293,7 @@ private:
     const BootRestore& boot_restore_;
     const hal::FpgaAperture aperture_;
     WindowTally& windows_;
+    infra::OptRef<const OcramLaneWriter> lane_{};
     Owed content_owed_{};
     std::optional<PickedLoad> picked_load_{};
     std::optional<ContentWatch> watch_{};

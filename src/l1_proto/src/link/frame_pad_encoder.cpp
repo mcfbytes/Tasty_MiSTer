@@ -12,7 +12,7 @@ Ex<void> FramePadEncoder::digital(UioOp opcode, JoyMask map) {
     ILinkFrame& frame = *frame_;
     if (auto e = frame.begin(opcode); !e)
         return e;
-    const hal::SpiHalves halves = map.halves();
+    const hal::LinkHalves halves = map.halves();
     if (auto e = frame.word(halves.low); !e)
         return e;
 
@@ -28,19 +28,19 @@ Ex<void> FramePadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) 
     ILinkFrame& frame = *frame_;
     if (auto e = frame.begin(opcode); !e)
         return e;
-    if (auto e = frame.word(hal::SpiWord{index}); !e)
+    if (auto e = frame.word(hal::LinkWord{index}); !e)
         return e;
 
     if (port_.wire().analog_word) {
 
-        if (auto e = frame.word(hal::SpiWord{pos.packed()}); !e)
+        if (auto e = frame.word(hal::LinkWord{pos.packed()}); !e)
             return e;
         return frame.end();
     }
 
-    if (auto e = frame.word(hal::SpiWord{pos.x}); !e)
+    if (auto e = frame.word(hal::LinkWord{pos.x}); !e)
         return e;
-    if (auto e = frame.word(hal::SpiWord{pos.y}); !e)
+    if (auto e = frame.word(hal::LinkWord{pos.y}); !e)
         return e;
     return frame.end();
 }

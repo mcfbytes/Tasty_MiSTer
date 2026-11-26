@@ -31,13 +31,13 @@ public:
         const HostServices& h,
         proto::MailboxProgramme programme
     ) noexcept {
-        if (!h.mailbox || !h.fio_queue)
+        if (!h.mailbox)
             return std::nullopt;
         return std::optional<MailboxCarriage>{
             std::in_place,
             h.link,
             *h.mailbox,
-            *h.fio_queue,
+            h.fio_queue,
             h.clock,
             programme
         };

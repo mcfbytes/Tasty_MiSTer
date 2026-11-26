@@ -77,7 +77,7 @@ private:
         svc::AdfCodec::Sector sector{};
         bool gap = false;
         proto::FileSize sent{};
-        hal::SpiWord sync{};
+        hal::LinkWord sync{};
         proto::DiskStatusTag tag{};
     };
 

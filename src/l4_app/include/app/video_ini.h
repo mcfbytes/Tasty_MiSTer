@@ -17,7 +17,7 @@
 
 namespace mister::app {
 
-using AspectWords = std::array<hal::SpiWord, 2>;
+using AspectWords = std::array<hal::LinkWord, 2>;
 
 struct AspectTerm {
     std::uint16_t v = 0;
@@ -30,7 +30,7 @@ struct AspectTerm {
     }
 
     friend constexpr AspectWords aspect_words(AspectTerm num, AspectTerm den) noexcept {
-        return {hal::SpiWord{num.v}, hal::SpiWord{den.v}};
+        return {hal::LinkWord{num.v}, hal::LinkWord{den.v}};
     }
 
     friend constexpr bool operator==(AspectTerm, AspectTerm) = default;
@@ -83,7 +83,7 @@ struct VideoIni {
 
 [[nodiscard]] VideoIni absent_video_ini(const VideoIni::Force& force, const VideoIni& last);
 
-[[nodiscard]] constexpr std::array<hal::SpiWord, 4> ar_custom_words(
+[[nodiscard]] constexpr std::array<hal::LinkWord, 4> ar_custom_words(
     const std::array<AspectRatio, 2>& ratios
 ) noexcept {
     const auto first = aspect_words(ratios[0].num, ratios[0].den);

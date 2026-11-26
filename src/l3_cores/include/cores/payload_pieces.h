@@ -97,8 +97,15 @@ private:
           ext_(ext),
           frame_(frame) {}
 
-    [[nodiscard]] Ex<void> stage_(std::size_t n);
+    [[nodiscard]] Ex<void> stage_(proto::FileSize n);
     [[nodiscard]] Ex<Pass> fail_(ILadderHost& host);
+
+    [[nodiscard]] Ex<Pass> step_off_link_(ILadderHost& host);
+    [[nodiscard]] Ex<Pass> order_off_link_(
+        ILadderHost& host,
+        proto::LinkOp::StagePhase phase,
+        bool names_bytes
+    );
 
     [[nodiscard]] proto::LinkOp piece_op_(proto::FileId id, proto::LinkOp::StagePhase phase);
 
@@ -114,6 +121,13 @@ private:
     Pass end_ = Pass::Waiting;
     std::optional<Error> failure_{};
     bool cut_owed_ = false;
+
+    std::optional<bool> off_link_{};
+
+    enum class OffLinkStep : std::uint8_t { Open, Opening, Data, Ending, Closing };
+    OffLinkStep off_step_ = OffLinkStep::Open;
+    proto::ActKey16 off_act_{};
+    proto::FileOffset staged_at_{};
 };
 
 }

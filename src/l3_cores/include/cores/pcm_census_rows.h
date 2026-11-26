@@ -2,7 +2,7 @@
 #pragma once
 
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/pcm_wire_rows.h"
 #include "cores/role_row.h"
 #include "infra/seat.h"

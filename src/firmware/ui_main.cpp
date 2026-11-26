@@ -7,7 +7,6 @@
 #include "app/event_sink.h"
 #include "app/game_id_pump.h"
 #include "app/link_rx_channel.h"
-#include "app/lw_osd_endpoint.h"
 #include "app/mgl_pump.h"
 #include "app/launcher/launcher_screen.h"
 #include "app/recorder_control.h"
@@ -64,7 +63,7 @@ UiMain::UiMain(
       ui_round_(wiring.ui_round),
       menu_keys_(wiring.menu_keys),
       fan_(video_, wiring.ui_round),
-      lw_osd_(wiring.lw_osd),
+      osd_endpoints_(wiring.osd_endpoints),
       ui_rx_(wiring.link_rx),
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
@@ -158,8 +157,8 @@ void UiMain::serve() noexcept {
         ? std::optional{ui_round_->round(app::UiPassWork{link_work, popped > 0})}
         : std::nullopt;
 
-    if (lw_osd_)
-        lw_osd_->serve();
+    for (app::OsdEndpoint& ep : osd_endpoints_)
+        ep.serve();
     if (edge)
         ui_round_->publish_edges(*edge);
     if (edge)
@@ -174,15 +173,15 @@ void UiMain::on_pause() noexcept {
     if (ui_round_)
         ui_round_->forget_cells();
     coworkers_.on_pause();
-    if (lw_osd_)
-        lw_osd_->on_pause();
+    for (app::OsdEndpoint& ep : osd_endpoints_)
+        ep.on_pause();
 }
 
 void UiMain::on_resume() noexcept {
     park_.mute_extra(false);
     coworkers_.on_resume();
-    if (lw_osd_)
-        lw_osd_->on_resume();
+    for (app::OsdEndpoint& ep : osd_endpoints_)
+        ep.on_resume();
     drain_events_();
 }
 
@@ -191,8 +190,8 @@ void UiMain::settle() noexcept {
     coworkers_.on_stop();
     if (ui_round_)
         ui_round_->settle();
-    if (lw_osd_)
-        lw_osd_->on_stop();
+    for (app::OsdEndpoint& ep : osd_endpoints_)
+        ep.on_stop();
 }
 
 }

@@ -66,7 +66,7 @@ static_assert(
 void compose(Adf::EncodedSector& out, Adf::HeaderWords header, Adf::DataWords data) noexcept {
     constexpr std::size_t kWord = sizeof(std::uint16_t);
     std::size_t at = 0;
-    const auto put = [&out, &at](hal::SpiWord w) noexcept {
+    const auto put = [&out, &at](hal::LinkWord w) noexcept {
         const std::span<std::byte, kWord> to = std::span(out).subspan(at).first<kWord>();
         w.store_le(to);
         std::swap(to[0], to[1]);
@@ -75,9 +75,9 @@ void compose(Adf::EncodedSector& out, Adf::HeaderWords header, Adf::DataWords da
     put(Adf::kFillWord);
     put(Adf::kFillWord);
     put(Adf::kSyncWord);
-    for (const hal::SpiWord w : header)
+    for (const hal::LinkWord w : header)
         put(w);
-    for (const hal::SpiWord w : data)
+    for (const hal::LinkWord w : data)
         put(w);
 }
 
@@ -93,12 +93,12 @@ void FloppyWriteCapture::begin(proto::DiskUnit unit, svc::AdfCodec::Track track)
     held_end_ = FioWordCount{};
 }
 
-std::span<const hal::SpiWord> FloppyWriteCapture::live_() const noexcept {
+std::span<const hal::LinkWord> FloppyWriteCapture::live_() const noexcept {
     return infra::affine::from(infra::affine::first(std::span(held_words_), held_end_), held_from_);
 }
 
 void FloppyWriteCapture::take(
-    std::span<const hal::SpiWord> words,
+    std::span<const hal::LinkWord> words,
     svc::IDiskImage& image
 ) noexcept {
     TASTY_SEAT_BODY(FloppyWriteCapture);
@@ -108,7 +108,7 @@ void FloppyWriteCapture::take(
     std::ranges::copy(live_(), held_words_.begin());
     held_end_ = held_();
     held_from_ = FioWordCount{};
-    const std::span<const hal::SpiWord> fits = infra::affine::first_clamped(
+    const std::span<const hal::LinkWord> fits = infra::affine::first_clamped(
         words,
         kHeld - held_end_
     );
@@ -156,13 +156,13 @@ bool FloppyWriteCapture::step_(svc::IDiskImage& image) noexcept {
 }
 
 void FloppyWriteCapture::scan_() noexcept {
-    const std::span<const hal::SpiWord> live = live_();
+    const std::span<const hal::LinkWord> live = live_();
     const auto sync = std::ranges::find(live, Adf::kSyncWord);
     if (sync == live.end()) {
         consume_(held_());
         return;
     }
-    const std::span<const hal::SpiWord> read{live.begin(), sync + 1};
+    const std::span<const hal::LinkWord> read{live.begin(), sync + 1};
     consume_(FioWordCount::carrying(proto::FileSize::of(std::as_bytes(read)), hal::Width::Word));
     stage_ = Stage::Header;
 }

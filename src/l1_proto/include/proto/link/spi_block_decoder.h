@@ -76,7 +76,7 @@ private:
     Port out_;
     unsigned budget_ = kDrainBudget;
     SectorFloor floor_{};
-    BlockPollRoute route_ = BlockPollRoute::Link;
+    BlockPollRoute route_ = BlockPollRoute::Spi;
     PollLife life_ = PollLife::Polling;
     Counters counters_{};
 };

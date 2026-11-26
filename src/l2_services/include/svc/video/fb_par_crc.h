@@ -10,7 +10,7 @@ namespace mister::svc::video {
 struct FbParCrc {
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr FbParCrc of(hal::SpiWord reply) noexcept {
+    [[nodiscard]] static constexpr FbParCrc of(hal::LinkWord reply) noexcept {
         return FbParCrc{reply.low_byte()};
     }
 

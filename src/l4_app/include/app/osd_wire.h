@@ -7,9 +7,11 @@
 #include "app/carrier.h"
 #include "app/spi_osd_rows.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "hal/spi_transport.h"
 #include "infra/prelude.h"
 #include "proto/link_op.h"
+#include "proto/link/frame_route.h"
 #include "proto/link/osd_transport.h"
 #include "infra/seat.h"
 #include "infra/tally.h"
@@ -25,7 +27,7 @@ public:
         : surface_(&surface),
           link_(&link),
           link_rows_(surface, link, tally_),
-          lw_rows_(surface, link, tally_) {}
+          status_rows_(surface, link, tally_) {}
 
     OsdWire(const OsdWire&) = delete;
     OsdWire& operator=(const OsdWire&) = delete;
@@ -33,12 +35,14 @@ public:
     bool flush_one() noexcept {
         if (emit_info_window_())
             return true;
-        return route_ == Carrier::Lw ? lw_rows_.flush_one() : link_rows_.flush_one();
+        return link_carries(route_) ? link_rows_.flush_one() : status_rows_.flush_one();
     }
 
     void bind_rows(Carrier r) noexcept { route_ = r; }
 
     [[nodiscard]] Carrier page_route() const noexcept { return route_; }
+
+    void bind_frames(infra::OptRef<proto::link::FrameRoute> frames) noexcept { frames_ = frames; }
 
     void bind_rotation(proto::OsdRotation rotation) noexcept { rotation_ = rotation; }
 
@@ -120,13 +124,17 @@ public:
     bool has_focus() const noexcept { return show_ == proto::LinkOp::OsdShow::Menu; }
 
     proto::OsdRowCount backlog() const noexcept {
-        return route_ == Carrier::Lw ? lw_rows_.backlog() : link_rows_.backlog();
+        return link_carries(route_) ? link_rows_.backlog() : status_rows_.backlog();
     }
 
     proto::OsdSurface& surface() noexcept { return *surface_; }
 
 private:
     bool emit_info_window_() noexcept;
+
+    [[nodiscard]] proto::ILinkFrame& control_frame_(proto::link::SpiFrame& link) noexcept {
+        return frames_ && frames_->off_link() ? frames_->frame() : link;
+    }
 
     void latch_lit(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdTarget t) noexcept {
         show_ = s;
@@ -143,8 +151,9 @@ private:
     hal::ISpiTransport* link_;
     OsdRowTally tally_{};
     SpiOsdRows<proto::OsdRow{}> link_rows_;
-    SpiOsdRows<proto::OsdSurface::kStatusRow> lw_rows_;
-    Carrier route_ = Carrier::Link;
+    SpiOsdRows<proto::OsdSurface::kStatusRow> status_rows_;
+    Carrier route_ = Carrier::Spi;
+    infra::OptRef<proto::link::FrameRoute> frames_{};
     proto::link::OsdTransport osd_{};
     xthread::Telemetry<proto::InfoWindow>::Reader info_seen_{};
     infra::Tally vis_writes_{};

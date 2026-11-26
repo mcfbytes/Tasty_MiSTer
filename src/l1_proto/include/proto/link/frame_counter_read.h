@@ -21,7 +21,7 @@ public:
 
     static constexpr FioWordCount kReadWords{1};
 
-    static constexpr hal::SpiWord kSupportedBit{0x100u};
+    static constexpr hal::LinkWord kSupportedBit{0x100u};
 
     [[nodiscard]] Ex<FrameCount> read(Link& link);
 

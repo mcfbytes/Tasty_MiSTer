@@ -31,7 +31,7 @@
 #include "app/session_machine.h"
 #include "app/session_tally.h"
 #include "app/types.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mounted_path.h"
 #include "cores/save_channel.h"
 #include "cores/slot_mount.h"

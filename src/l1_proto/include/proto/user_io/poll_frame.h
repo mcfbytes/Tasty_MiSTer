@@ -19,13 +19,13 @@ inline constexpr ReplyCount kMaxPollFrameReplies{16};
 
 struct PollFrame {
     TASTY_SEAT_EXEMPT(component);
-    using Replies = infra::IndexedArray<hal::SpiWord, kMaxPollFrameReplies.size(), ReplyIndex>;
+    using Replies = infra::IndexedArray<hal::LinkWord, kMaxPollFrameReplies.size(), ReplyIndex>;
 
     Replies replies{};
     ReplyCount kept{};
     std::byte pad_{};
 
-    constexpr void keep(hal::SpiWord reply) noexcept {
+    constexpr void keep(hal::LinkWord reply) noexcept {
         replies[infra::affine::end_of<ReplyIndex>(kept)] = reply;
         kept += ReplyCount{1};
     }
@@ -37,7 +37,7 @@ struct PollFrame {
 
     constexpr void keep_blank(ReplyCount blank) noexcept {
         for (ReplyCount done{}; done < blank; done += ReplyCount{1})
-            keep(hal::SpiWord{});
+            keep(hal::LinkWord{});
     }
 
     [[nodiscard]] constexpr ReplyWord reply(ReplyIndex i) const noexcept {

@@ -4,9 +4,11 @@
 #include "app/event.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
+#include "app/ocram_lane_writer.h"
 #include "app/load_window_map.h"
 #include "app/window_tally.h"
 #include "hal/fpga_aperture.h"
+#include "infra/opt_ref.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/seat_owner_main.h"
@@ -29,6 +31,8 @@ struct RungEdges {
     const svc::Vfs& vfs;
     WindowTally& windows;
     const os::IClock& clock;
+
+    infra::OptRef<OcramLaneWriter> lane{};
 };
 
 }

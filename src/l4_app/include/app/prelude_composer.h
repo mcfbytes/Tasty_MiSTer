@@ -25,6 +25,7 @@
 #include "proto/link_event.h"
 #include "proto/types.h"
 #include "svc/filter_send_plan.h"
+#include "svc/types.h"
 #include "svc/video/filter_set.h"
 #include "svc/video/video_service.h"
 
@@ -68,7 +69,7 @@ public:
 
     void take_filters(std::unique_ptr<svc::video::FilterSet> set) noexcept;
 
-    [[nodiscard]] Ex<void> publish(proto::UioOp op, std::span<const hal::SpiWord> w) override;
+    [[nodiscard]] Ex<void> publish(proto::UioOp op, std::span<const hal::LinkWord> w) override;
 
     void on_reply(const proto::LinkEvent::FrameReply& r) noexcept;
 
@@ -82,6 +83,10 @@ public:
 
     [[nodiscard]] ModeEdge mode_edge() const noexcept { return mode_edge_; }
 
+    void owe_scaling_pair() noexcept { pair_owed_ = true; }
+
+    [[nodiscard]] std::optional<svc::ScalerCaps> scaler_caps() const noexcept { return caps_; }
+
     [[nodiscard]] Answers answers() const noexcept { return answers_; }
 
     [[nodiscard]] const xthread::Telemetry<PreludeStats, SeatTag::Ui>& stats_cell() const noexcept {
@@ -90,7 +95,7 @@ public:
 
 private:
     struct Publish {
-        std::span<const hal::SpiWord> v{};
+        std::span<const hal::LinkWord> v{};
 
         [[nodiscard]] bool fits_block() const noexcept {
             return !v.empty() && v.size() <= VideoWire::kWords;
@@ -106,7 +111,7 @@ private:
             return words;
         }
 
-        [[nodiscard]] std::span<const hal::SpiWord> words() const noexcept { return v; }
+        [[nodiscard]] std::span<const hal::LinkWord> words() const noexcept { return v; }
     };
 
     struct RepliesOwed {
@@ -153,13 +158,13 @@ private:
 
         template <class WordAt>
         void fill(
-            std::span<hal::SpiWord> block,
+            std::span<hal::LinkWord> block,
             svc::FilterBankWordIndex from,
             WordAt&& word_at
         ) const {
             const std::size_t base = from.wire_offset(svc::FilterAddressGrid{});
             for (std::size_t i = 0; i < v; ++i)
-                block[i] = hal::SpiWord{word_at(svc::FilterBankWordIndex{base + i})};
+                block[i] = hal::LinkWord{word_at(svc::FilterBankWordIndex{base + i})};
         }
 
         friend constexpr bool operator==(ChunkWords, ChunkWords) = default;
@@ -184,11 +189,11 @@ private:
     struct Held {
         proto::UioOp op{};
         FrameWordCount n{};
-        std::array<hal::SpiWord, VideoWire::kWords> w{};
+        std::array<hal::LinkWord, VideoWire::kWords> w{};
         bool live = false;
 
-        [[nodiscard]] std::span<const hal::SpiWord> words() const noexcept {
-            return infra::affine::first(std::span<const hal::SpiWord>(w), n);
+        [[nodiscard]] std::span<const hal::LinkWord> words() const noexcept {
+            return infra::affine::first(std::span<const hal::LinkWord>(w), n);
         }
     };
 
@@ -254,6 +259,7 @@ private:
 
     proto::StageGen mode_gen_{};
     ModeEdge mode_edge_ = ModeEdge::None;
+    std::optional<svc::ScalerCaps> caps_{};
     bool mode_in_block_done_ = false;
     bool shadow_done_ = false;
     bool tail_done_ = false;

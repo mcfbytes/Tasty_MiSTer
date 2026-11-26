@@ -18,7 +18,7 @@ constexpr BusDevice kFirstLook = BusDevice::Cdda;
 constexpr std::array<BusDevice, 3> kServiceOrder{BusDevice::Ide0, BusDevice::Ide1, BusDevice::Fdc};
 constexpr IdeUnit::Channel kFirstChannel{0};
 constexpr IdeUnit::Channel kSecondChannel{1};
-constexpr hal::SpiWord kCddaOut = proto::word(proto::UioOp::DmaWrite);
+constexpr hal::LinkWord kCddaOut = proto::word(proto::UioOp::DmaWrite);
 
 constexpr std::uint16_t wire_len(infra::ByteCount n) noexcept {
     return static_cast<std::uint16_t>(n.v);

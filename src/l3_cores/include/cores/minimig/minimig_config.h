@@ -14,7 +14,7 @@
 #include "cores/minimig/minimig_ladder_bus_addr.h"
 #include "cores/minimig/ext_cfg_word.h"
 #include "proto/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "infra/byte_count.h"
 #include "infra/byte_offset.h"
@@ -68,17 +68,17 @@ struct MinimigConfig {
 
     void set_ext_rom(std::string_view path) noexcept;
 
-    [[nodiscard]] hal::SpiWord cpu_word() const noexcept;
-    [[nodiscard]] hal::SpiWord chipset_word() const noexcept;
-    [[nodiscard]] hal::SpiWord floppy_word() const noexcept;
-    [[nodiscard]] hal::SpiWord memory_word() const noexcept;
-    [[nodiscard]] hal::SpiWord hdd_word(IdeUnits present) const noexcept;
-    [[nodiscard]] hal::SpiWord video_word() const noexcept;
-    [[nodiscard]] hal::SpiWord audio_word() const noexcept;
+    [[nodiscard]] hal::LinkWord cpu_word() const noexcept;
+    [[nodiscard]] hal::LinkWord chipset_word() const noexcept;
+    [[nodiscard]] hal::LinkWord floppy_word() const noexcept;
+    [[nodiscard]] hal::LinkWord memory_word() const noexcept;
+    [[nodiscard]] hal::LinkWord hdd_word(IdeUnits present) const noexcept;
+    [[nodiscard]] hal::LinkWord video_word() const noexcept;
+    [[nodiscard]] hal::LinkWord audio_word() const noexcept;
 
-    [[nodiscard]] hal::SpiWord joy_word() const noexcept;
+    [[nodiscard]] hal::LinkWord joy_word() const noexcept;
 
-    [[nodiscard]] hal::SpiHalves ext_cfg_halves() const noexcept;
+    [[nodiscard]] hal::LinkHalves ext_cfg_halves() const noexcept;
 
     [[nodiscard]] bool hrtmon() const noexcept;
 
@@ -169,8 +169,8 @@ struct MinimigConfig {
     [[nodiscard]] std::string_view fast_ram_label() const noexcept;
     [[nodiscard]] std::string_view joy_mode_name() const noexcept;
 
-    [[nodiscard]] hal::SpiWord joy_swap_word() const noexcept;
-    [[nodiscard]] hal::SpiWord joy_mode_word() const noexcept;
+    [[nodiscard]] hal::LinkWord joy_swap_word() const noexcept;
+    [[nodiscard]] hal::LinkWord joy_mode_word() const noexcept;
 
     friend bool operator==(const MinimigConfig&, const MinimigConfig&) = default;
 
@@ -182,7 +182,7 @@ private:
         infra::ByteCount len
     ) const noexcept;
     [[nodiscard]] std::span<std::byte> field_(infra::ByteOffset at, infra::ByteCount len) noexcept;
-    [[nodiscard]] hal::SpiWord half_(infra::ByteOffset at) const noexcept;
+    [[nodiscard]] hal::LinkWord half_(infra::ByteOffset at) const noexcept;
     [[nodiscard]] bool well_formed_() const noexcept;
 
     [[nodiscard]] std::string_view chip_ram_name_() const noexcept;

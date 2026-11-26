@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "hal/spi_sample.h"
+#include "hal/pin_sample.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
@@ -52,9 +52,9 @@ public:
 
     [[nodiscard]] constexpr ConfSwitches with_buttons(hal::ButtonMask buttons) const noexcept {
         ConfSwitches out = without(Bit::MenuButton).without(Bit::UserButton);
-        if (buttons.intersects(hal::SpiSample::kMenuButton))
+        if (buttons.intersects(hal::PinSample::kMenuButton))
             out.set(Bit::MenuButton);
-        if (buttons.intersects(hal::SpiSample::kUserButton))
+        if (buttons.intersects(hal::PinSample::kUserButton))
             out.set(Bit::UserButton);
         return out;
     }
@@ -62,13 +62,13 @@ public:
     [[nodiscard]] constexpr hal::ButtonMask buttons() const noexcept {
         hal::ButtonMask out{};
         if (has(Bit::MenuButton))
-            out = hal::SpiSample::kMenuButton;
+            out = hal::PinSample::kMenuButton;
         if (has(Bit::UserButton))
-            out = out.with(hal::SpiSample::kUserButton);
+            out = out.with(hal::PinSample::kUserButton);
         return out;
     }
 
-    [[nodiscard]] constexpr hal::SpiWord word() const noexcept { return hal::SpiWord{bits_}; }
+    [[nodiscard]] constexpr hal::LinkWord word() const noexcept { return hal::LinkWord{bits_}; }
 
     friend constexpr bool operator==(ConfSwitches, ConfSwitches) = default;
 

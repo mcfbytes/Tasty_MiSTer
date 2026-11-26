@@ -7,7 +7,7 @@
 #include "cores/companion_load.h"
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/mailbox_census_rows.h"
 #include "cores/mailbox_servant_row.h"
 #include "cores/snes/msu_wire.h"

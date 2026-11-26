@@ -11,6 +11,7 @@ namespace mister::app {
 
 struct PadGrantBody {
     proto::JoystickWire wire{};
+    bool keys = false;
 
     [[nodiscard]] bool live() const noexcept { return true; }
 };

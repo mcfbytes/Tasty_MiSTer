@@ -39,7 +39,8 @@ void SpiIdentifyDecoder::service() noexcept {
             .type_byte = *id,
             .bind_gen = gen_,
             .width = session_.capabilities().width,
-            .lw = session_.capabilities().lw
+            .lw = session_.capabilities().lw,
+            .ocram = session_.capabilities().ocram
         }
     );
 }

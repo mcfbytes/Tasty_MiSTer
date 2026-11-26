@@ -30,6 +30,12 @@ std::string_view InfoDecoder::decode(const proto::LinkEvent::PolledWord& w) {
     return {};
 }
 
+std::string_view InfoDecoder::decode(const InfoNotice& n) {
+    TASTY_SEAT_BODY(InfoDecoder);
+    refresh_();
+    return judged_(n.info, n.bind_gen);
+}
+
 void InfoDecoder::refresh_() {
     if (!reader_.take_if_changed(cell_, scratch_))
         return;
@@ -47,16 +53,27 @@ void InfoDecoder::refresh_() {
 }
 
 std::string_view InfoDecoder::info_text_(const proto::LinkEvent::PolledWord& w) {
-    const unsigned index = w.word.masked(proto::user_io::poll_row(w.shape).mask.wire_word())
-                               .low_byte();
-    if (index == 0)
+    const hal::ocram::InfoArg info = hal::ocram::InfoArg::of(
+        w.word.masked(proto::user_io::poll_row(w.shape).mask.wire_word()).low_byte()
+    );
+    return judged_(info, w.bind_gen);
+}
+
+std::string_view InfoDecoder::judged_(hal::ocram::InfoArg info, proto::BindGeneration gen) {
+    if (info == hal::ocram::InfoArg{})
         return {};
-    if (w.bind_gen != gen_) {
+    if (gen != gen_) {
         ++stale_;
         return {};
     }
+    return text_for_(info);
+}
+
+std::string_view InfoDecoder::text_for_(hal::ocram::InfoArg info) {
+    if (info == hal::ocram::InfoArg{})
+        return {};
     const auto rows = table_.table();
-    const std::string_view text = row_.has_value() ? table_.subfield(rows[*row_], index)
+    const std::string_view text = row_.has_value() ? table_.subfield(rows[*row_], info.byte())
                                                    : std::string_view{};
     if (text.empty()) {
         ++unmapped_;

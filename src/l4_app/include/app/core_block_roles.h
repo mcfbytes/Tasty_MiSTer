@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/save_channel.h"
 #include "cores/slot_servants.h"
 #include "infra/opt_ref.h"

@@ -14,7 +14,7 @@
 #include "cores/cd/cd_engine_stats.h"
 #include "cores/cd/cd_profile.h"
 #include "cores/cd/cd_wire_port.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/staging_core.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"

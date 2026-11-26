@@ -8,7 +8,7 @@
 #include "cores/core_grant.h"
 #include "cores/cheat_engine_row.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/loader.h"
 #include "cores/loader_context.h"
 #include "cores/n64/n64_analog.h"

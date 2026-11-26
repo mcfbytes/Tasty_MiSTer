@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "cores/core_grant.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/lba_window_geometry.h"
 #include "cores/slot_servant_grant.h"
 #include "cores/slot_servants.h"

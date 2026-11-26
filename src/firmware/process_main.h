@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/opt_ref.h"
 #include "infra/xthread/park_fds.h"
+#include "os/epoll_set.h"
 #include "infra/park_timeout.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
@@ -17,7 +19,7 @@ namespace mister::fw {
 
 class ThreadAssembly;
 
-inline constexpr infra::ParkTimeout kSupervisorWakeMs{1000};
+inline constexpr infra::ParkTimeout kMainWakeMs{1000};
 
 class ProcessMain final : public xthread::SeatMain<ProcessMain> {
     TASTY_SEAT_RESIDENT(Main);
@@ -26,7 +28,8 @@ public:
     ProcessMain(
         app::SessionOwner& owner,
         const ThreadAssembly& assembly,
-        xthread::ParkFds fds
+        xthread::ParkFds fds,
+        infra::OptRef<const os::EpollSet> doorbells = {}
     ) noexcept;
     ProcessMain(const ProcessMain&) = delete;
     ProcessMain& operator=(const ProcessMain&) = delete;

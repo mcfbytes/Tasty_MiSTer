@@ -81,12 +81,12 @@ proto::LinkOp PayloadPieces::piece_op_(proto::FileId id, proto::LinkOp::StagePha
     return infra::make<proto::LinkOp>(op);
 }
 
-Ex<void> PayloadPieces::stage_(std::size_t n) {
-    std::vector<std::uint8_t> buf(n);
+Ex<void> PayloadPieces::stage_(proto::FileSize n) {
+    auto buf = n.zeroed<std::vector<std::uint8_t>>();
     if (file_ == nullptr) {
         std::copy_n(
             infra::affine::from(std::span<const std::uint8_t>(bytes_), sent_).begin(),
-            n,
+            buf.size(),
             buf.begin()
         );
     } else {
@@ -103,6 +103,11 @@ Ex<void> PayloadPieces::stage_(std::size_t n) {
 }
 
 Ex<PayloadPieces::Pass> PayloadPieces::step(ILadderHost& host) {
+
+    if (!off_link_)
+        off_link_ = !held_ && !size_.empty() && host.off_link();
+    if (*off_link_)
+        return step_off_link_(host);
     if (failure_) {
         if (cut_owed_)
             return fail_(host);
@@ -115,12 +120,13 @@ Ex<PayloadPieces::Pass> PayloadPieces::step(ILadderHost& host) {
     while (host.link_in_flight() < kAhead) {
         const proto::FileSize left = sent_.remaining_in(size_);
 
-        const std::size_t n = left.clamp_write(
-            proto::kFileStart,
-            held_ ? held_->piece.bytes_at(held_->framing) : piece_bytes(frame_.chunk, *width_)
+        const proto::FileSize n = left.min(
+            proto::FileSize{
+                held_ ? held_->piece.bytes_at(held_->framing) : piece_bytes(frame_.chunk, *width_)
+            }
         );
         const bool first = sent_ == proto::kFileStart;
-        const bool last = proto::FileSize{n} == left;
+        const bool last = n == left;
 
         if (!staged_) {
             auto read = stage_(n);
@@ -131,7 +137,7 @@ Ex<PayloadPieces::Pass> PayloadPieces::step(ILadderHost& host) {
         }
 
         proto::FileId id{};
-        if (n != 0) {
+        if (!n.empty()) {
             auto r = host.intern_piece(
                 *staged_,
                 first ? std::string_view{ext_} : std::string_view{},
@@ -153,11 +159,117 @@ Ex<PayloadPieces::Pass> PayloadPieces::step(ILadderHost& host) {
         if (!host.order(op))
             return Pass::Waiting;
         staged_.reset();
-        sent_ += proto::FileSize{n};
+        sent_ += n;
         if (last)
             return end_ = Pass::Done;
     }
     return Pass::Waiting;
+}
+
+Ex<PayloadPieces::Pass> PayloadPieces::order_off_link_(
+    ILadderHost& host,
+    Phase phase,
+    bool names_bytes
+) {
+    proto::FileId id{};
+    if (names_bytes) {
+
+        const std::string_view ext = phase == Phase::Open ? std::string_view{ext_}
+                                                          : std::string_view{};
+        auto r = host.intern_piece({}, ext, size_, proto::kFileStart + size_);
+        if (!r) {
+            if (r.error().code == Errc::would_block)
+                return Pass::Waiting;
+            return std::unexpected(r.error());
+        }
+        id = *r;
+    }
+    proto::ActKey16 key = host.next_act().narrow();
+    if (!key)
+        key = host.next_act().narrow();
+    proto::LinkOp::StagePayload op{.payload = id, .dest = frame_.dest, .phase = phase};
+    if (phase == Phase::Close)
+        op.region = frame_.region;
+    op.act = key;
+    if (!host.order(op))
+        return Pass::Waiting;
+    off_act_ = key;
+    off_step_ = phase == Phase::Open ? OffLinkStep::Opening : OffLinkStep::Closing;
+    return Pass::Waiting;
+}
+
+Ex<PayloadPieces::Pass> PayloadPieces::step_off_link_(ILadderHost& host) {
+    if (end_ != Pass::Waiting)
+        return end_;
+    if (!width_)
+        width_ = host.link_width();
+    for (;;) {
+        switch (off_step_) {
+            case OffLinkStep::Open:
+                return order_off_link_(host, Phase::Open, true);
+            case OffLinkStep::Opening:
+                switch (host.payload_answer(off_act_)) {
+                    case FileTxAnswer::Pending:
+                        return Pass::Waiting;
+                    case FileTxAnswer::Dropped:
+                        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+                    case FileTxAnswer::Served:
+                        off_step_ = OffLinkStep::Data;
+                        break;
+                }
+                break;
+            case OffLinkStep::Data: {
+                if (!staged_ && sent_ == proto::kFileStart + size_) {
+                    off_step_ = OffLinkStep::Ending;
+                    break;
+                }
+                if (!staged_) {
+                    const proto::FileSize n = sent_.remaining_in(size_).min(
+                        proto::FileSize{piece_bytes(frame_.chunk, *width_)}
+                    );
+                    if (auto read = stage_(n); !read) {
+                        failure_ = std::move(read.error());
+                        off_step_ = OffLinkStep::Ending;
+                        break;
+                    }
+                    staged_at_ = proto::kFileStart;
+                }
+                const std::span<const std::uint8_t> piece(*staged_);
+                auto taken = host.send_off_link(infra::affine::from(piece, staged_at_));
+                if (!taken) {
+                    failure_ = taken.error();
+                    off_step_ = OffLinkStep::Ending;
+                    break;
+                }
+                if (taken->empty())
+                    return Pass::Waiting;
+                staged_at_ += *taken;
+                if (staged_at_ == proto::kFileStart + proto::FileSize::of(piece)) {
+                    sent_ += proto::FileSize::of(piece);
+                    staged_.reset();
+                }
+                break;
+            }
+            case OffLinkStep::Ending:
+                if (!host.end_off_link())
+                    return Pass::Waiting;
+                return order_off_link_(host, Phase::Close, !failure_.has_value());
+            case OffLinkStep::Closing:
+                switch (host.payload_answer(off_act_)) {
+                    case FileTxAnswer::Pending:
+                        return Pass::Waiting;
+                    case FileTxAnswer::Dropped: {
+                        const Error dropped{Errc::negotiation, ERR_SITE(), 0};
+                        return std::unexpected(failure_.value_or(dropped));
+                    }
+                    case FileTxAnswer::Served:
+                        if (failure_)
+                            return std::unexpected(*failure_);
+                        return end_ = Pass::Done;
+                }
+                return Pass::Waiting;
+        }
+    }
 }
 
 Ex<PayloadPieces::Pass> PayloadPieces::fail_(ILadderHost& host) {

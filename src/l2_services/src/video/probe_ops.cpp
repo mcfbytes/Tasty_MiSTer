@@ -11,14 +11,14 @@
 
 namespace mister::svc::video {
 
-Ex<hal::SpiWord> ProbeOps::emit_filter_mode(ScalerSlotMode mode) {
+Ex<hal::LinkWord> ProbeOps::emit_filter_mode(ScalerSlotMode mode) {
     auto op = link_.command(proto::UioOp::SetFltNum);
     if (!op)
         return std::unexpected(op.error());
 
-    if (*op == hal::SpiWord{}) {
+    if (*op == hal::LinkWord{}) {
         link_.close();
-        return hal::SpiWord{};
+        return hal::LinkWord{};
     }
 
     if (auto r = mode.write_to(link_); !r) {
@@ -29,30 +29,30 @@ Ex<hal::SpiWord> ProbeOps::emit_filter_mode(ScalerSlotMode mode) {
 }
 
 Ex<void> ShadowMaskWord::write_to(proto::link::Link& link) const {
-    return link.word(hal::SpiWord{static_cast<std::uint16_t>(v)});
+    return link.word(hal::LinkWord{static_cast<std::uint16_t>(v)});
 }
 
-Ex<hal::SpiWord> ProbeOps::emit_shadow_mask(ShadowMaskWord flag) {
+Ex<hal::LinkWord> ProbeOps::emit_shadow_mask(ShadowMaskWord flag) {
     auto op = link_.command(proto::UioOp::ShadowMask);
     if (!op)
         return std::unexpected(op.error());
 
-    if (*op == hal::SpiWord{}) {
+    if (*op == hal::LinkWord{}) {
         link_.close();
-        return hal::SpiWord{};
+        return hal::LinkWord{};
     }
     if (auto r = flag.write_to(link_); !r) {
         return std::unexpected(r.error());
     }
 
-    if (auto r = link_.word(hal::SpiWord{}); !r) {
+    if (auto r = link_.word(hal::LinkWord{}); !r) {
         return std::unexpected(r.error());
     }
     link_.close();
     return *op;
 }
 
-Ex<hal::SpiWord> ProbeOps::emit_hdmi_int_probe() {
+Ex<hal::LinkWord> ProbeOps::emit_hdmi_int_probe() {
     auto op = link_.command(proto::UioOp::HdmiInt);
     if (!op)
         return std::unexpected(op.error());
@@ -60,7 +60,7 @@ Ex<hal::SpiWord> ProbeOps::emit_hdmi_int_probe() {
     return *op;
 }
 
-Ex<hal::SpiWord> ProbeOps::emit_gamma_probe() {
+Ex<hal::LinkWord> ProbeOps::emit_gamma_probe() {
     auto op = link_.command(proto::UioOp::SetGamma);
     if (!op)
         return std::unexpected(op.error());
@@ -125,8 +125,8 @@ Ex<ProbeOps::VresStep> ProbeOps::read_vres_(
         return out;
     if (out.res_changed)
         out.vi_seen = true;
-    std::array<hal::SpiWord, VideoSample::kVresRunWords> run{};
-    for (hal::SpiWord& w : run) {
+    std::array<hal::LinkWord, VideoSample::kVresRunWords> run{};
+    for (hal::LinkWord& w : run) {
         auto r = link_.read();
         if (!r)
             return std::unexpected(r.error());
@@ -152,8 +152,8 @@ Ex<ProbeOps::FbParStep> ProbeOps::read_fb_par_(
     pass.sample.fb_crc = out.crc;
     if (!out.fb_changed && !force && !res_changed)
         return out;
-    std::array<hal::SpiWord, VideoSample::kFbParRunWords> run{};
-    for (hal::SpiWord& w : run) {
+    std::array<hal::LinkWord, VideoSample::kFbParRunWords> run{};
+    for (hal::LinkWord& w : run) {
         auto r = link_.read();
         if (!r)
             return std::unexpected(r.error());
@@ -169,7 +169,7 @@ Ex<void> ProbeOps::send_yc_(bool force, GeometryPass& pass) {
 
     if (auto r = link_.command(
             proto::LinkSel::Io,
-            hal::SpiWord{proto::byte(proto::UioOp::SetYcPar)}
+            hal::LinkWord{proto::byte(proto::UioOp::SetYcPar)}
         );
         !r) {
         return std::unexpected(r.error());
@@ -228,7 +228,7 @@ Ex<void> ProbeOps::send_scaling_(const ScalingPolicy& policy, const VideoSample&
     return link_.word(sw.width);
 }
 
-Ex<hal::SpiWord> ProbeOps::emit_afilter_probe() {
+Ex<hal::LinkWord> ProbeOps::emit_afilter_probe() {
 
     auto op = link_.command(proto::UioOp::SetAfilter);
     if (!op)

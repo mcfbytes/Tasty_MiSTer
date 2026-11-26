@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "app/file_bytes.h"
+#include "app/types.h"
+#include "cores/progress.h"
 #include "infra/path_parts.h"
 #include "infra/prelude.h"
 
@@ -242,14 +244,22 @@ bool FileTxPieces::wants_pass(
     const FileTxLevelCell& level
 ) const noexcept {
     TASTY_SEAT_BODY(FileTxPieces);
+
+    if (off_link_ && *off_link_)
+        return !lane_waiting_;
     return ready(inbox, level);
 }
 
 Rung::Pass FileTxPieces::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(FileTxPieces);
-    if (!ready(edges.inbox, edges.level))
-        return Rung::Pass::Waiting;
-    switch (step(edges.inbox, edges.level, owner.next_act(), owner.link_width())) {
+
+    if (!off_link_)
+        off_link_ = !resumed() && edges.lane && edges.lane->granted();
+    const Pass pass = *off_link_ ? step_off_link_(edges, owner)
+        : ready(edges.inbox, edges.level)
+        ? step(edges.inbox, edges.level, owner.next_act(), owner.link_width())
+        : Pass::Waiting;
+    switch (pass) {
         case Pass::Sent:
             return Rung::Pass::Moved;
         case Pass::Waiting:
@@ -260,6 +270,228 @@ Rung::Pass FileTxPieces::step(const RungEdges& edges, cores::ILadderHost& owner)
             return Rung::Pass::Failed;
     }
     return Rung::Pass::Failed;
+}
+
+std::optional<bool> FileTxPieces::off_link_answer_(const FileTxLevelCell& level) const noexcept {
+    const auto s = level.sample();
+    if (!s || !s.value.answers(off_act_))
+        return std::nullopt;
+    return s.value.stream_served;
+}
+
+void FileTxPieces::off_link_progress_(const RungEdges& edges) noexcept {
+    const cores::Progress now = cores::Progress::of_bytes(
+        {.done = sent_ - proto::kFileStart, .total = total_}
+    );
+    if (now.done == bar_.done)
+        return;
+    bar_ = now;
+    EventQueue<SeatTag::Main>::Producer events = edges.events;
+    events.push(Event::ProgressUpdate{.progress = now}, Event::Head{ERR_SITE(), {}, kUncaused});
+}
+
+FileTxPieces::Pass FileTxPieces::step_off_link_(const RungEdges& edges, cores::ILadderHost& owner) {
+    using Phase = proto::LinkOp::FileTxPhase;
+    lane_waiting_ = false;
+    OcramLaneWriter& lane = *edges.lane;
+    const auto park = [this, &lane](OcramLaneWriter::Wait on) {
+        lane.wait(on);
+        lane_waiting_ = true;
+        return Pass::Waiting;
+    };
+    const bool open = off_step_ != OffLink::Open && off_step_ != OffLink::Opening;
+
+    if (open && lane.lost()) {
+        cut_ended_ = true;
+        off_step_ = OffLink::Cut;
+    }
+    switch (off_step_) {
+        case OffLink::Open: {
+            if (edges.inbox.ring().size() + 1 >= proto::kLinkTxCapacity)
+                return Pass::Waiting;
+            auto id = edges.inbox.intern_file_path(path_.view(), total_);
+            if (!id)
+                return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
+            if (!width_)
+                width_ = owner.link_width();
+            off_act_ = owner.next_act();
+            (void)edges.inbox.push(
+                proto::LinkOp::FileTx{
+                    .wire_index = wire_index_.fio_byte(),
+                    .phase = Phase::Open,
+                    .file = *id,
+                    .total = total_.file_word<std::uint32_t>(),
+                    .act = off_act_
+                }
+            );
+            off_step_ = OffLink::Opening;
+            return Pass::Sent;
+        }
+        case OffLink::Opening: {
+            const std::optional<bool> served = off_link_answer_(edges.level);
+            if (!served)
+                return Pass::Waiting;
+            if (!*served)
+                return Pass::Failed;
+            ++pieces_;
+            off_step_ = OffLink::Data;
+            return off_link_data_(edges, lane);
+        }
+        case OffLink::Data:
+            return off_link_data_(edges, lane);
+        case OffLink::Acts:
+        case OffLink::Before:
+        case OffLink::Answering:
+            return off_link_close_acts_(edges, owner);
+        case OffLink::End:
+            if (!lane.end())
+                return park(OcramLaneWriter::Wait::Room);
+            off_step_ = OffLink::Close;
+            return Pass::Sent;
+        case OffLink::Close: {
+            if (!lane.played())
+                return park(OcramLaneWriter::Wait::Played);
+
+            lane.close_window();
+            const svc::Crc32 crc = key_.value();
+            auto id = edges.inbox.intern_file_path(path_.view(), total_, crc, 0, stamp_.edge);
+            if (!id)
+                return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
+            const proto::ActKey act = owner.next_act();
+            if (!edges.inbox.push(
+                    proto::LinkOp::FileTx{
+                        .wire_index = wire_index_.fio_byte(),
+                        .phase = Phase::Close,
+                        .file = *id,
+                        .total = total_.file_word<std::uint32_t>(),
+                        .act = act
+                    }
+                )) {
+                return Pass::Waiting;
+            }
+            last_ = LastOp{
+                .act = act,
+                .from = sent_,
+                .crc = crc,
+                .shaped = loader_ != nullptr,
+                .stamped = stamp_.any(),
+                .remounts_saves = facts_sent_
+            };
+            return Pass::Done;
+        }
+        case OffLink::Cut:
+            return off_link_cut_(edges, lane);
+    }
+    return Pass::Failed;
+}
+
+FileTxPieces::Pass FileTxPieces::off_link_data_(const RungEdges& edges, OcramLaneWriter& lane) {
+
+    if (!framed_) {
+        if (!lane.open(edges.level.sample().value.params)) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            lane_waiting_ = true;
+            return Pass::Waiting;
+        }
+        framed_ = true;
+    }
+    if (!staged_ && sent_ == proto::kFileStart + total_) {
+        off_step_ = OffLink::Acts;
+        return Pass::Sent;
+    }
+    if (!staged_) {
+        if (!stage_(piece_bytes(*width_))) {
+            off_step_ = OffLink::Cut;
+            return off_link_cut_(edges, lane);
+        }
+        staged_at_ = proto::kFileStart;
+    }
+    const std::span<const std::uint8_t> piece(staged_->bytes);
+    const proto::FileSize taken = lane.data(infra::affine::from(piece, staged_at_), *width_);
+    if (taken.empty()) {
+        lane.wait(OcramLaneWriter::Wait::Room);
+        lane_waiting_ = true;
+        return Pass::Waiting;
+    }
+    staged_at_ += taken;
+    if (staged_at_ == proto::kFileStart + proto::FileSize::of(piece)) {
+        sent_ += proto::FileSize::of(piece);
+        staged_.reset();
+        off_link_progress_(edges);
+    }
+    return Pass::Sent;
+}
+
+FileTxPieces::Pass FileTxPieces::off_link_close_acts_(
+    const RungEdges& edges,
+    cores::ILadderHost& owner
+) {
+    using Phase = proto::LinkOp::FileTxPhase;
+    OcramLaneWriter& lane = *edges.lane;
+    if (off_step_ == OffLink::Acts) {
+        if (!lane.played()) {
+            lane.wait(OcramLaneWriter::Wait::Played);
+            lane_waiting_ = true;
+            return Pass::Waiting;
+        }
+        if (!facts_sent_ && loader_ != nullptr && !loader_->facts().empty()) {
+            const auto sent = edges.inbox.push_load_facts(loader_->facts(), path_.view());
+            if (!sent)
+                return sent.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
+            facts_sent_ = true;
+        }
+        off_step_ = stamp_.any() || facts_sent_ ? OffLink::Before : OffLink::End;
+        return Pass::Sent;
+    }
+    if (off_step_ == OffLink::Before) {
+        if (edges.inbox.ring().size() + 1 >= proto::kLinkTxCapacity)
+            return Pass::Waiting;
+        auto id = edges.inbox.intern_empty_file(
+            FileIntern{.path = path_.view(), .save = stamp_.save, .edge = stamp_.edge}
+        );
+        if (!id)
+            return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
+        if (facts_sent_)
+            (void)edges.inbox.stamp_remount(*id);
+        off_act_ = owner.next_act();
+        (void)edges.inbox.push(
+            proto::LinkOp::FileTx{
+                .wire_index = wire_index_.fio_byte(),
+                .phase = Phase::BeforeClose,
+                .file = *id,
+                .total = total_.file_word<std::uint32_t>(),
+                .act = off_act_
+            }
+        );
+        off_step_ = OffLink::Answering;
+        return Pass::Sent;
+    }
+    const std::optional<bool> served = off_link_answer_(edges.level);
+    if (!served)
+        return Pass::Waiting;
+
+    off_step_ = OffLink::End;
+    return Pass::Sent;
+}
+
+FileTxPieces::Pass FileTxPieces::off_link_cut_(const RungEdges& edges, OcramLaneWriter& lane) {
+    if (pieces_ == 0)
+        return Pass::Failed;
+    if (!cut_ended_) {
+        if (framed_ && !lane.end()) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            lane_waiting_ = true;
+            return Pass::Waiting;
+        }
+        cut_ended_ = true;
+    }
+    if (!lane.lost() && !lane.played()) {
+        lane.wait(OcramLaneWriter::Wait::Played);
+        lane_waiting_ = true;
+        return Pass::Waiting;
+    }
+    lane.close_window();
+    return cut_(edges.inbox);
 }
 
 }

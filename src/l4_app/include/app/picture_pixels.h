@@ -85,8 +85,8 @@ public:
         return line.subspan(pixel_bytes.span(v));
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
-        return hal::SpiWord{count<std::uint16_t>()};
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
+        return hal::LinkWord{count<std::uint16_t>()};
     }
 
     constexpr void store_le16(std::span<std::byte, sizeof(std::uint16_t)> dst) const noexcept {

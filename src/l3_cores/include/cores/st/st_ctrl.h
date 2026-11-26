@@ -8,7 +8,7 @@
 
 #include "cores/st/st_sysctrl.h"
 #include "cores/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "infra/endian.h"
 #include "proto/status_bit.h"
 #include "proto/status_word.h"
@@ -116,8 +116,8 @@ struct CtrlWord {
         return CtrlWord{src[0]};
     }
 
-    [[nodiscard]] constexpr hal::SpiHalves wire_halves() const noexcept {
-        return hal::SpiHalves::of(raw());
+    [[nodiscard]] constexpr hal::LinkHalves wire_halves() const noexcept {
+        return hal::LinkHalves::of(raw());
     }
 
     [[nodiscard]] constexpr proto::StatusWord status_word() const noexcept {
@@ -125,7 +125,7 @@ struct CtrlWord {
     }
 
     [[nodiscard]] static constexpr CtrlWord of(const proto::StatusWord& w) noexcept {
-        return hal::SpiHalves{.low = w.words[0], .high = w.words[1]}.joined([](std::uint32_t d) {
+        return hal::LinkHalves{.low = w.words[0], .high = w.words[1]}.joined([](std::uint32_t d) {
             return CtrlWord{d};
         });
     }

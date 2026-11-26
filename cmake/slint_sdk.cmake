@@ -1,13 +1,13 @@
-set(TASTY_SLINT_SDK "" CACHE PATH "Root of the pinned static Slint SDK (default: $ENV{TASTY_SLINT_SDK}, else /opt/slint/1.19.0)")
+set(TASTY_SLINT_SDK "" CACHE PATH "Root of the pinned static Slint SDK (default: $ENV{TASTY_SLINT_SDK}, else /opt/slint/1.19.1)")
 if(NOT TASTY_SLINT_SDK AND DEFINED ENV{TASTY_SLINT_SDK})
   set(TASTY_SLINT_SDK "$ENV{TASTY_SLINT_SDK}")
 endif()
 if(NOT TASTY_SLINT_SDK)
-  set(TASTY_SLINT_SDK "/opt/slint/1.19.0")
+  set(TASTY_SLINT_SDK "/opt/slint/1.19.1")
 endif()
 if(NOT EXISTS "${TASTY_SLINT_SDK}/BUILD-INFO")
   message(FATAL_ERROR "no pinned Slint SDK at ${TASTY_SLINT_SDK} (no BUILD-INFO). Extract "
-                      "slint-sdk-1.19.0-<n>.tar.zst (made by build-slint-sdk.sh) there, or pass -DTASTY_SLINT_SDK=<dir>. "
+                      "slint-sdk-1.19.1-<n>.tar.zst (made by build-slint-sdk.sh) there, or pass -DTASTY_SLINT_SDK=<dir>. "
                       "The HD OSD is compiled into every build; there is no build without it.")
 endif()
 
@@ -32,8 +32,8 @@ if(NOT EXISTS "${_tasty_slint_prefix}/lib/cmake/Slint/SlintConfig.cmake")
 endif()
 
 file(STRINGS "${TASTY_SLINT_SDK}/BUILD-INFO" _tasty_info)
-if(NOT "slint 1.19.0" IN_LIST _tasty_info)
-  message(FATAL_ERROR "the Slint SDK at ${TASTY_SLINT_SDK} is not version 1.19.0 (BUILD-INFO: ${_tasty_info})")
+if(NOT "slint 1.19.1" IN_LIST _tasty_info)
+  message(FATAL_ERROR "the Slint SDK at ${TASTY_SLINT_SDK} is not version 1.19.1 (BUILD-INFO: ${_tasty_info})")
 endif()
 foreach(_p 0001-api-cpp-dlopen-libfontconfig 0004-static-fontique 0005-optional-parley)
   if(NOT _tasty_info MATCHES "patch ${_p}")

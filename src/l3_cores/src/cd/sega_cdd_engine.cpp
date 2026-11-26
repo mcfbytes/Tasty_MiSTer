@@ -91,7 +91,7 @@ Ex<void> SegaCddEngine::do_accept(const CdCommandWords& cmd, CdDialectPorts& p) 
 
     speed_index_ = cdwire::sega_speed_index(cmd.words[2]);
     const std::uint64_t c = cdwire::sega_compose(
-        std::span<const hal::SpiWord>(cmd.words).first<3>()
+        std::span<const hal::LinkWord>(cmd.words).first<3>()
     );
     if (!cdwire::sega_command_ok(c, row_.crc_start)) {
         ++stats_.crc_faults;

@@ -19,16 +19,16 @@ namespace mister::cores::minimig {
 
 namespace {
 
-constexpr hal::SpiWord kResetUser{0x1};
-constexpr hal::SpiWord kResetCpu{0x2};
-constexpr hal::SpiWord kHaltCpu{0x4};
-constexpr hal::SpiWord kRunning{};
-constexpr hal::SpiWord kHeld = kHaltCpu.with(kResetCpu);
-constexpr hal::SpiWord kHeldInReset = kHeld.with(kResetUser);
+constexpr hal::LinkWord kResetUser{0x1};
+constexpr hal::LinkWord kResetCpu{0x2};
+constexpr hal::LinkWord kHaltCpu{0x4};
+constexpr hal::LinkWord kRunning{};
+constexpr hal::LinkWord kHeld = kHaltCpu.with(kResetCpu);
+constexpr hal::LinkWord kHeldInReset = kHeld.with(kResetUser);
 
-constexpr hal::SpiWord kBootVideo{0x0400};
-constexpr hal::SpiWord kBootAudio{};
-constexpr hal::SpiWord kBootMemory{0x5};
+constexpr hal::LinkWord kBootVideo{0x0400};
+constexpr hal::LinkWord kBootAudio{};
+constexpr hal::LinkWord kBootMemory{0x5};
 
 constexpr proto::WideIoIndex kFrameDest = proto::WideIoIndex::of(proto::IoIndex{});
 

@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "cores/ide/ide_media.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 #include "svc/disk_geometry.h"
@@ -76,9 +76,9 @@ public:
         return image_;
     }
 
-    [[nodiscard]] constexpr hal::SpiWord word(Word at) const noexcept {
-        return hal::SpiWord::load_le(
-            std::span<const std::byte>(image_).subspan(byte_of(at)).first<sizeof(hal::SpiWord)>()
+    [[nodiscard]] constexpr hal::LinkWord word(Word at) const noexcept {
+        return hal::LinkWord::load_le(
+            std::span<const std::byte>(image_).subspan(byte_of(at)).first<sizeof(hal::LinkWord)>()
         );
     }
 
@@ -86,31 +86,31 @@ public:
 
 private:
     [[nodiscard]] static constexpr std::size_t byte_of(Word at) noexcept {
-        return std::to_underlying(at) * sizeof(hal::SpiWord);
+        return std::to_underlying(at) * sizeof(hal::LinkWord);
     }
 
     [[nodiscard]] constexpr std::span<std::byte> bytes_of(Words run) noexcept {
         return std::span<std::byte>(image_).subspan(
             byte_of(run.first),
-            byte_of(run.last) + sizeof(hal::SpiWord) - byte_of(run.first)
+            byte_of(run.last) + sizeof(hal::LinkWord) - byte_of(run.first)
         );
     }
 
-    constexpr void put(Word at, hal::SpiWord value) noexcept {
-        value.store_le(bytes_of(Words{at, at}).first<sizeof(hal::SpiWord)>());
+    constexpr void put(Word at, hal::LinkWord value) noexcept {
+        value.store_le(bytes_of(Words{at, at}).first<sizeof(hal::LinkWord)>());
     }
 
-    constexpr void put_pair(Word at, hal::SpiHalves value) noexcept {
+    constexpr void put_pair(Word at, hal::LinkHalves value) noexcept {
         const std::span<std::byte> field = std::span<std::byte>(image_).subspan(byte_of(at));
-        value.low.store_le(field.first<sizeof(hal::SpiWord)>());
-        value.high.store_le(field.subspan(sizeof(hal::SpiWord)).first<sizeof(hal::SpiWord)>());
+        value.low.store_le(field.first<sizeof(hal::LinkWord)>());
+        value.high.store_le(field.subspan(sizeof(hal::LinkWord)).first<sizeof(hal::LinkWord)>());
     }
 
-    constexpr void fill(Words run, hal::SpiWord value) noexcept {
+    constexpr void fill(Words run, hal::LinkWord value) noexcept {
         std::span<std::byte> rest = bytes_of(run);
         while (!rest.empty()) {
-            value.store_le(rest.first<sizeof(hal::SpiWord)>());
-            rest = rest.subspan(sizeof(hal::SpiWord));
+            value.store_le(rest.first<sizeof(hal::LinkWord)>());
+            rest = rest.subspan(sizeof(hal::LinkWord));
         }
     }
 

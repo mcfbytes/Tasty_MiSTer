@@ -53,11 +53,13 @@ struct BoardProfile {
     std::span<const std::string_view> compatible;
     std::span<const WindowDecl> windows;
 
-    WindowId mailbox_window;
-    Fact<std::uint32_t> mailbox_gpo_offset;
-    Fact<std::uint32_t> mailbox_gpi_offset;
+    WindowId gpo_gpi_window;
+    Fact<std::uint32_t> gpo_offset;
+    Fact<std::uint32_t> gpi_offset;
 
     WindowId lw_window;
+
+    PhysRegion ocram_window;
 
     FpgaAperture fpga_mem;
 
@@ -83,10 +85,10 @@ struct BoardProfile {
 
 constexpr bool fact_measured(const BoardProfile& profile, FactField f) noexcept {
     switch (f) {
-        case FactField::MailboxGpoOffset:
-            return profile.mailbox_gpo_offset.measured();
-        case FactField::MailboxGpiOffset:
-            return profile.mailbox_gpi_offset.measured();
+        case FactField::GpoOffset:
+            return profile.gpo_offset.measured();
+        case FactField::GpiOffset:
+            return profile.gpi_offset.measured();
         case FactField::VideoI2cBuses:
             return profile.video.i2c_buses.measured();
         case FactField::TimingWordNs:
@@ -135,6 +137,10 @@ constexpr PhysRegion lw_region(const BoardProfile& profile) noexcept {
     const auto i = static_cast<std::size_t>(profile.lw_window);
     return i < profile.windows.size() ? profile.windows[i].region
                                       : PhysRegion{os::PhysAddr{0u}, 0u, "unsourced-lw"};
+}
+
+constexpr PhysRegion ocram_region(const BoardProfile& profile) noexcept {
+    return profile.ocram_window;
 }
 
 constexpr const PhysRegion& region(const BoardProfile& profile, RegionId id) noexcept {

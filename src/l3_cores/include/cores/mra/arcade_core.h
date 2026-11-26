@@ -11,7 +11,7 @@
 
 #include "cores/mra/arcade_facts.h"
 #include "cores/core_grant.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/dip_switches.h"
 #include "cores/mra/mra_doc.h"
 #include "cores/save_upload.h"

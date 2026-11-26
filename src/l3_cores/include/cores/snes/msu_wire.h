@@ -9,7 +9,7 @@
 
 #include "hal/board_profile.h"
 #include "hal/phys_region.h"
-#include "hal/spi_words.h"
+#include "hal/link_words.h"
 #include "proto/mailbox_act.h"
 #include "proto/user_io/poll_frame.h"
 #include "proto/types.h"
@@ -34,7 +34,7 @@ inline constexpr std::uint16_t kSetDataBase = 3;
 
 enum class Request : std::uint16_t { Next = 0x34, Track = 0x35, Seek = 0x36, Reset = 0xFF };
 
-[[nodiscard]] constexpr Request request_word(hal::SpiWord w) noexcept {
+[[nodiscard]] constexpr Request request_word(hal::LinkWord w) noexcept {
     return w.decoded([](std::uint16_t bits) noexcept { return Request{bits}; });
 }
 
@@ -85,7 +85,7 @@ struct TrackCursor {
 };
 
 [[nodiscard]] constexpr proto::MailboxWords set_words(std::uint64_t v) noexcept {
-    const hal::SpiWords<3> words = hal::SpiWords<3>::le(v);
+    const hal::LinkWords<3> words = hal::LinkWords<3>::le(v);
     return {words[0], words[1], words[2]};
 }
 
@@ -99,7 +99,7 @@ struct TrackCursor {
 
 [[nodiscard]] constexpr proto::MailboxWords set_data_base() noexcept {
     const auto halves = hal::kBoardApertures.front().translate(kDataBaseOffset)->low_halves();
-    return {hal::SpiWord{kSetDataBase}, hal::SpiWord{halves[0]}, hal::SpiWord{halves[1]}};
+    return {hal::LinkWord{kSetDataBase}, hal::LinkWord{halves[0]}, hal::LinkWord{halves[1]}};
 }
 
 }

@@ -41,11 +41,11 @@ constexpr proto::ReplyIndex kResetStatus2{2};
 constexpr proto::ReplyIndex kResetStatus3{3};
 constexpr proto::ReplyIndex kStatusAlone{};
 
-[[nodiscard]] hal::SpiWord kept_reply(
+[[nodiscard]] hal::LinkWord kept_reply(
     const proto::user_io::PollFrame& replies,
     proto::ReplyIndex i
 ) noexcept {
-    return infra::affine::in_bounds(replies.kept, i) ? replies.replies[i] : hal::SpiWord{};
+    return infra::affine::in_bounds(replies.kept, i) ? replies.replies[i] : hal::LinkWord{};
 }
 
 std::vector<std::byte> read_tape(svc::IFile* file) {
@@ -67,8 +67,8 @@ static_assert(
     "a whole run of pulses, each behind its guard read, fits the direct round's bound"
 );
 static_assert(
-    Atari8Status3{hal::SpiWord{0b001}}.core_hz() == ClockHz{28644608}
-        && !Atari8Status3{hal::SpiWord{0b111}}.core_hz().valid(),
+    Atari8Status3{hal::LinkWord{0b001}}.core_hz() == ClockHz{28644608}
+        && !Atari8Status3{hal::LinkWord{0b111}}.core_hz().valid(),
     "atari800.cpp reboot_800: STATUS3's clock code, an unknown code 0"
 );
 

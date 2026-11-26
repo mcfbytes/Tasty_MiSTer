@@ -23,21 +23,21 @@ template <class F>
     if (w == hal::Width::Word) {
         for (; at + 1u < bytes.size(); at += 2u) {
             const auto pair = infra::load_le<std::uint16_t>(bytes.subspan(at).first<2>());
-            auto r = f(hal::SpiWord{pair});
+            auto r = f(hal::LinkWord{pair});
             if (!r)
                 return std::unexpected(r.error());
             if (!*r)
                 return at + 2u;
         }
         if (at < bytes.size()) {
-            auto r = f(hal::SpiWord{bytes.back()});
+            auto r = f(hal::LinkWord{bytes.back()});
             if (!r)
                 return std::unexpected(r.error());
         }
         return bytes.size();
     }
     for (; at < bytes.size(); ++at) {
-        auto r = f(hal::SpiWord{bytes[at]});
+        auto r = f(hal::LinkWord{bytes[at]});
         if (!r)
             return std::unexpected(r.error());
         if (!*r)

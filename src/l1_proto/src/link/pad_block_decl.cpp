@@ -15,7 +15,7 @@ namespace mister::proto::link {
 
 namespace {
 
-enum class PadKindWord : std::size_t { Shape = 8 };
+enum class PadKindWord : std::size_t { Shape = 8, Flags = 9 };
 
 static_assert(ops_word(PadKindWord::Shape) == 8, "the PAD entry's shape word is K8");
 
@@ -57,6 +57,13 @@ inline constexpr bool kHasOpBitmap<PadKindWord> = true;
         .line = d->line(),
         .index = d->index()
     };
+}
+
+bool pad_link_arm_absent(const SysDirectoryImage& dir, hal::LwExtent window) noexcept {
+    auto d = find_kinded<PadKindWord>(dir, kFacts, window);
+    if (!d)
+        return false;
+    return d->word(PadKindWord::Flags).pad_link_arm_absent();
 }
 
 static_assert(

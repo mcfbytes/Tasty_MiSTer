@@ -66,7 +66,7 @@ std::unique_ptr<IMailboxServant> make_atari5200_servant(const ServantGrant& g) {
 }
 
 namespace wire = atari8::wire;
-using hal::SpiWord;
+using hal::LinkWord;
 using proto::MailboxRunCommand;
 
 static_assert(kAtari800.kind == CoreKind::Atari800 && kAtari5200.kind == CoreKind::Atari5200);
@@ -79,49 +79,49 @@ static_assert(
 );
 
 static_assert(
-    wire::word(wire::Opcode::GetRegister) == SpiWord{0x08}
-        && wire::word(wire::Opcode::SetRegister) == SpiWord{0x09},
+    wire::word(wire::Opcode::GetRegister) == LinkWord{0x08}
+        && wire::word(wire::Opcode::SetRegister) == LinkWord{0x09},
     "atari800.cpp:240-256: A800_SET_REGISTER 0x09 and A800_GET_REGISTER 0x08"
 );
 static_assert(
     wire::pause(wire::Pause::Hold)
-            == MailboxRunCommand{.opcode = SpiWord{0x09}, .word = SpiWord{0x0401}}
+            == MailboxRunCommand{.opcode = LinkWord{0x09}, .word = LinkWord{0x0401}}
         && wire::pause(wire::Pause::Run)
-            == MailboxRunCommand{.opcode = SpiWord{0x09}, .word = SpiWord{0x0400}}
+            == MailboxRunCommand{.opcode = LinkWord{0x09}, .word = LinkWord{0x0400}}
         && wire::pause(wire::Pause::Halted)
-            == MailboxRunCommand{.opcode = SpiWord{0x09}, .word = SpiWord{0x0404}},
+            == MailboxRunCommand{.opcode = LinkWord{0x09}, .word = LinkWord{0x0404}},
     "atari800.cpp:244: spi_w((reg << 8) | val), REG_PAUSE 4; :358 writes the halt bit "
     "as it stands, so a halted machine's PAUSE value is 4"
 );
 static_assert(
-    wire::set(wire::WriteRegister::Cart1Select, wire::Level::Low).word == SpiWord{0x0100}
-        && wire::set(wire::WriteRegister::Cart2Select, wire::Level::Low).word == SpiWord{0x0200}
-        && wire::set(wire::WriteRegister::Reset, wire::Level::High).word == SpiWord{0x0301}
-        && wire::set(wire::WriteRegister::Freezer, wire::Level::High).word == SpiWord{0x0501}
-        && wire::set(wire::WriteRegister::ResetRnmi, wire::Level::High).word == SpiWord{0x0601}
-        && wire::set(wire::WriteRegister::XexLoader, wire::Level::Low).word == SpiWord{0x0900}
-        && wire::set(wire::WriteRegister::TapeReset, wire::Level::High).word == SpiWord{0x0C01},
+    wire::set(wire::WriteRegister::Cart1Select, wire::Level::Low).word == LinkWord{0x0100}
+        && wire::set(wire::WriteRegister::Cart2Select, wire::Level::Low).word == LinkWord{0x0200}
+        && wire::set(wire::WriteRegister::Reset, wire::Level::High).word == LinkWord{0x0301}
+        && wire::set(wire::WriteRegister::Freezer, wire::Level::High).word == LinkWord{0x0501}
+        && wire::set(wire::WriteRegister::ResetRnmi, wire::Level::High).word == LinkWord{0x0601}
+        && wire::set(wire::WriteRegister::XexLoader, wire::Level::Low).word == LinkWord{0x0900}
+        && wire::set(wire::WriteRegister::TapeReset, wire::Level::High).word == LinkWord{0x0C01},
     "atari800.cpp's REG_ write numbers: CART1 1, CART2 2, RESET 3, FREEZER 5, RESET_RNMI 6, "
     "XEX_LOADER 9, TAPE_RESET 0x0C"
 );
 static_assert(
     wire::get(wire::ReadRegister::Status1)
-            == MailboxRunCommand{.opcode = SpiWord{0x08}, .word = SpiWord{0x0100}}
+            == MailboxRunCommand{.opcode = LinkWord{0x08}, .word = LinkWord{0x0100}}
         && wire::get(wire::ReadRegister::Status3)
-            == MailboxRunCommand{.opcode = SpiWord{0x08}, .word = SpiWord{0x0300}},
+            == MailboxRunCommand{.opcode = LinkWord{0x08}, .word = LinkWord{0x0300}},
     "atari800.cpp:253: spi_w(reg << 8) answers the register; STATUS1 1, STATUS3 3"
 );
 static_assert(
-    atari8::Atari8Status::kSoftBoot == SpiWord{0x0001}
-        && atari8::Atari8Status::kColdBoot == SpiWord{0x0002}
-        && atari8::Atari8Status::kHalt == SpiWord{0x0004}
-        && atari8::Atari8Status::kMode800 == SpiWord{0x0008},
+    atari8::Atari8Status::kSoftBoot == LinkWord{0x0001}
+        && atari8::Atari8Status::kColdBoot == LinkWord{0x0002}
+        && atari8::Atari8Status::kHalt == LinkWord{0x0004}
+        && atari8::Atari8Status::kMode800 == LinkWord{0x0008},
     "atari800.cpp's STATUS1_MASK_ SOFTBOOT, COLDBOOT, HALT, MODE800"
 );
 
 static_assert(
-    atari8::kStatusFrame.row().opcode == SpiWord{0x08}
-        && atari8::kStatusFrame.row().exchanged == SpiWord{0x0100}
+    atari8::kStatusFrame.row().opcode == LinkWord{0x08}
+        && atari8::kStatusFrame.row().exchanged == LinkWord{0x0100}
         && atari8::kStatusFrame.kept() == proto::ReplyCount{1}
         && atari8::kStatusFrame.max_words() == proto::FioWordCount{2}
         && atari8::kStatusFrame.held_words() == proto::FioWordCount{2},
@@ -134,7 +134,7 @@ static_assert(
 );
 
 static_assert(
-    kAtari800Mailbox.guards()[1].row().exchanged == SpiWord{0x0200}
+    kAtari800Mailbox.guards()[1].row().exchanged == LinkWord{0x0200}
         && kAtari800Mailbox.guards()[1].row().guard.mask == proto::ReplyMask{0x8000}
         && kAtari800Mailbox.guards()[1].row().guard.condition == proto::user_io::Condition::Zero
         && atari8::kTapeGuard == proto::MailboxRunGuard{1},
@@ -143,34 +143,34 @@ static_assert(
 );
 static_assert(
     wire::enqueue(
-        hal::SpiHalves::of(0x0003'4567)
-    ) == MailboxRunCommand{.opcode = SpiWord{0x0A}, .word = SpiWord{0x4567}, .tail = SpiWord{0x0003}},
+        hal::LinkHalves::of(0x0003'4567)
+    ) == MailboxRunCommand{.opcode = LinkWord{0x0A}, .word = LinkWord{0x4567}, .tail = LinkWord{0x0003}},
     "atari800.cpp:420-424: spi8(A800_TAPE_ENQUEUE), spi_w(data), spi_w(data >> 16)"
 );
 
 static_assert(
-    wire::read(wire::SioPort::TxStatus).opcode == SpiWord{0x03}
-        && wire::read(wire::SioPort::Rx).opcode == SpiWord{0x04}
-        && wire::read(wire::SioPort::RxStatus).opcode == SpiWord{0x05}
-        && wire::read(wire::SioPort::Divisor).opcode == SpiWord{0x06}
-        && wire::read(wire::SioPort::Error).opcode == SpiWord{0x07}
-        && wire::read(wire::SioPort::Rx).word == SpiWord{},
+    wire::read(wire::SioPort::TxStatus).opcode == LinkWord{0x03}
+        && wire::read(wire::SioPort::Rx).opcode == LinkWord{0x04}
+        && wire::read(wire::SioPort::RxStatus).opcode == LinkWord{0x05}
+        && wire::read(wire::SioPort::Divisor).opcode == LinkWord{0x06}
+        && wire::read(wire::SioPort::Error).opcode == LinkWord{0x07}
+        && wire::read(wire::SioPort::Rx).word == LinkWord{},
     "atari800.cpp:258-265 get_a800_reg2: spi8(reg), spi_w(0); A800_SIO_TX_STAT 3, "
     "RX 4, RX_STAT 5, GETDIV 6, ERROR 7"
 );
 static_assert(
-    wire::transmit(wire::kAck) == MailboxRunCommand{SpiWord{0x09}, SpiWord{0x0A41}}
+    wire::transmit(wire::kAck) == MailboxRunCommand{LinkWord{0x09}, LinkWord{0x0A41}}
         && wire::divisor(atari8::SioDivisor{0x5D})
-            == MailboxRunCommand{SpiWord{0x09}, SpiWord{0x0B5D}}
-        && wire::set(wire::WriteRegister::DriveLed, wire::Level::High).word == SpiWord{0x0801}
-        && wire::set(wire::WriteRegister::OptionForce, wire::Level::High).word == SpiWord{0x0701},
+            == MailboxRunCommand{LinkWord{0x09}, LinkWord{0x0B5D}}
+        && wire::set(wire::WriteRegister::DriveLed, wire::Level::High).word == LinkWord{0x0801}
+        && wire::set(wire::WriteRegister::OptionForce, wire::Level::High).word == LinkWord{0x0701},
     "atari800.cpp:462,488: REG_SIO_SETDIV 0x0B, REG_SIO_TX 0x0A; :2046 REG_DRIVE_LED 8; "
     ":2447 REG_OPTION_FORCE 7; :2781 uart_init(speeds[0] + 6) writes (0x2E << 1) + 1"
 );
 static_assert(
-    wire::kTxRoomGuard.row().opcode == SpiWord{0x03}
+    wire::kTxRoomGuard.row().opcode == LinkWord{0x03}
         && wire::kTxRoomGuard.row().guard.mask == proto::ReplyMask{0x01FF}
-        && wire::kRxFrame.row().opcode == SpiWord{0x05}
+        && wire::kRxFrame.row().opcode == LinkWord{0x05}
         && wire::kRxFrame.row().guard.mask == proto::ReplyMask{0x02FF},
     "atari800.cpp:467 uart_full: TX_STAT bit 9; :493 uart_available: RX_STAT bit 8 "
     "clear; hps_ext.v's FIFO count wraps to 0 at full, so a nonzero 9-bit field is "
@@ -215,17 +215,17 @@ static_assert(
 );
 
 static_assert(
-    atari8::Atari8Status2{SpiWord{0x0024}}.mode_of(atari8::SioUnit{0}) == atari8::PbiDriveMode::Off
-        && atari8::Atari8Status2{SpiWord{0x0024}}.mode_of(atari8::SioUnit{1})
+    atari8::Atari8Status2{LinkWord{0x0024}}.mode_of(atari8::SioUnit{0}) == atari8::PbiDriveMode::Off
+        && atari8::Atari8Status2{LinkWord{0x0024}}.mode_of(atari8::SioUnit{1})
             == atari8::PbiDriveMode::Pbi
-        && atari8::Atari8Status2{SpiWord{0x0024}}.mode_of(atari8::SioUnit{2})
+        && atari8::Atari8Status2{LinkWord{0x0024}}.mode_of(atari8::SioUnit{2})
             == atari8::PbiDriveMode::Sio
         && !atari8::Atari8Status2{}.mode_of(atari8::SioUnit{4}),
     "atari800.cpp:2568-2571: drive i's mode is (STATUS2 >> 2i) & 3, for item"
 );
 static_assert(
-    atari8::Atari8Status2{SpiWord{0x0300}}.boot_drive() == atari8::Atari8Status2::BootDrive{3}
-        && atari8::Atari8Status2::kSplash == SpiWord{0x0800},
+    atari8::Atari8Status2{LinkWord{0x0300}}.boot_drive() == atari8::Atari8Status2::BootDrive{3}
+        && atari8::Atari8Status2::kSplash == LinkWord{0x0800},
     "atari800.cpp:2574 boot_drv = (STATUS2 >> 8) & 7; atari8bit_defs.h:11 STATUS2_MASK_SPLASH"
 );
 static_assert(

@@ -47,7 +47,7 @@ constexpr std::byte kChipsetWordBits{0x3F};
 constexpr std::byte kChipsetCdtvBit{0x20};
 constexpr std::byte kIdeWordBits{0x21};
 constexpr std::byte kScanlineBits{0x07};
-constexpr hal::SpiWord kMt32Reset{0x1};
+constexpr hal::LinkWord kMt32Reset{0x1};
 constexpr std::byte kDefaultMemory{0x11};
 
 constexpr BusBytes kChipRamStep{512u * 1024u};
@@ -194,8 +194,8 @@ constexpr PresetRow kA1200{
 
 constexpr std::string_view kNoInfo = "NO INFO";
 
-constexpr hal::SpiWord low_word(std::byte low) noexcept {
-    return hal::SpiWord::load_le(std::array{low, kZero});
+constexpr hal::LinkWord low_word(std::byte low) noexcept {
+    return hal::LinkWord::load_le(std::array{low, kZero});
 }
 
 constexpr ByteOffset record_of(MinimigConfig::Drive drive) noexcept {
@@ -260,8 +260,8 @@ std::span<std::byte> MinimigConfig::field_(ByteOffset at, ByteCount len) noexcep
     return infra::affine::first(infra::affine::from(std::span<std::byte>(image), at), len);
 }
 
-hal::SpiWord MinimigConfig::half_(ByteOffset at) const noexcept {
-    return hal::SpiWord::load_le(field_(at, mm_cfg::kHalf).first<sizeof(hal::SpiWord)>());
+hal::LinkWord MinimigConfig::half_(ByteOffset at) const noexcept {
+    return hal::LinkWord::load_le(field_(at, mm_cfg::kHalf).first<sizeof(hal::LinkWord)>());
 }
 
 bool MinimigConfig::well_formed_() const noexcept {
@@ -491,73 +491,73 @@ void MinimigConfig::set_stereo_mix(StereoMix mix) noexcept {
 
 ExtCfgWord MinimigConfig::ext_cfg() const noexcept {
     return ExtCfgWord::of(
-        hal::SpiHalves{.low = half_(mm_cfg::kExtCfgLow), .high = half_(mm_cfg::kExtCfgHigh)}
+        hal::LinkHalves{.low = half_(mm_cfg::kExtCfgLow), .high = half_(mm_cfg::kExtCfgHigh)}
     );
 }
 
 void MinimigConfig::set_ext_cfg(ExtCfgWord value) noexcept {
-    const hal::SpiHalves halves = value.halves();
-    halves.low.store_le(field_(mm_cfg::kExtCfgLow, mm_cfg::kHalf).first<sizeof(hal::SpiWord)>());
-    halves.high.store_le(field_(mm_cfg::kExtCfgHigh, mm_cfg::kHalf).first<sizeof(hal::SpiWord)>());
+    const hal::LinkHalves halves = value.halves();
+    halves.low.store_le(field_(mm_cfg::kExtCfgLow, mm_cfg::kHalf).first<sizeof(hal::LinkWord)>());
+    halves.high.store_le(field_(mm_cfg::kExtCfgHigh, mm_cfg::kHalf).first<sizeof(hal::LinkWord)>());
 }
 
 std::string_view MinimigConfig::joy_mode_name() const noexcept {
     return kJoyModeNames[std::to_underlying(joy_mode())];
 }
 
-hal::SpiWord MinimigConfig::joy_swap_word() const noexcept {
-    return hal::SpiWord::load_le(std::array{at_(mm_cfg::kAutofire), kJoySwapBit});
+hal::LinkWord MinimigConfig::joy_swap_word() const noexcept {
+    return hal::LinkWord::load_le(std::array{at_(mm_cfg::kAutofire), kJoySwapBit});
 }
 
-hal::SpiWord MinimigConfig::joy_mode_word() const noexcept {
-    return hal::SpiWord::load_le(
+hal::LinkWord MinimigConfig::joy_mode_word() const noexcept {
+    return hal::LinkWord::load_le(
         std::array{at_(mm_cfg::kAutofire), kJoyModeField.placed(kPairBits)}
     );
 }
 
-hal::SpiWord MinimigConfig::cpu_word() const noexcept {
+hal::LinkWord MinimigConfig::cpu_word() const noexcept {
     return low_word(at_(mm_cfg::kCpu) & kCpuWordBits);
 }
 
-hal::SpiWord MinimigConfig::chipset_word() const noexcept {
+hal::LinkWord MinimigConfig::chipset_word() const noexcept {
     const std::byte chipset = at_(mm_cfg::kChipset);
     const bool cdtv = at_(record_of(Drive::Cdtv)) != kZero;
     const std::byte machine = cdtv ? chipset | kChipsetCdtvBit : chipset & ~kChipsetCdtvBit;
     return low_word(machine & kChipsetWordBits);
 }
 
-hal::SpiWord MinimigConfig::floppy_word() const noexcept {
+hal::LinkWord MinimigConfig::floppy_word() const noexcept {
     const std::byte drives = at_(mm_cfg::kFloppyDrives) & kPairBits;
     const std::byte speed = at_(mm_cfg::kFloppySpeed) & kPairBits;
     return low_word(kFloppyDrivesField.placed(drives) | speed);
 }
 
-hal::SpiWord MinimigConfig::memory_word() const noexcept {
+hal::LinkWord MinimigConfig::memory_word() const noexcept {
     return low_word(at_(mm_cfg::kMemory));
 }
 
-hal::SpiWord MinimigConfig::hdd_word(IdeUnits present) const noexcept {
+hal::LinkWord MinimigConfig::hdd_word(IdeUnits present) const noexcept {
     return low_word((at_(mm_cfg::kIdeCfg) & kIdeWordBits) | present.frame_bits());
 }
 
-hal::SpiWord MinimigConfig::video_word() const noexcept {
+hal::LinkWord MinimigConfig::video_word() const noexcept {
     const std::byte s = at_(mm_cfg::kScanlines);
 
     const std::byte high = kVideoAreaField.placed(kAreaField.code(s))
         | kVideoAspectField.placed(kAspectField.code(s));
-    return hal::SpiWord::load_le(std::array{s & kScanlineBits, high});
+    return hal::LinkWord::load_le(std::array{s & kScanlineBits, high});
 }
 
-hal::SpiWord MinimigConfig::audio_word() const noexcept {
+hal::LinkWord MinimigConfig::audio_word() const noexcept {
     return low_word(at_(mm_cfg::kAudio));
 }
 
-hal::SpiWord MinimigConfig::joy_word() const noexcept {
-    return hal::SpiWord::load_le(std::array{at_(mm_cfg::kAutofire), kApplyAutofireMask});
+hal::LinkWord MinimigConfig::joy_word() const noexcept {
+    return hal::LinkWord::load_le(std::array{at_(mm_cfg::kAutofire), kApplyAutofireMask});
 }
 
-hal::SpiHalves MinimigConfig::ext_cfg_halves() const noexcept {
-    return hal::SpiHalves{
+hal::LinkHalves MinimigConfig::ext_cfg_halves() const noexcept {
+    return hal::LinkHalves{
         .low = half_(mm_cfg::kExtCfgLow).without(kMt32Reset),
         .high = half_(mm_cfg::kExtCfgHigh)
     };

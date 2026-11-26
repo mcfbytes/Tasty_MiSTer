@@ -8,17 +8,17 @@
 
 namespace mister::proto::link {
 
-Ex<void> SpiFrame::begin(LinkSel sel, hal::SpiWord op) {
+Ex<void> SpiFrame::begin(LinkSel sel, hal::LinkWord op) {
     TASTY_SEAT_BODY(SpiFrame);
-    return open(sel, op).transform([](hal::SpiWord) noexcept {});
+    return open(sel, op).transform([](hal::LinkWord) noexcept {});
 }
 
-Ex<hal::SpiWord> SpiFrame::open(LinkSel sel, hal::SpiWord op) {
+Ex<hal::LinkWord> SpiFrame::open(LinkSel sel, hal::LinkWord op) {
     TASTY_SEAT_BODY(SpiFrame);
     return open_raw_(chip_select(sel), op);
 }
 
-Ex<hal::SpiWord> SpiFrame::open_raw_(hal::ChipSelect cs, hal::SpiWord op) {
+Ex<hal::LinkWord> SpiFrame::open_raw_(hal::ChipSelect cs, hal::LinkWord op) {
     TASTY_SEAT_BODY(SpiFrame);
     close_();
     reply_.reset();
@@ -36,9 +36,9 @@ Ex<hal::SpiWord> SpiFrame::open_raw_(hal::ChipSelect cs, hal::SpiWord op) {
     return *r;
 }
 
-Ex<void> SpiFrame::word(hal::SpiWord w) {
+Ex<void> SpiFrame::word(hal::LinkWord w) {
     TASTY_SEAT_BODY(SpiFrame);
-    return beat(w).transform([](hal::SpiWord) noexcept {});
+    return beat(w).transform([](hal::LinkWord) noexcept {});
 }
 
 Ex<void> SpiFrame::end() {
@@ -49,12 +49,12 @@ Ex<void> SpiFrame::end() {
     return {};
 }
 
-std::optional<hal::SpiWord> SpiFrame::opcode_reply() const noexcept {
+std::optional<hal::LinkWord> SpiFrame::opcode_reply() const noexcept {
     TASTY_SEAT_BODY(SpiFrame);
     return reply_;
 }
 
-Ex<hal::SpiWord> SpiFrame::beat(hal::SpiWord w) {
+Ex<hal::LinkWord> SpiFrame::beat(hal::LinkWord w) {
     TASTY_SEAT_BODY(SpiFrame);
     if (!open_)
         return std::unexpected(w.refusal(Errc::negotiation, ERR_SITE()));

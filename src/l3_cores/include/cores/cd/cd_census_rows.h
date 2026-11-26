@@ -3,7 +3,7 @@
 
 #include "cores/cd_service_rows.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/role_row.h"
 #include "cores/sector_kick_row.h"
 #include "cores/cd/service_tick_row.h"

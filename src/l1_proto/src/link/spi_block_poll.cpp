@@ -2,7 +2,7 @@
 #include "proto/link/spi_block_poll.h"
 #include "hal/selected.h"
 #include "infra/prelude.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "proto/block_server.h"
 #include "proto/uio_opcodes.h"
 #include "proto/wire_word.h"
@@ -29,23 +29,23 @@ enum CsdLayout : unsigned {
     kStockBlockBytes = 512,
 };
 
-inline constexpr hal::SpiWord kStockTagMask{0x00F0};
-inline constexpr hal::SpiWord kStockTag{0x0050};
-inline constexpr hal::SpiWord kStockActive{0x3F03};
-inline constexpr hal::SpiWord kStockConfig{0x000C};
-inline constexpr hal::SpiWord kStockNoAck{0x0004};
-inline constexpr hal::SpiWord kStockDisk0{0x0003};
-inline constexpr hal::SpiWord kStockDisk0Read{0x0001};
-inline constexpr hal::SpiWord kStockDisk1{0x0900};
-inline constexpr hal::SpiWord kStockDisk1Read{0x0100};
-inline constexpr hal::SpiWord kStockDisk2{0x1200};
-inline constexpr hal::SpiWord kStockDisk2Read{0x0200};
-inline constexpr hal::SpiWord kStockDisk3{0x2400};
-inline constexpr hal::SpiWord kStockDisk3Read{0x0400};
+inline constexpr hal::LinkWord kStockTagMask{0x00F0};
+inline constexpr hal::LinkWord kStockTag{0x0050};
+inline constexpr hal::LinkWord kStockActive{0x3F03};
+inline constexpr hal::LinkWord kStockConfig{0x000C};
+inline constexpr hal::LinkWord kStockNoAck{0x0004};
+inline constexpr hal::LinkWord kStockDisk0{0x0003};
+inline constexpr hal::LinkWord kStockDisk0Read{0x0001};
+inline constexpr hal::LinkWord kStockDisk1{0x0900};
+inline constexpr hal::LinkWord kStockDisk1Read{0x0100};
+inline constexpr hal::LinkWord kStockDisk2{0x1200};
+inline constexpr hal::LinkWord kStockDisk2Read{0x0200};
+inline constexpr hal::LinkWord kStockDisk3{0x2400};
+inline constexpr hal::LinkWord kStockDisk3Read{0x0400};
 
 struct StockDiskRow {
-    hal::SpiWord any;
-    hal::SpiWord read;
+    hal::LinkWord any;
+    hal::LinkWord read;
     DiskUnit unit;
 };
 
@@ -61,7 +61,7 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
     std::span<const std::uint8_t> bytes,
     hal::Width width
 ) {
-    auto walk = for_each_word(width, bytes, [&link](hal::SpiWord word) {
+    auto walk = for_each_word(width, bytes, [&link](hal::LinkWord word) {
         if (auto r = link.transfer(word); !r)
             return Ex<bool>{std::unexpected(r.error())};
         return Ex<bool>{true};
@@ -92,7 +92,7 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
     if (auto r = write_framed(link, csd, width); !r)
         return r;
 
-    if (auto r = link.transfer(hal::SpiWord{kSdhcPermanently}); !r)
+    if (auto r = link.transfer(hal::LinkWord{kSdhcPermanently}); !r)
         return std::unexpected(r.error());
     return {};
 }
@@ -127,18 +127,18 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
 
         if (c.valid()) {
 
-            auto w1 = link.transfer(hal::SpiWord{0});
+            auto w1 = link.transfer(hal::LinkWord{0});
             if (!w1)
                 return std::unexpected(w1.error());
-            auto w2 = link.transfer(hal::SpiWord{0});
+            auto w2 = link.transfer(hal::LinkWord{0});
             if (!w2)
                 return std::unexpected(w2.error());
-            auto w3 = link.transfer(hal::SpiWord{0});
+            auto w3 = link.transfer(hal::LinkWord{0});
             if (!w3)
                 return std::unexpected(w3.error());
 
             d.req.slot = c.slot();
-            d.req.lba = Lba::of(hal::SpiHalves{.low = *w2, .high = *w3});
+            d.req.lba = Lba::of(hal::LinkHalves{.low = *w2, .high = *w3});
             d.req.block_count = c.block_count();
             d.req.write = c.writes();
             d.block_size = c.block_size();
@@ -146,22 +146,22 @@ inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
             d.decoded = c.decoded();
         } else {
 
-            auto w1 = link.transfer(hal::SpiWord{0});
+            auto w1 = link.transfer(hal::LinkWord{0});
             if (!w1)
                 return std::unexpected(w1.error());
-            const hal::SpiWord rq = *w1;
+            const hal::LinkWord rq = *w1;
             stock = true;
             d.block_size = BlockSize{kStockBlockBytes};
             d.req.block_count = BlockCount{1};
 
             if (rq.masked(kStockTagMask) == kStockTag && rq.intersects(kStockActive)) {
-                auto w2 = link.transfer(hal::SpiWord{0});
+                auto w2 = link.transfer(hal::LinkWord{0});
                 if (!w2)
                     return std::unexpected(w2.error());
-                auto w3 = link.transfer(hal::SpiWord{0});
+                auto w3 = link.transfer(hal::LinkWord{0});
                 if (!w3)
                     return std::unexpected(w3.error());
-                d.req.lba = Lba::of(hal::SpiHalves{.low = *w2, .high = *w3});
+                d.req.lba = Lba::of(hal::LinkHalves{.low = *w2, .high = *w3});
 
                 config_request = rq.contains(kStockConfig);
 

@@ -49,7 +49,7 @@ struct WireLog {
         io_head_ = false;
     }
 
-    void word(WireKind kind, hal::SpiWord out, std::optional<hal::SpiWord> reply) {
+    void word(WireKind kind, hal::LinkWord out, std::optional<hal::LinkWord> reply) {
         words.push_back(out.v);
         word_cs.push_back(cur_cs_);
         if (io_head_) {

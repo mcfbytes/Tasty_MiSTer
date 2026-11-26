@@ -12,8 +12,8 @@
 namespace mister::hal {
 
 enum class FactField : std::uint8_t {
-    MailboxGpoOffset,
-    MailboxGpiOffset,
+    GpoOffset,
+    GpiOffset,
     VideoI2cBuses,
     TimingWordNs,
     TimingBeatNs,
@@ -41,10 +41,10 @@ constexpr std::uint32_t fact_ordinal(FactField f) noexcept {
 
 constexpr std::string_view fact_field_name(FactField f) noexcept {
     switch (f) {
-        case FactField::MailboxGpoOffset:
-            return "mailbox_gpo_offset";
-        case FactField::MailboxGpiOffset:
-            return "mailbox_gpi_offset";
+        case FactField::GpoOffset:
+            return "gpo_offset";
+        case FactField::GpiOffset:
+            return "gpi_offset";
         case FactField::VideoI2cBuses:
             return "video.i2c_buses";
         case FactField::TimingWordNs:

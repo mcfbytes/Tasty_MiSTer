@@ -11,7 +11,7 @@
 #include "cores/minimig/minimig_ladder_bus_addr.h"
 #include "cores/minimig/minimig_ladder_bus_bytes.h"
 #include "cores/wire_chunk.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
@@ -30,7 +30,7 @@ public:
 
     static constexpr std::size_t kBlockFrameWords = 1 + 4 + kBlockBytes;
 
-    void reg(FrameOp op, hal::SpiWord parm);
+    void reg(FrameOp op, hal::LinkWord parm);
 
     void mem(BusAddr at, std::span<const std::byte> data);
 
@@ -42,17 +42,17 @@ public:
 
     void discard_residents();
 
-    void ext_cfg(hal::SpiHalves halves);
+    void ext_cfg(hal::LinkHalves halves);
 
     [[nodiscard]] bool empty() const noexcept { return runs_.empty(); }
 
     [[nodiscard]] Run take();
 
 private:
-    void push_(std::span<const hal::SpiWord> frame);
+    void push_(std::span<const hal::LinkWord> frame);
 
     std::deque<Run> runs_{};
-    std::vector<hal::SpiWord> scratch_{};
+    std::vector<hal::LinkWord> scratch_{};
 };
 
 static_assert(FrameQueue::kBlockFrameWords == 517, "an F0 block is 517 words on the wire");

@@ -8,7 +8,7 @@
 #include <string_view>
 
 #include "cores/cheat_engine.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/n64/n64_cheat_engine.h"
 #include "cores/n64/n64_file_route.h"
 #include "cores/n64/n64_layout_key_source.h"

@@ -22,14 +22,14 @@ public:
     [[nodiscard]] static Ex<FioBracket> begin(
         hal::ISpiTransport& link,
         WideIoIndex index,
-        hal::SpiWord mode,
+        hal::LinkWord mode,
         const SessionParams& params
     );
 
     [[nodiscard]] static Ex<FioBracket> window(
         hal::ISpiTransport& link,
         WideIoIndex index,
-        hal::SpiWord mode,
+        hal::LinkWord mode,
         AuxValue address = {}
     );
 

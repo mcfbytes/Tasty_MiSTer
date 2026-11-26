@@ -15,7 +15,7 @@ static_assert(CoreSession::kConfStrCap <= 0xFFFFu, "ConfStr.bytes is 16 bits");
 
 namespace {
 
-constexpr hal::SpiWord kTextByte{std::numeric_limits<std::uint8_t>::max()};
+constexpr hal::LinkWord kTextByte{std::numeric_limits<std::uint8_t>::max()};
 }
 
 Ex<std::size_t> SpiConfStrDecoder::read_() noexcept {
@@ -24,7 +24,7 @@ Ex<std::size_t> SpiConfStrDecoder::read_() noexcept {
     if (auto r = link_.transfer(word(UioOp::GetString)); !r)
         return std::unexpected(r.error());
     while (n < buf_.size()) {
-        auto r = link_.transfer(hal::SpiWord{0});
+        auto r = link_.transfer(hal::LinkWord{0});
         if (!r)
             return std::unexpected(r.error());
         if (!r->intersects(kTextByte))

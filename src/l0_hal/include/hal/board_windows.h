@@ -13,7 +13,7 @@
 #include "infra/error.h"
 #include "hal/axi.h"
 #include "hal/board_profile.h"
-#include "hal/mailbox.h"
+#include "hal/gpo_gpi_pair.h"
 #include "hal/reg_block.h"
 #include "hal/reg_lend.h"
 #include "hal/register_window.h"
@@ -42,7 +42,7 @@ public:
           pages_(std::move(o.pages_)),
           lends_(std::exchange(o.lends_, {})),
           window_claims_(std::move(o.window_claims_)),
-          mailbox_claims_(std::move(o.mailbox_claims_)) {}
+          pair_claims_(std::move(o.pair_claims_)) {}
 
     BoardWindows& operator=(BoardWindows&&) = delete;
     BoardWindows(const BoardWindows&) = delete;
@@ -64,14 +64,14 @@ public:
         };
     }
 
-    [[nodiscard]] Ex<Mailbox> take_mailbox();
+    [[nodiscard]] Ex<GpoGpiPair> take_gpo_gpi();
 
     [[nodiscard]] xthread::ClaimSetCounts window_counts() const noexcept {
         return window_claims_->counts();
     }
 
-    [[nodiscard]] xthread::ClaimSetCounts mailbox_counts() const noexcept {
-        return mailbox_claims_->counts();
+    [[nodiscard]] xthread::ClaimSetCounts pair_counts() const noexcept {
+        return pair_claims_->counts();
     }
 
 private:
@@ -87,18 +87,18 @@ private:
     [[nodiscard]] Ex<reg::Block> lead_of(WindowId id, std::size_t need) const;
 
     template <class Layout>
-    [[nodiscard]] Ex<BlockView<Layout>> mailbox_reg(FactField field) const;
+    [[nodiscard]] Ex<BlockView<Layout>> pair_reg(FactField field) const;
 
     [[nodiscard]] Ex<void> bind_slot(WindowId id, reg::Lend lend);
-    [[nodiscard]] Ex<BlockView<GpoBlock>> mailbox_gpo() const;
-    [[nodiscard]] Ex<BlockView<GpiBlock>> mailbox_gpi() const;
+    [[nodiscard]] Ex<BlockView<GpoBlock>> pair_gpo() const;
+    [[nodiscard]] Ex<BlockView<GpiBlock>> pair_gpi() const;
 
     const BoardProfile* profile_;
     std::array<std::optional<detail::MappedRegs>, kMaxWindows> pages_{};
     std::array<reg::Lend, kMaxWindows> lends_{};
 
     std::unique_ptr<WindowClaims> window_claims_ = std::make_unique<WindowClaims>();
-    std::unique_ptr<MailboxClaims> mailbox_claims_ = std::make_unique<MailboxClaims>();
+    std::unique_ptr<GpoGpiClaims> pair_claims_ = std::make_unique<GpoGpiClaims>();
 };
 
 }

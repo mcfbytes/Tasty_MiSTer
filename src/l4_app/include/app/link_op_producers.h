@@ -152,7 +152,8 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>,
     OpProducer<proto::LinkOp::Kind::MenuCtl, ui::UiRound>,
     OpProducer<proto::LinkOp::Kind::PlainDownload, cores::PayloadPieces>,
-    OpProducer<proto::LinkOp::Kind::JoyStick, input::LinkPadSink>>;
+    OpProducer<proto::LinkOp::Kind::JoyStick, input::LinkPadSink>,
+    OpProducer<proto::LinkOp::Kind::OcramRun, SessionOwner>>;
 
 namespace detail {
 template <class T>

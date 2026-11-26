@@ -22,7 +22,7 @@
 #include "app/option_cell.h"
 #include "cores/config_codec.h"
 #include "cores/config_slots.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/dip_switches.h"
 #include "cores/option_rows.h"
 #include "infra/byte_view.h"

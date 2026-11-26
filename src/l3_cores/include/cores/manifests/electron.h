@@ -5,7 +5,7 @@
 
 #include "cores/core_grant.h"
 #include "cores/core_profile.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/loader.h"
 #include "cores/loader_context.h"
 

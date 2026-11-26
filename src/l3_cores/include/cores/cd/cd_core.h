@@ -15,7 +15,7 @@
 #include "cores/cd_flow.h"
 #include "cores/cd/cd_profile.h"
 #include "cores/cd_service_rows.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
 #include "cores/file_tx.h"

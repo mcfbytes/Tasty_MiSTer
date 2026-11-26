@@ -47,19 +47,28 @@ namespace mister::app {
     return container_window(std::span<const std::byte>(hdr), size);
 }
 
-Ex<void> BitstreamProgrammer::program(const ParkReceipt&, AllLeasesHome, std::string_view rel) {
-    return run_(rel);
+Ex<void> BitstreamProgrammer::program(
+    const ParkReceipt&,
+    AllLeasesHome,
+    std::string_view rel,
+    infra::OptRef<IProgramGuard> guard
+) {
+    return run_(rel, guard);
 }
 
-Ex<void> BitstreamProgrammer::program_at_boot(AllLeasesHome, std::string_view rel) {
-    return run_(rel);
+Ex<void> BitstreamProgrammer::program_at_boot(
+    AllLeasesHome,
+    std::string_view rel,
+    infra::OptRef<IProgramGuard> guard
+) {
+    return run_(rel, guard);
 }
 
 bool BitstreamProgrammer::programmed() const {
     return programmer_->programmed();
 }
 
-Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
+Ex<void> BitstreamProgrammer::run_(std::string_view rel, infra::OptRef<IProgramGuard> guard) {
     auto src = stream_open(*vfs_, rel, svc::OpenMode::ReadWhole);
     if (!src)
         return std::unexpected(src.error());
@@ -72,6 +81,8 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
+    if (guard)
+        guard->proof();
     if (auto r = bridges_->pre_program(); !r)
         return std::unexpected(r.error());
     bridges_down_ = true;

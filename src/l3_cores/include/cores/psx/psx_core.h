@@ -10,7 +10,7 @@
 
 #include "cores/staging_core.h"
 #include "cores/cd/cd_core.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/psx/psx_sector_map.h"
 #include "cores/sector_kick.h"
 #include "infra/error.h"

@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "cores/c64/easyflash_image.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/nvram_save.h"
 #include "cores/save_home.h"
 #include "cores/save_shape.h"

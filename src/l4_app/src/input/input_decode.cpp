@@ -92,6 +92,7 @@ InputDecode::InputDecode(
       inbox_(w.inbox),
       rt_kick_(w.rt_kick),
       rumble_(svc, w.rumble_players, w.diag),
+      rumble_levels_(w.rumble_levels),
       clock_(clock),
       core_facts_(w.core_facts),
       launcher_cell_(w.cell),
@@ -104,7 +105,7 @@ InputDecode::InputDecode(
       pad_egress_(w.inbox, w.pads),
       joy_(w.joy_edge_reset, w.activity, svc, pad_egress_, tally_),
       sticks_(w.joy_edge_reset, w.activity, svc, pad_egress_),
-      egress_(kbd_, mouse_, w.inbox, w.activity, w.diag),
+      egress_(kbd_, mouse_, w.inbox, w.activity, w.diag, w.pads),
       epoll_(std::move(fds.epoll_)) {
 
     for (const cores::InputSinkId id : cores::kInputSinkIds)
@@ -266,16 +267,21 @@ void InputDecode::begin_round() {
 void InputDecode::prepare_wait() {
     rebuilt_ = apply_requests();
     rumble_.refresh();
+    take_rumble_levels_();
 
     serve_sink_();
     kick_for_landed_();
 }
 
 infra::ParkTimeout InputDecode::wait_bound(infra::ParkTimeout timeout) const noexcept {
+
+    const infra::ParkTimeout base = pads_ && pads_->events_pending()
+        ? infra::sooner_of(timeout, LwPadEndpoint::kEventRetry)
+        : timeout;
     if (!sink_)
-        return timeout;
+        return base;
     const auto due = sink_->deadline();
-    return due ? infra::park_timeout_for(*due - clock_.now(), timeout) : timeout;
+    return due ? infra::park_timeout_for(*due - clock_.now(), base) : base;
 }
 
 void InputDecode::wait_events(infra::ParkTimeout timeout) noexcept {
@@ -458,6 +464,18 @@ void InputDecode::on(const proto::LinkEvent::Ps2Control& c) {
     mouse_.accept_control(c.mouse);
 }
 
+void InputDecode::take_rumble_levels_() noexcept {
+    if (!rumble_levels_)
+        return;
+    if (!rumble_levels_reader_.take_if_changed(*rumble_levels_, rumble_levels_scratch_))
+        return;
+    for (const svc::PlayerIndex p : svc::kPlayers) {
+        const hal::LinkWord level = rumble_levels_scratch_.levels[p];
+        if (level != rumble_.last_applied(p))
+            rumble_.on_level(p, level);
+    }
+}
+
 void InputDecode::on(const proto::LinkEvent::Ps2ControlEnded&) noexcept {
     end_ps2_control();
 }
@@ -468,7 +486,7 @@ void InputDecode::on(const proto::LinkEvent::PolledWord& w) noexcept {
             rumble_.on(w);
             return;
         case proto::user_io::PollShape::F12ModPoll:
-            f12_mod_needed_ = w.word != hal::SpiWord{};
+            f12_mod_needed_ = w.word != hal::LinkWord{};
             return;
         case proto::user_io::PollShape::KbdController:
 

@@ -28,6 +28,7 @@
 #include "app/input/pad_egress.h"
 #include "app/input/raw_key_edge.h"
 #include "app/input/rumble_relay.h"
+#include "app/rumble_levels.h"
 #include "cores/input_sink.h"
 #include "cores/input_sink_id.h"
 #include "cores/key_policy.h"
@@ -148,6 +149,8 @@ public:
         infra::OptRef<LwPadEndpoint> pads{};
 
         const CoreInputCell& core_facts;
+
+        infra::OptRef<const RumbleLevelsCell> rumble_levels{};
     };
 
     InputDecode(
@@ -230,6 +233,8 @@ private:
 
     void serve_sink_() noexcept;
 
+    void take_rumble_levels_() noexcept;
+
     void kick_for_landed_() noexcept;
 
     [[nodiscard]] bool is_osd_toggle_(svc::EvdevCode code) const noexcept;
@@ -265,6 +270,9 @@ private:
     KeyFocus focus_ = KeyFocus::Core;
     InputDecodeTally tally_{};
     RumbleRelay rumble_;
+    infra::OptRef<const RumbleLevelsCell> rumble_levels_;
+    RumbleLevelsCell::Reader rumble_levels_reader_{};
+    RumbleLevels rumble_levels_scratch_{};
 
     bool f12_mod_needed_ = false;
 

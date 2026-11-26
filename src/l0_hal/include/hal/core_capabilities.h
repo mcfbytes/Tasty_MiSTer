@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "hal/lw_presence.h"
+#include "hal/ocram_presence.h"
 #include "hal/types.h"
 
 namespace mister::hal {
@@ -16,6 +17,7 @@ struct CoreCapabilities {
     bool button_user = false;
     std::uint8_t free_caps = 0;
     LwPresence lw{};
+    OcramPresence ocram{};
 };
 
 }

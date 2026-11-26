@@ -10,7 +10,7 @@
 #include "cores/archie/archie_option.h"
 #include "infra/endian.h"
 #include "proto/bit_field.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "proto/status_bit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
@@ -43,7 +43,7 @@ struct SystemCtrl {
     }
 
     [[nodiscard]] constexpr proto::StatusWord image() const noexcept {
-        return proto::StatusWord::of(hal::SpiHalves::of(v));
+        return proto::StatusWord::of(hal::LinkHalves::of(v));
     }
 
     [[nodiscard]] constexpr proto::FieldValue get(const Home& h) const noexcept {
@@ -52,7 +52,7 @@ struct SystemCtrl {
 
     [[nodiscard]] constexpr SystemCtrl with(const Home& h, proto::FieldValue x) const noexcept {
         const proto::StatusWord next = h.file.write(image(), x);
-        return hal::SpiHalves{next.words[0], next.words[1]}.joined([](std::uint32_t word) {
+        return hal::LinkHalves{next.words[0], next.words[1]}.joined([](std::uint32_t word) {
             return SystemCtrl{word};
         });
     }

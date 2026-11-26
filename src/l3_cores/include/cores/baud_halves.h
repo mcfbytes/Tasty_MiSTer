@@ -2,12 +2,12 @@
 #pragma once
 
 #include "cores/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 
 namespace mister::cores {
 
-constexpr hal::SpiHalves BaudRate::halves() const noexcept {
-    return hal::SpiHalves::of(v);
+constexpr hal::LinkHalves BaudRate::halves() const noexcept {
+    return hal::LinkHalves::of(v);
 }
 
 }

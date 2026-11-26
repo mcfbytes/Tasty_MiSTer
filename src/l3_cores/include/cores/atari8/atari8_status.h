@@ -8,7 +8,7 @@
 namespace mister::cores::atari8 {
 
 struct Atari8Status {
-    hal::SpiWord v{};
+    hal::LinkWord v{};
 
     [[nodiscard]] constexpr bool soft_boot() const noexcept { return v.intersects(kSoftBoot); }
 
@@ -36,18 +36,18 @@ struct Atari8Status {
 
     friend constexpr bool operator==(Atari8Status, Atari8Status) = default;
 
-    static constexpr hal::SpiWord kSoftBoot{0x0001};
-    static constexpr hal::SpiWord kColdBoot{0x0002};
-    static constexpr hal::SpiWord kHalt{0x0004};
-    static constexpr hal::SpiWord kMode800{0x0008};
-    static constexpr hal::SpiWord kReadOnly{0x0040};
-    static constexpr hal::SpiWord kPbi{0x0080};
-    static constexpr hal::SpiWord kSpeed{0x0700};
-    static constexpr hal::SpiWord kAtx1050{0x8000};
+    static constexpr hal::LinkWord kSoftBoot{0x0001};
+    static constexpr hal::LinkWord kColdBoot{0x0002};
+    static constexpr hal::LinkWord kHalt{0x0004};
+    static constexpr hal::LinkWord kMode800{0x0008};
+    static constexpr hal::LinkWord kReadOnly{0x0040};
+    static constexpr hal::LinkWord kPbi{0x0080};
+    static constexpr hal::LinkWord kSpeed{0x0700};
+    static constexpr hal::LinkWord kAtx1050{0x8000};
 
-    static constexpr hal::SpiWord kHotkeys{0x0007};
+    static constexpr hal::LinkWord kHotkeys{0x0007};
 
-    static constexpr hal::SpiWord kDriveOptions{0x87C0};
+    static constexpr hal::LinkWord kDriveOptions{0x87C0};
 };
 
 }

@@ -117,6 +117,7 @@ std::optional<app::input::InputPipeline> DeviceBlock::open_input_pipeline_(
             .rumble_players = rumble_players_,
             .pads = infra::OptRef<app::input::LwPadEndpoint>{lw_pad_},
             .core_facts = core_facts_,
+            .rumble_levels = infra::OptRef<const app::RumbleLevelsCell>{rumble_levels_},
         }
     };
 }
@@ -256,6 +257,7 @@ DeviceBlock::DeviceBlock(
 )
     : threads_(plat.threads),
       io_doorbells_(open_io_doorbells_()),
+      main_doorbells_(open_main_doorbells_()),
       events_(),
       owner_events_(),
       clock_(),
@@ -338,6 +340,26 @@ DeviceBlock::DeviceBlock(
               .saves = infra::OptRef<const svc::ISaveFilesOnIo>{storage_}
           }
       ),
+      ocram_events_(
+          app::OcramEventRelay::Wiring{
+              .status = status_snapshots_,
+              .info = info_notices_,
+              .rumble = rumble_levels_,
+              .input_wake = input_ctrl_.kicker()
+          }
+      ),
+      ocram_sector_(
+          app::OcramSectorEndpoint::Wiring{
+              .grant = sector_grant_,
+              .route = sector_route_,
+              .lease = sector_lease_,
+              .geometry = disc_geometry_,
+              .discs = discs_,
+              .doorbells = io_doorbell_set_(),
+              .saves = infra::OptRef<const svc::ISaveFilesOnIo>{storage_},
+              .events = infra::OptRef<app::OcramEventRelay>{ocram_events_}
+          }
+      ),
       lw_sys_(
           app::LwSysEndpoint::Wiring{
               .grant = sys_grant_,
@@ -362,6 +384,14 @@ DeviceBlock::DeviceBlock(
       osd_wire_{surface_, plat.link},
       lw_osd_(
           app::LwOsdEndpoint::Wiring{
+              .grant = osd_grant_,
+              .route = osd_route_,
+              .lease = osd_lease_,
+              .surface = surface_
+          }
+      ),
+      ocram_osd_(
+          app::OcramOsdEndpoint::Wiring{
               .grant = osd_grant_,
               .route = osd_route_,
               .lease = osd_lease_,
@@ -400,6 +430,7 @@ DeviceBlock::DeviceBlock(
           .vfs = infra::OptRef<const svc::Vfs>{plat.vfs},
           .uart_handoffs = infra::opt_ref_of(front.grants_uart ? &uart_handoffs_ : nullptr),
           .doorbells = plat.doorbells,
+          .ocram_run = plat.ocram_run,
           .fpga_mem = plat.fpga_mem,
           .lw_window = plat.lw_window,
           .doorbell_nodes = plat.doorbell_nodes,
@@ -441,6 +472,9 @@ DeviceBlock::DeviceBlock(
               .launcher_demand = front.launcher_demand,
               .launcher_wake = front.launcher_wake,
               .programmer = bitstream_,
+              .ocram_window = plat.ocram_window,
+              .ocram_platform = plat.ocram_platform,
+              .main_doorbells = main_doorbell_set_(),
               .storage = plat.vfs,
               .window_map = window_map_,
               .fabric_cell = fabric_cell_,
@@ -503,7 +537,7 @@ DeviceBlock::DeviceBlock(
       }},
       vfs_(plat.vfs) {
 
-    static_assert(svc::IoMain::kMaxCoworkers >= 11);
+    static_assert(svc::IoMain::kMaxCoworkers >= 12);
 
     const app::RunPolicy& policy = front.policy;
     video_pump_.apply_run_policy(policy);
@@ -533,7 +567,8 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .frames = frame_counter_,
              .input_emit = input_emit_,
 
-             .vsync = infra::opt_ref_of(frame_ ? &frame_->frame_cell() : nullptr)},
+             .vsync = infra::opt_ref_of(frame_ ? &frame_->frame_cell() : nullptr),
+             .main_doorbells = main_doorbell_set_()},
         .cells =
             {.config = config_cell_,
              .conf_str = conf_str_cell_,
@@ -549,7 +584,8 @@ DeviceBlock::Parts DeviceBlock::parts() noexcept {
              .core_frames = core_frames_,
              .ini = ini_cell_,
              .disk_activity = disk_activity_,
-             .menu_focus = menu_focus_cell_},
+             .menu_focus = menu_focus_cell_,
+             .info_notices = info_notices_},
         .session = {.link = session_, .owner = owner_},
     };
 }
@@ -595,6 +631,20 @@ std::optional<os::EpollSet> DeviceBlock::open_io_doorbells_() {
     return std::optional<os::EpollSet>{std::move(*s)};
 }
 
+std::optional<os::EpollSet> DeviceBlock::open_main_doorbells_() {
+    auto s = os::EpollSet::create();
+    if (!s) {
+        opened_.refuse("MAIN: epoll_create1(doorbells)", s.error());
+        return std::nullopt;
+    }
+    return std::optional<os::EpollSet>{std::move(*s)};
+}
+
+infra::OptRef<const os::EpollSet> DeviceBlock::main_doorbell_set_() noexcept {
+    return main_doorbells_ ? infra::OptRef<const os::EpollSet>{*main_doorbells_}
+                           : infra::OptRef<const os::EpollSet>{};
+}
+
 infra::OptRef<const os::EpollSet> DeviceBlock::io_doorbell_set_() noexcept {
     return io_doorbells_ ? infra::OptRef<const os::EpollSet>{*io_doorbells_}
                          : infra::OptRef<const os::EpollSet>{};
@@ -617,8 +667,8 @@ std::optional<svc::IoMain> DeviceBlock::open_io_main_() {
     }
 }
 
-app::SupervisorParts::Services DeviceBlock::services_() noexcept {
-    return app::SupervisorParts::Services{
+app::LinkSessionParts::Services DeviceBlock::services_() noexcept {
+    return app::LinkSessionParts::Services{
         .feeder = pcm_feeder_,
         .prefetch = prefetch_,
         .mailbox = mailbox_relay_,
@@ -669,6 +719,8 @@ void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) n
     (void)rides_io_(discs_, "T-IO: add_coworker(discs)");
 
     (void)rides_io_(lw_sector_, "T-IO: add_coworker(lw_sector)");
+
+    (void)rides_io_(ocram_sector_, "T-IO: add_coworker(ocram_sector)");
 
     (void)rides_io_(lw_sys_, "T-IO: add_coworker(lw_sys)");
 

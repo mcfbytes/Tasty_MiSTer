@@ -20,8 +20,8 @@ inline constexpr std::array<OsdRotation, 3> kRotationByIni{
     return osd_rotate < kRotationByIni.size() ? kRotationByIni[osd_rotate] : OsdRotation::None;
 }
 
-[[nodiscard]] constexpr std::array<hal::SpiWord, 1> rotation_words(OsdRotation rotate) noexcept {
-    return {hal::SpiWord{static_cast<std::uint16_t>(rotate)}};
+[[nodiscard]] constexpr std::array<hal::LinkWord, 1> rotation_words(OsdRotation rotate) noexcept {
+    return {hal::LinkWord{static_cast<std::uint16_t>(rotate)}};
 }
 
 }

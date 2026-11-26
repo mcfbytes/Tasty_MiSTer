@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "app/file_bytes.h"
-#include "cores/progress_ticker.h"
+#include "cores/progress.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
 #include "infra/prelude.h"
@@ -74,7 +74,16 @@ bool LoadLadder::wants_pass(
         case Pc::Mount:
         case Pc::Close:
         case Pc::Cut:
+        case Pc::LaneAct:
             return inbox.ring().size() < proto::kLinkTxCapacity;
+        case Pc::LaneAnswer: {
+            const auto s = level.sample();
+            return s && s.value.stream_act == job_.act;
+        }
+
+        case Pc::LaneOpen:
+        case Pc::LaneEnd:
+            return false;
     }
 
     return false;
@@ -103,6 +112,11 @@ LoadLadder::Pass LoadLadder::step(Host& h) {
             return close_(h);
         case Pc::Cut:
             return cut_(h);
+        case Pc::LaneOpen:
+        case Pc::LaneAct:
+        case Pc::LaneAnswer:
+        case Pc::LaneEnd:
+            return lane_step_(h);
         case Pc::Over:
             break;
     }
@@ -128,6 +142,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
     };
     if (!h.inbox.push(op))
         return Pass::Waiting;
+    off_link_ = h.lane && h.lane->granted();
     progress_(h, true);
     pc_ = Pc::AwaitOpen;
     return Pass::Stepped;
@@ -142,7 +157,8 @@ LoadLadder::Pass LoadLadder::await_open_(Host& h) {
         progress_(h, true);
         return Pass::Failed;
     }
-    pc_ = Pc::Chunk;
+
+    pc_ = off_link_ ? Pc::LaneOpen : Pc::Chunk;
     return Pass::Stepped;
 }
 
@@ -251,7 +267,7 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
     }
 
     const bool mounts = !job_.save.empty() && job_.row.bracket != cores::RowBracket::None;
-    pc_ = mounts ? Pc::Mount : Pc::Close;
+    pc_ = mounts ? Pc::Mount : close_pc_();
     return Pass::Stepped;
 }
 
@@ -262,7 +278,7 @@ LoadLadder::Pass LoadLadder::mount_(Host& h) {
     if (!id) {
         if (id.error().code == Errc::would_block)
             return Pass::Waiting;
-        pc_ = Pc::Close;
+        pc_ = close_pc_();
         return Pass::Stepped;
     }
     if (!h.inbox.push(
@@ -274,7 +290,8 @@ LoadLadder::Pass LoadLadder::mount_(Host& h) {
         )) {
         return Pass::Waiting;
     }
-    pc_ = Pc::Close;
+    mounted_ = true;
+    pc_ = close_pc_();
     return Pass::Stepped;
 }
 
@@ -330,7 +347,92 @@ LoadLadder::Pass LoadLadder::notify_(Host& h) {
     return Pass::Done;
 }
 
+LoadLadder::Pc LoadLadder::close_pc_() const noexcept {
+    if (!off_link_)
+        return Pc::Close;
+    return facts_pushed_ || mounted_ ? Pc::LaneAct : Pc::LaneEnd;
+}
+
+LoadLadder::Pass LoadLadder::lane_step_(Host& h) {
+    OcramLaneWriter& lane = *h.lane;
+    if (lane.lost()) {
+        lane_ended_ = true;
+        return cut_(h);
+    }
+    if (pc_ == Pc::LaneOpen) {
+        if (!lane_framed_) {
+            if (!lane.open(h.level.sample().value.params)) {
+                lane.wait(OcramLaneWriter::Wait::Room);
+                return Pass::Waiting;
+            }
+            lane_framed_ = true;
+        }
+        if (!lane.played()) {
+            lane.wait(OcramLaneWriter::Wait::Played);
+            return Pass::Waiting;
+        }
+        pc_ = Pc::Chunk;
+        return Pass::Stepped;
+    }
+    if (pc_ == Pc::LaneAct) {
+        if (h.inbox.ring().size() >= proto::kLinkTxCapacity)
+            return Pass::Waiting;
+        const proto::FileSize total{job_.total};
+        auto id = h.inbox.intern_file_path(path_.view(), total, {}, 0, job_.edge);
+        if (!id)
+            return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
+        if (facts_pushed_)
+            (void)h.inbox.stamp_remount(*id);
+        const proto::LinkOp::FileTx op{
+            .wire_index = job_.wire_index.fio_byte(),
+            .phase = proto::LinkOp::FileTxPhase::BeforeClose,
+            .file = *id,
+            .total = bracket_length_().detail(),
+            .act = job_.act
+        };
+        if (!h.inbox.push(op))
+            return Pass::Waiting;
+        pc_ = Pc::LaneAnswer;
+        return Pass::Stepped;
+    }
+    if (pc_ == Pc::LaneAnswer) {
+        const auto s = h.level.sample();
+        if (!s || s.value.stream_act != job_.act)
+            return Pass::Waiting;
+        pc_ = Pc::LaneEnd;
+        return Pass::Stepped;
+    }
+    if (!lane_ended_) {
+        if (!lane.end()) {
+            lane.wait(OcramLaneWriter::Wait::Room);
+            return Pass::Waiting;
+        }
+        lane_ended_ = true;
+    }
+    if (!lane.played()) {
+        lane.wait(OcramLaneWriter::Wait::Played);
+        return Pass::Waiting;
+    }
+    lane.close_window();
+    pc_ = Pc::Close;
+    return Pass::Stepped;
+}
+
 LoadLadder::Pass LoadLadder::cut_(Host& h) {
+    if (off_link_ && lane_framed_ && !lane_ended_ && h.lane) {
+        pc_ = Pc::Cut;
+        if (!h.lane->end()) {
+            h.lane->wait(OcramLaneWriter::Wait::Room);
+            return Pass::Waiting;
+        }
+        lane_ended_ = true;
+    }
+    if (off_link_ && lane_ended_ && h.lane && !h.lane->lost() && !h.lane->played()) {
+        h.lane->wait(OcramLaneWriter::Wait::Played);
+        return Pass::Waiting;
+    }
+    if (off_link_ && h.lane)
+        h.lane->close_window();
     pc_ = Pc::Cut;
     if (job_.row.bracket == cores::RowBracket::None) {
         pc_ = Pc::Over;
@@ -354,23 +456,15 @@ proto::FileSize LoadLadder::bracket_length_() const noexcept {
 }
 
 void LoadLadder::progress_(Host& h, bool edge) noexcept {
-    std::uint16_t cur = 0;
-    std::uint16_t max = 0;
-    if (!edge) {
-        max = cores::kProgressSteps;
-        cur = static_cast<std::uint16_t>(
-            off_.file_word<std::uint64_t>() * cores::kProgressSteps / job_.total
-        );
-    }
-    h.events.push(
-        Event::ProgressUpdate{.progress = {.done = cur, .total = max}},
-        Event::Head{ERR_SITE(), {}, kUncaused}
-    );
+    const cores::Progress now = edge
+        ? cores::Progress{}
+        : cores::Progress::of_bytes({.done = off_, .total = proto::FileSize{job_.total}});
+    h.events.push(Event::ProgressUpdate{.progress = now}, Event::Head{ERR_SITE(), {}, kUncaused});
 }
 
 Rung::Pass LoadLadder::step(const RungEdges& edges, cores::ILadderHost&) {
     TASTY_SEAT_BODY(LoadLadder);
-    Host h{edges.inbox, edges.level, edges.events};
+    Host h{edges.inbox, edges.level, edges.events, edges.lane};
     switch (step(h)) {
         case Pass::Stepped:
             return Rung::Pass::Moved;

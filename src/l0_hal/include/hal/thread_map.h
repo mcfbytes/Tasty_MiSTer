@@ -240,6 +240,26 @@ constexpr ThreadMap join_threads(
 
 inline constexpr ThreadMap kDe10ThreadMap = join_threads(kSeatPolicyTable, kDe10Placement);
 
+inline constexpr PlacementTable kDe25Placement{{
+    {.seat = SeatTag::RT, .cpu = os::CpuId{1}},
+    {.seat = SeatTag::Frame, .cpu = os::CpuId{1}},
+    {.seat = SeatTag::Input, .cpu = os::CpuId{2}},
+    {.seat = SeatTag::Pcm, .cpu = os::CpuId{2}},
+    {.seat = SeatTag::Prefetch, .cpu = os::CpuId{2}},
+    {.seat = SeatTag::Diag, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Ui, .cpu = os::CpuId{3}},
+    {.seat = SeatTag::Io, .cpu = os::CpuId{2}},
+    {.seat = SeatTag::Capture, .cpu = os::CpuId{2}},
+    {.seat = SeatTag::Encode, .cpu = os::CpuId{3}},
+    {.seat = SeatTag::RecWrite, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Launcher, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::HdOsd, .cpu = os::CpuId{3}},
+    {.seat = SeatTag::Connect, .cpu = os::CpuId{0}},
+    {.seat = SeatTag::Nic, .cpu = os::CpuId{0}},
+}};
+
+inline constexpr ThreadMap kDe25ThreadMap = join_threads(kSeatPolicyTable, kDe25Placement);
+
 constexpr bool carries_seat_table(
     const ThreadMap& m,
     const SeatPolicyTable& seats = kSeatPolicyTable

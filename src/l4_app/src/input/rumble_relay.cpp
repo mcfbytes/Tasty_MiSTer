@@ -19,10 +19,10 @@ void RumbleRelay::refresh() noexcept {
         if (now.pads[p] == seen_[p].pad)
             continue;
 
-        const hal::SpiWord held = seen_[p].word;
+        const hal::LinkWord held = seen_[p].word;
         seen_[p].pad = now.pads[p];
-        seen_[p].word = hal::SpiWord{};
-        if (held != hal::SpiWord{} && now.players.contains(p)) {
+        seen_[p].word = hal::LinkWord{};
+        if (held != hal::LinkWord{} && now.players.contains(p)) {
             ++reapplied_;
             apply_(p, held);
         }
@@ -35,20 +35,24 @@ void RumbleRelay::refresh() noexcept {
 
 void RumbleRelay::on(const proto::LinkEvent::PolledWord& w) noexcept {
     TASTY_SEAT_BODY(RumbleRelay);
-    const svc::PlayerIndex player{w.param};
+    on_level(svc::PlayerIndex{w.param}, w.word);
+}
+
+void RumbleRelay::on_level(svc::PlayerIndex player, hal::LinkWord word) noexcept {
+    TASTY_SEAT_BODY(RumbleRelay);
     const auto held = seen_.find(player);
     if (!held) {
         ++out_of_range_;
         return;
     }
-    if (w.word == held->word) {
+    if (word == held->word) {
         ++repeats_;
         return;
     }
-    apply_(player, w.word);
+    apply_(player, word);
 }
 
-void RumbleRelay::apply_(svc::PlayerIndex player, hal::SpiWord word) noexcept {
+void RumbleRelay::apply_(svc::PlayerIndex player, hal::LinkWord word) noexcept {
     const proto::user_io::RumbleMotors m = proto::user_io::rumble_motors(word);
     switch (out_.rumble(player, m)) {
         case svc::input::RumbleApply::NoDevice:

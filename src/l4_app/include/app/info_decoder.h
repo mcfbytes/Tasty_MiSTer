@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "app/conf_str_cell.h"
+#include "app/info_notice.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "proto/link_event.h"
@@ -25,6 +26,8 @@ public:
 
     [[nodiscard]] std::string_view decode(const proto::LinkEvent::PolledWord& w);
 
+    [[nodiscard]] std::string_view decode(const InfoNotice& n);
+
     [[nodiscard]] std::uint32_t decoded() const noexcept { return decoded_; }
 
     [[nodiscard]] std::uint32_t stale() const noexcept { return stale_; }
@@ -34,6 +37,8 @@ public:
 private:
     void refresh_();
     [[nodiscard]] std::string_view info_text_(const proto::LinkEvent::PolledWord& w);
+    [[nodiscard]] std::string_view judged_(hal::ocram::InfoArg info, proto::BindGeneration gen);
+    [[nodiscard]] std::string_view text_for_(hal::ocram::InfoArg info);
 
     const ConfStrCell& cell_;
     ConfStrCell::Reader reader_{};

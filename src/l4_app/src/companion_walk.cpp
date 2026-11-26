@@ -114,10 +114,11 @@ CompanionWalk::Pass CompanionWalk::load_(Host& h) {
 
 Rung::Pass CompanionWalk::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(CompanionWalk);
+    const LoadLadder::Host rung{edges.inbox, edges.level, edges.events, edges.lane};
     Host h{
         .load =
             LoadWalk::Host{
-                .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events},
+                .rung = rung,
                 .owner = owner,
                 .map = edges.window_map,
                 .aperture = edges.aperture,

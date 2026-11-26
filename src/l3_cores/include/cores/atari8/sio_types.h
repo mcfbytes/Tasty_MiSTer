@@ -176,7 +176,7 @@ inline constexpr SioSector SioSector::kLastBoot{3};
 struct SioDivisor {
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr SioDivisor switched_from(hal::SpiWord getdiv) noexcept {
+    [[nodiscard]] static constexpr SioDivisor switched_from(hal::LinkWord getdiv) noexcept {
         return SioDivisor{static_cast<std::uint8_t>(getdiv.low_byte() - 1)};
     }
 
@@ -294,7 +294,7 @@ struct HostAddress {
 };
 
 struct SioRxWord {
-    hal::SpiWord v{};
+    hal::LinkWord v{};
     static constexpr hal::RegField<std::uint8_t> kPlaceField{0, 0x7F};
 
     [[nodiscard]] constexpr std::byte byte() const noexcept { return v.low_lane(); }
@@ -308,9 +308,9 @@ struct SioRxWord {
 };
 
 struct SioRxStatus {
-    hal::SpiWord v{};
-    static constexpr hal::SpiWord kFull{0x0200};
-    static constexpr hal::SpiWord kEmpty{0x0100};
+    hal::LinkWord v{};
+    static constexpr hal::LinkWord kFull{0x0200};
+    static constexpr hal::LinkWord kEmpty{0x0100};
     static constexpr SioWordCount kDepth{256};
 
     [[nodiscard]] constexpr SioWordCount held() const noexcept {
@@ -323,9 +323,9 @@ struct SioRxStatus {
 };
 
 struct SioError {
-    hal::SpiWord v{};
+    hal::LinkWord v{};
 
-    [[nodiscard]] constexpr bool any() const noexcept { return v != hal::SpiWord{}; }
+    [[nodiscard]] constexpr bool any() const noexcept { return v != hal::LinkWord{}; }
 
     [[nodiscard]] constexpr SioError with(SioError more) const noexcept {
         return SioError{v.with(more.v)};

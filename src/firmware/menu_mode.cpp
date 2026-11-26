@@ -205,7 +205,8 @@ void MenuMode::StderrVoice::fabric_not_ready(const hal::BoardProfile& board) con
 
         std::fprintf(
             stderr,
-            "mister: board %.*s has no link port yet (unverified row); quitting\n",
+            "mister: board %.*s: no FPGA link (unverified row, no link port); nothing "
+            "on the fabric was mapped or touched; quitting\n",
             static_cast<int>(board.model.size()),
             board.model.data()
         );

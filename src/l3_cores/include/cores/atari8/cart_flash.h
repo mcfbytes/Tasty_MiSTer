@@ -6,7 +6,7 @@
 namespace mister::cores::atari8 {
 
 struct CartFlash {
-    hal::SpiWord v{};
+    hal::LinkWord v{};
 
     [[nodiscard]] constexpr bool written() const noexcept { return v.intersects(kWritten); }
 
@@ -18,11 +18,11 @@ struct CartFlash {
 
     [[nodiscard]] constexpr bool boots_on_mount() const noexcept { return v.intersects(kBoots); }
 
-    static constexpr hal::SpiWord kWritten{0x0001};
-    static constexpr hal::SpiWord kSecond{0x0002};
-    static constexpr hal::SpiWord kAutosave{0x0004};
-    static constexpr hal::SpiWord kSaveNow{0x0008};
-    static constexpr hal::SpiWord kBoots{0x0010};
+    static constexpr hal::LinkWord kWritten{0x0001};
+    static constexpr hal::LinkWord kSecond{0x0002};
+    static constexpr hal::LinkWord kAutosave{0x0004};
+    static constexpr hal::LinkWord kSaveNow{0x0008};
+    static constexpr hal::LinkWord kBoots{0x0010};
 };
 
 }

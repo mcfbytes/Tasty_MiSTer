@@ -10,6 +10,7 @@ add_library(mister_proto STATIC
   src/ps2_wire.cpp
   src/rtc_image.cpp
   src/save_state_name.cpp
+  src/types.cpp
 )
 target_include_directories(mister_proto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_proto
@@ -24,12 +25,14 @@ add_library(mister_proto_link STATIC
   src/link/lane_block_decl.cpp
   src/link/dir_version.cpp
   src/link/sys_directory_image.cpp
-  src/link/axi_pad_encoder.cpp
+  src/link/lw_pad_encoder.cpp
+  src/link/pad_events.cpp
   src/link/relay_pad_encoder.cpp
   src/link/block_slots.cpp
   src/link/core_session.cpp
   src/link/download_session.cpp
   src/link/fio_bracket.cpp
+  src/link/fio_bracket_words.cpp
   src/link/upload_session.cpp
   src/link/frame_counter_read.cpp
   src/link/spi_image_sink.cpp
@@ -44,11 +47,12 @@ add_library(mister_proto_link STATIC
   src/link/spi_conf_str_decoder.cpp
   src/link/spi_fio_queue.cpp
   src/link/spi_frame.cpp
+  src/link/frame_route.cpp
   src/link/spi_identify_decoder.cpp
   src/link/spi_osd_mask_decoder.cpp
-  src/link/spi_sampler.cpp
-  src/link/spi_status_decoder.cpp
-  src/link/axi_status_decoder.cpp
+  src/link/pin_sampler.cpp
+  src/link/spi_status_source.cpp
+  src/link/lw_status_source.cpp
   src/link/status_decoder.cpp
   src/link/poll_reader.cpp
   src/link/joystick_port.cpp
@@ -219,6 +223,8 @@ tasty_add_header_checks(tasty_proto_link_header_checks LIB mister_proto_link HEA
   proto/link/link.h
   proto/link/link_ops.h
   proto/link/spi_frame.h
+  proto/link/frame_lane.h
+  proto/link/frame_route.h
   proto/link/link_sel_carriers.h
   proto/link/sys_directory_image.h
   proto/link/sector_block_decl.h
@@ -228,7 +234,10 @@ tasty_add_header_checks(tasty_proto_link_header_checks LIB mister_proto_link HEA
   proto/link/osd_shape.h
   proto/link/pad_shape.h
   proto/link/sys_block_decl.h
-  proto/link/axi_pad_encoder.h
+  proto/link/lw_pad_encoder.h
+  proto/link/pad_event.h
+  proto/link/pad_key_image.h
+  proto/link/pad_mouse_stores.h
   proto/link/pad_relay.h
   proto/link/relay_pad_encoder.h
   proto/link/core_session.h
@@ -243,13 +252,15 @@ tasty_add_header_checks(tasty_proto_link_header_checks LIB mister_proto_link HEA
   proto/link/spi_conf_str_decoder.h
   proto/link/spi_fio_queue.h
   proto/link/fio_bracket.h
+  proto/link/fio_open.h
+  proto/link/fio_bracket_words.h
   proto/link/spi_image_sink.h
   proto/link/spi_identify_decoder.h
   proto/link/spi_osd_mask_decoder.h
   proto/link/spi_ps2_decoder.h
-  proto/link/spi_sampler.h
-  proto/link/spi_status_decoder.h
-  proto/link/axi_status_decoder.h
+  proto/link/pin_sampler.h
+  proto/link/spi_status_source.h
+  proto/link/snapshot_status_source.h
   proto/link/status_change.h
   proto/link/status_source.h
   proto/link/status_decoder.h

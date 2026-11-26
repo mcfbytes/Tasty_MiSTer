@@ -26,7 +26,7 @@ static_assert(kCountAt + sizeof(std::uint16_t) == kHeaderBytes);
 inline constexpr std::size_t kMaxPacketBytes = 32;
 
 struct Command {
-    hal::SpiWord opcode;
+    hal::LinkWord opcode;
     std::uint8_t words;
 };
 

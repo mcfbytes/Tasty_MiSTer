@@ -393,7 +393,7 @@ LoadWalk::Pass LoadWalk::fail_(Host& h) {
 Rung::Pass LoadWalk::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(LoadWalk);
     Host h{
-        .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events},
+        .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events, edges.lane},
         .owner = owner,
         .map = edges.window_map,
         .aperture = edges.aperture,

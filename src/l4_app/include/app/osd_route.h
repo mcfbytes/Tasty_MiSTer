@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "infra/cell_gen.h"
+#include "infra/tally.h"
 #include "infra/prelude.h"
 #include "infra/seat.h"
 #include "infra/xthread/telemetry.h"
@@ -12,7 +13,9 @@
 namespace mister::app {
 
 struct OsdRoute {
-    bool on_lw = false;
+    bool bound = false;
+    bool on_ocram = false;
+    infra::Tally ring_lost = {};
     std::uint32_t frames = 0;
     std::uint32_t rows = 0;
     std::uint32_t revoked = 0;

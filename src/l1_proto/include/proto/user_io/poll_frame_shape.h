@@ -20,12 +20,12 @@ enum class TransferKind : std::uint8_t { AckedWord, AckedByte, kCount };
 inline constexpr FioWordCount kCommandBeatWords{1};
 inline constexpr ReplyMask kLowByteLane{0x00FF};
 
-[[nodiscard]] constexpr hal::SpiWord kept_part(TransferKind kind, hal::SpiWord reply) noexcept {
+[[nodiscard]] constexpr hal::LinkWord kept_part(TransferKind kind, hal::LinkWord reply) noexcept {
     switch (kind) {
         case TransferKind::AckedWord:
             return reply;
         case TransferKind::AckedByte:
-            return hal::SpiWord{reply.low_byte()};
+            return hal::LinkWord{reply.low_byte()};
         case TransferKind::kCount:
             break;
     }
@@ -43,14 +43,14 @@ public:
     };
 
     struct Row {
-        hal::SpiWord opcode{};
+        hal::LinkWord opcode{};
         bool keeps_command_reply = false;
         std::optional<DiskAddress> address{};
         TransferKind kind = TransferKind::AckedWord;
         ReplyCount leading{};
         ReplyCount guarded{};
         Guard guard{};
-        hal::SpiWord exchanged{};
+        hal::LinkWord exchanged{};
         LinkSel select = LinkSel::Io;
 
         std::optional<HeadLengths> head_lengths{};
@@ -63,7 +63,7 @@ public:
 
     [[nodiscard]] static constexpr bool well_formed(const Row& r) noexcept {
 
-        if (r.opcode == hal::SpiWord{} && (r.select == LinkSel::Io || !r.keeps_command_reply))
+        if (r.opcode == hal::LinkWord{} && (r.select == LinkSel::Io || !r.keeps_command_reply))
             return false;
         if (r.kind == TransferKind::kCount || r.guard.condition == Condition::kCount)
             return false;

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/spi_transport.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
@@ -30,18 +30,18 @@ public:
     Link(const Link&) = delete;
     Link& operator=(const Link&) = delete;
 
-    [[nodiscard]] Ex<hal::SpiWord> command(LinkSel sel, hal::SpiWord op);
+    [[nodiscard]] Ex<hal::LinkWord> command(LinkSel sel, hal::LinkWord op);
 
-    [[nodiscard]] Ex<hal::SpiWord> command(UioOp op);
+    [[nodiscard]] Ex<hal::LinkWord> command(UioOp op);
 
-    [[nodiscard]] Ex<void> word(hal::SpiWord w);
+    [[nodiscard]] Ex<void> word(hal::LinkWord w);
 
-    [[nodiscard]] Ex<void> write_byte(std::uint8_t b) { return word(hal::SpiWord{b}); }
+    [[nodiscard]] Ex<void> write_byte(std::uint8_t b) { return word(hal::LinkWord{b}); }
 
-    [[nodiscard]] Ex<hal::SpiWord> read();
-    [[nodiscard]] Ex<hal::SpiHalves> read_dword();
+    [[nodiscard]] Ex<hal::LinkWord> read();
+    [[nodiscard]] Ex<hal::LinkHalves> read_dword();
 
-    [[nodiscard]] Ex<hal::SpiWord> exchange(hal::SpiWord w);
+    [[nodiscard]] Ex<hal::LinkWord> exchange(hal::LinkWord w);
 
     [[nodiscard]] PollFrameRead read_poll_frame(
         const user_io::PollFrameShape& shape,

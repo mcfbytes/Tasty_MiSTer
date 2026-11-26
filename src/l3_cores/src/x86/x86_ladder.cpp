@@ -251,7 +251,7 @@ Ex<bool> X86Ladder::cmos_rung_() {
     while (infra::affine::in_bounds(kCmosRegisters, cmos_at_)) {
         const BusRegisterWrite w{
             kRtcBase + cmos_at_.offset(),
-            hal::SpiWord::of_byte((*cmos_)[cmos_at_])
+            hal::LinkWord::of_byte((*cmos_)[cmos_at_])
         };
         if (!write_(w))
             return false;

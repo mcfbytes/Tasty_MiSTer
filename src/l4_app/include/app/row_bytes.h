@@ -38,9 +38,9 @@ struct RowBytes {
         return v > 0 && v >= row.v && height.fits_in((extent - row.v) / v + 1u);
     }
 
-    [[nodiscard]] constexpr hal::SpiWord wire_word() const noexcept {
+    [[nodiscard]] constexpr hal::LinkWord wire_word() const noexcept {
         constexpr std::size_t kWordMask = 0xFFFFu;
-        return hal::SpiWord{static_cast<std::uint16_t>(v & kWordMask)};
+        return hal::LinkWord{static_cast<std::uint16_t>(v & kWordMask)};
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }

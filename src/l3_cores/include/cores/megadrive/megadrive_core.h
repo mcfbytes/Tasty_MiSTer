@@ -6,7 +6,7 @@
 #include <optional>
 #include <string_view>
 
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/megadrive/md_cmd_flags.h"
 #include "cores/megadrive/owed_answer.h"
 #include "cores/pcm_feed.h"
@@ -93,8 +93,8 @@ private:
     struct Status {
 
         struct Words {
-            hal::SpiWord track_flags;
-            hal::SpiWord fade_volume;
+            hal::LinkWord track_flags;
+            hal::LinkWord fade_volume;
         };
 
         std::optional<svc::TrackNumber> track{};

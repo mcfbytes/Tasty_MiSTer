@@ -95,12 +95,12 @@ MegaDriveCore::Status MegaDriveCore::Status::of(Words w) noexcept {
 std::optional<MegaDriveCore::Status> MegaDriveCore::read_status_() noexcept {
     hal::ISpiTransport& link = host().link;
     hal::Selected cs(link, hal::ChipSelect::Io);
-    const auto w0 = link.transfer(hal::SpiWord{kCmdStatus});
+    const auto w0 = link.transfer(hal::LinkWord{kCmdStatus});
     if (!w0) {
         ++wire_faults_;
         return std::nullopt;
     }
-    const auto w1 = link.transfer(hal::SpiWord{0});
+    const auto w1 = link.transfer(hal::LinkWord{0});
     if (!w1) {
         ++wire_faults_;
         return std::nullopt;
@@ -112,14 +112,14 @@ std::optional<MegaDriveCore::Status> MegaDriveCore::read_status_() noexcept {
 void MegaDriveCore::send_ack_(std::optional<svc::TrackNumber> track, bool playing) noexcept {
     hal::ISpiTransport& link = host().link;
     hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{kCmdAck}); !r) {
+    if (auto r = link.transfer(hal::LinkWord{kCmdAck}); !r) {
         ++wire_faults_;
         return;
     }
-    constexpr hal::SpiWord kPlaying{1};
-    constexpr hal::SpiWord kPaused{0};
-    const hal::SpiWord base = playing ? kPlaying : kPaused;
-    const hal::SpiWord word = track ? track->in_high_byte(base) : base;
+    constexpr hal::LinkWord kPlaying{1};
+    constexpr hal::LinkWord kPaused{0};
+    const hal::LinkWord base = playing ? kPlaying : kPaused;
+    const hal::LinkWord word = track ? track->in_high_byte(base) : base;
     if (auto r = link.transfer(word); !r) {
         ++wire_faults_;
         return;
@@ -135,7 +135,7 @@ void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
     PcmRingPoint read_point{};
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
-        const auto rd = link.transfer(hal::SpiWord{kCmdAudio});
+        const auto rd = link.transfer(hal::LinkWord{kCmdAudio});
         if (!rd) {
             ++wire_faults_;
             return;

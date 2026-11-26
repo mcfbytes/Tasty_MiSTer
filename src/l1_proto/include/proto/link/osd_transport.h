@@ -55,7 +55,7 @@ public:
 
 private:
     [[nodiscard]] LinkSel sel() const noexcept;
-    [[nodiscard]] Ex<void> command(ILinkFrame& frame, hal::SpiWord cmd);
+    [[nodiscard]] Ex<void> command(ILinkFrame& frame, hal::LinkWord cmd);
 
     OsdTarget target_ = OsdTarget::All;
     std::uint32_t unrouted_selects_ = 0;

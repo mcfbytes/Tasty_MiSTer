@@ -3,7 +3,7 @@ add_library(mister_cores_base STATIC
   src/boot_ladder.cpp
   src/cmos_image.cpp
   src/core_profile.cpp
-  src/core_support.cpp
+  src/core.cpp
   src/disc_save_migration.cpp
   src/fio_cheat_sink.cpp
   src/held_image_file.cpp
@@ -13,6 +13,7 @@ add_library(mister_cores_base STATIC
   src/nvram_store.cpp
   src/payload_pieces.cpp
   src/stream_load_bracket.cpp
+  src/off_link_window.cpp
   src/stream_load_host.cpp
   src/host_file_sandbox.cpp
   src/sidecar_send.cpp
@@ -676,6 +677,7 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/stream_ask.h
   cores/stream_load.h
   cores/stream_load_bracket.h
+  cores/off_link_window.h
   cores/stream_load_end.h
   cores/stream_load_host.h
   cores/stream_tx_record.h
@@ -700,7 +702,7 @@ tasty_add_header_checks(tasty_l3_base_header_checks LIB mister_cores_base HEADER
   cores/core_init_step.h
   cores/core_profile.h
   cores/core_window.h
-  cores/core_support.h
+  cores/core.h
   cores/host_file_server.h
   cores/host_file_sandbox.h
   cores/share_host.h

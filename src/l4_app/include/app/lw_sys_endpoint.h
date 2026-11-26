@@ -6,7 +6,7 @@
 #include <optional>
 #include <utility>
 
-#include "app/lw_block_endpoint.h"
+#include "app/grant_endpoint.h"
 #include "app/block_line.h"
 #include "app/sys_grant.h"
 #include "app/sys_route.h"
@@ -25,7 +25,7 @@
 namespace mister::app {
 
 class LwSysEndpoint final : public svc::IIoCoworker,
-                            public LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io> {
+                            public GrantEndpoint<SysGrant, SysRoute, seat_owner::Io> {
     TASTY_SEAT_RESIDENT(Io);
     static_assert(
         seat_owner::Io::kSeatDecl == kSeatDecl,
@@ -57,7 +57,7 @@ public:
     [[nodiscard]] const SysRoute& route() const noexcept { return tally_; }
 
 private:
-    using Base = LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
+    using Base = GrantEndpoint<SysGrant, SysRoute, seat_owner::Io>;
     static_assert(
         std::is_same_v<SysLeaseCell, Base::LeaseCell>,
         "the route's lease cell is the base's lease cell"
@@ -85,7 +85,7 @@ private:
     os::MonotonicClock clock_{};
 };
 
-extern template class LwBlockEndpoint<SysGrant, SysRoute, seat_owner::Io>;
+extern template class GrantEndpoint<SysGrant, SysRoute, seat_owner::Io>;
 
 }
 

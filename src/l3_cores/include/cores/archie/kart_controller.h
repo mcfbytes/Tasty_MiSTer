@@ -48,7 +48,7 @@ public:
     void bind(Instant now) noexcept override;
     void key(svc::EvdevCode code, bool pressed, Instant now) noexcept override;
     void mouse(proto::MouseDelta delta, proto::MouseButtons buttons, Instant now) noexcept override;
-    void controller_word(hal::SpiWord word, Instant now) noexcept override;
+    void controller_word(hal::LinkWord word, Instant now) noexcept override;
     void tick(Instant now) noexcept override;
     [[nodiscard]] std::optional<Instant> deadline() const noexcept override;
     [[nodiscard]] std::optional<proto::Ps2Frame> next_frame() noexcept override;

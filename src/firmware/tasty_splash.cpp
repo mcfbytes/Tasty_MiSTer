@@ -159,15 +159,15 @@ Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept 
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), 0});
     const app::PictureSize size = app::PictureSize::of(out);
     const auto halves = fb_region_->region().phys.advanced(app::kFramebufferPageBytes).low_halves();
-    const std::array<hal::SpiWord, 10> words{
+    const std::array<hal::LinkWord, 10> words{
         kFbEnWord,
-        hal::SpiWord{halves[0]},
-        hal::SpiWord{halves[1]},
+        hal::LinkWord{halves[0]},
+        hal::LinkWord{halves[1]},
         size.width.wire_word(),
         size.rows.wire_word(),
-        hal::SpiWord{},
+        hal::LinkWord{},
         (size.width - app::PicturePixels{1}).wire_word(),
-        hal::SpiWord{},
+        hal::LinkWord{},
         (size.rows - app::PictureRows{1}).wire_word(),
         size.stride_bytes(app::PixelBytes::of(sizeof(std::uint32_t))).wire_word(),
     };
@@ -176,7 +176,7 @@ Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept 
 
 Ex<void> TastySplash::hide(app::VideoPump& video) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    const std::array<hal::SpiWord, 1> words{hal::SpiWord{}};
+    const std::array<hal::LinkWord, 1> words{hal::LinkWord{}};
     return video.mode_sink().publish(proto::UioOp::SetFbuf, words);
 }
 

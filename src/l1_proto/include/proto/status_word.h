@@ -10,7 +10,7 @@
 #include <type_traits>
 
 #include "hal/types.h"
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "proto/bit_field.h"
 #include "proto/status_bit.h"
 #include "proto/types.h"
@@ -20,7 +20,7 @@ namespace mister::proto {
 
 struct StatusWord {
     static constexpr unsigned kWords = 8;
-    std::array<hal::SpiWord, kWords> words{};
+    std::array<hal::LinkWord, kWords> words{};
 
     [[nodiscard]] constexpr bool get_bit(StatusBit bit) const noexcept { return bit_at(bit); }
 
@@ -44,7 +44,7 @@ struct StatusWord {
         return out;
     }
 
-    [[nodiscard]] static constexpr StatusWord of(hal::SpiHalves halves) noexcept {
+    [[nodiscard]] static constexpr StatusWord of(hal::LinkHalves halves) noexcept {
         StatusWord w{};
         w.words[0] = halves.low;
         w.words[1] = halves.high;
@@ -55,7 +55,7 @@ struct StatusWord {
     static_assert(kRegisters * 2 == kWords);
 
     [[nodiscard]] static constexpr StatusWord of_registers(
-        std::span<const hal::SpiHalves, kRegisters> regs
+        std::span<const hal::LinkHalves, kRegisters> regs
     ) noexcept {
         StatusWord w{};
         for (unsigned r = 0; r < kRegisters; ++r) {
@@ -68,19 +68,19 @@ struct StatusWord {
     [[nodiscard]] static constexpr StatusWord all() noexcept {
         StatusWord w{};
         for (auto& word : w.words)
-            word = hal::SpiWord::all_ones();
+            word = hal::LinkWord::all_ones();
         return w;
     }
 
-    using Bytes = std::array<std::uint8_t, kWords * sizeof(hal::SpiWord)>;
+    using Bytes = std::array<std::uint8_t, kWords * sizeof(hal::LinkWord)>;
 
     [[nodiscard]] static constexpr StatusWord from_bytes(
         std::span<const std::uint8_t, sizeof(Bytes)> b
     ) noexcept {
         StatusWord w{};
         for (unsigned i = 0; i < kWords; ++i)
-            w.words[i] = hal::SpiWord::load_le(
-                b.subspan(i * sizeof(hal::SpiWord)).first<sizeof(hal::SpiWord)>()
+            w.words[i] = hal::LinkWord::load_le(
+                b.subspan(i * sizeof(hal::LinkWord)).first<sizeof(hal::LinkWord)>()
             );
         return w;
     }
@@ -98,8 +98,8 @@ struct StatusWord {
         for (unsigned i = 0; i < kWords; ++i) {
             words[i].store_le(
                 std::span<std::uint8_t>(out)
-                    .subspan(i * sizeof(hal::SpiWord))
-                    .first<sizeof(hal::SpiWord)>()
+                    .subspan(i * sizeof(hal::LinkWord))
+                    .first<sizeof(hal::LinkWord)>()
             );
         }
         return out;
@@ -127,7 +127,7 @@ constexpr StatusWord BitField::write(StatusWord word, FieldValue value) const no
 }
 
 static_assert(sizeof(StatusWord) == 16);
-static_assert(std::is_same_v<decltype(StatusWord::words)::value_type, hal::SpiWord>);
+static_assert(std::is_same_v<decltype(StatusWord::words)::value_type, hal::LinkWord>);
 static_assert(StatusBit::kCount == StatusWord::kWords * std::numeric_limits<std::uint16_t>::digits);
 static_assert(StatusWord{}.with(StatusBit{17}, true).has(StatusBit{17}));
 static_assert(!StatusWord{}.with(StatusBit{17}, false).has(StatusBit{17}));

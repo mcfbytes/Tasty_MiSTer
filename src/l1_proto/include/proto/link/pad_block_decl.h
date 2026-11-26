@@ -22,11 +22,17 @@ struct PadBlockDecl {
     PadShape shape{};
     EntryLine line{};
     hal::SysDirectory::EntryIndex index{};
+
+    [[nodiscard]] constexpr bool keys() const noexcept {
+        return ops.contains(UioOp::Mouse) && ops.contains(UioOp::Keyboard);
+    }
 };
 
 [[nodiscard]] Ex<PadBlockDecl> find_pad_block(
     const SysDirectoryImage& dir,
     hal::LwExtent window
 ) noexcept;
+
+[[nodiscard]] bool pad_link_arm_absent(const SysDirectoryImage& dir, hal::LwExtent window) noexcept;
 
 }

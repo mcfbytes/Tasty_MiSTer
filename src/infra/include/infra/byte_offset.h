@@ -15,6 +15,10 @@ struct ByteOffset {
     using affine_count = ByteCount;
     using affine_index = ByteOffset;
 
+    [[nodiscard]] static constexpr ByteOffset of(ByteCount n) noexcept {
+        return ByteOffset{n.size()};
+    }
+
     [[nodiscard]] constexpr std::size_t bytes() const noexcept { return v; }
 
     [[nodiscard]] constexpr char element_at(std::string_view text) const noexcept {

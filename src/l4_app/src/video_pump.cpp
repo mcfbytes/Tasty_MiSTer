@@ -180,6 +180,8 @@ void VideoPump::arm_load_edge(bool front_end) {
     video_->reset_resolution_gate();
     geo_edges_ = 0;
     geo_gen_seen_ = video_->resolution_generation();
+    scaler_caps_ = svc::ScalerCaps{};
+    overflow_seen_ = svc::video::Resolution{};
     publish_scaling_policy();
 }
 
@@ -212,6 +214,7 @@ void VideoPump::serve() noexcept {
         geo_gen_seen_ = g;
         ++geo_edges_;
         service_family_switch();
+        note_downscale_overflow();
 
         if (spd_form_ == svc::video::SpdForm::Dv1 || spd_form_ == svc::video::SpdForm::Dv1Menu) {
             seat_.update_spd(seat_host(), spd_inputs(), video_->info());
@@ -220,6 +223,7 @@ void VideoPump::serve() noexcept {
     take_edge(seat_.hotplug(seat_host(), ini_.init));
     service_idle_blank();
     composer_.service();
+    service_scaler_caps();
     audio_.tick(clock_.now());
 
     if (!pending_)
@@ -254,7 +258,59 @@ void VideoPump::publish_scaling_policy() noexcept {
     p.vscale_border = vscale_border_;
     p.filter_mode = filter_mode_;
     p.front_end = front_end_;
+    p.scaler = scaler_caps_;
     wire_.publish_policy(p);
+}
+
+void VideoPump::service_scaler_caps() {
+    const auto caps = composer_.scaler_caps();
+    if (!caps || caps->same_features(scaler_caps_))
+        return;
+    const bool reshaped = caps->downscale() != scaler_caps_.downscale();
+    scaler_caps_ = *caps;
+    if (!scaler_caps_.downscale()) {
+        std::fprintf(
+            stderr,
+            "mister: scaler: no downscale path (0x20 reply %s): the HDMI window is held at "
+            "or above the core's picture\n",
+            scaler_caps_.word().text().c_str()
+        );
+    }
+    if (!scaler_caps_.vga_scaler()) {
+        std::fprintf(
+            stderr,
+            "mister: scaler: no scaled analog output (0x20 reply %s): vga_scaler is "
+            "ignored, the analog output shows the core's own picture\n",
+            scaler_caps_.word().text().c_str()
+        );
+    }
+    publish_scaling_policy();
+
+    if (reshaped)
+        composer_.owe_scaling_pair();
+}
+
+void VideoPump::note_downscale_overflow() {
+    if (scaler_caps_.downscale() || scrw_ == 0 || scrh_ == 0)
+        return;
+    const svc::video::Resolution pic = video_->info().picture();
+    const svc::video::Resolution frame{.width = scrw_, .height = scrh_};
+    if (pic.width <= frame.width && pic.height <= frame.height)
+        return;
+    if (pic == overflow_seen_)
+        return;
+    overflow_seen_ = pic;
+    std::fprintf(
+        stderr,
+        "mister: scaler: the core's %ux%u picture exceeds the %ux%u HDMI frame and this "
+        "core has no downscale path; set a video_mode of at least %ux%u\n",
+        pic.width,
+        pic.height,
+        frame.width,
+        frame.height,
+        pic.width,
+        pic.height
+    );
 }
 
 void VideoPump::service_idle_blank() {

@@ -153,8 +153,8 @@ struct SaturnCddFrame {
 
     constexpr void load(const CdCommandWords& cmd) noexcept { cmd.store_le(bytes); }
 
-    [[nodiscard]] constexpr hal::SpiWord word(std::size_t i) const noexcept {
-        return hal::SpiWord{static_cast<std::uint16_t>(bytes[2 * i] | (bytes[2 * i + 1] << 8))};
+    [[nodiscard]] constexpr hal::LinkWord word(std::size_t i) const noexcept {
+        return hal::LinkWord{static_cast<std::uint16_t>(bytes[2 * i] | (bytes[2 * i + 1] << 8))};
     }
 
     [[nodiscard]] constexpr std::optional<Opcode> opcode() const noexcept {

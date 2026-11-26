@@ -109,7 +109,7 @@ public:
 
     [[nodiscard]] Ex<void> spawn_rt(RtMode mode, app::RtMain& rt);
 
-    xthread::WakeFlag& supervisor_wake() noexcept { return main_wake_; }
+    xthread::WakeFlag& main_wake() noexcept { return main_wake_; }
 
     [[nodiscard]] bool rt_exited() const noexcept { return rt_outcome_.generation().held(); }
 

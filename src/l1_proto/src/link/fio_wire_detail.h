@@ -6,14 +6,15 @@
 #include "hal/spi_transport.h"
 #include "infra/error.h"
 #include "infra/prelude.h"
+#include "proto/link/fio_bracket_words.h"
 
 namespace mister::proto::link::detail {
 
-inline constexpr hal::SpiWord kModeDownload{0x00FF};
-inline constexpr hal::SpiWord kModeUpload{0x00AA};
-inline constexpr hal::SpiWord kModeEnd{0x0000};
+inline constexpr hal::LinkWord kModeDownload = FioBracketWords::kModeDownload;
+inline constexpr hal::LinkWord kModeUpload = FioBracketWords::kModeUpload;
+inline constexpr hal::LinkWord kModeEnd = FioBracketWords::kModeEnd;
 
-[[nodiscard]] inline Ex<hal::SpiWord> beat(hal::ISpiTransport& link, hal::SpiWord out) {
+[[nodiscard]] inline Ex<hal::LinkWord> beat(hal::ISpiTransport& link, hal::LinkWord out) {
     return link.transfer(out);
 }
 

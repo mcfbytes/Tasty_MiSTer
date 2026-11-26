@@ -15,7 +15,7 @@ struct DiskStatusTag {
         return DiskStatusTag{mask, status.masked(mask)};
     }
 
-    [[nodiscard]] constexpr bool holds(hal::SpiWord beat) const noexcept {
+    [[nodiscard]] constexpr bool holds(hal::LinkWord beat) const noexcept {
         return !user_io::condition_holds(
             user_io::Condition::MaskedChangedSinceLast,
             mask,

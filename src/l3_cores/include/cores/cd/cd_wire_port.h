@@ -46,7 +46,7 @@ public:
         proto::IImageSink& sink
     );
 
-    [[nodiscard]] Ex<void> send_status(std::span<const hal::SpiWord> words);
+    [[nodiscard]] Ex<void> send_status(std::span<const hal::LinkWord> words);
     bool can_send_data(cdwire::Selector selector);
     [[nodiscard]] bool egress_idle() const noexcept;
     [[nodiscard]] std::uint32_t egress_abandons() const noexcept;
@@ -58,8 +58,6 @@ public:
 
     void declare_resets(const proto::ResetTerms& terms) noexcept;
 
-    [[nodiscard]] bool queued() const noexcept { return fio_queue_.has_value(); }
-
     [[nodiscard]] std::uint32_t wire_faults() const noexcept { return wire_faults_; }
 
     [[nodiscard]] bool cdda_capture_armed() const noexcept { return cdda_cap_ != nullptr; }
@@ -70,7 +68,7 @@ private:
 
     const CdProfile& cd_;
     hal::ISpiTransport& link_;
-    infra::OptRef<proto::link::SpiFioQueue> fio_queue_;
+    proto::link::SpiFioQueue& fio_queue_;
     std::uint32_t wire_faults_ = 0;
 };
 

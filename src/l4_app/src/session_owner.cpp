@@ -86,11 +86,19 @@ namespace {
     return std::optional<SaveStageDirector>{std::in_place, *link.save_stages, link.clock, status};
 }
 
-[[nodiscard]] CoreBuilder builder_over(const SessionOwner::Link& link) noexcept {
+[[nodiscard]] CoreBuilder builder_over(
+    const SessionOwner::Link& link,
+    infra::OptRef<OcramLaneWriter> lane
+) noexcept {
     const CoreBuilder::Wiring wiring{
         .bay = link.bay,
         .releases = link.bay_releases,
         .terms = link.core_terms,
+        .ocram_window = link.ocram_window,
+        .ocram_platform = link.ocram_platform,
+        .ocram_mapped = link.ocram_mapped,
+        .ocram_delay = link.ocram_delay,
+        .download_lane = lane,
         .sectors = link.sectors,
         .osds = link.osds,
         .sys = link.sys,
@@ -183,7 +191,8 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .aperture = aperture_,
               .vfs = vfs_,
               .windows = windows_,
-              .clock = clock_
+              .clock = clock_,
+              .lane = infra::OptRef{download_lane_}
           },
           tally_
       ),
@@ -203,10 +212,17 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .status_cell = status_cell_,
               .boot_restore = boot_restore_,
               .aperture = aperture_,
-              .windows = windows_
+              .windows = windows_,
+              .lane = infra::OptRef<const OcramLaneWriter>{download_lane_}
           }
       ),
       save_state_facts_(link.save_state_facts),
+      download_lane_(
+          OcramLaneWriter::Wiring{
+              .doorbells = link.main_doorbells,
+              .inbox = infra::OptRef<const LinkTxChannel<SeatTag::Main>>{inbox_}
+          }
+      ),
       ladder_host_(
           LadderHostAdapter::Edges{
               .inbox = inbox_,
@@ -228,10 +244,12 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .share_grant = link.share_grant,
               .io_wake = link.io_wake,
               .vfs = infra::OptRef<const svc::Vfs>{link.storage},
-              .aperture = link.aperture
+              .aperture = link.aperture,
+              .lane = infra::OptRef{download_lane_},
+              .events = owner_events_
           }
       ),
-      builder_(builder_over(link)),
+      builder_(builder_over(link, infra::OptRef{download_lane_})),
       osd_mask_cell_(link.osd_mask_cell),
       menu_focus_cell_(link.menu_focus_cell),
       director_(director_over(link, save_director_cell_)),
@@ -385,6 +403,8 @@ const RememberedStem& SessionOwner::remembered_stem() const noexcept {
 }
 
 unsigned SessionOwner::tick() {
+
+    download_lane_.serve_line();
     unsigned acks = 0;
     for (const MainPassStep& s : kMainPassSteps) {
         const std::optional<unsigned> took = run_(s.step);
@@ -838,7 +858,8 @@ void SessionOwner::watch_start_() noexcept {
 }
 
 void SessionOwner::refresh_clock_() noexcept {
-    if (!negotiated_.core_live() || ladder_.live())
+
+    if (!negotiated_.core_live() || ladder_.live() || download_lane_.unplayed())
         return;
     const auto op = rtc_.due(std::chrono::system_clock::now());
     if (op && push_dropping(inbox_, tally_, *op))
@@ -908,7 +929,7 @@ void SessionOwner::fall_back_to_front_end_() {
         return refuse_rebooting_(phase::Stimulus::FrontEnd);
     }
 
-    if (proto::kLinkTxCapacity - inbox_.ring().size() < CoreSwitch::kTeardownOps)
+    if (!switch_.teardown_fits(*this))
         return;
     const UiRequest::LoadCore req{.path = front_end_image_, .xml = XmlKind::Rbf};
     const CoreSwitch::Asked asked = switch_.ask(req, kUncaused, *this);
@@ -1445,7 +1466,8 @@ void SessionOwner::order_make_core_(const MakeCoreFacts& facts, const svc::Confi
             .fabric = facts.fabric,
             .fabric_gen = fabric_gen_,
             .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{},
-            .terms = negotiated_.terms()
+            .terms = negotiated_.terms(),
+            .conf_gen = negotiated_.conf_scope().gen
         }
     );
 
@@ -1765,6 +1787,9 @@ void SessionOwner::order_session_up_() noexcept {
 
     builder_.osd().raise(builder_.generation());
 
+    if (builder_.ocram_osd().built_as(builder_.generation()))
+        builder_.ocram_osd().raise(builder_.generation());
+
     proto::LinkOp::SessionUp up{};
     up.rtc = proto::RtcImage::zero_date();
     const std::time_t now = std::time(nullptr);
@@ -1788,6 +1813,8 @@ void SessionOwner::order_session_up_() noexcept {
     }
 
     builder_.sector().raise(builder_.generation());
+    if (builder_.ocram_sector().built_as(builder_.generation()))
+        builder_.ocram_sector().raise(builder_.generation());
 
     builder_.sys().raise(builder_.generation());
 
@@ -2074,6 +2101,8 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     const bool identity_bound = bind_.identity(cs);
     const std::span<const proto::AxiLwDecl> lw = cs.lw_windows();
 
+    hello_ocram_(negotiated_.ocram_presence());
+
     const bool manifest = build_has_manifest_(cs);
     const bool fabric = CoreBuilder::fabric_route(name, manifest);
     const std::optional<hal::LwOffset> owned = fabric
@@ -2135,7 +2164,7 @@ bool SessionOwner::launcher_swap_held_() const noexcept {
 
 bool SessionOwner::launcher_swap_room_() const noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    return proto::kLinkTxCapacity - inbox_.ring().size() >= CoreSwitch::kTeardownOps;
+    return switch_.teardown_fits(*this);
 }
 
 void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& w) noexcept {
@@ -2176,6 +2205,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
     if (phase_.in_stage<phase::AwaitIdentity>() == nullptr) {
         negotiated_.note_width(w.width);
         negotiated_.note_lw_presence(w.lw);
+        negotiated_.note_ocram_presence(w.ocram);
         return;
     }
 
@@ -2212,8 +2242,36 @@ void SessionOwner::minted_(phase::Stimulus cause) noexcept {
     phase_edge_(phase::Stimulus::ParkPushed);
 }
 
+void SessionOwner::hello_ocram_(hal::OcramPresence presence) noexcept {
+    TASTY_SEAT_BODY(SessionOwner);
+    const std::optional<hal::ocram::Nonce> nonce = builder_.ocram().prepare(presence, fabric_gen_);
+    if (!nonce)
+        return;
+    const proto::LinkOp::OcramRun raise{.edge = hal::OcramRunEdge::Raise};
+    if (!push_dropping(inbox_, tally_, raise)) {
+        std::fprintf(stderr, "mister: OCRAM: the RUN raise found T-RT's ring full, no hello\n");
+        return;
+    }
+    builder_.ocram().raised();
+    bool good = builder_.ocram().handshake(*nonce);
+    if (good)
+        good = builder_.ocram().read_session().has_value();
+    if (good)
+        return;
+
+    (void)push_dropping(inbox_, tally_, proto::LinkOp::OcramRun{.edge = hal::OcramRunEdge::Drop});
+    (void)builder_.ocram().stop_after_drop();
+}
+
 void SessionOwner::drop_core_acts() {
     TASTY_SEAT_BODY(SessionOwner);
+
+    if (download_lane_.granted() && download_lane_.unplayed()) {
+        (void)
+            push_dropping(inbox_, tally_, proto::LinkOp::OcramRun{.edge = hal::OcramRunEdge::Drop});
+        (void)builder_.ocram().stop_after_drop();
+    }
+    download_lane_.close_window();
     drop_ladder_();
     content_.loader_memo() = cores::LoaderMemo{};
 }
@@ -2230,6 +2288,7 @@ void SessionOwner::release_and_await_identity_(proto::BindGeneration gen) noexce
 
     negotiated_.note_width(hal::Width::Byte);
     negotiated_.note_lw_presence(hal::LwPresence{});
+    negotiated_.note_ocram_presence(hal::OcramPresence{});
 }
 
 void SessionOwner::pause_wedged() noexcept {
@@ -2314,8 +2373,12 @@ infra::ParkTimeout SessionOwner::wake_hint_ms(infra::ParkTimeout floor_ms) const
     if (switch_.last_order_owed() || ask_due)
         return floor_ms < kLastOrderRetryMs ? floor_ms : kLastOrderRetryMs;
 
-    if (rung_wait_() != Wait::None && floor_ms > kPieceRetryMs)
-        floor_ms = kPieceRetryMs;
+    const bool lane_parked = download_lane_.parked();
+    if (rung_wait_() != Wait::None && !lane_parked) {
+        floor_ms = std::min(floor_ms, download_lane_.granted() ? kLastOrderRetryMs : kPieceRetryMs);
+    }
+    if (download_lane_.polls() && floor_ms > kLastOrderRetryMs)
+        floor_ms = kLastOrderRetryMs;
     if (const auto due = phase_.bound(); due && start_bound_ != std::chrono::milliseconds::zero())
         floor_ms = until(*due, floor_ms);
     if (!switch_.receipt_held() || readiness_.recovering())

@@ -9,28 +9,28 @@
 
 namespace mister::proto::link {
 
-Ex<hal::SpiWord> Link::command(LinkSel sel, hal::SpiWord op) {
+Ex<hal::LinkWord> Link::command(LinkSel sel, hal::LinkWord op) {
     TASTY_SEAT_BODY(Link);
     return frame_.open(sel, op);
 }
 
-Ex<hal::SpiWord> Link::command(UioOp op) {
+Ex<hal::LinkWord> Link::command(UioOp op) {
     TASTY_SEAT_BODY(Link);
     return frame_.open(LinkSel::Io, proto::word(op));
 }
 
-Ex<void> Link::word(hal::SpiWord w) {
+Ex<void> Link::word(hal::LinkWord w) {
     TASTY_SEAT_BODY(Link);
     return frame_.word(w);
 }
 
-Ex<hal::SpiWord> Link::read() {
+Ex<hal::LinkWord> Link::read() {
     TASTY_SEAT_BODY(Link);
 
-    return frame_.beat(hal::SpiWord{});
+    return frame_.beat(hal::LinkWord{});
 }
 
-Ex<hal::SpiHalves> Link::read_dword() {
+Ex<hal::LinkHalves> Link::read_dword() {
     TASTY_SEAT_BODY(Link);
 
     auto lo = read();
@@ -39,10 +39,10 @@ Ex<hal::SpiHalves> Link::read_dword() {
     auto hi = read();
     if (!hi)
         return std::unexpected(hi.error());
-    return hal::SpiHalves{.low = *lo, .high = *hi};
+    return hal::LinkHalves{.low = *lo, .high = *hi};
 }
 
-Ex<hal::SpiWord> Link::exchange(hal::SpiWord w) {
+Ex<hal::LinkWord> Link::exchange(hal::LinkWord w) {
     TASTY_SEAT_BODY(Link);
     return frame_.beat(w);
 }
@@ -74,7 +74,7 @@ PollFrameRead Link::read_poll_frame(
     if (row.keeps_command_reply)
         out.frame.keep(*opened);
     if (row.address) {
-        const hal::SpiHalves at = row.address->halves();
+        const hal::LinkHalves at = row.address->halves();
         if (!word(at.low) || !word(at.high))
             return out;
     }

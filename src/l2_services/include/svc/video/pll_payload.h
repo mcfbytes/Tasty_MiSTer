@@ -5,14 +5,16 @@
 #include <concepts>
 #include <cstdint>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 
 namespace mister::svc::video {
 
 struct PllPayload {
     std::uint32_t v = 0;
 
-    [[nodiscard]] constexpr hal::SpiHalves halves() const noexcept { return hal::SpiHalves::of(v); }
+    [[nodiscard]] constexpr hal::LinkHalves halves() const noexcept {
+        return hal::LinkHalves::of(v);
+    }
 
     template <std::integral Word>
     constexpr void store_into(Word& slot) const noexcept {

@@ -74,11 +74,13 @@
 #include "infra/opt_ref.h"
 #include "app/cmos_keeper.h"
 #include "app/reload_hold.h"
+#include "hal/ocram_presence.h"
 #include "hal/pin_levels.h"
 #include "infra/park_timeout.h"
 #include "infra/prelude.h"
 #include "infra/tally.h"
 #include "os/clock.h"
+#include "os/delay.h"
 #include "proto/reset_edge.h"
 #include "proto/status_cell.h"
 #include "proto/status_word.h"
@@ -117,6 +119,13 @@ public:
         infra::OptRef<launcher::LauncherDemandCell> launcher_demand{};
         infra::OptRef<xthread::WakeFlag> launcher_wake{};
         BitstreamProgrammer& programmer;
+
+        hal::PhysRegion ocram_window{};
+        infra::OptRef<hal::IOcramPlatform> ocram_platform{};
+        infra::OptRef<hal::ocram::Window> ocram_mapped{};
+        infra::OptRef<os::IDelay> ocram_delay{};
+
+        infra::OptRef<const os::EpollSet> main_doorbells{};
         const svc::Vfs& storage;
         ILoadWindowMap<seat_owner::Main>& window_map;
         FabricCell& fabric_cell;
@@ -393,6 +402,12 @@ private:
 
     void switch_minted(const UiRequest::LoadCore& req) noexcept override;
     void drop_core_acts() override;
+
+    [[nodiscard]] bool drop_pushes_op() const noexcept override {
+        TASTY_SEAT_BODY(SessionOwner);
+        return download_lane_.granted();
+    }
+
     void forget_core() noexcept override;
     void programmed(bool ok) override;
     void pause_wedged() noexcept override;
@@ -434,6 +449,8 @@ private:
 
     void upkeep_();
     void watch_start_() noexcept;
+
+    void hello_ocram_(hal::OcramPresence presence) noexcept;
 
     void watch_bridge_() noexcept;
 
@@ -613,6 +630,8 @@ private:
     ContentPick content_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
     GameIdCell game_id_cell_;
+
+    OcramLaneWriter download_lane_;
     LadderHostAdapter ladder_host_;
     CoreBuilder builder_;
 

@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "cores/config_slots.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/disk_port.h"
 #include "cores/mounted_path.h"
 #include "cores/sector_kick.h"

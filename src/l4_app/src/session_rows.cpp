@@ -5,7 +5,7 @@
 #include "app/link_binder.h"
 #include "app/osd_wire.h"
 #include "app/session_bindings.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "infra/prelude.h"
 #include "proto/link/core_session.h"
 
@@ -20,7 +20,7 @@ SessionRows::SessionRows(const Wiring& w) noexcept
       identify_decoder_(w.signals, session_, w.router, bindings_.generation()),
       status_decoder_(session_, status_cell_, w.live, spi_status_source_),
       spi_status_source_(w.link),
-      status_lw_(w.status_lw),
+      status_snapshots_(w.status_snapshots),
       conf_str_decoder_(w.link, session_, w.router, bindings_.generation()),
       block_decoder_(w.router, w.slots, w.live),
       info_poll_(
@@ -135,7 +135,7 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
         n = put_census_row_(
             out,
             n,
-            status_route_ == Carrier::Lw
+            !link_carries(status_route_)
                 ? reactor::
                       LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &status_row_, reactor::kEveryRound, reactor::RoundClaim::Never}
                 : reactor::LinkDecoderDecl{
@@ -147,24 +147,31 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
                   }
         );
 
-        if (bindings_.declares_info())
+        const bool polls = link_carries(events_route_);
+        if (polls && bindings_.declares_info())
             n = put_census_row_(out, n, info_poll_.census_row(info_row_));
 
-        n = put_census_row_(out, n, rumble_poll_.census_row(rumble_row_));
+        if (polls)
+            n = put_census_row_(out, n, rumble_poll_.census_row(rumble_row_));
     }
     return std::span<const reactor::LinkDecoderDecl>(out.data(), n);
 }
 
 void SessionRows::bind_status_route(Carrier route, proto::BuildGeneration gen) noexcept {
     TASTY_SEAT_BODY(SessionRows);
-    status_route_ = status_lw_ ? route : Carrier::Link;
-    if (status_route_ == Carrier::Lw) {
-        axi_status_source_.bind(status_lw_, gen);
-        status_decoder_.bind_source(axi_status_source_);
+    status_route_ = status_snapshots_ ? route : Carrier::Spi;
+    if (!link_carries(status_route_)) {
+        snapshot_status_source_.bind(status_snapshots_, gen);
+        status_decoder_.bind_source(snapshot_status_source_);
     } else {
-        axi_status_source_.bind(infra::OptRef<const proto::link::StatusSnapshotCell>{}, gen);
+        snapshot_status_source_.bind(infra::OptRef<const proto::link::StatusSnapshotCell>{}, gen);
         status_decoder_.bind_source(spi_status_source_);
     }
+}
+
+void SessionRows::bind_events_route(Carrier route) noexcept {
+    TASTY_SEAT_BODY(SessionRows);
+    events_route_ = route;
 }
 
 std::optional<bool> SessionRows::latch_osd_edge() {

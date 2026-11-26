@@ -19,7 +19,7 @@ struct CmdFlags {
 
     std::uint8_t v = 0;
 
-    [[nodiscard]] static constexpr CmdFlags of_word(hal::SpiWord w) noexcept {
+    [[nodiscard]] static constexpr CmdFlags of_word(hal::LinkWord w) noexcept {
         return CmdFlags{w.low_byte()};
     }
 
@@ -31,7 +31,7 @@ struct CmdFlags {
 };
 
 static_assert(
-    CmdFlags::of_word(hal::SpiWord{0x1203}) == CmdFlags{CmdFlags::Play | CmdFlags::Stop},
+    CmdFlags::of_word(hal::LinkWord{0x1203}) == CmdFlags{CmdFlags::Play | CmdFlags::Stop},
     "the flags ride the low byte; the high byte is the track"
 );
 

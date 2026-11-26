@@ -2,14 +2,14 @@
 
 set -euo pipefail
 
-SLINT_VERSION=1.19.0
+SLINT_VERSION=1.19.1
 SLINT_URL="https://github.com/slint-ui/slint/archive/v${SLINT_VERSION}/slint-${SLINT_VERSION}.tar.gz"
-SLINT_SHA256=9c15a9f6dfe94fbe96cb97dcb38207907403a67c9b23d8a93468ea1bb132246c
+SLINT_SHA256=9c921f375de12fcf8647ddf076cf13af579b5cff61db5800e378cbedea9bff19
 PATCH_REPO="https://raw.githubusercontent.com/mcfbytes/Buildroot_MiSTer/eae07567a1349037fed4f723bec145c55ca9025a/package/slint"
 P0001=0001-api-cpp-dlopen-libfontconfig-instead-of-linking-it.patch
 P0001_SHA256=34b07553dd659dd4fb6dee944eb0c6d090b6edf12609ca71a54e488734dcd1e6
 COMPILER_URL="https://github.com/slint-ui/slint/releases/download/v${SLINT_VERSION}/slint-compiler-Linux-x86_64.tar.gz"
-COMPILER_SHA256=40f50891de8b78c59cd04158c4f55d3f9ee45f8908aacc22192d76ffc0b7693a
+COMPILER_SHA256=f143b592e7806bae90e79bfd5ac7e2e46d35e377609ebc619cc12d627d911f95
 RUST_TOOLCHAIN=${RUST_TOOLCHAIN:-1.97.0}
 RUST_TARGET=armv7-unknown-linux-gnueabihf
 TRIPLE=armv7-linux-gnueabihf

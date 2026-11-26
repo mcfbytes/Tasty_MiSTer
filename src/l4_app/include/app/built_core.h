@@ -10,6 +10,7 @@
 
 #include "app/core_deleter.h"
 #include "app/core_window.h"
+#include "app/ocram_frame_grant.h"
 #include "app/osd_grant.h"
 #include "app/session_routes.h"
 #include "app/sys_grant.h"
@@ -56,6 +57,8 @@ struct BuiltCore {
     std::array<std::optional<CoreWindow>, cores::kMaxCoreWindows> windows{};
     std::optional<hal::FpgaMemory> fed_ring{};
     SessionRoutes routes{};
+
+    OcramFrameGrant frame_lane{};
     proto::BuildGeneration gen{};
 };
 

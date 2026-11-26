@@ -161,7 +161,7 @@ private:
 
     [[nodiscard]] bool bus_open_(proto::UioOp opcode, proto::DiskAddress address) noexcept {
         round_words.charge(proto::user_io::kCommandBeatWords + proto::DiskAddress::kWords);
-        const hal::SpiHalves at = address.halves();
+        const hal::LinkHalves at = address.halves();
         return link.command(proto::LinkSel::Io, proto::word(opcode))
             && link.word(at.low)
             && link.word(at.high);
@@ -177,10 +177,10 @@ private:
         if (!bus_open_(b.opcode, b.address))
             return bus_fault_();
         const bool words = b.len.framing == hal::Width::Word;
-        const std::size_t step = words ? sizeof(hal::SpiWord) : 1;
+        const std::size_t step = words ? sizeof(hal::LinkWord) : 1;
         for (std::size_t at = 0; at + step <= payload.size(); at += step) {
-            const hal::SpiWord w = words ? hal::SpiWord::load_le(payload.subspan(at).first<2>())
-                                         : hal::SpiWord::of_byte(payload[at]);
+            const hal::LinkWord w = words ? hal::LinkWord::load_le(payload.subspan(at).first<2>())
+                                          : hal::LinkWord::of_byte(payload[at]);
             if (!link.word(w))
                 return bus_fault_();
         }
@@ -198,9 +198,9 @@ private:
         if (!bus_open_(b.opcode, b.address))
             return bus_fault_();
         const bool words = b.len.framing == hal::Width::Word;
-        const std::size_t step = words ? sizeof(hal::SpiWord) : 1;
+        const std::size_t step = words ? sizeof(hal::LinkWord) : 1;
         for (std::size_t at = 0; at + step <= into.size(); at += step) {
-            const Ex<hal::SpiWord> reply = link.read();
+            const Ex<hal::LinkWord> reply = link.read();
             if (!reply)
                 return bus_fault_();
             if (words) {
@@ -257,7 +257,7 @@ private:
             round_words.charge(proto::run_command_words(r.words));
             if (!link.command(proto::LinkSel::Io, command.opcode))
                 return proto::MailboxResult::End::Faulted;
-            const Ex<hal::SpiWord> reply = link.exchange(command.word);
+            const Ex<hal::LinkWord> reply = link.exchange(command.word);
             if (!reply)
                 return proto::MailboxResult::End::Faulted;
             if (r.words == proto::MailboxRunWords::Pair && !link.exchange(command.tail))

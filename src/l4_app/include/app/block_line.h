@@ -10,6 +10,7 @@
 #include "infra/unique_fd.h"
 #include "infra/opt_ref.h"
 #include "infra/seat_owner_io.h"
+#include "infra/seat_owner_main.h"
 #include "os/epoll_set.h"
 #include "os/uio_handle.h"
 #include "os/uio_line_ref.h"
@@ -19,6 +20,8 @@ namespace mister::app {
 
 class LwSectorEndpoint;
 class LwSysEndpoint;
+class OcramSectorEndpoint;
+class OcramLaneWriter;
 
 template <class Owner>
 class BlockLine {
@@ -35,6 +38,8 @@ public:
 private:
     friend class LwSectorEndpoint;
     friend class LwSysEndpoint;
+    friend class OcramSectorEndpoint;
+    friend class OcramLaneWriter;
 
     [[nodiscard]] bool open(
         os::UioLineRef from,
@@ -57,10 +62,21 @@ private:
         return proto::CauseBits::of(w);
     }
 
+    template <class Drain>
+    void drain_ring(bool rang, Drain&& drain) noexcept {
+        TASTY_SEAT_BODY(SeatOwner);
+        if (rang)
+            (void)line_.borrow().consume();
+        drain();
+        if (rang)
+            (void)line_.borrow().rearm();
+    }
+
     os::UioHandle line_{};
     infra::OptRef<const os::EpollSet> doorbells_{};
 };
 
 extern template class BlockLine<seat_owner::Io>;
+extern template class BlockLine<seat_owner::Main>;
 
 }

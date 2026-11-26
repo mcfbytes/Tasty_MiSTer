@@ -39,8 +39,9 @@ inline constexpr auto kDe10Windows = std::to_array<WindowDecl>({
     {.id = WindowId{3},
      .region = {os::PhysAddr{0xFFD0'5000u}, 0x100u, "rstmgr"},
      .uio_name = "mister_rstmgr"},
+
     {.id = WindowId{4},
-     .region = {os::PhysAddr{0xFFD0'8000u}, 0x100u, "sysmgr"},
+     .region = {os::PhysAddr{0xFFD0'8000u}, 0x200u, "sysmgr"},
      .uio_name = "mister_sysmgr"},
     {.id = WindowId{5},
      .region = {os::PhysAddr{0xFF80'0000u}, 0x100u, "nic301"},
@@ -91,10 +92,12 @@ inline constexpr BoardProfile kDe10Profile{
     .model = "Terasic DE10-Nano",
     .compatible = kDe10Compatible,
     .windows = kDe10Windows,
-    .mailbox_window = window_named(kDe10Windows, "fpga-mgr"),
-    .mailbox_gpo_offset = 0x10u,
-    .mailbox_gpi_offset = 0x14u,
+    .gpo_gpi_window = window_named(kDe10Windows, "fpga-mgr"),
+    .gpo_offset = 0x10u,
+    .gpi_offset = 0x14u,
     .lw_window = window_named(kDe10Windows, "lw-bridge"),
+
+    .ocram_window = {os::PhysAddr{0xFFFF'0000u}, 0xF000u, "ocram"},
     .fpga_mem = kBoardApertures[std::to_underlying(BoardId::De10Nano)],
     .regions = kDe10Regions,
     .f2h_lines = 64u,
@@ -148,17 +151,20 @@ static_assert(
 consteval BoardProfile placeholder_row(
     BoardId id,
     std::string_view model,
-    std::span<const std::string_view> compatible
+    std::span<const std::string_view> compatible,
+    const ThreadMap& threads,
+    os::CpuId main_cpu
 ) {
     return BoardProfile{
         .id = id,
         .model = model,
         .compatible = compatible,
         .windows = {},
-        .mailbox_window = WindowId{},
-        .mailbox_gpo_offset = kUnmeasured,
-        .mailbox_gpi_offset = kUnmeasured,
+        .gpo_gpi_window = WindowId{},
+        .gpo_offset = kUnmeasured,
+        .gpi_offset = kUnmeasured,
         .lw_window = WindowId{},
+        .ocram_window = {os::PhysAddr{0u}, 0u, "unsourced-ocram"},
         .fpga_mem = kBoardApertures[std::to_underlying(id)],
         .regions = regions::kUnsourced,
         .f2h_lines = 0u,
@@ -166,8 +172,8 @@ consteval BoardProfile placeholder_row(
         .irq_pins = {},
         .video = {.i2c_buses = kUnmeasured, .vsync_device = nullptr},
         .kernel = {},
-        .threads = kDe10ThreadMap,
-        .main_cpu = os::CpuId{0},
+        .threads = threads,
+        .main_cpu = main_cpu,
         .verified = false,
         .timing =
             {.word_ns = kUnmeasured,
@@ -185,18 +191,24 @@ consteval BoardProfile placeholder_row(
 
 inline constexpr BoardProfile kDe25Profile = placeholder_row(
     BoardId::De25Nano,
-    "SoCFPGA Agilex5 Terasic DE25-Nano",
-    kDe25Compatible
+    "Terasic DE25-Nano",
+    kDe25Compatible,
+    kDe25ThreadMap,
+    os::CpuId{0}
 );
 inline constexpr BoardProfile kZynq7000Profile = placeholder_row(
     BoardId::Zynq7000,
     "Xilinx Zynq-7000",
-    kZynq7000Compatible
+    kZynq7000Compatible,
+    kDe10ThreadMap,
+    os::CpuId{0}
 );
 inline constexpr BoardProfile kSpiSbcProfile = placeholder_row(
     BoardId::SpiSbc,
     "SBC + FPGA over spidev (MiSTeX shape)",
-    kSpiSbcCompatible
+    kSpiSbcCompatible,
+    kDe10ThreadMap,
+    os::CpuId{0}
 );
 
 inline constexpr std::array<const BoardProfile*, kBoardCount> kBoardTable{
@@ -312,7 +324,7 @@ consteval bool boards_window_roles_well_formed() {
     for (const BoardProfile* p : kBoardTable) {
         if (p->windows.empty())
             continue;
-        const auto mbox = static_cast<std::size_t>(p->mailbox_window);
+        const auto mbox = static_cast<std::size_t>(p->gpo_gpi_window);
         const auto lw = static_cast<std::size_t>(p->lw_window);
         if (mbox >= p->windows.size() || lw >= p->windows.size() || mbox == lw)
             return false;
@@ -324,6 +336,34 @@ static_assert(
     boards_window_roles_well_formed(),
     "a row with windows must name distinct, in-range mailbox and LW windows"
 );
+
+consteval bool sources_no_fabric(const BoardProfile& p) {
+    if (!p.windows.empty() || p.f2h_lines != 0u || p.ocram_window.len != 0u)
+        return false;
+    if (p.doorbells.cause_span != 0u)
+        return false;
+    if (p.fpga_mem.region.len != regions::kLenUnsourced)
+        return false;
+    for (const PhysRegion& r : p.regions) {
+        if (r.len != regions::kLenUnsourced)
+            return false;
+    }
+    return p.kernel.doorbell_prefix.empty() && p.kernel.ddr_aperture.empty();
+}
+
+consteval bool unverified_rows_source_no_fabric() {
+    for (const BoardProfile* p : kBoardTable) {
+        if (!p->verified && !sources_no_fabric(*p))
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    unverified_rows_source_no_fabric(),
+    "an unverified board row may source no fabric address and name no fabric node"
+);
+static_assert(sources_no_fabric(kDe25Profile) && !sources_no_fabric(kDe10Profile));
 
 consteval bool verified_boards_are_fully_measured() {
     for (const BoardProfile* p : kBoardTable) {
@@ -396,6 +436,13 @@ static_assert(
     "that core is the SPI and RT round's alone, and a SCHED_OTHER thread there "
     "is contention the round is measured against. main_cpu must also be a CPU some row "
     "already names, so both arms of fw::rt_topology_init cover it."
+);
+
+static_assert(
+    max_cpu(kDe25Profile.threads) == os::CpuId{3}
+        && seat_of(kDe25Profile.threads, SeatTag::RT).cpu == os::CpuId{1},
+    "The DE25-Nano row's map is 2x Cortex-A55 (CPUs 0-1) + 2x Cortex-A76 (CPUs 2-3), "
+    "with T-RT on A55 CPU 1 until rtstats says otherwise."
 );
 
 static_assert(

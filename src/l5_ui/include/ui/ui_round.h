@@ -13,6 +13,7 @@
 #include "app/idle_knobs.h"
 #include "app/ini_cell.h"
 #include "app/info_decoder.h"
+#include "app/info_notice.h"
 #include "app/core_input_binding.h"
 #include "app/input/joymap_ends.h"
 #include "app/input/key_focus.h"
@@ -87,6 +88,8 @@ public:
         infra::OptRef<const app::SaveDirectorCell> save_director{};
 
         infra::OptRef<app::MenuFocusCell> menu_focus{};
+
+        infra::OptRef<const app::InfoNoticeCell> info_notices{};
     };
 
     struct InputEnds {
@@ -117,6 +120,7 @@ public:
           sampler_(w.sampler),
           osd_file_(w.osd_file),
           info_(w.conf_str),
+          info_notices_(w.info_notices),
           writes_(w.writes),
           idle_(w.idle),
           ini_(w.ini),
@@ -345,6 +349,9 @@ private:
     IHostSampler& sampler_;
     IOsdVisibleFile& osd_file_;
     app::InfoDecoder info_;
+    infra::OptRef<const app::InfoNoticeCell> info_notices_;
+    app::InfoNoticeCell::Reader info_notice_reader_{};
+    app::InfoNotice info_notice_{};
     infra::OptRef<app::recents::UiWriteLane> writes_;
 
     const app::IdleKnobsCell& idle_;

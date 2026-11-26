@@ -94,19 +94,21 @@ static_assert(
 );
 static_assert(
     snes::msu::set_enable(true)
-            == mister::proto::MailboxWords{hal::SpiWord{0x8001}, hal::SpiWord{}, hal::SpiWord{}}
+            == mister::proto::MailboxWords{hal::LinkWord{0x8001}, hal::LinkWord{}, hal::LinkWord{}}
         && snes::msu::set_enable(false)
-            == mister::proto::MailboxWords{hal::SpiWord{0x0001}, hal::SpiWord{}, hal::SpiWord{}},
+            == mister::proto::MailboxWords{hal::LinkWord{0x0001}, hal::LinkWord{}, hal::LinkWord{}},
     "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)"
 );
 static_assert(
     snes::msu::set_data_base()
-        == mister::proto::MailboxWords{hal::SpiWord{0x0003}, hal::SpiWord{}, hal::SpiWord{0x2300}},
+        == mister::proto::
+            MailboxWords{hal::LinkWord{0x0003}, hal::LinkWord{}, hal::LinkWord{0x2300}},
     "snes.cpp:524 sent 0x20600000; the base is now the aperture + snes::msu::kDataBaseOffset"
 );
 static_assert(
     snes::msu::set_track_size(0x0001'2345u)
-        == mister::proto::MailboxWords{hal::SpiWord{0x0002}, hal::SpiWord{0x2345}, hal::SpiWord{1}},
+        == mister::proto::
+            MailboxWords{hal::LinkWord{0x0002}, hal::LinkWord{0x2345}, hal::LinkWord{1}},
     "snes.cpp:558: (f_audio.size << 16) | MSU_AUDIO_TRACK_MOUNTED"
 );
 static_assert(

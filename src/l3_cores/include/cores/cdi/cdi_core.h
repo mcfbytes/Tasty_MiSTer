@@ -9,7 +9,7 @@
 #include <string_view>
 
 #include "cores/cdi/cdi_block.h"
-#include "cores/core_support.h"
+#include "cores/core.h"
 #include "cores/staging_core.h"
 #include "cores/cdi/toc_entry.h"
 #include "infra/error.h"

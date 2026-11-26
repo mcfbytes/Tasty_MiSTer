@@ -27,7 +27,8 @@ ContentPick::ContentPick(const Wiring& w) noexcept
       status_cell_(w.status_cell),
       boot_restore_(w.boot_restore),
       aperture_(w.aperture),
-      windows_(w.windows) {}
+      windows_(w.windows),
+      lane_(w.lane) {}
 
 Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFile& r) const {
     if (!negotiated_.conf_str())
@@ -235,7 +236,8 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         sz = std::move(made_size);
     }
 
-    const bool cut = *sz > FileTxPieces::piece_bytes(negotiated_.link_width());
+    const bool off_link = lane_ && lane_->granted() && !sz->empty();
+    const bool cut = off_link || *sz > FileTxPieces::piece_bytes(negotiated_.link_width());
     const bool quiet = !req.whole && no_mount_in_flight_();
     if (cut && quiet && streams_files_()) {
 

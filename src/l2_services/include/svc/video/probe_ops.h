@@ -35,15 +35,15 @@ public:
     ProbeOps(const ProbeOps&) = delete;
     ProbeOps& operator=(const ProbeOps&) = delete;
 
-    [[nodiscard]] Ex<hal::SpiWord> emit_filter_mode(ScalerSlotMode mode);
+    [[nodiscard]] Ex<hal::LinkWord> emit_filter_mode(ScalerSlotMode mode);
 
-    [[nodiscard]] Ex<hal::SpiWord> emit_shadow_mask(ShadowMaskWord flag);
+    [[nodiscard]] Ex<hal::LinkWord> emit_shadow_mask(ShadowMaskWord flag);
 
-    [[nodiscard]] Ex<hal::SpiWord> emit_hdmi_int_probe();
+    [[nodiscard]] Ex<hal::LinkWord> emit_hdmi_int_probe();
 
-    [[nodiscard]] Ex<hal::SpiWord> emit_gamma_probe();
+    [[nodiscard]] Ex<hal::LinkWord> emit_gamma_probe();
 
-    [[nodiscard]] Ex<hal::SpiWord> emit_afilter_probe();
+    [[nodiscard]] Ex<hal::LinkWord> emit_afilter_probe();
 
     [[nodiscard]] Ex<GeometryPass> sample_video_geometry(
         bool force,

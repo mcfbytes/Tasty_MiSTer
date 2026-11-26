@@ -6,7 +6,7 @@
 #include <functional>
 #include <span>
 
-#include "hal/spi_halves.h"
+#include "hal/link_halves.h"
 #include "hal/types.h"
 #include "svc/video/aspect_raw.h"
 #include "svc/video/fb_par_crc.h"
@@ -34,13 +34,13 @@ struct VideoSample {
     static constexpr std::size_t kFbParRunWords = 5;
 
     [[nodiscard]] constexpr VideoSample with_vres_run(
-        std::span<const hal::SpiWord, kVresRunWords> run
+        std::span<const hal::LinkWord, kVresRunWords> run
     ) const noexcept {
         VideoSample out = *this;
         auto w = run.begin();
         const auto halves = [&w] {
-            const hal::SpiWord low = *w++;
-            return hal::SpiHalves{.low = low, .high = *w++};
+            const hal::LinkWord low = *w++;
+            return hal::LinkHalves{.low = low, .high = *w++};
         };
 
         constexpr auto dword = [](std::uint32_t bits) noexcept {
@@ -56,16 +56,16 @@ struct VideoSample {
         out.pixrep = (w++)->decoded(std::identity{});
         out.de_h = (w++)->decoded(std::identity{});
         out.de_v = (w++)->decoded(std::identity{});
-        const hal::SpiWord clocks_low = *w++;
-        out.frame_clocks = hal::SpiHalves{
+        const hal::LinkWord clocks_low = *w++;
+        out.frame_clocks = hal::LinkHalves{
             .low = clocks_low,
-            .high = hal::SpiWord{w->low_byte()}
+            .high = hal::LinkWord{w->low_byte()}
         }.joined(dword);
         return out;
     }
 
     [[nodiscard]] constexpr VideoSample with_fb_par_run(
-        std::span<const hal::SpiWord, kFbParRunWords> run
+        std::span<const hal::LinkWord, kFbParRunWords> run
     ) const noexcept {
         VideoSample out = *this;
         auto w = run.begin();
@@ -80,6 +80,12 @@ struct VideoSample {
     [[nodiscard]] bool interlaced() const noexcept { return res.interlaced(); }
 
     [[nodiscard]] bool rotated() const noexcept { return res.rotated(); }
+
+    [[nodiscard]] Resolution picture() const noexcept {
+        if (!rotated())
+            return active;
+        return Resolution{.width = active.height, .height = active.width};
+    }
 
     [[nodiscard]] bool arxy() const noexcept { return aspect.arxy(); }
 

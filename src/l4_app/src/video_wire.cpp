@@ -7,7 +7,7 @@
 #include <cstring>
 
 #include "app/staged_frame_dispatch.h"
-#include "hal/spi_sample.h"
+#include "hal/pin_sample.h"
 #include "infra/prelude.h"
 #include "svc/audio_service.h"
 #include "svc/but_sw_wire.h"
@@ -156,11 +156,20 @@ void VideoWire::FrameArms::answer_(
         self.reply_drops_.add();
 }
 
+void VideoWire::FrameArms::answer_mode_(proto::link::Link& l) noexcept {
+    const hal::LinkWord caps = l.frame().opcode_reply().value_or(hal::LinkWord{});
+    answer_(
+        proto::LinkEvent::ReplyWindow::ModeEmitted,
+        proto::WindowFails{},
+        proto::ReplyWord::of(caps)
+    );
+}
+
 Delivered VideoWire::FrameArms::on(const StagedFrame::Mode& m) noexcept {
     const auto r = svc::video::emit_video_words(
         link.frame(),
         m.m.opcode,
-        infra::affine::first(std::span<const hal::SpiWord>(m.m.w), m.m.count)
+        infra::affine::first(std::span<const hal::LinkWord>(m.m.w), m.m.count)
     );
 
     const bool burst = m.m.opcode == proto::UioOp::SetVideo;
@@ -177,11 +186,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::Mode& m) noexcept {
     }
     self.emitted_.add();
     if (burst)
-        answer_(
-            proto::LinkEvent::ReplyWindow::ModeEmitted,
-            proto::WindowFails{},
-            proto::ReplyWord::of(proto::word(m.m.opcode))
-        );
+        answer_mode_(link);
 
     if (auto arm = self.emit_but_sw_(link, self.tail_but_sw_, fence); !arm)
         self.arm_fail_.add();
@@ -192,7 +197,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::ModeInBlock& m) noexcept {
     const auto r = svc::video::emit_video_words(
         link.frame(),
         m.m.opcode,
-        infra::affine::first(std::span<const hal::SpiWord>(m.m.w), m.m.count)
+        infra::affine::first(std::span<const hal::LinkWord>(m.m.w), m.m.count)
     );
 
     const bool burst = m.m.opcode == proto::UioOp::SetVideo;
@@ -209,11 +214,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::ModeInBlock& m) noexcept {
     }
     self.emitted_.add();
     if (burst)
-        answer_(
-            proto::LinkEvent::ReplyWindow::ModeEmitted,
-            proto::WindowFails{},
-            proto::ReplyWord::of(proto::word(m.m.opcode))
-        );
+        answer_mode_(link);
     return Delivered{ILinkEncoder::Outcome::Encoded, true};
 }
 
@@ -221,7 +222,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FbufProbes& f) noexcept {
     svc::video::ProbeOps ops{link};
 
     {
-        const auto fb = svc::video::emit_fbuf(link.frame(), hal::SpiWord{});
+        const auto fb = svc::video::emit_fbuf(link.frame(), hal::LinkWord{});
         proto::ReplyWord word{};
         proto::WindowFails fails{};
         if (fb) {
@@ -286,7 +287,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::FilterMode& m) noexcept {
 Delivered VideoWire::FrameArms::on(const StagedFrame::CoeffChunk& c) noexcept {
     if (auto r = svc::video::emit_filter_coeff_chunk(
             link.frame(),
-            infra::affine::first(std::span<const hal::SpiWord>(c.w), c.count)
+            infra::affine::first(std::span<const hal::LinkWord>(c.w), c.count)
         );
         !r)
         self.partial_.add();
@@ -336,7 +337,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::AudioTail& t) noexcept {
                 pushed = svc::emit_afilter_stream(
                     link.frame(),
                     lead,
-                    infra::affine::first(std::span<const hal::SpiWord>(t.words), t.count)
+                    infra::affine::first(std::span<const hal::LinkWord>(t.words), t.count)
                 );
                 break;
         }
@@ -385,7 +386,7 @@ Delivered VideoWire::FrameArms::on(const StagedFrame::AfilterPush& a) noexcept {
                 pushed = svc::emit_afilter_stream(
                     link.frame(),
                     lead,
-                    infra::affine::first(std::span<const hal::SpiWord>(a.words), a.count)
+                    infra::affine::first(std::span<const hal::LinkWord>(a.words), a.count)
                 );
                 break;
         }
@@ -543,7 +544,9 @@ Ex<void> VideoWire::emit_but_sw_(
 ) noexcept {
     if (fence)
         fence->before_buttons(but_sw_sent_, word);
-    auto r = svc::emit_but_sw(link.frame(), word);
+
+    const bool lane = frames_.has_value() && frames_->off_link();
+    auto r = svc::emit_but_sw(lane ? frames_->frame() : link.frame(), word);
     if (r)
         but_sw_sent_ = word;
     return r;

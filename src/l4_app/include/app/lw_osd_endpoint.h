@@ -7,7 +7,7 @@
 #include <span>
 #include <utility>
 
-#include "app/lw_block_endpoint.h"
+#include "app/grant_endpoint.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "hal/osd_block.h"
@@ -22,7 +22,7 @@
 
 namespace mister::app {
 
-class LwOsdEndpoint : public LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui> {
+class LwOsdEndpoint : public GrantEndpoint<OsdGrant, OsdRoute, seat_owner::Ui> {
     TASTY_SEAT_RESIDENT(Ui);
     static_assert(
         seat_owner::Ui::kSeatDecl == kSeatDecl,
@@ -41,7 +41,7 @@ public:
     };
 
     explicit LwOsdEndpoint(const Wiring& w) noexcept
-        : LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>(w.grant, w.lease),
+        : GrantEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>(w.grant, w.lease),
           w_(w) {}
 
     [[nodiscard]] const OsdRoute& route() const noexcept { return tally_; }
@@ -59,11 +59,13 @@ private:
         "the image holds exactly the surface's row bytes"
     );
 
-    using Base = LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+    using Base = GrantEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
     static_assert(
         std::is_same_v<OsdLeaseCell, Base::LeaseCell>,
         "the route's lease cell is the base's lease cell"
     );
+
+    [[nodiscard]] bool accepts_hook_(const OsdGrant& g) const noexcept override;
     void publish_hook_(const OsdRoute& r) noexcept override;
     void prepare_hook_(const OsdGrant& g) noexcept override;
     [[nodiscard]] bool arm_hook_(const OsdGrant& g) noexcept override;
@@ -96,7 +98,7 @@ private:
     proto::OsdSurface::Row row_{};
 };
 
-extern template class LwBlockEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
+extern template class GrantEndpoint<OsdGrant, OsdRoute, seat_owner::Ui>;
 
 }
 
